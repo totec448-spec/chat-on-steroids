@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeArch, normalizePlatform, PLATFORM_INFO } from './packaging-targets.mjs';
+import { resolveWindowsSigningMode } from './windows-signing-mode.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -16,6 +17,7 @@ function value(name, fallback) {
 const platform = normalizePlatform(value('platform', process.platform));
 const arches = value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim()));
 const dirOnly = args.includes('--dir');
+const windowsSigning = platform === 'win32' ? resolveWindowsSigningMode(process.env) : { mode: 'unsigned-capable' };
 
 function run(command, commandArgs, env = process.env) {
   const result = spawnSync(command, commandArgs, { cwd: root, stdio: 'inherit', env });
@@ -50,6 +52,9 @@ for (const arch of arches) {
     '--publish',
     'never'
   ];
+  if (platform === 'win32' && windowsSigning.mode === 'official') {
+    builderArgs.push('--config.forceCodeSigning=true');
+  }
   if (dirOnly) builderArgs.push('--dir');
   run(node, builderArgs, { ...process.env, COS_PACKAGE_ARCH: arch });
   // A successful electron-builder exit only proves that an artifact was assembled. Exercise the

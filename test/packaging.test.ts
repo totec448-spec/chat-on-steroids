@@ -239,6 +239,26 @@ describe('cross-platform packaging targets', () => {
     expect(workflow).toContain('node scripts/smoke-macos-gui.mjs ${{ matrix.arch }}');
     expect(workflow).toContain('architecture: ${{ matrix.arch }}');
 
+    const publishWorkflow = readFileSync(path.join(root, '.github', 'workflows', 'publish.yml'), 'utf8');
+    const canaryWorkflow = readFileSync(path.join(root, '.github', 'workflows', 'canary.yml'), 'utf8');
+    expect(publishWorkflow).not.toContain('official_windows_signing: true');
+    expect(publishWorkflow).toContain('WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}');
+    expect(publishWorkflow).toContain('WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}');
+    expect(publishWorkflow).toContain('WINDOWS_SIGNER_SUBJECT: ${{ secrets.WINDOWS_SIGNER_SUBJECT }}');
+    expect(publishWorkflow).toContain('WINDOWS_CERTIFICATE_SHA1: ${{ secrets.WINDOWS_CERTIFICATE_SHA1 }}');
+    expect(publishWorkflow).toContain('node scripts/windows-signing-mode.mjs');
+    expect(publishWorkflow).not.toContain('--require-official');
+    expect(canaryWorkflow).not.toContain('official_windows_signing: true');
+    expect(canaryWorkflow).not.toContain('WINDOWS_CSC_LINK');
+    expect(canaryWorkflow).not.toContain('secrets: inherit');
+    expect(workflow).not.toContain('official_windows_signing:');
+    expect(workflow).not.toContain('COS_WINDOWS_SIGNING_REQUIRED:');
+    expect(workflow).toContain('id: windows-signing');
+    expect(workflow).toContain('node scripts/windows-signing-mode.mjs --github-output');
+    expect(workflow).toContain("steps.windows-signing.outputs.mode == 'official'");
+    expect(workflow).toContain('Verify official Windows Authenticode signatures');
+    expect(workflow).toContain('scripts/verify-windows-authenticode.ps1');
+
     const macGui = workflow.slice(
       workflow.indexOf('      - name: Launch packaged macOS app normally'),
       workflow.indexOf('      - name: Install generated DEB on target distro')
@@ -399,6 +419,7 @@ describe('cross-platform packaging targets', () => {
     const packageScript = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
     expect(packageScript).toContain("run(node, ['-e', \"require('electron')\"]);");
     expect(packageScript).toContain('COS_PACKAGE_ARCH: arch');
+    expect(packageScript).toContain("'--config.forceCodeSigning=true'");
     expect(packageScript).toContain("run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);");
     const releaseWorkflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     expect(releaseWorkflow).toContain('HOME="$deb_smoke_root/home"');
@@ -628,6 +649,20 @@ Load command 11
     }, false)).toThrow(/no bundle CodeResources envelope/);
   });
 
+  it('pins the official Windows Authenticode audit to both executable layers and one exact signer', () => {
+    const audit = readFileSync(path.join(root, 'scripts', 'verify-windows-authenticode.ps1'), 'utf8');
+    for (const marker of [
+      'Get-AuthenticodeSignature',
+      'Chat On Steroids.exe',
+      'Chat-On-Steroids-Setup-$Arch.exe',
+      "Status -ne 'Valid'",
+      'SignerCertificate.Subject',
+      'SignerCertificate.Thumbprint',
+      '$ExpectedSubject',
+      '$ExpectedThumbprint'
+    ]) expect(audit).toContain(marker);
+  });
+
   it('fails release-existence preflight closed on API errors instead of spending packaging runners', async () => {
     const options = {
       repository: 'owner/repo',
@@ -657,6 +692,8 @@ Load command 11
     expect(candidate).toBeGreaterThan(preflight);
     expect(publish).toBeGreaterThan(candidate);
     expect(workflow.slice(preflight, candidate)).toContain('node scripts/check-release-absent.mjs');
+    expect(workflow.slice(preflight, candidate)).toContain('Validate optional Windows signing credentials');
+    expect(workflow.slice(preflight, candidate)).toContain('node scripts/windows-signing-mode.mjs');
     expect(workflow.slice(preflight, candidate)).toContain('npm run verify:tunnel-current');
     expect(workflow.slice(preflight, candidate)).toContain('Verify release metadata agrees');
     expect(workflow.slice(preflight, candidate)).toContain("APP_VERSION = '([^']+)'");

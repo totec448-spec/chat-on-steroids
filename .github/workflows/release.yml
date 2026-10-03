@@ -7,6 +7,15 @@ on:
         description: all for a release; common for a canary (the targets most installs use, see scripts/release-targets.mjs)
         type: string
         default: all
+    secrets:
+      WINDOWS_CSC_LINK:
+        required: false
+      WINDOWS_CSC_KEY_PASSWORD:
+        required: false
+      WINDOWS_SIGNER_SUBJECT:
+        required: false
+      WINDOWS_CERTIFICATE_SHA1:
+        required: false
   workflow_dispatch:
     inputs:
       platforms:
@@ -93,11 +102,34 @@ jobs:
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
 
+      - name: Resolve optional Windows signing mode
+        id: windows-signing
+        if: matrix.platform == 'win32'
+        env:
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          COS_WINDOWS_SIGNER_SUBJECT: ${{ secrets.WINDOWS_SIGNER_SUBJECT }}
+          COS_WINDOWS_CERTIFICATE_SHA1: ${{ secrets.WINDOWS_CERTIFICATE_SHA1 }}
+        run: node scripts/windows-signing-mode.mjs --github-output
+
       - name: Package
         run: npm run ${{ matrix.script }}
+        env:
+          WIN_CSC_LINK: ${{ matrix.platform == 'win32' && secrets.WINDOWS_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win32' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
+          COS_WINDOWS_SIGNER_SUBJECT: ${{ matrix.platform == 'win32' && secrets.WINDOWS_SIGNER_SUBJECT || '' }}
+          COS_WINDOWS_CERTIFICATE_SHA1: ${{ matrix.platform == 'win32' && secrets.WINDOWS_CERTIFICATE_SHA1 || '' }}
 
       - name: Smoke packaged runtime natively
         run: node scripts/smoke-packaged-runtime.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+
+      - name: Verify official Windows Authenticode signatures
+        if: matrix.platform == 'win32' && steps.windows-signing.outputs.mode == 'official'
+        shell: pwsh
+        env:
+          COS_WINDOWS_SIGNER_SUBJECT: ${{ secrets.WINDOWS_SIGNER_SUBJECT }}
+          COS_WINDOWS_CERTIFICATE_SHA1: ${{ secrets.WINDOWS_CERTIFICATE_SHA1 }}
+        run: ./scripts/verify-windows-authenticode.ps1 -Arch '${{ matrix.arch }}' -ExpectedSubject $env:COS_WINDOWS_SIGNER_SUBJECT -ExpectedThumbprint $env:COS_WINDOWS_CERTIFICATE_SHA1
 
       - name: Audit packaged macOS bundle metadata and Mach-O payloads
         if: matrix.platform == 'darwin'
