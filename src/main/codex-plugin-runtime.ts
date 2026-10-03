@@ -30,7 +30,7 @@ function source(value: unknown): CodexPluginSource {
   const kind = row && plain(row.source, 'source kind', 40);
   if (!row || !kind) throw new Error('Codex plugin runtime returned an invalid source');
   if (kind === 'remote') return { source: kind, id: plain(row.id, 'remote source id') };
-  if (kind === 'local') return { source: kind, path: plain(row.path, 'local source path') };
+  if (kind === 'local') return { source: kind };
   if (kind === 'git') return {
     source: kind,
     url: plain(row.url, 'Git source URL'),
@@ -79,13 +79,17 @@ export function parseCodexPluginList(text: string): CodexPluginRuntimeEntry[] {
     if (!SAFE_VERSION.test(version) || version === '.' || version === '..') throw new Error(`Codex plugin ${pluginId} returned an unsafe installed version`);
     if (row.installed !== true || typeof row.enabled !== 'boolean') throw new Error(`Codex plugin ${pluginId} returned invalid installed/enabled state`);
     const marketplaceSource = object(row.marketplaceSource);
+    const marketplaceSourceType = marketplaceSource ? plain(marketplaceSource.sourceType, 'marketplace source type', 80) : null;
+    const marketplaceSourceValue = marketplaceSourceType && marketplaceSourceType !== 'local'
+      ? optionalPlain(marketplaceSource?.source, 'marketplace source')
+      : undefined;
     result.push({
       pluginId, pluginName, marketplaceName, version, installed: true, enabled: row.enabled,
       source: source(row.source),
-      ...(marketplaceSource ? {
+      ...(marketplaceSourceType ? {
         marketplaceSource: {
-          sourceType: plain(marketplaceSource.sourceType, 'marketplace source type', 80),
-          source: plain(marketplaceSource.source, 'marketplace source')
+          sourceType: marketplaceSourceType,
+          ...(marketplaceSourceValue ? { source: marketplaceSourceValue } : {})
         }
       } : {})
     });
@@ -144,7 +148,7 @@ export async function listInstalledCodexPlugins(codexHome: string, cwd: string):
     const timer = setTimeout(() => {
       child.kill(); finish(new Error('Codex plugin runtime did not respond within 15 seconds'));
     }, RUNTIME_TIMEOUT_MS);
-    child.once('error', error => finish(new Error(`Codex plugin runtime could not start: ${error.message}`)));
+    child.once('error', () => finish(new Error('Codex plugin runtime could not start')));
     child.stdout.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > MAX_RUNTIME_OUTPUT_BYTES) { child.kill(); finish(new Error('Codex plugin runtime returned too much data')); return; }

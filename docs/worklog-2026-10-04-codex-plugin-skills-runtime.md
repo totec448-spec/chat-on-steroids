@@ -10,7 +10,8 @@ hooks, or another plugin UI.
 
 Codex runtime state is authoritative. CoS runs the read-only `codex plugin list --json` command
 with the same `CODEX_HOME`, validates its bounded JSON result, and carries plugin, marketplace,
-version and source provenance into each projected Skill. The runtime-provided installed version
+version and safe source provenance into each projected Skill. Native local marketplace/source paths
+are not sent to the renderer. The runtime-provided installed version
 selects exactly `plugins/cache/<marketplace>/<plugin>/<version>`; CoS never chooses a version by
 enumerating cache contents. Stale, disabled and unlisted cache entries therefore cannot become
 active Skills.
@@ -27,11 +28,18 @@ installed/available snapshot. Installed rows expose `pluginId`, `name`, `marketp
 `version`, `installed`, `enabled`, `source`, and configured marketplace provenance. The Codex
 plugin store maps a plugin id and version to the same cache layout used here.
 
-## Validation before current-main integration
+## Validation
 
+- Current `upstream/main` was integrated at exact `9d1c033b15ed5603db7f690ed2aa1176ab4aa4a4`
+  with a merge before final validation.
 - Focused Vitest: `test/codex-plugin-runtime.test.ts`, `test/skill-library.test.ts`,
-  `test/skill-metadata.test.ts`, `test/renderer-skills.test.ts` — 24/24 passed.
+  `test/skill-metadata.test.ts`, `test/renderer-skills.test.ts` — 25/25 passed after final
+  provenance hardening.
 - `npm run typecheck` — passed.
 - `git diff --check` — passed.
-
-Final validation is repeated after integrating the current upstream `main` before publication.
+- `npm run verify:privacy` — passed.
+- `npm run verify:notices` — passed.
+- `npm run build` — passed.
+- Full `npm run verify` reached 6,966 passed / 48 skipped with two Windows exec-session failures in
+  `test/mcp.test.ts`. Both exact failing cases reproduce unchanged in a clean detached worktree at
+  `9d1c033b15ed5603db7f690ed2aa1176ab4aa4a4`; neither test nor its implementation is in this diff.
