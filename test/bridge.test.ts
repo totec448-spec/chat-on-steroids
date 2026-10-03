@@ -801,6 +801,23 @@ describe('active agent tab discard projection', () => {
       expect((await request('GET', '/status')).body.closableConversations).toEqual([]);
     } finally { await saveConfig(previous); }
   });
+  it('never treats the chat Compact & Resume moved the user into as an app-owned tab (#1012)', async () => {
+    await pair();
+    const { setSessionOrigin } = await import('../src/main/session/store.js');
+    const resumed = 'cafe1012-0000-4000-8000-000000001012';
+    const session = await createSession({ conversationId: resumed, title: 'Long project' });
+    await setSessionOrigin(session.id, { kind: 'resume', fromSessionId: session.id, agentId: null, task: '' }, 'Resumed: Long project');
+    const status = (await request('POST', '/status', { body: { openConversations: [resumed] } })).body;
+    expect(status.managedConversations).not.toContain(resumed);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_600_000);
+    try {
+      // An hour idle in the background is still the user's working chat.
+      const idle = (await request('POST', '/status', { body: { openConversations: [resumed] } })).body;
+      expect(idle.managedConversations).not.toContain(resumed);
+      expect(idle.closableConversations).not.toContain(resumed);
+    } finally { clock.mockRestore(); }
+  });
+
   it.each(['opening', 'established', 'missing-source', 'same-source'])('retires only cancelled claimed dedicated helpers, preserving source and personal chats (%s)', async kind => {
     await pair();
     const { registerGoalDecisionChat } = await import('../src/main/goal.js');
@@ -3945,6 +3962,8 @@ describe('delivering a bootstrap', () => {
     spawn({ workers: [{ task: 'audit the compaction' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
     const conversationId = 'abcdef12-3456-7890-abcd-ef1234567890';
+    expect(command.expiresAt).toBeGreaterThan(Date.now());
+    expect(command.expiresAt).toBeLessThanOrEqual(Date.now() + COMMAND_DEADLINE_MS);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('invited');
 
     await request('POST', '/commands/ack', {
