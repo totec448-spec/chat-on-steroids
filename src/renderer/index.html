@@ -155,6 +155,12 @@
            state.update plus the extension version the bridge already reports; see
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
+      <!-- A new macOS build asks once for the Keychain password; everything that needs saved keys
+           waits for the answer. See src/renderer/keychain-notice.ts. -->
+      <div class="notice" id="keychainNotice" role="status" hidden>
+        <i class="ico ph ph-lock-key" aria-hidden="true"></i>
+        <span>macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.</span>
+      </div>
       <div class="notice" id="updateNotice" hidden>
         <i class="ico ph ph-lightning" aria-hidden="true"></i>
         <span id="updateText"></span>

@@ -66,6 +66,7 @@ import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, r
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
 import { livePreview } from './live-preview.js';
+import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
@@ -1165,6 +1166,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return runningToolActivity(conversationIds);
   });
   // The newest sentence a working chat shows before ChatGPT publishes it (#942).
+  // The window armed its Keychain notice; the first Keychain read may start.
+  handle('keychain:noticeReady', async () => keychainNoticeReady());
   handle('sessions:livePreview', async (payload) => {
     const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
     return livePreview(conversationIds);
