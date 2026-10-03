@@ -495,6 +495,9 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
+  // in flight so a second click cannot recreate permission after the row's durable revoke.
+  const deletingSessionIds = new Set<string>();
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -1238,7 +1241,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         trusted: z.boolean()
       })
       .parse(payload);
+    if (deletingSessionIds.has(id)) {
+      throw new Error('This session is being deleted; its trust cannot be changed');
+    }
     const summary = await getSession(id);
+    // getSession is async. Delete may have started while this lookup was in flight.
+    if (deletingSessionIds.has(id)) {
+      throw new Error('This session is being deleted; its trust cannot be changed');
+    }
     const conversationId = summary?.conversationId;
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
@@ -1255,29 +1265,35 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
-    const summary = await getSession(id);
-    // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
-    // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
-    // already gone and no user control left to repair that authority.
-    if (summary?.conversationId) await setChatTrusted(summary.conversationId, false);
-    // Detach first. The recorder maps live ChatGPT conversations to session ids, so
-    // deleting the folder underneath a live one left it appending to a session that no
-    // longer existed — the events went to a resurrected half-session with no summary.
-    // Forgetting the mapping makes the next observation open a fresh session instead.
-    const detached = forgetSession(id);
-    // Release first. The block button lives on this row, so a block left behind by the row's
-    // deletion would refuse that conversation's tools with nothing left in the app that could
-    // ever release it.
-    if (summary?.conversationId) {
-      setChatBlocked(summary.conversationId, false);
+    if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
+    deletingSessionIds.add(id);
+    try {
+      const summary = await getSession(id);
+      // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
+      // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
+      // already gone and no user control left to repair that authority.
+      if (summary?.conversationId) await setChatTrusted(summary.conversationId, false);
+      // Detach first. The recorder maps live ChatGPT conversations to session ids, so
+      // deleting the folder underneath a live one left it appending to a session that no
+      // longer existed — the events went to a resurrected half-session with no summary.
+      // Forgetting the mapping makes the next observation open a fresh session instead.
+      const detached = forgetSession(id);
+      // Release first. The block button lives on this row, so a block left behind by the row's
+      // deletion would refuse that conversation's tools with nothing left in the app that could
+      // ever release it.
+      if (summary?.conversationId) {
+        setChatBlocked(summary.conversationId, false);
+      }
+      await deleteSession(id);
+      logInfo(
+        detached.length > 0
+          ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
+          : `session ${id} deleted`
+      );
+      return true;
+    } finally {
+      deletingSessionIds.delete(id);
     }
-    await deleteSession(id);
-    logInfo(
-      detached.length > 0
-        ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
-        : `session ${id} deleted`
-    );
-    return true;
   });
 
   handle('handoff:get', async (payload) => {
