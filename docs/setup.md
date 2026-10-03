@@ -56,7 +56,7 @@ comma-separated override and port `0` remain available for isolated development/
 
 ## Local control API
 
-**Settings → Setup → Advanced → Local control API** (off by default) lets an agent running on
+**Settings → General → For developers → Local control API** (off by default) lets an agent running on
 this computer check on CoS, and read its chats, from outside the app. It is meant for an agent's
 MCP server that watches for a hung app. **Turning it on lets any process that can read your user
 data folder read your chat history**, including messages, tool arguments and results, and queued
