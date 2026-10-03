@@ -1585,6 +1585,19 @@ it('opens, saves and restores the editable handoff prompt', async () => {
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
 });
 
+it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
+  const mounted = await mountChat({ hasGoalKey: true });
+  const length = mounted.window.document.getElementById('handoffLength') as HTMLSelectElement;
+  expect(length.value).toBe('thorough');
+  expect([...length.options].map(option => option.value)).toEqual(['thorough', 'standard', 'short']);
+  length.value = 'short';
+  length.dispatchEvent(new mounted.window.Event('change'));
+  await settle();
+  await settle();
+  expect(mounted.calls.at(-1)?.compaction.handoffLength).toBe('short');
+  expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
+});
+
 /**
  * The catalogue is a network request to somebody else's service, so it happens when a person
  * asks for it and not when the settings tab is opened.

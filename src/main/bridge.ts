@@ -3405,7 +3405,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           ? nativeHandoffPrompt(
               already.token,
               getConfig().goal.includeToolCalls === true,
-              getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT
+              getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+              getConfig().compaction.handoffLength
             )
           : null;
       return json(
@@ -3448,7 +3449,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         prompt: nativeHandoffPrompt(
           opened.token,
           getConfig().goal.includeToolCalls === true,
-          getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT
+          getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+          getConfig().compaction.handoffLength
         ),
         job: resumeJobFor(sessionId)
       },

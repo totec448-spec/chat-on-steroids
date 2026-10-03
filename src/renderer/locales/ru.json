@@ -1705,7 +1705,6 @@
   "See changes as you adjust the workspace.": "Смотрите изменения по мере настройки рабочего пространства.",
   "Set the provider, model, and credentials for API-based decisions.": "Выберите провайдера, модель и учётные данные для решений через API.",
   "Set worker limits and which chats can resume after interruptions.": "Настройте лимиты воркеров и чаты, которые могут возобновляться после прерываний.",
-  "Shape how Goal and Loop write their next instruction.": "Настройте, как «Цель» и «Цикл» формируют следующую инструкцию.",
   "Use account-observed models for sub-agents.": "Использовать для субагентов модели, доступные в аккаунте.",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "Подтверждённые нативные отправки вместе с ограничениями модели, общими и функциональными лимитами, которые сообщает ChatGPT.",
   "{0}K": "{0} тыс.",
@@ -1786,5 +1785,11 @@
   "Local control API": "Локальный API управления",
   "Let agents on this computer read app status and chats.": "Разрешить агентам на этом компьютере читать состояние приложения и чаты.",
   "Allow actions": "Разрешить действия",
-  "Let those agents also send and cancel messages. Needs the local control API.": "Эти агенты смогут также отправлять и отменять сообщения. Нужен локальный API управления."
+  "Let those agents also send and cancel messages. Needs the local control API.": "Эти агенты смогут также отправлять и отменять сообщения. Нужен локальный API управления.",
+  "Handoff length": "Объём передачи",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Сколько сохраняет сводка Compact & Resume. Длинная переносит в новый чат больше деталей, короткая оставляет ему больше места.",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Настройте, что сохраняет Compact & Resume и как «Цель» и «Цикл» формируют следующую инструкцию.",
+  "Thorough · 10k–30k tokens": "Подробно · 10–30 тыс. токенов",
+  "Standard · 4k–10k tokens": "Стандартно · 4–10 тыс. токенов",
+  "Short · 2k–6k tokens": "Кратко · 2–6 тыс. токенов"
 }
