@@ -3158,7 +3158,7 @@ does not retire its PTYs; closing a terminal tab does. Closing the last bottom t
 dock. The top-right control group orders right expansion (shown only while right is open),
 bottom, then right; the latter two buttons toggle their panels. There is no separate right-dock
 close button. Layout controls grant no new file, terminal or worker authority.
-The sub-agent overview starts directly with Active and History, without a heading or close X.
+The sub-agent overview starts with a compact running/done/failed worker summary, then Active and History, without a heading or close X.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
