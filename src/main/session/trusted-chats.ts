@@ -5,7 +5,7 @@
  * no longer forcibly stopped; it does not grant access under a default-deny policy. Likewise,
  * Compact & Resume creates a different ChatGPT conversation and does not inherit trust.
  */
-import { readDurable, writeDurableSoon } from '../durable.js';
+import { readDurable, writeDurableNow } from '../durable.js';
 
 const MAX_TRUSTED_CHATS = 200;
 const TRUSTED_STATE = 'trusted-chats';
@@ -13,6 +13,7 @@ const TRUSTED_STATE_VERSION = 1;
 
 const trusted = new Set<string>();
 let restored = false;
+let mutationQueue: Promise<void> = Promise.resolve();
 
 interface PersistedTrustedChats {
   version: number;
@@ -23,8 +24,8 @@ function validConversationId(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-z-]{8,64}$/i.test(value);
 }
 
-function snapshot(): PersistedTrustedChats {
-  return { version: TRUSTED_STATE_VERSION, entries: [...trusted] };
+function snapshot(values: ReadonlySet<string> = trusted): PersistedTrustedChats {
+  return { version: TRUSTED_STATE_VERSION, entries: [...values] };
 }
 
 export async function restoreTrustedChats(): Promise<void> {
@@ -45,21 +46,29 @@ export function trustedChatIds(): string[] {
   return [...trusted];
 }
 
-export function setChatTrusted(conversationId: string, next: boolean): void {
+export function setChatTrusted(conversationId: string, next: boolean): Promise<void> {
   if (!validConversationId(conversationId)) throw new Error('Not a ChatGPT conversation id');
-  if (next === trusted.has(conversationId)) return;
-  if (next) {
-    if (trusted.size >= MAX_TRUSTED_CHATS) {
-      throw new Error(`Too many trusted chats (${MAX_TRUSTED_CHATS}). Untrust one before trusting another.`);
+  const operation = mutationQueue.then(async () => {
+    if (next === trusted.has(conversationId)) return;
+    const updated = new Set(trusted);
+    if (next) {
+      if (updated.size >= MAX_TRUSTED_CHATS) {
+        throw new Error(`Too many trusted chats (${MAX_TRUSTED_CHATS}). Untrust one before trusting another.`);
+      }
+      updated.add(conversationId);
+    } else {
+      updated.delete(conversationId);
     }
-    trusted.add(conversationId);
-  } else {
-    trusted.delete(conversationId);
-  }
-  writeDurableSoon(TRUSTED_STATE, snapshot());
+    await writeDurableNow(TRUSTED_STATE, snapshot(updated));
+    trusted.clear();
+    for (const id of updated) trusted.add(id);
+  });
+  mutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 export function resetTrustedChatsForTests(): void {
   trusted.clear();
   restored = false;
+  mutationQueue = Promise.resolve();
 }

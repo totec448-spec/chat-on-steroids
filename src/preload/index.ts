@@ -299,7 +299,8 @@ const api = {
   // to own is refused until it is released. Returns the whole blocked set, so one press
   // repaints without a second read.
   setSessionBlocked: (id: string, blocked: boolean) => call<string[]>('sessions:block', { id, blocked }),
-  setSessionTrusted: (id: string, trusted: boolean) => call<string[]>('sessions:trust', { id, trusted }),
+  setSessionTrusted: (id: string, expectedConversationId: string, trusted: boolean) =>
+    call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 

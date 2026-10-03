@@ -3967,7 +3967,7 @@ describe('blocked chats', () => {
     expect(failed(unattributed)).toBe(true);
     expect(textOf(unattributed)).toContain('CHAT_NOT_TRUSTED');
 
-    setChatTrusted(BYSTANDER, true);
+    await setChatTrusted(BYSTANDER, true);
     const trusted = await readAs(owned(BYSTANDER));
     expect(failed(trusted)).toBe(false);
     expect(textOf(trusted)).toContain('/workspace/notes.txt');
@@ -3975,7 +3975,7 @@ describe('blocked chats', () => {
 
   it('strict mode waits for late exact proof and block still wins over trust', async () => {
     getConfig().multiAgent.strictChatAllowlist = true;
-    setChatTrusted(ROGUE, true);
+    await setChatTrusted(ROGUE, true);
 
     const trustedLate = await readAs(provenLate(ROGUE, 40));
     expect(failed(trustedLate)).toBe(false);
