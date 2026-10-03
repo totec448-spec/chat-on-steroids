@@ -2801,13 +2801,24 @@ let modelCache: { at: number; keyScope: string; models: GoalModel[] } | null = n
  * exists than the one already chosen. Paged, because the listing is several hundred long and
  * nobody scrolls that.
  */
-export async function listGoalModels(offset = 0, limit = MODEL_PAGE_SIZE): Promise<{ models: GoalModel[]; total: number; selectedModel?: GoalModel }> {
+export async function listGoalModels(
+  offset = 0,
+  limit = MODEL_PAGE_SIZE,
+  query = ''
+): Promise<{ models: GoalModel[]; total: number; selectedModel?: GoalModel }> {
   const selectedId = getConfig().goal.model;
   const models = await allGoalModels();
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? models.filter(model => model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle))
+    : models;
   const from = Math.max(0, Math.floor(offset));
   const count = Math.max(1, Math.min(100, Math.floor(limit)));
+  // Keep the selected model's metadata independent from the search result. A saved model can be
+  // outside both the current page and the active filter, but its reasoning options still belong
+  // to the selected configuration rather than to the query.
   const selectedModel = models.find(model => model.id === selectedId);
-  return { models: models.slice(from, from + count), total: models.length, ...(selectedModel ? { selectedModel } : {}) };
+  return { models: visible.slice(from, from + count), total: visible.length, ...(selectedModel ? { selectedModel } : {}) };
 }
 
 async function allGoalModels(): Promise<GoalModel[]> {

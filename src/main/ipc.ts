@@ -962,8 +962,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * module's own, so the renderer cannot ask for the whole catalogue in one call.
    */
   handle('goal:models', async (payload) => {
-    const { offset } = z.object({ offset: z.number().int().min(0).max(2000).default(0) }).parse(payload ?? {});
-    return listGoalModels(offset, MODEL_PAGE_SIZE);
+    const { offset, query } = z.object({
+      offset: z.number().int().min(0).max(2000).default(0),
+      query: z.string().max(160).default('')
+    }).parse(payload ?? {});
+    return listGoalModels(offset, MODEL_PAGE_SIZE, query);
   });
 
   handle('binary:pick', async () => {
