@@ -1761,7 +1761,7 @@
   "Trust only selected chats": "Nur ausgewählten Chats vertrauen",
   "Untrust this chat: strict mode refuses its tool calls": "Vertrauen für diesen Chat aufheben: Im strikten Modus werden seine Tool-Aufrufe abgelehnt",
   "Trust this chat: strict mode lets its tool calls run": "Diesem Chat vertrauen: Im strikten Modus dürfen seine Tool-Aufrufe ausgeführt werden",
-  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "Nur Chats, denen Sie vertrauen, dürfen die Tools dieses Computers verwenden. Bestehende Chats beginnen ohne Vertrauen; bewegen Sie den Mauszeiger in der Seitenleiste über einen Chat und wählen Sie Vertrauen (✓). Worker und fortgesetzte Chats folgen dem Chat, aus dem sie hervorgegangen sind. Aufrufe, die die App keinem Chat zuordnen kann, werden abgelehnt.",
+  "Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.": "Nur Chats, denen du vertraust, dürfen die Tools dieses Computers verwenden. Bestehende Chats beginnen ohne Vertrauen; zeige in der Seitenleiste auf einen Chat und wähle Vertrauen (✓). Worker und fortgesetzte Chats folgen dem Chat, aus dem sie hervorgegangen sind. Aufrufe, die die App keinem Chat zuordnen kann, werden abgelehnt.",
   "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Auf Nur-Lesen umschalten: ChatGPT kann weiterhin Dateien und den Bildschirm ansehen, aber keine Dateien erstellen, bearbeiten, verschieben oder löschen, keine Programme ausführen und diesen Computer nicht steuern.",
   "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Nur-Lesen ist an: ChatGPT kann nur ansehen. Klicken, um Änderungen wieder zu erlauben.",
   "General": "Allgemein",
@@ -1813,5 +1813,9 @@
   "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "Diesen Chat samt gespeichertem Verlauf aus der App entfernen. In ChatGPT bleibt der Chat erhalten.",
   "Chat removed from the app": "Chat aus der App entfernt",
   "Pet instructions copied": "Anleitung für Pets kopiert",
-  "Skill added to your library": "Skill zu deiner Bibliothek hinzugefügt"
+  "Skill added to your library": "Skill zu deiner Bibliothek hinzugefügt",
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Wechselt die gespeicherten Tunnel-IDs und den Tunnel-API-Schlüssel, zum Beispiel für ein anderes ChatGPT-Konto.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Die ChatGPT-Seite hat den Live-Stream dieser Antwort verloren. Die Antwort läuft vielleicht noch: Das Neuladen verbindet die Seite neu, ohne sie zu stoppen.",
+  "Don't reload this answer": "Diese Antwort nicht neu laden",
+  "The reload has already started.": "Das Neuladen hat schon begonnen."
 }

@@ -1813,5 +1813,9 @@
   "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "이 채팅과 저장된 기록을 앱에서 제거합니다. 채팅은 ChatGPT에 남아 있습니다.",
   "Chat removed from the app": "앱에서 채팅을 제거했습니다",
   "Pet instructions copied": "펫 지침을 복사했습니다",
-  "Skill added to your library": "스킬을 라이브러리에 추가했습니다"
+  "Skill added to your library": "스킬을 라이브러리에 추가했습니다",
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "저장된 터널 ID와 터널 API 키를 전환합니다. 예를 들어 다른 ChatGPT 계정을 쓸 때 사용합니다.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT 페이지가 이 답변의 실시간 스트림을 잃었습니다. 답변은 아직 진행 중일 수 있으며, 새로고침은 답변을 멈추지 않고 페이지를 다시 연결합니다.",
+  "Don't reload this answer": "이 답변은 새로고침하지 않기",
+  "The reload has already started.": "새로고침이 이미 시작되었습니다."
 }
