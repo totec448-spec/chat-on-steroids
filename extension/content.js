@@ -7891,6 +7891,16 @@
     return reply.status === 0 && reply.error !== 'app_not_found';
   }
 
+  /** Keep the existing opening retry owner, but honor a provider's structured Retry-After. */
+  function openRetryWait(reply) {
+    const failure = (reply && reply.data) || reply || {};
+    const retryAfterMs = failure.retryAfterMs;
+    if (typeof retryAfterMs !== 'number' || !Number.isFinite(retryAfterMs)) return GOAL_RETRY_MS;
+    // A retryable Goal opening is still cancellable by navigation/settings while it waits. Bound
+    // one provider-directed pause to an hour so malformed metadata cannot strand the document.
+    return Math.max(GOAL_RETRY_MS, Math.min(GOAL_OPEN_RETRY_CAP_MS, Math.floor(retryAfterMs)));
+  }
+
   async function openWithObjective(goal, mode) {
     const openingEpoch = epoch;
     pendingObjective = goal;
@@ -7926,8 +7936,9 @@
       // only thing that knows which instruction the opening message is being written under.
       reply = await ask({ type: 'goal_open', text: goal, mode: pendingObjectiveMode });
       if (!current() || (reply && reply.ok === true) || !openRetryable(reply)) break;
+      goalRetryWaitMs = openRetryWait(reply);
       setGoalPhase('retrying', replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer'));
-      await sleep(GOAL_RETRY_MS);
+      await sleep(goalRetryWaitMs);
       if (!current()) break;
       setGoalPhase('requesting');
     }
@@ -10045,6 +10056,7 @@
    */
   const GOAL_RETRY_MS = 15_000;
   const GOAL_RETRY_CAP_MS = 4 * 60_000;
+  const GOAL_OPEN_RETRY_CAP_MS = 60 * 60_000;
   const goalRetryWait = () => Math.min(GOAL_RETRY_CAP_MS, GOAL_RETRY_MS * 2 ** goalRetries);
 
   /** The turn endings worth writing a next message about. See noteGoalTurn for the rest. */
