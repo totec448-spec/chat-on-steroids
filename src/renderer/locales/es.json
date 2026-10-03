@@ -472,7 +472,6 @@
   "Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop": "Bloquear llamadas sin atribución: se rechaza cada llamada que no se pueda atribuir a un chat y se le indica al chat que se detenga",
   "Release this chat: its tool calls run again": "Desbloquear este chat: sus llamadas a herramientas vuelven a ejecutarse",
   "Block this chat: every tool call it makes is refused and it is told to stop": "Bloquear este chat: se rechazan todas sus llamadas a herramientas y se le indica que se detenga",
-  "Open this chat in Chrome": "Abrir este chat en Chrome",
   "Session deleted": "Sesión eliminada",
   "{0} sub-agents · {1} active": "{0} subagentes · {1} activos",
   "{0} {1} sub-agents": "{0} {1} subagentes",
@@ -1804,5 +1803,11 @@
   "Workers cleared": "Subagentes borrados",
   "No workers are running. Their histories stay available to the chats that started them; Clear workers removes them for good.": "No hay subagentes en ejecución. Sus historiales siguen disponibles para los chats que los iniciaron; Borrar subagentes los elimina definitivamente.",
   "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Elige el modelo y el razonamiento predeterminados para chats nuevos y subagentes, entre lo que ofrece tu cuenta.",
-  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "¿Borrar todos los subagentes? Los que están en ejecución se detienen y sus historiales guardados se eliminan definitivamente. Sus chats siguen en ChatGPT."
+  "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "¿Borrar todos los subagentes? Los que están en ejecución se detienen y sus historiales guardados se eliminan definitivamente. Sus chats siguen en ChatGPT.",
+  "Quit": "Salir",
+  "Astra is wrapping up": "Astra está terminando",
+  "Send an automatic Goal or write your next instruction.": "Envía un Objetivo automático o escribe tu siguiente instrucción.",
+  "Send Automatic Goal": "Enviar Objetivo automático",
+  "Write Directly": "Escribir directamente",
+  "Open this chat in your browser": "Abrir este chat en tu navegador"
 }
