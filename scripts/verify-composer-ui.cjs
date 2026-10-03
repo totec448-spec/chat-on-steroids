@@ -39,6 +39,11 @@ app.whenReady().then(async () => {
     if (!passed) console.error(await js(`({dock:document.getElementById('composerDock').getBoundingClientRect().toJSON(),children:[...document.querySelector('.composer-dock-body').children].map(e=>({id:e.id,hidden:e.hidden,height:e.getBoundingClientRect().height,text:e.textContent})),planHidden:document.getElementById('agentPlan').hidden,goalHidden:document.getElementById('activeGoalRow').hidden,queued:document.querySelectorAll('#finishQueue .queued-input').length,context:getComputedStyle(document.getElementById('contextMeterInfo')).display,focus:document.activeElement.id})`));
     assert.equal(passed, true, name); checks.push(name);
   };
+  // A fixture scenario reaches the renderer through its asynchronous session reload. Poll for
+  // the expected state instead of sleeping a fixed time, which lost that race on slow runners.
+  const until = async (source, timeout = 5000) => {
+    for (const end = Date.now() + timeout; Date.now() < end && !(await js(source));) await pause(100);
+  };
   const click = async selector => { await js(`document.querySelector(${JSON.stringify(selector)}).click()`); await pause(200); };
   const type = async text => { await js(`(() => { const input = document.getElementById('chatInput'); input.value=${JSON.stringify(text)}; input.focus(); input.dispatchEvent(new Event('input', {bubbles:true})); })()`); await pause(260); };
   const capture = async name => { fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
@@ -80,7 +85,7 @@ app.whenReady().then(async () => {
   await click('#createPlan');
   await check('Plan toggles native send behavior', `document.getElementById('createPlan').getAttribute('aria-pressed')==='true'&&document.getElementById('chatSend').getAttribute('aria-label')==='Generate plan'`);
   await click('#createPlan');
-  await js(`composerFixture.scenario('queue')`); await pause(650);
+  await js(`composerFixture.scenario('queue')`); await until(`!document.getElementById('agentPlan').hidden&&!document.getElementById('activeGoalRow').hidden&&document.querySelectorAll('#finishQueue .queued-input').length===1`);
   await check('Plan, Goal and queue coexist', `!document.getElementById('agentPlan').hidden&&!document.getElementById('activeGoalRow').hidden&&document.querySelectorAll('#finishQueue .queued-input').length===1`);
   await capture('dock');
   await js(`composerFixture.scenario('complete')`);
@@ -89,9 +94,9 @@ app.whenReady().then(async () => {
     if (await js(`document.getElementById('agentPlan').hidden`)) break;
   }
   await check('Completion removes plan while preserving queue and Goal', `document.getElementById('agentPlan').hidden&&!document.getElementById('activeGoalRow').hidden&&document.querySelectorAll('#finishQueue .queued-input').length===1`);
-  await js(`composerFixture.scenario('empty')`); await pause(1000);
+  await js(`composerFixture.scenario('empty')`); await until(`document.getElementById('composerDock').getBoundingClientRect().height===0`);
   await check('Empty dock leaves no strip', `document.getElementById('composerDock').getBoundingClientRect().height===0`);
-  await js(`composerFixture.scenario('hold')`); await pause(500);
+  await js(`composerFixture.scenario('hold')`); await until(`document.getElementById('chatSend').dataset.action==='stop'`);
   await check('Stop is available during finish hold', `document.getElementById('chatSend').dataset.action==='stop'`);
   await click('#chatSend'); await pause(350);
   await check('Stop reaches native controller', `composerFixture.controls.activeTurnId===null`);
