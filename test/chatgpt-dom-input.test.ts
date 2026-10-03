@@ -265,6 +265,44 @@ describe('native Project entry readiness', () => {
     expect(await api.enterProject(entry)).toBe(true);
   });
 
+  it('enters through the current Project chrome link when it is no longer inside header or banner', async () => {
+    // Measured 2026-10-04: the native Project-home link is still exact and same-origin, but
+    // ChatGPT moved it out of both <header> and [role="banner"]. Restricting discovery to those
+    // two old shells leaves zero candidates and Compact & resume fails before Send.
+    dom.reconfigure({ url: `https://chatgpt.com/c/${entry.sourceConversationId}` });
+    const chrome = document.createElement('div');
+    chrome.innerHTML = `<a href="/g/${entry.id}/project" data-discover="true"><span>Homelab</span></a>`;
+    document.body.prepend(chrome);
+    const link = chrome.querySelector('a')!;
+    box.textContent = '';
+    const clicks = vi.fn((event: Event) => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.replaceWith(box.cloneNode(true));
+    });
+    link.addEventListener('click', clicks);
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await entered).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it('never uses an exact Project-home link rendered only inside a conversation turn', async () => {
+    dom.reconfigure({ url: `https://chatgpt.com/c/${entry.sourceConversationId}` });
+    user('Earlier turn');
+    const turn = document.querySelector('section[data-testid^="conversation-turn"]')!;
+    const transcriptLink = document.createElement('a');
+    transcriptLink.href = `/g/${entry.id}/project`;
+    transcriptLink.textContent = 'Project link quoted in chat';
+    turn.querySelector('[data-message-author-role="user"]')!.append(transcriptLink);
+    const transcriptClicks = vi.fn((event: Event) => event.preventDefault());
+    transcriptLink.addEventListener('click', transcriptClicks);
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(transcriptClicks).not.toHaveBeenCalled();
+    expect(await entered).toBe(false);
+  });
+
   it('accepts the Project home when ChatGPT keeps the same editor element', async () => {
     // Measured 2026-10-01: from a Project chat, the header link leads to the Project home in
     // the same editor element. Waiting for a new editor failed every Compact & resume there.

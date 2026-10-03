@@ -2571,13 +2571,16 @@ The browser says writing only with current generation proof for the marked summa
 a sent checkpoint alone means waiting. Bootstrap folds require the app's exact recorded opening
 message id plus current route/epoch. Retired folds unwrap all native children and controls.
 
-Native ChatGPT Project destinations enter through the source chat's exact native Project link.
-The header alone is not readiness: `chatgpt-dom.js::enterProject` waits for the source editor
-to be mounted, empty, idle and attachment-free before its one click. Source readiness and
-replacement-editor navigation each have a bounded 12-second phase using the same observer/timer.
-Destination proof requires the exact Project home, a different connected editor and no source
-turns. User interaction, cancellation or a foreign route revokes the attempt; no extra tab or
-second click compensates for a missing result.
+Native ChatGPT Project destinations enter through the source chat's exact native Project-home
+link. The provider may move that control between top-level shells, so
+`chatgpt-dom.js::enterProject` identifies it by exact same-origin Project target rather than a
+header/banner wrapper, excludes transcript/extension/hidden-kept-page links and requires one
+visible candidate. The link alone is not readiness: the source editor must be mounted, empty,
+idle and attachment-free before the one click. Source readiness has a bounded 60-second phase;
+the native transition then gets its own bounded 12-second phase. Destination proof requires the
+exact Project home, a connected ready editor and no displayed source turns. User interaction,
+cancellation or a foreign route revokes the attempt; no extra tab or second click compensates
+for a missing result.
 
 The brief includes the original task, accepted steering, current result, remaining checks and
 relevant durable ids. Linked project instructions and current executor settings still apply.
