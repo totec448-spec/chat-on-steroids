@@ -879,6 +879,33 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('chrome');
 });
 
+it('saves and clears ordinary new-chat model defaults from either selector independently', async () => {
+  const catalog = {
+    state: 'ready', requestedAt: 1, observedAt: 2,
+    models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high', 'xhigh'] }]
+  };
+  const mounted = await mountChat({}, [], { getChatModels: () => Promise.resolve({ ok: true, data: catalog }) });
+  const w = mounted.window;
+  const model = w.document.getElementById('defaultChatModel') as HTMLSelectElement;
+  const reasoning = w.document.getElementById('defaultChatReasoning') as HTMLSelectElement;
+  await vi.waitFor(() => expect([...model.options].map(option => option.value)).toContain('gpt-5.6-sol'));
+  expect(model.value).toBe(''); expect(reasoning.value).toBe('');
+
+  model.value = 'gpt-5.6-sol'; model.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui).toMatchObject({ defaultChatModel: 'gpt-5.6-sol' });
+  expect(mounted.calls[0].ui.defaultChatReasoning).toBeUndefined();
+
+  reasoning.value = 'xhigh'; reasoning.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  expect(mounted.calls[1].ui).toMatchObject({ defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh' });
+
+  model.value = ''; model.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(3));
+  expect(mounted.calls[2].ui.defaultChatModel).toBeUndefined();
+  expect(mounted.calls[2].ui.defaultChatReasoning).toBeUndefined();
+});
+
 it('loads, explains and saves both command policy modes without losing rules', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
