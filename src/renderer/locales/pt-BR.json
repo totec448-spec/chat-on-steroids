@@ -309,6 +309,8 @@
   "Sub-agent workers": "Workers dos subagentes",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Requer que a extensão do Chrome esteja instalada e conectada. Define o número máximo de chats de workers que uma execução pode abrir.",
   "max": "máx.",
+  "Global worker admission cap": "Limite global de admissão de workers",
+  "Across all prime families. 0 keeps this cap off, so only the per-family worker limit applies.": "Aplica-se a todas as famílias de agentes principais. 0 desativa este limite; somente o limite de workers por família é aplicado.",
   "Allow unattributed calls": "Permitir chamadas sem atribuição",
   "Recover other chats’ tabs": "Recuperar abas de outros chats",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Restaurar chats de trabalho ausentes ou que não respondem. Chats em Goal e Loop são recuperados automaticamente.",

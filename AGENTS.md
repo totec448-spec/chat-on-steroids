@@ -193,7 +193,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Tool capabilities | Current `defaultConfig()` starts all Core capability flags on; read-only off. | Omitted legacy flags use conservative `DEFAULT_CAPABILITIES`. Malformed existing config is conservative recovery, not fresh consent. |
 | Recording | On, 30-day retention. | Explicit Off stays Off; retention still applies to old history. |
 | Context / compaction | Advisory 400,000; limit rounded from advisory × 4/3; auto-compaction on at advisory. | Estimated local units. Automatic execution additionally requires live work, current ownership and eligible model/role. |
-| Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
+| Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8; global worker admission cap Off (`0`, configurable through 64). | Legacy absent enabled/allow-unattributed fields remain false; an absent global cap remains Off. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
@@ -2500,7 +2500,11 @@ independent user tasks run at once. Inside a family the topology is a star: work
 their prime and cannot create worker descendants.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
-`maxWorkers` applies **per family**, not to one global active run. Display names such as
+`maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
+broker-wide worker-admission cap: `0` preserves the historical unlimited-across-families behavior,
+while a positive value limits slot-holding workers across every active family. Admission counts
+staged unpublished spawn reservations so two primes cannot overbook the final global slot; lowering
+the cap never evicts existing workers. Display names such as
 `worker-1` are scoped by run incarnation/prime. Resolve a proven caller first, then its family;
 never select the newest run globally. Workspace, inbox, activity and finish routing follow
 that identity. With unattributed calls allowed, `primeRequestId` holds a provisional family
@@ -2532,7 +2536,7 @@ of other active primes. A permitted unresolved request can likewise inspect its 
 start its own family. Missing both exact proof and permitted request identity refuses only that
 operation. Sleeping-worker measurement remains scoped to the caller's actual history.
 
-Spawn validates capacity, objective/context, account-observed model/effort, workspace and role,
+Spawn validates both per-family and optional global capacity, objective/context, account-observed model/effort, workspace and role,
 then durably reserves the worker before handing out browser work. Model checks precede every
 batch mutation; unknown ids fail with observed choices. With no retained catalog, native
 selection still must confirm the exact request. Shared context carries common project/instructions;

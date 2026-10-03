@@ -109,11 +109,16 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let dir: string;
 
-async function setEnabled(enabled: boolean, maxWorkers = 3, allowUnattributedCalls = false): Promise<void> {
+async function setEnabled(
+  enabled: boolean,
+  maxWorkers = 3,
+  allowUnattributedCalls = false,
+  globalMaxWorkers = 0
+): Promise<void> {
   const base = defaultConfig();
   await saveConfig({
     ...base,
-    multiAgent: { ...base.multiAgent, enabled, maxWorkers, allowUnattributedCalls }
+    multiAgent: { ...base.multiAgent, enabled, maxWorkers, allowUnattributedCalls, globalMaxWorkers }
   });
 }
 
@@ -3968,6 +3973,85 @@ describe('simultaneous independent prime families', () => {
   const primeB: Caller = { conversationId: 'parallel-prime-b' };
   const recruit = (caller: Caller, count = 2) => spawn({ caller,
     workers: Array.from({ length: count }, (_, i) => ({ task: `parallel task ${i}` })) });
+
+  it('enforces one optional admission cap across independent prime families', async () => {
+    await setEnabled(true, 2, false, 3);
+    try {
+      const a = recruit(prime, 2);
+      const b = recruit(primeB, 1);
+      expect(a.runId).not.toBe(b.runId);
+      // B still has room under its own per-family limit. The refusal comes only from the
+      // separately configured global admission cap shared by all prime families.
+      expect(freeWorkerSlots(b.runId)).toBe(1);
+      const nextB = () => spawn({ caller: primeB, workers: [{ task: 'B second global task' }] });
+      expect(nextB).toThrow(/GLOBAL_WORKER_LIMIT|global worker/i);
+
+      expect(bindConversation('worker-1', 'parallel-global-worker-a', a.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-worker-a' }, 'A freed one global slot');
+      expect(nextB().runId).toBe(b.runId);
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
+  it('counts an unpublished staged spawn as a global admission reservation', async () => {
+    await setEnabled(true, 2, false, 1);
+    try {
+      const a = stageSpawn({ caller: prime, workers: [{ task: 'A staged reservation' }] });
+      expect(() => stageSpawn({ caller: primeB, workers: [{ task: 'B cannot overbook it' }] }))
+        .toThrow(/GLOBAL_WORKER_LIMIT|global worker/i);
+      a.rollback();
+      const b = stageSpawn({ caller: primeB, workers: [{ task: 'B after rollback' }] });
+      b.rollback();
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
+  it('uses the same global admission cap when another family wakes a sleeping worker', async () => {
+    await setEnabled(true, 2, false, 1);
+    try {
+      const a = recruit(prime, 1);
+      expect(bindConversation('worker-1', 'parallel-global-sleeper-a', a.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-sleeper-a' }, 'A sleeps');
+      expect(releaseQuiescentRun({}, a.runId)).toBe(true);
+
+      const b = recruit(primeB, 1);
+      expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'wake A while B owns the global slot' }]))
+        .toThrow(/GLOBAL_WORKER_LIMIT|global worker/i);
+      expect(currentRunId(PRIME_CHAT)).toBeNull();
+
+      expect(bindConversation('worker-1', 'parallel-global-worker-b', b.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-worker-b' }, 'B frees the global slot');
+      const wake = stageMessages(prime, [{ to: 'worker-1', text: 'wake A after B stops' }]);
+      expect(wake.waking).toEqual(['worker-1']);
+      wake.rollback();
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
+  it('does not auto-revive queued worker work past the global admission cap', async () => {
+    await setEnabled(true, 2, false, 1);
+    try {
+      const a = recruit(prime, 1);
+      expect(bindConversation('worker-1', 'parallel-global-queued-a', a.runId)).toBe(true);
+      sendMessage(prime, 'worker-1', 'queued work for A');
+      finishAgent({ conversationId: 'parallel-global-queued-a' }, 'A pauses before queued work');
+
+      const b = recruit(primeB, 1);
+      expect(stageQueuedWorkerRevivals(['worker-1'], a.runId).waking).toEqual([]);
+      expect(statusForCaller(prime).state.agents.find(agent => agent.id === 'worker-1')?.state).toBe('sleeping');
+
+      expect(bindConversation('worker-1', 'parallel-global-queued-b', b.runId)).toBe(true);
+      finishAgent({ conversationId: 'parallel-global-queued-b' }, 'B frees the global slot');
+      const wake = stageQueuedWorkerRevivals(['worker-1'], a.runId);
+      expect(wake.waking).toEqual(['worker-1']);
+      wake.rollback();
+    } finally {
+      await setEnabled(true);
+    }
+  });
 
   it('admits two workers for each of two primes and refuses only the full owner', async () => {
     await setEnabled(true, 2);

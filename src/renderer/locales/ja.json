@@ -336,6 +336,8 @@
   "Sub-agent workers": "サブエージェントのワーカー",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Chrome 拡張機能を読み込み、接続する必要があります。1回の実行で開けるワーカーチャットの上限を設定します。",
   "max": "上限",
+  "Global worker admission cap": "グローバル ワーカー受け入れ上限",
+  "Across all prime families. 0 keeps this cap off, so only the per-family worker limit applies.": "すべてのプライム系統に適用します。0 ではこの上限を無効にし、系統ごとのワーカー上限だけを適用します。",
   "Allow unattributed calls": "帰属未確定の呼び出しを許可",
   "Recover other chats’ tabs": "ほかのチャットのタブを復旧",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "作業用チャットのタブがなくなったり応答しなくなったりした場合に復旧します。ゴールとループのチャットは自動で復旧します。",

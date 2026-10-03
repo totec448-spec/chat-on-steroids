@@ -216,6 +216,7 @@ const settingsPatch = z.object({
     defaultModel: z.string().max(80).optional(),
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
+    globalMaxWorkers: z.number().int().min(0).max(64).optional(),
     allowUnattributedCalls: z.boolean(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
@@ -384,6 +385,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       defaultReasoning: pick(current.multiAgent.defaultReasoning, base.multiAgent.defaultReasoning, wanted.multiAgent.defaultReasoning),
       enabled: pick(current.multiAgent.enabled, base.multiAgent.enabled, wanted.multiAgent.enabled),
       maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers),
+      globalMaxWorkers: pick(
+        current.multiAgent.globalMaxWorkers ?? 0,
+        base.multiAgent.globalMaxWorkers ?? 0,
+        wanted.multiAgent.globalMaxWorkers ?? 0
+      ),
       allowUnattributedCalls: pick(
         current.multiAgent.allowUnattributedCalls,
         base.multiAgent.allowUnattributedCalls,

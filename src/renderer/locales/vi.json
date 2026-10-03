@@ -313,6 +313,8 @@
   "Sub-agent workers": "Worker tác nhân phụ",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Yêu cầu tiện ích mở rộng Chrome đã tải và kết nối. Thiết lập số cuộc trò chuyện worker tối đa mà một lần chạy có thể mở.",
   "max": "tối đa",
+  "Global worker admission cap": "Giới hạn tiếp nhận worker toàn cục",
+  "Across all prime families. 0 keeps this cap off, so only the per-family worker limit applies.": "Áp dụng cho tất cả các nhóm prime. 0 tắt giới hạn này, khi đó chỉ áp dụng giới hạn worker theo từng nhóm.",
   "Allow unattributed calls": "Cho phép lệnh gọi chưa gán",
   "Recover other chats’ tabs": "Khôi phục tab của các cuộc trò chuyện khác",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Khôi phục cuộc trò chuyện công việc bị thiếu hoặc không phản hồi. Cuộc trò chuyện Goal và Loop tự khôi phục.",

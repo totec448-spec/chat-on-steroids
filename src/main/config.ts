@@ -163,6 +163,9 @@ const DEFAULT_GOAL: GoalSettings = {
 const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   enabled: false,
   maxWorkers: 2,
+  // Preserve the historical behavior unless the user explicitly opts into a cap shared by
+  // independent prime families. Existing per-family maxWorkers remains authoritative too.
+  globalMaxWorkers: 0,
   allowUnattributedCalls: false,
   // Off: Goal/Loop chats are always recovered, and reopening anything else — a worker, a prime,
   // a plain chat that once called a tool — is the user's choice to make.
@@ -389,6 +392,7 @@ const configSchema = z.object({
     defaultModel: z.string().max(80).optional(),
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
+      globalMaxWorkers: z.number().int().min(0).max(64).optional().default(DEFAULT_MULTI_AGENT.globalMaxWorkers ?? 0),
       allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
       waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false),
@@ -396,7 +400,11 @@ const configSchema = z.object({
     })
     .optional()
     .default({
-      ...DEFAULT_MULTI_AGENT,
+      enabled: DEFAULT_MULTI_AGENT.enabled,
+      maxWorkers: DEFAULT_MULTI_AGENT.maxWorkers,
+      globalMaxWorkers: DEFAULT_MULTI_AGENT.globalMaxWorkers ?? 0,
+      allowUnattributedCalls: DEFAULT_MULTI_AGENT.allowUnattributedCalls,
+      recoverAgentTabs: DEFAULT_MULTI_AGENT.recoverAgentTabs,
       waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false,
       endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false
     }),

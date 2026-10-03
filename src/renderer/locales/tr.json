@@ -326,6 +326,8 @@
   "Sub-agent workers": "Yardımcı ajanlar",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Chrome eklentisinin yüklenmiş ve bağlı olmasını gerektirir. Bir çalıştırmada açılabilecek en fazla yardımcı ajan sohbeti sayısını belirler.",
   "max": "en fazla",
+  "Global worker admission cap": "Genel worker kabul sınırı",
+  "Across all prime families. 0 keeps this cap off, so only the per-family worker limit applies.": "Tüm prime aileleri için geçerlidir. 0 bu sınırı kapatır; yalnızca aile başına worker sınırı uygulanır.",
   "Allow unattributed calls": "Sohbeti belirlenemeyen çağrılara izin ver",
   "Recover other chats’ tabs": "Diğer sohbetlerin sekmelerini kurtar",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Kaybolan veya yanıt vermeyen çalışma sohbetlerini geri getir. Hedef ve Döngü sohbetleri otomatik kurtarılır.",
