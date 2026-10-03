@@ -1648,6 +1648,8 @@ it('searches the whole OpenRouter catalogue and clearing restores newest-first p
 
   const search = doc.getElementById('goalModelSearch') as HTMLInputElement | null;
   expect(search).not.toBeNull();
+  // It says what it does: it searches the whole catalogue, not a model field.
+  expect([search!.placeholder, search!.getAttribute('aria-label')]).toEqual(['Search models', 'Search models']);
   search!.value = 'model-44';
   search!.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
   await settle(); await settle();
