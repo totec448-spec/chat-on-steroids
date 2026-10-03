@@ -2749,7 +2749,9 @@ narrow. Goal stops at the requested outcome; Loop raises the quality of the same
 recursively shrinking to the latest detail or repeating settled reports. Verbatim old defaults
 live in `shared/goal-prompt-history.ts` only for exact-match migration; custom wording is preserved.
 API model discovery is bounded and cached by endpoint/key; a list entry does not prove an
-execution succeeded. The API reasoning picker uses OpenRouter's per-model `reasoning` metadata,
+execution succeeded. Search stays on that main-process catalogue: a bounded name/id query filters
+the complete cached listing before results are paged back to the renderer, while an empty query
+retains the existing newest-first twenty-at-a-time view. The API reasoning picker uses OpenRouter's per-model `reasoning` metadata,
 including supported efforts, mandatory reasoning and the default effort. Absent effort metadata
 does not imply support; an explicit null list accepts the gateway's efforts. The selected model's
 metadata accompanies every catalogue page, even when its row is on a later page. Saved unsupported
