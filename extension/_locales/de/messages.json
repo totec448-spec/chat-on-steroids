@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "Die App konnte die Aufgabe nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
+  },
+  "popup_app_not_running_help": {
+    "message": "Stelle sicher, dass Chat On Steroids auf diesem Computer geöffnet ist. Die Begleit-Erweiterung verbindet sich dann von selbst."
   }
 }

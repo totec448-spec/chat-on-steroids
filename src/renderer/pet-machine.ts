@@ -87,7 +87,8 @@ export class PetMachine {
   show(): void { if(this.visible)return; this.cancel(); this.clicks=[]; this.enter('spawn'); this.nextSpecial=this.clock+SPECIAL_COOLDOWN; }
   hide(): void { this.cancel(); this.pointer=null; this.clicks=[]; this.state='hidden';this.elapsed=0; }
   reset(): void { this.cancel();this.pointer=null;this.position=clampPosition({x:this.width-200,y:this.height-230},this.width,this.height);if(this.visible)this.rest(); }
-  resize(width:number,height:number): void { this.width=width;this.height=height;this.position=clampPosition(this.position,width,height);this.cancel();this.pointer=null;if(this.visible)this.rest(); }
+  /** A held pet stays held: the work area can change by a pixel mid-drag (menu bar, Dock). */
+  resize(width:number,height:number): void { this.width=width;this.height=height;this.position=clampPosition(this.position,width,height);if(this.pointer)return;this.cancel();if(this.visible)this.rest(); }
   setReducedMotion(value:boolean): void { this.reducedMotion=value;this.cancel();this.pointer=null;if(this.visible)this.rest(); }
   beginPointer(id:number,p:Point): boolean { if(!this.visible || this.pointer)return false;this.pointer={id,start:p,origin:{...this.position},dragging:false};return true; }
   movePointer(id:number,p:Point): void {

@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "应用无法保存任务。请检查可用磁盘空间，然后重试保存。"
+  },
+  "popup_app_not_running_help": {
+    "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
   }
 }

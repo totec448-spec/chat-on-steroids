@@ -63,6 +63,13 @@ describe('Tur Tur Sahur animation owner',()=>{
     pet.beginPointer(2,{x:10,y:10});pet.movePointer(2,{x:40,y:20});expect(pet.state).toBe('held');
     pet.endPointer(2);expect(pet.state).toBe('landing');expect(pet.position).toEqual({x:210,y:310});
   });
+  it('keeps a held pointer through a work-area resize (a 1 px change used to drop the drag)',()=>{
+    const pet=create();pet.beginPointer(1,{x:10,y:10});
+    pet.resize(1000,799);
+    pet.movePointer(1,{x:-70,y:-30});expect(pet.state).toBe('held');expect(pet.position).toEqual({x:100,y:260});
+    pet.resize(1000,800);expect(pet.state).toBe('held');
+    pet.endPointer(1);expect(pet.state).toBe('landing');expect(pet.pointer).toBeNull();
+  });
   it('cancelled pointer events never turn into pokes',()=>{
     const pet=create();advance(pet,500);pet.beginPointer(1,{x:0,y:0});pet.endPointer(1,true);expect(pet.state).toBe('idle');
   });

@@ -1810,5 +1810,9 @@
   "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "Remover este chat e o histórico salvo do app. O chat continua no ChatGPT.",
   "Chat removed from the app": "Chat removido do app",
   "Pet instructions copied": "Instruções dos pets copiadas",
-  "Skill added to your library": "Skill adicionada à sua biblioteca"
+  "Skill added to your library": "Skill adicionada à sua biblioteca",
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Alterna os IDs de túnel e a chave de API do túnel salvos, por exemplo para outra conta do ChatGPT.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "A página do ChatGPT perdeu a transmissão ao vivo desta resposta. Ela pode continuar em andamento: o recarregamento reconecta a página sem interrompê-la.",
+  "Don't reload this answer": "Não recarregar esta resposta",
+  "The reload has already started.": "O recarregamento já começou."
 }
