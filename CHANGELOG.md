@@ -48,7 +48,7 @@ This update is about messages that got lost and long Goal, Loop and worker runs 
 - **Extension settings survive a reinstall.** Timestamps and Overwrite come back after the extension is reinstalled from a new folder.
 - **Small windows.** Headers, settings rows, buttons and cards stay inside the window down to the smallest size, in every language. The language flags on Setup no longer cover the title.
 - **Numbers in your language.** Usage totals and amounts follow the app language, and the Activity log no longer fills with identical lines while Usage is open.
-- **Clearer settings.** Session finish now says it works with Pro models and needs a plugin refresh. Settings whose switch is off are dimmed instead of looking editable.
+- **Clearer settings.** Session finish now says it works with Pro models and needs a plugin refresh. Settings whose switch is off are dimmed instead of looking editable. Contrast, Colors, the default new-chat model and unattributed calls now say in plain words what they do, in every language.
 - **Worker health in the sub-agent overview.** Each worker shows a short health label next to its state.
 - **Installed Skill revisions.** The Skills library shows which GitHub commit of a Skill is installed.
 - **Optional cleanup of sleeping workers.** A new setting, off by default, ends the background processes of sleeping workers. Their chats stay reusable.
