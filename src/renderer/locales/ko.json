@@ -186,7 +186,6 @@
   "Allow all actions": "모든 작업 허용",
   ". Repeat for the Desktop plugin if you added it.": ". Desktop 플러그인도 추가했다면 같은 작업을 반복하세요.",
   "This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.": "이렇게 하면 ChatGPT가 매 작업마다 승인을 묻지 않고 플러그인을 사용할 수 있습니다. 그렇지 않으면 승인 요청 때문에 Goal, Loop 및 에이전트 작업이 멈출 수 있습니다. 이 앱의 폴더 및 도구 권한은 그대로 적용됩니다.",
-  "Add the Chrome extension": "Chrome 확장 프로그램 추가",
   "Load unpacked": "압축해제된 확장 프로그램 로드",
   "Required for sub-agents:": "서브에이전트에 필요:",
   "the companion extension must be loaded and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or coordinate worker chats.": "보조 확장 프로그램이 ChatGPT에 로드되어 연결되어 있어야 합니다. 없으면 Chat On Steroids가 워커 채팅을 식별하거나 열고 조정할 수 없습니다.",
@@ -307,7 +306,6 @@
   "Saved when you leave the editor. There is no stop response here - the app refuses one and asks again.": "편집기를 나가면 저장됩니다. 여기에는 종료 응답이 없습니다. 앱이 종료 응답을 거부하고 다시 요청합니다.",
   "Workers & recovery": "워커 및 복구",
   "Sub-agent workers": "서브에이전트 워커",
-  "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Chrome 확장 프로그램이 로드되고 연결되어 있어야 합니다. 한 번의 실행에서 열 수 있는 워커 채팅의 최대 수를 설정합니다.",
   "max": "최대",
   "Allow unattributed calls": "귀속되지 않은 호출 허용",
   "Recover other chats’ tabs": "다른 채팅의 탭 복구",
@@ -1170,7 +1168,6 @@
   "Browser tabs, DOM, console, network and background screenshots; native apps, input and clipboard where supported.": "브라우저 탭, DOM, 콘솔, 네트워크, 백그라운드 스크린샷을 다루며 지원되는 환경에서는 네이티브 앱, 입력, 클립보드도 제어합니다.",
   "Turn on Developer mode at the top right.": "오른쪽 위에서 Developer mode를 켜세요.",
   "Click Open extension folder below and copy the folder path from the file manager’s address bar.": "아래의 Open extension folder를 클릭하고 파일 관리자 주소 표시줄에서 폴더 경로를 복사하세요.",
-  "In Chrome, click Load unpacked, paste the copied folder path and select that folder.": "Chrome에서 Load unpacked를 클릭하고 복사한 폴더 경로를 붙여넣은 뒤 해당 폴더를 선택하세요.",
   "The extension pairs with this app automatically — there is no code to type.": "확장 프로그램은 이 앱과 자동으로 페어링됩니다 — 입력할 코드는 없습니다.",
   "When the model ends the turn this way with Goal or Loop on in this chat, the next step is written from that prompt and response source. Otherwise you get a notification.": "이 대화에서 Goal 또는 Loop가 켜져 있을 때 모델이 이렇게 턴을 마치면, 해당 프롬프트와 응답 소스로 다음 단계를 작성합니다. 그렇지 않으면 알림을 받습니다.",
   "Not saved to history": "기록에 저장되지 않음",
@@ -1459,7 +1456,6 @@
   "Another browser tab is handling this continuation. Check that tab for progress.": "다른 브라우저 탭에서 이 계속하기를 처리 중입니다. 해당 탭에서 진행 상황을 확인하세요.",
   "App v{0} (protocol {1}); companion v{2} (protocol {3}).": "앱 v{0} (프로토콜 {1}) · 보조 확장 프로그램 v{2} (프로토콜 {3})",
   "Authentication": "인증",
-  "Before Goal or Loop takes its next step, wait until this chat's own workers have finished. Their reports arrive here, so deciding earlier reads a context that is about to change. Messages you type or queue are sent as usual.": "Goal 또는 Loop가 다음 단계를 시작하기 전에 이 채팅의 워커가 모두 끝날 때까지 기다립니다. 워커 보고가 이 채팅으로 도착하므로 너무 일찍 판단하면 곧 바뀔 컨텍스트를 읽게 됩니다. 직접 입력하거나 대기열에 넣은 메시지는 평소처럼 전송됩니다.",
   "Blocked commands (one rule per line)": "차단할 명령(줄마다 규칙 하나)",
   "Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.": "Chat On Steroids 커넥터 도구가 변경되었습니다. ChatGPT에서 해당 커넥터를 새로고침하세요. 브라우저 확장 프로그램과는 별개입니다.",
   "ChatGPT’s current model": "ChatGPT의 현재 모델",
@@ -1792,5 +1788,9 @@
   "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Compact & Resume가 남기는 내용과 Goal과 Loop가 다음 지시를 작성하는 방식을 설정합니다.",
   "Thorough · 10k–30k tokens": "자세히 · 1만~3만 토큰",
   "Standard · 4k–10k tokens": "표준 · 4천~1만 토큰",
-  "Short · 2k–6k tokens": "짧게 · 2천~6천 토큰"
+  "Short · 2k–6k tokens": "짧게 · 2천~6천 토큰",
+  "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "연결된 브라우저 확장 프로그램이 필요합니다. 한 번의 실행에서 열 수 있는 워커 채팅의 최대 수를 설정합니다.",
+  "Add the browser extension": "브라우저 확장 프로그램 추가",
+  "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "브라우저에서 Load unpacked를 클릭하고 복사한 폴더 경로를 붙여넣은 뒤 해당 폴더를 선택하세요.",
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "Goal과 Loop는 이 채팅의 워커가 보고할 때까지 기다렸다가 다음 단계를 시작하므로 그 결과로 판단합니다. 직접 입력하거나 대기열에 넣은 메시지는 평소처럼 전송됩니다."
 }

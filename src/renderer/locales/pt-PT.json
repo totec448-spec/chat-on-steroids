@@ -199,7 +199,6 @@
   "Allow all actions": "Permitir todas as ações",
   ". Repeat for the Desktop plugin if you added it.": ". Repita para o plugin Desktop se o tiver adicionado.",
   "This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.": "Isto permite ao ChatGPT utilizar o plugin sem pedir aprovação para cada ação. Caso contrário, os pedidos de aprovação podem colocar em pausa tarefas de Goal, Loop e agentes. As permissões de pastas e ferramentas desta aplicação continuam a aplicar-se.",
-  "Add the Chrome extension": "Adicionar a extensão do Chrome",
   "Load unpacked": "Carregar descompactada",
   "Required for sub-agents:": "Obrigatório para subagentes:",
   "the companion extension must be loaded and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or coordinate worker chats.": "a extensão companion tem de estar carregada e ligada no ChatGPT. Sem ela, o Chat On Steroids não consegue identificar, abrir nem coordenar chats de workers.",
@@ -320,7 +319,6 @@
   "Saved when you leave the editor. There is no stop response here - the app refuses one and asks again.": "Guardado quando sair do editor. Aqui não existe uma resposta de paragem - a aplicação recusa-a e volta a pedir.",
   "Workers & recovery": "Workers e recuperação",
   "Sub-agent workers": "Workers subagentes",
-  "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Requer que a extensão do Chrome esteja carregada e ligada. Isto define o número máximo de chats de workers que uma execução pode abrir.",
   "max": "máx.",
   "Allow unattributed calls": "Permitir chamadas sem atribuição",
   "Recover other chats’ tabs": "Recuperar separadores de outros chats",
@@ -1184,7 +1182,6 @@
   "Browser tabs, DOM, console, network and background screenshots; native apps, input and clipboard where supported.": "Separadores do navegador, DOM, consola, rede e capturas de ecrã em segundo plano; aplicações nativas, entrada e área de transferência quando suportado.",
   "Turn on Developer mode at the top right.": "Ative Developer mode no canto superior direito.",
   "Click Open extension folder below and copy the folder path from the file manager’s address bar.": "Clique em Abrir pasta da extensão abaixo e copie o caminho da pasta da barra de endereços do gestor de ficheiros.",
-  "In Chrome, click Load unpacked, paste the copied folder path and select that folder.": "No Chrome, clique em Load unpacked, cole o caminho da pasta copiado e selecione essa pasta.",
   "The extension pairs with this app automatically — there is no code to type.": "A extensão emparelha automaticamente com esta aplicação — não há qualquer código para introduzir.",
   "When the model ends the turn this way with Goal or Loop on in this chat, the next step is written from that prompt and response source. Otherwise you get a notification.": "Quando o modelo termina o turno desta forma com Goal ou Loop ativado neste chat, o passo seguinte é escrito com esse prompt e essa origem de resposta. Caso contrário, recebe uma notificação.",
   "Not saved to history": "Não guardado no histórico",
@@ -1469,7 +1466,6 @@
   "{0}: drag, click, or open the context menu": "{0}: arraste, clique ou abra o menu de contexto",
   "New response": "Nova resposta",
   "Wait for sub-agents": "Aguardar subagentes",
-  "Before Goal or Loop takes its next step, wait until this chat's own workers have finished. Their reports arrive here, so deciding earlier reads a context that is about to change. Messages you type or queue are sent as usual.": "Antes de o Objetivo ou o Ciclo avançar, aguarde que terminem os trabalhadores deste chat. Os relatórios chegam aqui; uma decisão antecipada usaria um contexto prestes a mudar. As mensagens que escrever ou colocar em fila continuam a ser enviadas normalmente.",
   "Waiting for this chat’s sub-agents": "A aguardar os subagentes deste chat",
   "Authentication": "Autenticação",
   "None or a static credential": "Nenhuma ou credencial estática",
@@ -1792,5 +1788,9 @@
   "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Defina o que o Compact & Resume guarda e como o Goal e o Loop escrevem a instrução seguinte.",
   "Thorough · 10k–30k tokens": "Completo · 10k–30k tokens",
   "Standard · 4k–10k tokens": "Padrão · 4k–10k tokens",
-  "Short · 2k–6k tokens": "Curto · 2k–6k tokens"
+  "Short · 2k–6k tokens": "Curto · 2k–6k tokens",
+  "Needs the browser extension to be connected. This sets the most worker chats one run may open.": "Requer a extensão do navegador ligada. Isto define o número máximo de chats de workers que uma execução pode abrir.",
+  "Add the browser extension": "Adicionar a extensão do navegador",
+  "In the browser, click Load unpacked, paste the copied folder path and select that folder.": "No navegador, clique em Load unpacked, cole o caminho da pasta copiado e selecione essa pasta.",
+  "Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.": "O Objetivo e o Ciclo esperam que os trabalhadores deste chat reportem antes do passo seguinte, para decidirem com os resultados. As mensagens que escrever ou colocar em fila continuam a ser enviadas normalmente."
 }
