@@ -882,6 +882,14 @@
                     <span class="unit">max</span>
                   </div>
 
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Workers across all chats</b>
+                      <em>The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.</em>
+                    </span>
+                    <input id="globalMaWorkers" class="num" type="number" min="0" max="64" step="1" />
+                  </div>
+
                   <label class="setting">
                     <span class="setting-text">
                       <b>Allow unattributed calls</b>
@@ -945,6 +953,17 @@
                     <input id="autoCompactTokens" class="num" type="number" min="10000" max="4000000" step="10000" />
                     <span class="unit">tokens</span>
                     <span class="sw"><input type="checkbox" id="autoCompact" /><i></i></span>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Handoff length</b>
+                      <em>How much a Compact &amp; Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.</em>
+                    </span>
+                    <select id="handoffLength">
+                      <option value="thorough">Thorough · 10k–30k tokens</option>
+                      <option value="standard">Standard · 4k–10k tokens</option>
+                      <option value="short">Short · 2k–6k tokens</option>
+                    </select>
                   </div>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">API provider</h2><p>Set the provider, model, and credentials for API-based decisions.</p></div></header>
@@ -1021,7 +1040,7 @@
                   </div>
 
                   </div>
-                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape how Goal and Loop write their next instruction.</p></div></header>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape what Compact &amp; Resume keeps and how Goal and Loop write their next instruction.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">

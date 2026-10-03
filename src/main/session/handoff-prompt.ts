@@ -1,4 +1,4 @@
-import { DEFAULT_HANDOFF_PROMPT } from '../../shared/handoff.js';
+import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, handoffPromptForLength, type HandoffLength } from '../../shared/handoff.js';
 
 /**
  * What a handoff brief has to contain, in one place.
@@ -32,10 +32,11 @@ export const destinationContinuationMarker = (token: string): string => marker('
 export function nativeHandoffPrompt(
   token = '',
   includeToolCalls = true,
-  handoffPrompt = DEFAULT_HANDOFF_PROMPT
+  handoffPrompt = DEFAULT_HANDOFF_PROMPT,
+  length: HandoffLength = DEFAULT_HANDOFF_LENGTH
 ): string {
   const identity = sourceContinuationMarker(token);
-  const briefInstructions = handoffPrompt.trim() || DEFAULT_HANDOFF_PROMPT;
+  const briefInstructions = handoffPromptForLength(handoffPrompt.trim() || DEFAULT_HANDOFF_PROMPT, length);
   return (
     (identity ? `${identity}\n\n` : '') +
     'Chat On Steroids is compacting this conversation so a fresh chat can continue the work. ' +

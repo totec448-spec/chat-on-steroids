@@ -64,9 +64,8 @@ export function checkPullRequest({ body, files, draft = false, fromFork = false,
     if (!tests.length && !optedOut) {
       problems.push('Add or update a test for the behavior change, or write "No test: <reason>" under "## Test".');
     }
-    if (tests.length && !/fail/i.test(testSection)) {
-      problems.push('Under "## Test", name the test and confirm it fails without your change.');
-    }
+    // Whether the new test fails without the change is proved by the "Fail-first test" job, which
+    // runs it against main's code. Requiring the word here as well only failed PRs on wording.
   }
 
   if (files.some((file) => UI.test(file.path)) && !/!\[[^\]]*\]\(|<img\s/i.test(section(text, 'screenshots')) &&

@@ -309,6 +309,8 @@
   "Sub-agent workers": "서브에이전트 워커",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Chrome 확장 프로그램이 로드되고 연결되어 있어야 합니다. 한 번의 실행에서 열 수 있는 워커 채팅의 최대 수를 설정합니다.",
   "max": "최대",
+  "Workers across all chats": "모든 채팅의 워커",
+  "The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.": "모든 채팅을 합쳐 동시에 실행할 수 있는 워커의 최대 수입니다. 0은 추가 제한이 없음을 뜻하며, 각 채팅에는 위의 제한이 계속 적용됩니다.",
   "Allow unattributed calls": "귀속되지 않은 호출 허용",
   "Recover other chats’ tabs": "다른 채팅의 탭 복구",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "사라졌거나 응답하지 않는 작업 채팅을 복구합니다. Goal과 Loop 채팅은 자동으로 복구됩니다.",
@@ -1706,7 +1708,6 @@
   "See changes as you adjust the workspace.": "워크스페이스를 조정하면서 변경 사항을 확인하세요.",
   "Set the provider, model, and credentials for API-based decisions.": "API 기반 판단에 사용할 제공자, 모델 및 인증 정보를 설정합니다.",
   "Set worker limits and which chats can resume after interruptions.": "워커 제한과 중단 후 재개할 수 있는 채팅을 설정합니다.",
-  "Shape how Goal and Loop write their next instruction.": "Goal과 Loop가 다음 지시를 작성하는 방식을 설정합니다.",
   "Use account-observed models for sub-agents.": "하위 에이전트에 계정에서 관측된 모델을 사용합니다.",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "검증된 네이티브 전송과 함께 ChatGPT가 보고한 모델·공유·기능 한도를 표시합니다.",
   "{0}K": "{0}K",
@@ -1787,5 +1788,11 @@
   "Let agents on this computer read app status and chats.": "이 컴퓨터의 에이전트가 앱 상태와 채팅을 읽을 수 있도록 허용합니다.",
   "Allow actions": "작업 허용",
   "Let those agents also send and cancel messages. Needs the local control API.": "해당 에이전트가 메시지를 보내고 취소할 수도 있습니다. 로컬 제어 API가 필요합니다.",
-  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "업데이트할 때마다 한 번, 이 버전이 저장된 키를 열 수 있도록 macOS가 암호를 요청합니다. Mac 로그인 암호를 입력하고 “항상 허용”을 선택하세요. 응답하면 바로 채팅과 브라우저 연결이 이어집니다."
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "업데이트할 때마다 한 번, 이 버전이 저장된 키를 열 수 있도록 macOS가 암호를 요청합니다. Mac 로그인 암호를 입력하고 “항상 허용”을 선택하세요. 응답하면 바로 채팅과 브라우저 연결이 이어집니다.",
+  "Handoff length": "인계 길이",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Compact & Resume 인계 요약에 남길 분량입니다. 길수록 새 채팅에 더 많은 세부 정보가 넘어가고, 짧을수록 새 채팅에 여유가 생깁니다.",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Compact & Resume가 남기는 내용과 Goal과 Loop가 다음 지시를 작성하는 방식을 설정합니다.",
+  "Thorough · 10k–30k tokens": "자세히 · 1만~3만 토큰",
+  "Standard · 4k–10k tokens": "표준 · 4천~1만 토큰",
+  "Short · 2k–6k tokens": "짧게 · 2천~6천 토큰"
 }

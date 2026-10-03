@@ -49,7 +49,9 @@ export function createAgentPanel(options: {
     };
     for (const active of [true, false]) {
       const group = workers.filter(worker => isActive(worker) === active);
-      body.append(el('h3', '', () => `${active ? t("Active") : t("History")} · ${group.length}`));
+      const failed = active ? 0 : group.filter(worker => options.agent?.(worker)?.state === 'failed').length;
+      body.append(el('h3', '', () =>
+        `${active ? t("Active") : t("History")} · ${group.length}${failed ? ` · ${t('{0} failed', [failed])}` : ''}`));
       if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
       for (const worker of group) {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');

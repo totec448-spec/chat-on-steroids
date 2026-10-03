@@ -57,7 +57,7 @@ import {
   type Config
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
-import { MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -210,13 +210,15 @@ const settingsPatch = z.object({
     // Floored well above what a fresh chat holds, so a threshold cannot be set somewhere
     // every conversation is already past the moment it opens.
     autoTokens: z.number().int().min(10_000).max(4_000_000),
-    handoffPrompt: z.string().trim().min(1).max(MAX_HANDOFF_PROMPT_CHARS)
+    handoffPrompt: z.string().trim().min(1).max(MAX_HANDOFF_PROMPT_CHARS),
+    handoffLength: z.enum(HANDOFF_LENGTHS).optional()
   }),
   multiAgent: z.object({
     enabled: z.boolean(),
     defaultModel: z.string().max(80).optional(),
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
+    globalMaxWorkers: z.number().int().min(0).max(64).optional(),
     allowUnattributedCalls: z.boolean(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
@@ -378,6 +380,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.compaction.handoffPrompt,
         base.compaction.handoffPrompt,
         wanted.compaction.handoffPrompt
+      ),
+      handoffLength: pick(
+        current.compaction.handoffLength ?? DEFAULT_HANDOFF_LENGTH,
+        base.compaction.handoffLength ?? DEFAULT_HANDOFF_LENGTH,
+        wanted.compaction.handoffLength ?? DEFAULT_HANDOFF_LENGTH
       )
     },
     multiAgent: {
@@ -385,6 +392,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       defaultReasoning: pick(current.multiAgent.defaultReasoning, base.multiAgent.defaultReasoning, wanted.multiAgent.defaultReasoning),
       enabled: pick(current.multiAgent.enabled, base.multiAgent.enabled, wanted.multiAgent.enabled),
       maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers),
+      globalMaxWorkers: pick(
+        current.multiAgent.globalMaxWorkers ?? 0,
+        base.multiAgent.globalMaxWorkers ?? 0,
+        wanted.multiAgent.globalMaxWorkers ?? 0
+      ),
       allowUnattributedCalls: pick(
         current.multiAgent.allowUnattributedCalls,
         base.multiAgent.allowUnattributedCalls,

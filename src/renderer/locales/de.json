@@ -313,6 +313,8 @@
   "Sub-agent workers": "Unteragenten (Worker)",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "Setzt voraus, dass die Chrome-Erweiterung geladen und verbunden ist. Legt fest, wie viele Worker-Chats ein Lauf höchstens öffnen darf.",
   "max": "max.",
+  "Workers across all chats": "Worker in allen Chats",
+  "The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.": "Die maximale Zahl von Workern, die gleichzeitig über alle Chats hinweg laufen darf. 0 bedeutet kein zusätzliches Limit; für jeden Chat gilt weiterhin das oben festgelegte Limit.",
   "Allow unattributed calls": "Nicht zugeordnete Aufrufe erlauben",
   "Recover other chats’ tabs": "Tabs anderer Chats wiederherstellen",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "Stellt fehlende oder nicht reagierende Arbeits-Chats wieder her. Goal- und Loop-Chats werden automatisch wiederhergestellt.",
@@ -1706,7 +1708,6 @@
   "See changes as you adjust the workspace.": "Sieh Änderungen, während du den Arbeitsbereich anpasst.",
   "Set the provider, model, and credentials for API-based decisions.": "Lege Anbieter, Modell und Zugangsdaten für API-basierte Entscheidungen fest.",
   "Set worker limits and which chats can resume after interruptions.": "Lege Worker-Grenzen fest und welche Chats nach Unterbrechungen weiterlaufen dürfen.",
-  "Shape how Goal and Loop write their next instruction.": "Bestimme, wie Goal und Loop ihre nächste Anweisung formulieren.",
   "Use account-observed models for sub-agents.": "Verwende für Sub-Agenten die in deinem Konto beobachteten Modelle.",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "Verifizierte native Nachrichten neben den von ChatGPT gemeldeten Modell-, gemeinsamen und Funktionslimits.",
   "{0}K": "{0} Tsd.",
@@ -1787,5 +1788,11 @@
   "Let agents on this computer read app status and chats.": "Agenten auf diesem Computer dürfen App-Status und Chats lesen.",
   "Allow actions": "Aktionen erlauben",
   "Let those agents also send and cancel messages. Needs the local control API.": "Diese Agenten dürfen außerdem Nachrichten senden und abbrechen. Benötigt die lokale Steuerungs-API.",
-  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "macOS fragt nach jedem Update einmal nach deinem Passwort, damit diese Version ihre gespeicherten Schlüssel öffnen kann. Gib dein Mac-Anmeldepasswort ein und wähle „Immer erlauben“. Chats und die Browser-Verbindung laufen weiter, sobald du antwortest."
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "macOS fragt nach jedem Update einmal nach deinem Passwort, damit diese Version ihre gespeicherten Schlüssel öffnen kann. Gib dein Mac-Anmeldepasswort ein und wähle „Immer erlauben“. Chats und die Browser-Verbindung laufen weiter, sobald du antwortest.",
+  "Handoff length": "Länge der Übergabe",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Wie viel ein Compact & Resume-Bericht behält. Längere Berichte nehmen mehr Details in den neuen Chat mit, kürzere lassen ihm mehr Platz.",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "Bestimme, was Compact & Resume behält und wie Goal und Loop ihre nächste Anweisung formulieren.",
+  "Thorough · 10k–30k tokens": "Gründlich · 10k–30k Tokens",
+  "Standard · 4k–10k tokens": "Standard · 4k–10k Tokens",
+  "Short · 2k–6k tokens": "Kurz · 2k–6k Tokens"
 }

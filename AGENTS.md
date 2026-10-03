@@ -193,7 +193,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Tool capabilities | Current `defaultConfig()` starts all Core capability flags on; read-only off. | Omitted legacy flags use conservative `DEFAULT_CAPABILITIES`. Malformed existing config is conservative recovery, not fresh consent. |
 | Recording | On, 30-day retention. | Explicit Off stays Off; retention still applies to old history. |
 | Context / compaction | Advisory 400,000; limit rounded from advisory × 4/3; auto-compaction on at advisory. | Estimated local units. Automatic execution additionally requires live work, current ownership and eligible model/role. |
-| Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
+| Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8; global worker admission cap Off (`0`, configurable through 64). | Legacy absent enabled/allow-unattributed fields remain false; an absent global cap remains Off. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
@@ -2163,7 +2163,10 @@ regressions do not establish those tabs' original cause or live validation of th
 
 `tabRecoveryWanted()` means **active Goal/Loop OR the user's recoverAgentTabs switch**. It gates
 silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
-Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
+Unattributed incidents and compaction has its own evidence. A no-tab repair only gives the chat a
+tab: if the browser finds one by the time it acts (often the tab a worker wake just opened) that is
+still loading or answers `clf-page-status`, it reports `repairAction=present` and never reloads it,
+which used to cut a wake off mid-send (#864). Only a silent tab is reloaded. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
 existing session metadata and withdraws every unexecuted browser repair. It revokes synthetic
@@ -2398,9 +2401,14 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    newest final. The user may edit the **content instructions** used to
    write that brief; continuation markers, send/provenance framing, tool-detail policy and the
    requirement that the compaction reply contain only the brief remain code-owned invariants.
-   The shipped content prompt prefers a dense roughly 2k-6k-token operational handoff for a
-   substantial session, shorter when less state exists and longer only when correctness needs
-   it. Preparing a brief does not yet publish a rebind.
+   The shipped content prompt asks for a lossless, dense operational handoff: roughly
+   10k-30k tokens for a substantial session, shorter only when less state exists, never above
+   30k (`src/shared/handoff.ts`). `compaction.handoffLength` (Settings › Agents & automation,
+   default and absent = `thorough`) keeps that prompt byte for byte; `standard` (4k-10k) and
+   `short` (2k-6k) swap the default prompt's two length sentences when present and always append
+   one code-owned line that overrides any other length target, so an edited prompt follows the
+   choice too (`handoffPromptForLength`). The brief floors in `session/handoff.ts` are far below
+   all three. Preparing a brief does not yet publish a rebind.
 4. **Elect B and commit.** Destination creation/claim has one opening owner. B opens in the
    browser that holds A: the capture reply places it beside the capturing page, and a resume
    queued with no page waiting is offered to a browser still reporting A open (§13). Only when
@@ -2510,7 +2518,11 @@ independent user tasks run at once. Inside a family the topology is a star: work
 their prime and cannot create worker descendants.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
-`maxWorkers` applies **per family**, not to one global active run. Display names such as
+`maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
+broker-wide worker-admission cap: `0` preserves the historical unlimited-across-families behavior,
+while a positive value limits slot-holding workers across every active family. Admission counts
+staged unpublished spawn reservations so two primes cannot overbook the final global slot; lowering
+the cap never evicts existing workers. Display names such as
 `worker-1` are scoped by run incarnation/prime. Resolve a proven caller first, then its family;
 never select the newest run globally. Workspace, inbox, activity and finish routing follow
 that identity. With unattributed calls allowed, `primeRequestId` holds a provisional family
@@ -2542,7 +2554,7 @@ of other active primes. A permitted unresolved request can likewise inspect its 
 start its own family. Missing both exact proof and permitted request identity refuses only that
 operation. Sleeping-worker measurement remains scoped to the caller's actual history.
 
-Spawn validates capacity, objective/context, account-observed model/effort, workspace and role,
+Spawn validates both per-family and optional global capacity, objective/context, account-observed model/effort, workspace and role,
 then durably reserves the worker before handing out browser work. Model checks precede every
 batch mutation; unknown ids fail with observed choices. With no retained catalog, native
 selection still must confirm the exact request. Shared context carries common project/instructions;
@@ -2602,6 +2614,10 @@ response, a current canonical final, user block/clear/disable, or other durable 
 evidence still ends it normally.
 Status/message remeasure sleepers before revival. A terminal worker can be replaced deliberately;
 raising the user's worker cap is not a substitute for lifecycle correctness.
+`/status` and `/activity` hand the browser every unclaimed wake as `revivals` (oldest first, at
+most 16) beside the legacy single `revival`; the extension remembers each one and routes or opens
+them in one pass. Handing out only the oldest held every later wake behind a slow one until the
+revival deadline (#882). Redeem stays the one ownership boundary per wake.
 
 Detached means browser attachment is missing, not necessarily that tool execution died. An
 exact call can prove the worker server-side alive; a new page can reattach it. During waking,
@@ -3170,6 +3186,7 @@ dock. The top-right control group orders right expansion (shown only while right
 bottom, then right; the latter two buttons toggle their panels. There is no separate right-dock
 close button. Layout controls grant no new file, terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
+History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.

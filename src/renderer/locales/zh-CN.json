@@ -336,6 +336,8 @@
   "Sub-agent workers": "子智能体",
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "需要加载并连接 Chrome 扩展。此设置限制一次运行可打开的子智能体聊天数量。",
   "max": "上限",
+  "Workers across all chats": "所有聊天的 Worker",
+  "The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.": "所有聊天合计可同时运行的 Worker 最大数量。0 表示不额外限制；每个聊天仍保留上方的限制。",
   "Allow unattributed calls": "允许未归属的调用",
   "Recover other chats’ tabs": "恢复其他聊天的标签页",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "恢复缺失或无响应的工作聊天。目标和循环聊天会自动恢复。",
@@ -1706,7 +1708,6 @@
   "See changes as you adjust the workspace.": "调整工作区时即时查看变化。",
   "Set the provider, model, and credentials for API-based decisions.": "设置用于 API 决策的提供商、模型和凭据。",
   "Set worker limits and which chats can resume after interruptions.": "设置子智能体数量上限，以及哪些聊天可在中断后恢复。",
-  "Shape how Goal and Loop write their next instruction.": "调整目标模式和循环模式生成下一条指令的方式。",
   "Use account-observed models for sub-agents.": "为子智能体使用账户中已检测到的模型。",
   "Verified native sends alongside model, shared and feature limits reported by ChatGPT.": "同时显示已验证的原生发送数，以及 ChatGPT 报告的模型、共享和功能限额。",
   "{0}K": "{0}千",
@@ -1787,5 +1788,11 @@
   "Let agents on this computer read app status and chats.": "允许本机上的智能体读取应用状态和聊天。",
   "Allow actions": "允许操作",
   "Let those agents also send and cancel messages. Needs the local control API.": "这些智能体还可以发送和取消消息。需要开启本地控制 API。",
-  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "每次更新后，macOS 会询问一次你的密码，以便此版本打开已保存的密钥。请输入 Mac 登录密码并选择“始终允许”。你回应后，聊天和浏览器连接会立即继续。"
+  "macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.": "每次更新后，macOS 会询问一次你的密码，以便此版本打开已保存的密钥。请输入 Mac 登录密码并选择“始终允许”。你回应后，聊天和浏览器连接会立即继续。",
+  "Handoff length": "交接长度",
+  "How much a Compact & Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.": "Compact & Resume 交接摘要保留多少内容。越长，带入新聊天的细节越多；越短，给新聊天留的空间越多。",
+  "Shape what Compact & Resume keeps and how Goal and Loop write their next instruction.": "调整 Compact & Resume 保留的内容，以及目标模式和循环模式生成下一条指令的方式。",
+  "Thorough · 10k–30k tokens": "详细 · 1万–3万 tokens",
+  "Standard · 4k–10k tokens": "标准 · 4千–1万 tokens",
+  "Short · 2k–6k tokens": "简短 · 2千–6千 tokens"
 }
