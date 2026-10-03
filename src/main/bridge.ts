@@ -982,6 +982,25 @@ function protocolCompatible(req: http.IncomingMessage): boolean {
   return extensionProtocol(req) === BRIDGE_PROTOCOL;
 }
 
+/** Why the extension has not yet reloaded into the build this app ships, in the log's words. */
+const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
+  'app-busy': 'a tool call is running in this app',
+  sending: 'a message is being sent',
+  commands: 'a browser command is still pending',
+  'chat-busy': 'a ChatGPT tab is still answering',
+  'already-tried': 'it already tried this update once; reload it in chrome://extensions',
+  'folder-not-ready': 'its folder does not hold the new build yet'
+};
+let extensionUpdateHoldLogged: string | null = null;
+
+/** Logs once per change why an offered extension update is waiting; silence resets it. */
+export function noteExtensionUpdateHold(hold: unknown): void {
+  const reason = typeof hold === 'string' && Object.hasOwn(EXTENSION_UPDATE_HOLDS, hold) ? hold : null;
+  if (reason === extensionUpdateHoldLogged) return;
+  extensionUpdateHoldLogged = reason;
+  if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
+}
+
 function noteExtensionVersion(req: http.IncomingMessage): void {
   const version = req.headers['x-extension-version'];
   const protocol = extensionProtocol(req);
@@ -2130,7 +2149,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     let openConversations: string[] = [];
     let stalledConversations: string[] = [];
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
@@ -2140,6 +2159,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
       }
       stalledConversations = (body.stalledConversations ?? []) as string[];
+      noteExtensionUpdateHold(body.updateHold);
     }
     const openSet = new Set(openConversations);
     const tabPolicy = await browserTabPolicy(openSet);

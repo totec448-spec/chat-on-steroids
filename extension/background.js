@@ -2592,25 +2592,35 @@ async function followApp(data) {
 }
 
 let extensionReloadPending = false;
+/**
+ * Why an offered extension update has not happened yet, reported with the next `/status` so the
+ * app can log it once. Without it, an update that never ran left no trace anywhere: on 2026-10-03
+ * an idle browser kept the old build after the app updated, and nothing said which check held it.
+ */
+let extensionUpdateHold = null;
 async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
-  if (extensionReloadPending || !offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) return;
+  if (extensionReloadPending) return;
+  if (!offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) { extensionUpdateHold = null; return; }
   await workerStampReady;
-  if (!workerStampValue || workerStampValue === offer.build) return;
+  if (!workerStampValue || workerStampValue === offer.build) { extensionUpdateHold = null; return; }
   // A chat with an agent or an active Goal is usually just waiting; only running work counts.
-  if (offer.busy !== false || liveOpenings.size || liveCommands.size) return;
+  if (offer.busy !== false) { extensionUpdateHold = 'app-busy'; return; }
+  if (liveOpenings.size) { extensionUpdateHold = 'sending'; return; }
+  if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
   const attempt = `${workerStampValue}>${offer.build}`;
-  if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) return;
+  if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
   for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
     if (!Number.isInteger(tab.id) || tab.discarded === true) continue;
     const ping = await tabReply(tab.id, { type: 'clf-recorder-ping' }).catch(() => null);
     // A page that cannot answer has nothing running here. One that answers without `busy` runs an
     // older recorder that cannot say, so it is treated as busy.
-    if (ping && ping.busy !== false) return;
+    if (ping && ping.busy !== false) { extensionUpdateHold = 'chat-busy'; return; }
   }
   extensionReloadPending = true;
   try {
     const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
-    if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) return;
+    if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
+    extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
     chrome.runtime.reload();
   } finally {
@@ -2638,7 +2648,8 @@ async function maintainOnce() {
     .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
     .map(conversationForTab)
     .filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations }) });
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations,
+    ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
   if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
