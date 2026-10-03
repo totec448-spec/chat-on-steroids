@@ -3,7 +3,7 @@ import type { ChatModelCatalog } from '../shared/chat-models.js';
 import { chatModelDisplayLabel, resolveChatModel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
 import type { ReasoningEffort } from '../shared/session.js';
-import { $, el, icon, run, toast } from './dom.js';
+import { $, el, icon, run } from './dom.js';
 
 let catalog: ChatModelCatalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
 let generation = 0;
@@ -33,12 +33,6 @@ function currentModelChosen(): boolean {
 const pairs = [['composerModel', 'composerReasoning'], ['workerModel', 'workerReasoning'], ['helperModel', 'helperReasoning']] as const;
 const effortNames: Record<string, string> = { none: "Instant", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
 const composerEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
-const brainJokes = [
-  'Just think faster bro 😂',
-  'Mega brain activated. Still forgot why I opened this tab 😂',
-  'Mega brain, tiny attention span 🧠',
-  'Mega brain loading… coffee required ☕'
-] as const;
 const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
 function observedModel(value: string) {
   return resolveChatModel(catalog.models, value);
@@ -164,6 +158,25 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   options(effort, (models.find(item => item.id === model.value)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) })), nextEffort);
 }
 
+/** The next shortcut action is a projection of the same select Send reads. */
+function paintEffortShortcut(supported: readonly ReasoningEffort[]): void {
+  const spark = document.getElementById('composerSpark') as HTMLButtonElement | null;
+  if (!spark) return;
+  const minimum = supported.length > 1 && $<HTMLSelectElement>('composerReasoning').value === supported[0];
+  const action = minimum ? 'max' : 'min';
+  if (spark.dataset.action !== action) {
+    for (const glyph of spark.querySelectorAll<HTMLElement>('.ico')) {
+      for (const animation of glyph.getAnimations?.() ?? []) animation.cancel();
+    }
+  }
+  spark.dataset.action = action;
+  spark.disabled = supported.length < 2;
+  const label = () => spark.disabled ? t('Thinking effort') : minimum
+    ? t('Use maximum effort: {0}', [effortLabel(supported.at(-1)!)])
+    : t('Use minimum effort: {0}', [effortLabel(supported[0]!)]);
+  ui(spark, 'title', label); ui(spark, 'aria-label', label);
+}
+
 function paintComposerChoices(): void {
   const models = document.getElementById('composerModelChoices');
   const modelOptions = document.getElementById('composerModelOptions');
@@ -175,6 +188,8 @@ function paintComposerChoices(): void {
   const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   if (models.dataset.signature === signature) return;
   models.dataset.signature = signature;
+  const supported = choices.find(choice => choice.id === selected.value)?.efforts ?? [];
+  paintEffortShortcut(supported);
   modelOptions.replaceChildren();
   powers.replaceChildren();
   const title = document.getElementById('composerPowerTitle');
@@ -223,7 +238,6 @@ function paintComposerChoices(): void {
     });
     modelOptions.append(button);
   }
-  const supported = choices.find(choice => choice.id === selected.value)?.efforts ?? [];
   const current = supported.findIndex(power => power === effort.value);
   if (title) ui(title, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
   const selectedLabel = distinctModelChoices(choices).find(choice => choice.id === selected.value)?.label;
@@ -234,6 +248,7 @@ function paintComposerChoices(): void {
     effort.value = power;
     if (title) ui(title, 'textContent', () => effortLabel(power));
     paintComposerLabel();
+    paintEffortShortcut(supported);
     models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   };
   // One effort (an Instant model) is not a choice: no slider, just its name. A stale saved
@@ -444,21 +459,25 @@ export function initChatModels(onPaint?: () => void): void {
   });
   document.getElementById('composerSpark')?.addEventListener('click', event => {
     const spark = event.currentTarget as HTMLElement;
+    const effort = $<HTMLSelectElement>('composerReasoning');
+    const supported = composerModels().find(model => model.id === $<HTMLSelectElement>('composerModel').value)?.efforts ?? [];
+    if (supported.length < 2) return;
+    const minimum = effort.value === supported[0];
+    const outgoing = spark.querySelector<HTMLElement>(minimum ? '.spark-brain' : '.spark-lightning');
+    const incoming = spark.querySelector<HTMLElement>(minimum ? '.spark-lightning' : '.spark-brain');
     const glyphs = [...spark.querySelectorAll<HTMLElement>('.ico')];
-    // Finite, restartable visual feedback only: no selection, send or discovery authority.
     for (const glyph of glyphs) for (const animation of glyph.getAnimations()) animation.cancel();
-    // Keep the English meme wording; reuse the existing bounded toast owner.
-    toast(brainJokes[Math.floor(Math.random() * brainJokes.length)]!, 'brain-joke');
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      glyphs[0]!.animate([{ opacity: 1 }, { opacity: .35 }, { opacity: 1 }], { duration: 250 });
-      return;
-    }
-    glyphs[0]!.animate([{ opacity: 1, transform: 'rotate(0)' }, { opacity: 0, transform: 'rotate(-25deg)', offset: .2 }, { opacity: 0, offset: .8 }, { opacity: 1, transform: 'rotate(0)' }], { duration: 800 });
-    glyphs[1]!.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'scale(1.15) rotate(-12deg)', offset: .25 }, { opacity: 1, transform: 'scale(1) rotate(10deg)', offset: .55 }, { opacity: 0, transform: 'scale(.6)' }], { duration: 800 });
-    for (const [index, glyph] of glyphs.slice(2).entries()) {
-      const angle = (-150 + index * 75) * Math.PI / 180;
-      glyph.animate([{ opacity: 0, transform: 'translate(0, 0) scale(.3)' }, { opacity: 1, offset: .3 }, { opacity: 0, transform: `translate(${Math.cos(angle) * 18}px, ${Math.sin(angle) * 18}px) scale(.7) rotate(45deg)` }], { duration: 650, delay: 100 });
-    }
+    // Change the existing selection synchronously; animation never commits or restores it.
+    effort.value = minimum ? supported.at(-1)! : supported[0]!;
+    effort.dispatchEvent(new window.Event('change', { bubbles: true }));
+    if (!outgoing || !incoming) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    outgoing.animate(reduced ? [{ opacity: 1 }, { opacity: 0 }] : [
+      { opacity: 1, transform: 'scale(1) rotate(0deg)' }, { opacity: 0, transform: 'scale(.65) rotate(-18deg)' }
+    ], { duration: 150, easing: 'ease-out' });
+    incoming.animate(reduced ? [{ opacity: 0 }, { opacity: 1 }] : [
+      { opacity: 0, transform: 'scale(.65) rotate(18deg)' }, { opacity: 1, transform: 'scale(1) rotate(0deg)' }
+    ], { duration: 200, easing: 'cubic-bezier(.16, 1, .3, 1)' });
   });
   modelMenu?.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;

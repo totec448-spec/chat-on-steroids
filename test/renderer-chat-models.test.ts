@@ -44,12 +44,12 @@ it('opens the model list as presentation only and returns focus through both Esc
   expect(composerSendModel()).toEqual(pair); expect(input.value).toBe('Preserve this draft');
   expect(requestChatModels).not.toHaveBeenCalled();
 });
-it.each([false, true])('keeps the lightning joke visual, bounded and restartable (reduced motion=%s)', async reduced => {
+it.each([false, true])('switches the current model between minimum and maximum effort with interruptible feedback (reduced motion=%s)', async reduced => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
   const requestChatModels = vi.fn(), sendInput = vi.fn();
   Object.assign(dom.window, { matchMedia: () => ({ matches: reduced }), api: {
-    getChatModels: async () => ({ ok: true, data: { state: 'ready', observedAt: 2, models: [{ id: 'sol', label: 'GPT-5.6 Sol', efforts: ['high', 'xhigh'] }] } }), requestChatModels, sendInput
+    getChatModels: async () => ({ ok: true, data: { state: 'ready', observedAt: 2, models: [{ id: 'sol', label: 'GPT-5.6 Sol', efforts: ['ultra', 'high', 'none', 'low'] }] } }), requestChatModels, sendInput
   } });
   const animations: Array<{ target: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancelled: boolean }> = [];
   Object.assign(dom.window.HTMLElement.prototype, {
@@ -62,21 +62,58 @@ it.each([false, true])('keeps the lightning joke visual, bounded and restartable
   const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
   const menu = doc.getElementById('modelMenu') as HTMLDetailsElement;
   input.value = 'Do not send this draft'; menu.open = true; spark.focus();
-  const selected = composerSendModel();
-  const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'high' });
+  expect(spark.dataset.action).toBe('min');
+  expect(spark.title).toBe('Use minimum effort: Instant');
   spark.click();
-  expect(doc.querySelector('.toast')?.textContent).toBe('Just think faster bro 😂');
-  random.mockReturnValue(.9);
-  spark.click(); spark.click();
-  random.mockRestore();
-  expect([...doc.querySelectorAll('.toast')].map(node => node.textContent)).toEqual(['Mega brain loading… coffee required ☕']);
-  expect(animations.filter(animation => !animation.cancelled)).toHaveLength(reduced ? 1 : 5);
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'none' });
+  expect(doc.getElementById('composerPowerTitle')!.textContent).toBe('Instant');
+  expect((doc.querySelector('#composerPowerChoices input') as HTMLInputElement).value).toBe('0');
+  expect(spark.dataset.action).toBe('max');
+  expect(spark.getAttribute('aria-label')).toBe('Use maximum effort: Ultra');
+  spark.click();
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'ultra' });
+  expect(doc.getElementById('composerPowerTitle')!.textContent).toBe('Ultra');
+  expect((doc.querySelector('#composerPowerChoices input') as HTMLInputElement).value).toBe('3');
+  expect(spark.dataset.action).toBe('min');
+  spark.click();
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'none' });
+  expect(doc.querySelector('.toast')).toBeNull();
+  expect(animations.filter(animation => !animation.cancelled)).toHaveLength(2);
   expect(animations.some(animation => animation.cancelled)).toBe(true);
-  expect(animations.every(animation => Number(animation.options.duration) <= 800 && !animation.options.iterations)).toBe(true);
+  expect(animations.every(animation => Number(animation.options.duration) <= 200 && !animation.options.iterations)).toBe(true);
   if (reduced) expect(animations.every(animation => animation.frames.every(frame => !frame.transform))).toBe(true);
-  expect(composerSendModel()).toEqual(selected); expect(input.value).toBe('Do not send this draft');
+  expect(input.value).toBe('Do not send this draft');
   expect(menu.open).toBe(true); expect(doc.activeElement).toBe(spark);
   expect(requestChatModels).not.toHaveBeenCalled(); expect(sendInput).not.toHaveBeenCalled();
+});
+it('derives the effort shortcut from slider, session and account changes and disables it without two available efforts', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let receive!: (catalog: any) => void;
+  const models = [{ id: 'sol', label: 'GPT-6', efforts: ['low', 'high', 'ultra'] }, { id: 'instant', label: 'Instant model', efforts: ['none'] }];
+  Object.assign(dom.window, { api: {
+    getChatModels: async () => ({ ok: true, data: { state: 'ready', models } }),
+    onChatModelsChanged: (listener: typeof receive) => { receive = listener; }
+  } });
+  const { initChatModels, applyChatModels, applyComposerSessionModel, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const doc = dom.window.document, spark = doc.getElementById('composerSpark') as HTMLButtonElement;
+  const slider = doc.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
+  slider.value = '0'; slider.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  expect(spark.dataset.action).toBe('max'); expect(spark.title).toBe('Use maximum effort: Ultra');
+  applyComposerSessionModel('chat-b', { model: 'sol', reasoningEffort: 'ultra', observedAt: 3 });
+  expect(spark.dataset.action).toBe('min');
+  applyComposerSessionModel('chat-a', { model: 'sol', reasoningEffort: 'low', observedAt: 4 });
+  expect(spark.dataset.action).toBe('max');
+  applyComposerSessionModel('single', { model: 'instant', reasoningEffort: 'none', observedAt: 5 });
+  expect(spark.disabled).toBe(true);
+  spark.click();
+  expect(composerSendModel()).toEqual({ model: 'instant', reasoningEffort: 'none' });
+  receive({ state: 'unavailable', models: [], error: 'No account choices' });
+  expect(spark.disabled).toBe(true);
+  spark.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  expect(composerSendModel()).toBeNull();
 });
 it('shows pending reasons and failed refresh separately from usable cached choices', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));

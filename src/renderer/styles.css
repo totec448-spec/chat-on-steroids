@@ -2929,8 +2929,6 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   z-index: 10;
 }
 
-.toast.brain-joke { bottom: 16px; max-width: calc(100vw - 32px); pointer-events: none; }
-
 /* ------------------------------------------------------------- the goal loop */
 
 /* The missing-key notice is a whole sentence and the one thing on the row worth reading, so
@@ -3300,13 +3298,15 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .power-header { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; align-items: start; gap: 4px; padding: 4px 4px 12px; }
 .model-menu .power-spark { position: relative; width: 32px; height: 32px; padding: 0; justify-content: center; overflow: visible; }
 .power-spark .ico { position: absolute; --ico: 16px; --glyph: 16px; pointer-events: none; }
-.power-spark :is(.spark-brain, .brain-spark) { opacity: 0; }
+.power-spark .spark-brain { opacity: 0; }
 .power-spark .spark-brain { --ico: 20px; --glyph: 20px; color: var(--accent); }
-.power-spark .brain-spark { --ico: 9px; --glyph: 9px; color: var(--accent); }
+.power-spark[data-action=max] .spark-lightning { opacity: 0; }
+.power-spark[data-action=max] .spark-brain { opacity: 1; }
 .power-caption { display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; }
 .power-caption strong { max-width: 100%; padding-top: 4px; text-align: center; overflow-wrap: anywhere; font-size: calc(16px * var(--text-scale, 1)); font-weight: 600; color: color-mix(in srgb, var(--accent) 80%, var(--ink)); line-height: 1.4; }
 .model-menu #composerModelToggle { width: auto; max-width: 100%; min-height: 28px; justify-content: center; gap: 3px; padding: 2px 6px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); text-align: center; }
 #composerModelToggle span { min-width: 0; overflow-wrap: anywhere; }
+#composerModelToggle[aria-expanded=true] .picker-chevron { transform: rotate(90deg); }
 #composerModelToggle:disabled { cursor: default; }
 #composerModelToggle:disabled .picker-chevron { display: none; }
 #composerPowerChoices:not(:empty) { padding: 0 6px 4px; }
