@@ -1765,6 +1765,7 @@
   "When to continue": "Khi nào tiếp tục",
   "Session Finish only": "Chỉ khi kết thúc phiên",
   "Also after the turn": "Đồng thời sau lượt",
+  "Search models": "Tìm mô hình",
   "Trust only selected chats": "Chỉ tin cậy các cuộc trò chuyện đã chọn",
   "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "Mặc định từ chối công cụ cục bộ và chỉ cho phép các cuộc trò chuyện bạn chủ động Tin cậy trong Phiên. Các lệnh gọi không xác định được cuộc trò chuyện vẫn bị chặn khi tùy chọn này bật.",
   "Untrust this chat: strict mode refuses its tool calls": "Bỏ tin cậy cuộc trò chuyện này: chế độ nghiêm ngặt sẽ từ chối các lệnh gọi công cụ của nó",

@@ -82,8 +82,9 @@ describe('transcript pagination across recovered turns', () => {
       { seq: 3, time: at + 30, kind: 'tool_call', turnId: 'first' },
       // Native publication preceded the tool, but its canonical revision arrived later.
       { ...nativeMessage(7, `assistant:${working}:${exchange}:${at + 40}`), origin: 4, time: at + 45 },
-      { seq: 5, time: at + 50, kind: 'tool_call', turnId: 'first' },
-      { seq: 6, time: at + 60, kind: 'tool_call', turnId: 'first' }
+      // Calls issued after the prose reach the app through the tunnel well after it opened.
+      { seq: 5, time: at + 2_050, kind: 'tool_call', turnId: 'first' },
+      { seq: 6, time: at + 2_060, kind: 'tool_call', turnId: 'first' }
     ];
     const boundaries = { first: { origin: 1, time: at + 10 } };
     const before = structuredClone(source);

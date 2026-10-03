@@ -1765,6 +1765,7 @@
   "When to continue": "続行するタイミング",
   "Session Finish only": "セッション終了通知時のみ",
   "Also after the turn": "ターン後にも送信",
+  "Search models": "モデルを検索",
   "Trust only selected chats": "選択したチャットのみ信頼",
   "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "ローカルツールを既定で拒否し、セッションで明示的に信頼したチャットだけを許可します。有効な間、帰属不明の呼び出しはブロックされたままです。",
   "Untrust this chat: strict mode refuses its tool calls": "このチャットの信頼を解除: 厳格モードではツール呼び出しを拒否します",

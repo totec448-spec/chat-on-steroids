@@ -1765,6 +1765,7 @@
   "When to continue": "何時繼續",
   "Session Finish only": "僅在回合結束通知時",
   "Also after the turn": "也可在回合後傳送",
+  "Search models": "搜尋模型",
   "Trust only selected chats": "僅信任選取的聊天",
   "Default-deny local tools to chats you explicitly Trust in Sessions. Unattributed calls stay blocked while this is on.": "預設拒絕本機工具，只允許你在「工作階段」中明確設為信任的聊天。啟用時，無法歸屬到聊天的呼叫仍會被封鎖。",
   "Untrust this chat: strict mode refuses its tool calls": "取消信任此聊天：嚴格模式會拒絕其工具呼叫",
