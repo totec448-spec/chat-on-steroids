@@ -1231,15 +1231,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('sessions:trust', async (payload) => {
-    const { id, trusted } = z
-      .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), trusted: z.boolean() })
+    const { id, expectedConversationId, trusted } = z
+      .object({
+        id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+        expectedConversationId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+        trusted: z.boolean()
+      })
       .parse(payload);
     const summary = await getSession(id);
     const conversationId = summary?.conversationId;
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
     }
-    setChatTrusted(conversationId, trusted);
+    if (conversationId !== expectedConversationId) {
+      throw new Error('This session moved to another ChatGPT conversation; refresh Sessions before changing trust');
+    }
+    await setChatTrusted(conversationId, trusted);
     logInfo(trusted
       ? `conversation ${conversationId} trusted for strict chat allowlisting`
       : `conversation ${conversationId} removed from strict chat allowlisting`);
@@ -1259,7 +1266,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const summary = await getSession(id);
     if (summary?.conversationId) {
       setChatBlocked(summary.conversationId, false);
-      setChatTrusted(summary.conversationId, false);
+      await setChatTrusted(summary.conversationId, false);
     }
     await deleteSession(id);
     logInfo(

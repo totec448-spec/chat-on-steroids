@@ -541,7 +541,7 @@ it('keeps strict chat allowlisting separate from Block and exposes explicit Trus
   await vi.waitFor(() => expect(doc.querySelector('.sess-trust')).not.toBeNull());
 
   (doc.querySelector('.sess-trust') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, true));
+  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, session.conversationId, true));
   expect(setSessionBlocked).not.toHaveBeenCalled();
 
   (doc.querySelector('.sess-block') as HTMLButtonElement).click();

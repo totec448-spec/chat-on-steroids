@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
+import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
   isChatTrusted,
   resetTrustedChatsForTests,
@@ -27,23 +27,30 @@ afterAll(async () => {
 });
 
 describe('trusted chats', () => {
-  it('trusts and untrusts only the exact conversation', () => {
-    setChatTrusted(TRUSTED, true);
+  it('trusts and untrusts only the exact conversation', async () => {
+    await setChatTrusted(TRUSTED, true);
     expect(isChatTrusted(TRUSTED)).toBe(true);
     expect(isChatTrusted(OTHER)).toBe(false);
     expect(isChatTrusted(null)).toBe(false);
-    setChatTrusted(TRUSTED, false);
+    await setChatTrusted(TRUSTED, false);
     expect(trustedChatIds()).toEqual([]);
   });
 
-  it('survives restart without inventing trust for invalid durable entries', async () => {
-    setChatTrusted(TRUSTED, true);
-    await flushDurable();
+  it('is durable before trust or revoke resolves, without a later flush', async () => {
+    await setChatTrusted(TRUSTED, true);
     resetTrustedChatsForTests();
     await restoreTrustedChats();
     expect(trustedChatIds()).toEqual([TRUSTED]);
 
+    await setChatTrusted(TRUSTED, false);
     resetTrustedChatsForTests();
+    await restoreTrustedChats();
+    expect(trustedChatIds()).toEqual([]);
+  });
+
+  it('does not invent trust for invalid durable entries', async () => {
+    resetTrustedChatsForTests();
+
     await writeDurableNow('trusted-chats', { version: 1, entries: [OTHER, 'bad ! id'] });
     await restoreTrustedChats();
     expect(trustedChatIds()).toEqual([OTHER]);
@@ -55,12 +62,12 @@ describe('trusted chats', () => {
     expect(trustedChatIds()).toEqual([]);
   });
 
-  it('is bounded without silently evicting older trusted chats', () => {
+  it('is bounded without silently evicting older trusted chats', async () => {
     for (let index = 0; index < 200; index++) {
-      setChatTrusted(`conv-trusted-${String(index).padStart(4, '0')}`, true);
+      await setChatTrusted(`conv-trusted-${String(index).padStart(4, '0')}`, true);
     }
     expect(trustedChatIds()).toHaveLength(200);
-    expect(() => setChatTrusted(TRUSTED, true)).toThrow(/too many trusted chats/i);
+    await expect(setChatTrusted(TRUSTED, true)).rejects.toThrow(/too many trusted chats/i);
     expect(isChatTrusted('conv-trusted-0000')).toBe(true);
   });
 });

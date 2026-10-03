@@ -520,7 +520,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       trust.append(icon(trusted ? 'i-lock' : 'i-check'));
       trust.addEventListener('click', (event) => {
         event.stopPropagation();
-        void toggleSessionTrust(summary.id, !trusted);
+        void toggleSessionTrust(summary.id, summary.conversationId!, !trusted);
       });
       actions.push(trust);
     }
@@ -562,8 +562,8 @@ async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
   paintSessions();
 }
 
-async function toggleSessionTrust(id: string, trusted: boolean): Promise<void> {
-  const next = await run(api.setSessionTrusted(id, trusted));
+async function toggleSessionTrust(id: string, expectedConversationId: string, trusted: boolean): Promise<void> {
+  const next = await run(api.setSessionTrusted(id, expectedConversationId, trusted));
   if (next === null) return;
   trustedChats = new Set(next);
   paintSessions();

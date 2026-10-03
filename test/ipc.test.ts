@@ -1431,20 +1431,50 @@ describe('session IPC contracts', () => {
     const conversationId = 'dddddddd-1111-2222-3333-444444444444';
     const session = await createSession({ title: 'trusted chat', conversationId });
 
-    const trusted = (await handlers.get('sessions:trust')!(null, { id: session.id, trusted: true })) as any;
+    const trusted = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    })) as any;
     expect(trusted.ok, trusted.error).toBe(true);
     expect(trusted.data).toEqual([conversationId]);
     expect(isChatTrusted(conversationId)).toBe(true);
 
-    const untrusted = (await handlers.get('sessions:trust')!(null, { id: session.id, trusted: false })) as any;
+    const untrusted = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: false
+    })) as any;
     expect(untrusted.ok, untrusted.error).toBe(true);
     expect(untrusted.data).toEqual([]);
     expect(isChatTrusted(conversationId)).toBe(false);
 
     const unattributed = await createSession({ title: 'no conversation to trust', conversationId: null });
-    const refused = (await handlers.get('sessions:trust')!(null, { id: unattributed.id, trusted: true })) as any;
+    const refused = (await handlers.get('sessions:trust')!(null, {
+      id: unattributed.id, expectedConversationId: conversationId, trusted: true
+    })) as any;
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    resetTrustedChatsForTests();
+  });
+
+  it('refuses stale trust intent after Compact & Resume rebinds the same session to a new chat', async () => {
+    const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+    resetTrustedChatsForTests();
+    const chatA = '11111111-aaaa-bbbb-cccc-111111111111';
+    const chatB = '22222222-aaaa-bbbb-cccc-222222222222';
+    const session = await createSession({ title: 'rebound trust', conversationId: chatA });
+    expect(await rebindSession(session.id, chatA, chatB)).toBe(true);
+
+    const stale = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: chatA, trusted: true
+    })) as any;
+    expect(stale.ok).toBe(false);
+    expect(stale.error).toMatch(/moved to another ChatGPT conversation/i);
+    expect(isChatTrusted(chatA)).toBe(false);
+    expect(isChatTrusted(chatB)).toBe(false);
+
+    const current = (await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: chatB, trusted: true
+    })) as any;
+    expect(current.ok, current.error).toBe(true);
+    expect(isChatTrusted(chatB)).toBe(true);
     resetTrustedChatsForTests();
   });
 
@@ -1467,7 +1497,9 @@ describe('session IPC contracts', () => {
     resetTrustedChatsForTests();
     const conversationId = 'eeeeeeee-1111-2222-3333-444444444444';
     const session = await createSession({ title: 'trusted then deleted', conversationId });
-    await handlers.get('sessions:trust')!(null, { id: session.id, trusted: true });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
     expect(isChatTrusted(conversationId)).toBe(true);
 
     const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
@@ -1495,7 +1527,9 @@ describe('session IPC contracts', () => {
     const session = await createSession({ title: 'listed while trusted', conversationId });
 
     expect((await sessionList()).data.trusted).toEqual([]);
-    await handlers.get('sessions:trust')!(null, { id: session.id, trusted: true });
+    await handlers.get('sessions:trust')!(null, {
+      id: session.id, expectedConversationId: conversationId, trusted: true
+    });
     expect((await sessionList()).data.trusted).toEqual([conversationId]);
     resetTrustedChatsForTests();
   });

@@ -596,14 +596,16 @@ A positively known blocked, retired, ended or superseded caller is refused regar
 preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
 activity to a successor chat.
 
-\`multiAgent.strictChatAllowlist\` is an independent, opt-in default-deny boundary. Its allow set is
-\`state/trusted-chats.json\`, keyed only by exact ChatGPT conversation id and restored before MCP
+`multiAgent.strictChatAllowlist` is an independent, opt-in default-deny boundary. Its allow set is
+`state/trusted-chats.json`, keyed only by exact ChatGPT conversation id and restored before MCP
 traffic. Missing/corrupt trust state therefore means no trusted chats. Strict mode waits through the
 same request-id evidence window used by blocked-chat enforcement, refuses unknown/unattributed
-callers even if \`allowUnattributedCalls\` is true, and runs no handler or worker-liveness side effect
+callers even if `allowUnattributedCalls` is true, and runs no handler or worker-liveness side effect
 for a denied caller. Block always outranks Trust. Unblocking does not trust, deleting the session row
 removes both policies for that conversation, and Compact & Resume/new-chat bindings never inherit
-the predecessor conversation's trust.
+the predecessor conversation's trust. Trust/Untrust IPC carries the row's expected conversation id
+and refuses a stale A→B rebind; each trust mutation is serialized and published only after
+`writeDurableNow()` commits its exact snapshot, so an acknowledged revoke cannot be undone by crash.
 
 ### Three lifetimes and five outcomes
 
