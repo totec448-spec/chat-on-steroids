@@ -318,7 +318,7 @@ export interface MultiAgentSettings {
   maxWorkers: number;
   /** Permit self-contained calls when browser evidence cannot identify their conversation. */
   allowUnattributedCalls: boolean;
-  /** Default-deny local tools to conversations explicitly trusted in Sessions. */
+  /** Default-deny local tools to exact trusted conversations. */
   strictChatAllowlist?: boolean;
   /**
    * Reopen/reload chats that are not Goal/Loop driven — workers, primes, plain chats that have

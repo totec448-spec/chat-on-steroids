@@ -1274,7 +1274,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw new Error('This session has no valid ChatGPT conversation');
       }
       if (currentConversationId !== expectedConversationId) {
-        throw new Error('This session moved to another ChatGPT conversation; refresh Sessions before changing trust');
+        throw new Error('This session moved to another ChatGPT conversation; refresh the chat list before changing trust');
       }
       const workerOwner = workerPrimeOwner(currentConversationId);
       if (trusted && (workerOwner.owned || summary.origin?.kind === 'worker')) {
@@ -1456,6 +1456,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const source = fromSessionId ? await getSession(fromSessionId) : null;
       if (source?.conversationId === conversationId || source?.chatIds.includes(conversationId)) return;
       await noteChatOrigin(conversationId, { kind: 'helper', fromSessionId, agentId: null, task: '' });
+    },
+    trustOpening: async (sessionId, conversationId) => {
+      // Composer openings use the same deletion/rebind fence as an explicit Trust click. The
+      // second tombstone check and synchronous queue admission ensure Delete either wins before
+      // this grant or durably revokes it afterwards; no orphan permission can survive the row.
+      if (deletingSessionIds.has(sessionId)) return false;
+      return withSessionMutationFence(sessionId, async (summary) => {
+        if (deletingSessionIds.has(sessionId) || summary.conversationId !== conversationId || summary.origin?.kind === 'worker') return false;
+        await setChatsTrusted([conversationId], true);
+        return true;
+      });
     },
     changed: () => push('session:changed'),
     recordDelivered: (entry, anchorCommitted) => getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : Promise.resolve(true),

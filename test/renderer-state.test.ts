@@ -626,6 +626,11 @@ it('saves strict chat allowlisting and disables the unattributed switch while st
   const doc = mounted.window.document;
   const strict = doc.getElementById('strictChatAllowlist') as HTMLInputElement;
   const unattributed = doc.getElementById('allowUnattributedCalls') as HTMLInputElement;
+  const copy = strict.closest('.setting')!.textContent ?? '';
+  expect(copy).toContain("Only chats you trust can use this computer's tools.");
+  expect(copy).toContain('Existing chats start untrusted');
+  expect(copy).toMatch(/sidebar.*Trust/i);
+  expect(copy).not.toContain('Sessions');
 
   strict.checked = true;
   strict.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));

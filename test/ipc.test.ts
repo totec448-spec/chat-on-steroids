@@ -112,6 +112,45 @@ it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
+  const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+  resetTrustedChatsForTests();
+  const conversationId = 'strict-existing-chat-stays-untrusted';
+  await createSession({ title: 'Existing chat before strict mode', conversationId });
+  const base = getConfig();
+  try {
+    expect(await save({ ...base, multiAgent: { ...base.multiAgent, strictChatAllowlist: true } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().multiAgent.strictChatAllowlist).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(false);
+  } finally {
+    resetTrustedChatsForTests();
+  }
+});
+
+it('trusts a strict CoS opening through the configured session-policy fence only after exact bind', async () => {
+  const outbox = await import('../src/main/session/input.js');
+  const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
+  resetTrustedChatsForTests();
+  const original = await outbox.listInputs();
+  await writeDurableNow('session-input', []); outbox.resetInputForTests();
+  const base = getConfig();
+  const id = 'f0f00015-1111-4111-8111-111111111111';
+  const conversationId = 'f0f00016-1111-4111-8111-111111111111';
+  try {
+    expect(await save({ ...base, multiAgent: { ...base.multiAgent, strictChatAllowlist: true } }, base)).toMatchObject({ ok: true });
+    const row = await outbox.enqueueInput({ id, sessionId: null, text: 'Strict composer opening', mode: 'auto',
+      dueAt: Date.now(), model: null, reasoningEffort: null });
+    expect(await outbox.claimBrowserInput(row.id, 'strict-ipc-opening', null, true)).not.toBeNull();
+    expect(await outbox.authorizeBrowserInput(row.id, 'strict-ipc-opening', null)).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(false);
+    expect(await outbox.bindBrowserInputProject(row.id, 'strict-ipc-opening', conversationId)).toBe(true);
+    expect(isChatTrusted(conversationId)).toBe(true);
+  } finally {
+    await writeDurableNow('session-input', original); outbox.resetInputForTests();
+    resetTrustedChatsForTests();
+  }
+});
+
 it('saves port choices, merges stale snapshots and serializes concurrent port edits', async () => {
   const ports = await import('../src/main/bridge-ports.js');
   const bridge = await import('../src/main/bridge.js');

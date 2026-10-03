@@ -3991,6 +3991,10 @@ describe('blocked chats', () => {
     const untrusted = await readAs(owned(BYSTANDER));
     expect(failed(untrusted)).toBe(true);
     expect(textOf(untrusted)).toContain('CHAT_NOT_TRUSTED');
+    expect(textOf(untrusted)).toMatch(/chat list/i);
+    expect(textOf(untrusted)).toMatch(/sidebar/i);
+    expect(textOf(untrusted)).toContain('Trust');
+    expect(textOf(untrusted)).not.toContain('Sessions');
     expect(textOf(untrusted)).not.toContain('/workspace/notes.txt');
 
     const unattributed = await readAs(null);
@@ -4040,6 +4044,31 @@ describe('blocked chats', () => {
     const parentBlocked = await readAs(owned(worker));
     expect(failed(parentBlocked)).toBe(true);
     expect(textOf(parentBlocked)).toContain('CHAT_NOT_TRUSTED');
+  });
+
+  it('tells a refused worker to use the owning prime row in the sidebar', async () => {
+    const prime = 'strict-worker-notice-prime';
+    const worker = 'strict-worker-notice-child';
+    const primeSession = await createSession({ title: 'strict worker notice prime', conversationId: prime });
+    const workerSession = await createSession({
+      title: 'strict worker notice child', conversationId: worker,
+      origin: { kind: 'worker', fromSessionId: primeSession.id, agentId: 'worker-1', task: 'read the project' }
+    });
+    getConfig().multiAgent.strictChatAllowlist = true;
+    const run = spawn({ caller: { conversationId: prime }, workers: [{ task: 'read the project' }] });
+    expect(bindConversation('worker-1', worker, run.runId)).toBe(true);
+
+    const refused = await readAs(ownedSession(worker, workerSession.id));
+    expect(failed(refused)).toBe(true);
+    const notices = (await readRecentEvents(workerSession.id, 20))
+      .filter(event => event.kind === 'progress' && /owning prime/i.test(event.message.text));
+    expect(notices).toHaveLength(1);
+    const copy = notices[0]?.kind === 'progress' ? notices[0].message.text : '';
+    expect(copy).toMatch(/owning prime row/i);
+    expect(copy).toMatch(/sidebar/i);
+    expect(copy).toContain('Trust');
+    expect(copy).toContain('Release');
+    expect(copy).not.toContain('Sessions');
   });
 
   it('keeps durable worker identity fail-closed after broker provenance expires', async () => {
@@ -4123,7 +4152,11 @@ describe('blocked chats', () => {
     const notes = (await readRecentEvents(session.id, 20))
       .filter(event => event.kind === 'progress' && /untrusted chat was refused/.test(event.message.text));
     expect(notes).toHaveLength(1);
-    expect(notes[0]?.kind === 'progress' && notes[0].message.text).toContain('Trust this chat in Sessions');
+    const copy = notes[0]?.kind === 'progress' ? notes[0].message.text : '';
+    expect(copy).toMatch(/chat list/i);
+    expect(copy).toMatch(/hover.*sidebar/i);
+    expect(copy).toContain('Trust (✓)');
+    expect(copy).not.toContain('Sessions');
 
     await setChatTrusted(conversationId, true);
     expect(failed(await readAs(ownedSession(conversationId, session.id)))).toBe(false);

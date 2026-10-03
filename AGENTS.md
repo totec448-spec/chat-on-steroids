@@ -196,7 +196,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
-| Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Ordinary chats require explicit Trust; broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
+| Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
@@ -605,10 +605,18 @@ unknown/unattributed callers even if `allowUnattributedCalls` is true, and runs 
 worker-liveness side effect for a denied caller. Block always outranks Trust and Unblocking does not
 trust.
 
+A fresh ordinary chat explicitly started from the CoS composer is the one automatic explicit Trust
+entry. The durable outbox row must still be `opening`, its exact browser owner must bind that row to
+the provider conversation, and the reserved session's initial null→conversation rebind must commit
+before `trusted-chats` is written. Strict mode must already be on at that authoritative bind. Direct
+browser chats and openings bound while strict mode is off stay out of the Trust registry. Cancelled,
+retried and recovered openings keep their existing exact outbox/session identity rules; this path
+never infers intent from a URL, title, request time or nearby session.
+
 Effective trust may additionally be derived from two exact app-owned provenance links; neither
 copies a Trust bit into the child. A broker-owned worker follows the owning prime recorded by its
 published active/dormant family, including sleeping and terminal worker history. Direct Trust of a
-worker is refused by Sessions IPC/UI, ambiguous or provisional ownership fails closed, and every call
+worker is refused by the chat-list IPC/UI, ambiguous or provisional ownership fails closed, and every call
 re-resolves the parent so Untrust, Block or a committed prime transfer takes effect immediately. A
 worker session keeps its durable `origin.kind=worker` classification even after bounded broker and
 retired-worker history expires; without a unique broker owner that identity stays fail-closed and a
@@ -616,7 +624,7 @@ stale/direct Trust bit is never treated as ordinary-chat authority. A
 Compact & Resume successor stays untrusted before commit, then may inherit effective trust from the
 durable session `chatIds` lineage only after the continuation commit atomically rebinds the session
 and records `lastCommittedResumeHandoffId`. Ordinary new/browser chats and anything without either
-exact provenance link do not inherit. Sessions projects that inherited state onto the current row;
+exact provenance link do not inherit. The chat list projects that inherited state onto the current row;
 Untrust there atomically removes every explicit Trust entry in its committed lineage, while Trust on
 an otherwise-untrusted successor deliberately makes only that current conversation explicit. Session
 deletion performs the same atomic lineage revoke before detach/delete so a hidden predecessor cannot
