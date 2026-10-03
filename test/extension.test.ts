@@ -1070,7 +1070,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(trace.indexOf('scan')).toBeGreaterThan(trace.indexOf('handout'));
       expect(trace.indexOf('claim')).toBeGreaterThan(trace.indexOf('scan'));
       if (mode === 'unresolved') {
-        if (reason === 'compaction') expect(worker.tabsReload).not.toHaveBeenCalled();
+        // A no-tab repair whose chat has a live tab again keeps that tab (#864).
+        if (reason === 'compaction' || reason === 'no-tab') expect(worker.tabsReload).not.toHaveBeenCalled();
         else expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
         expect(trace).toContain('repaired');
       } else {
@@ -1080,6 +1081,39 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(worker.tabsCreate).not.toHaveBeenCalled();
     }
   );
+
+  it.each([
+    { page: 'still loading', status: 'loading', answers: false, reload: false },
+    { page: 'answering', status: 'complete', answers: true, reload: false },
+    { page: 'silent', status: 'complete', answers: false, reload: true }
+  ])('keeps a chat tab that is $page when a no-tab repair finds it (#864)', async ({ status, answers, reload }) => {
+    // The wake that queued this repair has usually opened the tab itself by now; a reload would
+    // cut that page off in the middle of the worker's send.
+    let handed = false;
+    const actions: string[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repaired')) actions.push(url.searchParams.get('repairAction')!);
+        if (handed) return response(200, { repairs: [] });
+        handed = true;
+        return response(200, { repairs: [{ conversationId: CHAT, token: 'wake-tab', reason: 'no-tab' }] });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}`, status }),
+      tabsSendMessage: async (_id, message) => message.type === 'clf-page-status' && answers ? { ok: true, streaming: false } : undefined,
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }] });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm();
+    if (reload) expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
+    else expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(actions).toEqual([reload ? 'reloaded' : 'present']);
+  });
 
   it('tells the app why the page held a repair, and neither claims nor reloads it', async () => {
     let handed = false;
