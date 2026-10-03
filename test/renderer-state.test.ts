@@ -299,6 +299,8 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   expect(calls[1].readOnly).toBe(false);
   // The toggle tells assistive technology which state is saved, not just its colour.
   expect(w.document.getElementById('readOnlyBtn')?.getAttribute('aria-pressed')).toBe('true');
+  // The lock reads like a state; its title says what a click changes.
+  expect(w.document.getElementById('readOnlyBtn')?.title).toBe('Read-only is on: ChatGPT can only look. Click to allow changes again.');
   expect(calls[1].ui.autoConnect).toBe(false);
 
   current = appState({ ...baseConfig, readOnly: false });
@@ -306,6 +308,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   await vi.waitFor(() => expect(calls).toHaveLength(3));
   expect(calls[2].readOnly).toBe(false);
   expect(w.document.getElementById('readOnlyBtn')?.getAttribute('aria-pressed')).toBe('false');
+  expect(w.document.getElementById('readOnlyBtn')?.title).toMatch(/^Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files/);
   expect(calls[2].ui.autoConnect).toBe(true);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true } });

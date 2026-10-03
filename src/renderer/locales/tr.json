@@ -1775,5 +1775,7 @@
   "Trust only selected chats": "Yalnızca seçili sohbetlere güven",
   "Untrust this chat: strict mode refuses its tool calls": "Bu sohbetin güvenini kaldır: katı mod araç çağrılarını reddeder",
   "Trust this chat: strict mode lets its tool calls run": "Bu sohbete güven: katı mod araç çağrılarına izin verir",
-  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "Yerel araçları varsayılan olarak reddeder ve yalnızca Oturumlar’da açıkça güvendiğiniz sohbetlere izin verir. Worker’lar ve devam ettirilen sohbetler güvenilen üst sohbeti izler; ilişkilendirilemeyen çağrılar engelli kalır."
+  "Default-deny local tools to chats you explicitly Trust in Sessions. Workers and resumed chats follow their trusted parent; unattributed calls stay blocked.": "Yerel araçları varsayılan olarak reddeder ve yalnızca Oturumlar’da açıkça güvendiğiniz sohbetlere izin verir. Worker’lar ve devam ettirilen sohbetler güvenilen üst sohbeti izler; ilişkilendirilemeyen çağrılar engelli kalır.",
+  "Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.": "Salt okunura geç: ChatGPT dosyaları ve ekranı görmeye devam eder ama dosya oluşturamaz, düzenleyemez, taşıyamaz veya silemez, program çalıştıramaz ve bu bilgisayarı kontrol edemez.",
+  "Read-only is on: ChatGPT can only look. Click to allow changes again.": "Salt okunur açık: ChatGPT yalnızca görebilir. Değişikliklere yeniden izin vermek için tıklayın."
 }

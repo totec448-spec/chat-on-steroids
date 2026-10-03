@@ -1188,6 +1188,10 @@ function apply(next: AppState): void {
   // ---- permissions
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
   $('readOnlyBtn').setAttribute('aria-pressed', String(config.readOnly));
+  // The lock reads like a state; the title says which way a click goes and what it changes.
+  ui($('readOnlyBtn'), 'title', () => config.readOnly
+    ? t('Read-only is on: ChatGPT can only look. Click to allow changes again.')
+    : t('Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.'));
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
     const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control';
