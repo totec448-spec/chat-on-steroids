@@ -99,6 +99,8 @@ losing the project, history, workers or queued instructions when a chat grows to
   checks remain mandatory; selected or recently accessed Chrome tabs veto idle closure, and pins veto closure and
   New Chat reuse. Terminal, blocked, cancelled, superseded and duplicate cleanup retains its
   separate authority. Unknown/personal ownership, live work and pending delivery are not idle.
+  A Compact & Resume destination (origin `resume`) is the user's own chat moved forward, never an
+  app-owned page: it is excluded from `managedConversations` (#1012).
 - Unknown identity fails closed where a wrong choice could mutate, attribute or message the
   wrong owner. Presentation can degrade visibly; execution must not guess.
 - Every async result proves its original owner and epoch still apply. A → B → A navigation
