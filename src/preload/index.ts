@@ -135,6 +135,13 @@ const api = {
     ipcRenderer.on('pet-overlay:stateChanged', wrapped);
     return () => ipcRenderer.removeListener('pet-overlay:stateChanged', wrapped);
   },
+  /** True right before a Keychain read that may wait on the macOS password prompt; false once it settled. */
+  onKeychainWaiting: (listener: (waiting: boolean) => void): (() => void) => {
+    const wrapped = (_event: unknown, waiting: boolean): void => listener(waiting === true);
+    ipcRenderer.on('keychain:waiting', wrapped);
+    return () => ipcRenderer.removeListener('keychain:waiting', wrapped);
+  },
+  keychainNoticeReady: () => call<void>('keychain:noticeReady'),
   onPetOverlayOpenOwner: (listener: (screen: 'chat' | 'pets') => void): (() => void) => {
     const wrapped = (_event: unknown, screen: 'chat' | 'pets'): void => listener(screen);
     ipcRenderer.on('pet-overlay:openOwner', wrapped);

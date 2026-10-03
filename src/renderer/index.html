@@ -51,6 +51,7 @@
         <button class="is-sel" data-tab="home" type="button">
           <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
+        <button data-tab="general" type="button"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>General</button>
         <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
           <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
@@ -154,6 +155,12 @@
            state.update plus the extension version the bridge already reports; see
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
+      <!-- A new macOS build asks once for the Keychain password; everything that needs saved keys
+           waits for the answer. See src/renderer/keychain-notice.ts. -->
+      <div class="notice" id="keychainNotice" role="status" hidden>
+        <i class="ico ph ph-lock-key" aria-hidden="true"></i>
+        <span>macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.</span>
+      </div>
       <div class="notice" id="updateNotice" hidden>
         <i class="ico ph ph-lightning" aria-hidden="true"></i>
         <span id="updateText"></span>
@@ -169,6 +176,40 @@
       </div>
 
       <main>
+
+        <!-- ========================================================= General
+             App-wide behavior that is not part of connecting. It used to sit in Setup › Advanced,
+             where nobody looking for "how chats behave" would open it. Shares the Appearance
+             page's layout classes. -->
+        <section class="panel appearance-panel general-panel scroll" data-panel="general" aria-labelledby="generalTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="generalTitle">General</h1><p>How the app behaves day to day. Changes apply immediately.</p></div>
+            </header>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Chats</h2><p>What you see while ChatGPT answers, and what your messages carry.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section" id="privacyScreenshotsSetting">
+              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Privacy screenshots</b><em>Screenshots show the active window by default instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
+              </div>
+            </section>
+          </div>
+        </section>
 
         <section class="panel appearance-panel scroll" data-panel="appearance" id="appearancePanel" aria-labelledby="appearanceTitle">
           <div class="appearance-content settings-page-content">
@@ -746,13 +787,6 @@
                 <label class="inline" id="startAtLoginRow" hidden><input type="checkbox" id="startAtLogin" /> Start Chat On Steroids when I sign in</label>
                 <label class="inline"><input type="checkbox" id="autoConnect" /> Connect automatically at startup</label>
                 <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
-                <label class="inline" id="privacyScreenshotsSetting"><input type="checkbox" id="privacyScreenshots" /> Privacy screenshots: default to the active window instead of the whole monitor</label>
-                <label class="inline"><input type="checkbox" id="developerMode" /> Developer mode: show turn boundaries and recovery events</label>
-                <label class="inline"><input type="checkbox" id="playfulStatus" /> Playful status words: show rotating gym jokes instead of “Working”</label>
-                <label class="inline"><input type="checkbox" id="followOutput" /> Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</label>
-                <label class="inline"><input type="checkbox" id="mentionCore" /> Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.</label>
-                <label class="inline"><input type="checkbox" id="controlApiEnabled" /> Local control API: let agents on this computer read app status and chats</label>
-                <label class="inline"><input type="checkbox" id="controlApiAllowActions" disabled /> Allow actions: let local agents send and cancel messages</label>
               </div>
             </details>
             <div id="toolApprovalSetup"></div>
@@ -847,6 +881,14 @@
                     <span class="unit">max</span>
                   </div>
 
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Workers across all chats</b>
+                      <em>The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.</em>
+                    </span>
+                    <input id="globalMaWorkers" class="num" type="number" min="0" max="64" step="1" />
+                  </div>
+
                   <label class="setting">
                     <span class="setting-text">
                       <b>Allow unattributed calls</b>
@@ -918,6 +960,17 @@
                     <input id="autoCompactTokens" class="num" type="number" min="10000" max="4000000" step="10000" />
                     <span class="unit">tokens</span>
                     <span class="sw"><input type="checkbox" id="autoCompact" /><i></i></span>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Handoff length</b>
+                      <em>How much a Compact &amp; Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.</em>
+                    </span>
+                    <select id="handoffLength">
+                      <option value="thorough">Thorough · 10k–30k tokens</option>
+                      <option value="standard">Standard · 4k–10k tokens</option>
+                      <option value="short">Short · 2k–6k tokens</option>
+                    </select>
                   </div>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">API provider</h2><p>Set the provider, model, and credentials for API-based decisions.</p></div></header>
@@ -994,7 +1047,7 @@
                   </div>
 
                   </div>
-                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape how Goal and Loop write their next instruction.</p></div></header>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape what Compact &amp; Resume keeps and how Goal and Loop write their next instruction.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">

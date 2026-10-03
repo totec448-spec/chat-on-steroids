@@ -16070,7 +16070,8 @@ describe('the fresh chat the app opened', () => {
       expect.objectContaining({
         id: 'cmd-enter-noop',
         status: 'failed',
-        error: 'ChatGPT did not accept the bootstrap send'
+        // #882: the failure names the step Send reached, here a Send button that never enabled.
+        error: 'ChatGPT did not accept the bootstrap send (send-not-ready)'
       })
     ]);
     expect(live.sent.some((message) => message.type === 'ack' && message.status === 'sent')).toBe(false);

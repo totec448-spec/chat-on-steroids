@@ -1055,7 +1055,7 @@ export interface CallerSwarmStatus {
   state: SwarmState;
   /** Null while this owner's history is parked. */
   runId: string | null;
-  /** Capacity available inside this caller's own worker family. */
+  /** Capacity available inside this caller's own worker family, before any optional global cap. */
   freeWorkerSlots: number;
 }
 
@@ -1274,6 +1274,31 @@ export function freeWorkerSlots(runId?: string): number {
   const run = scopedRun(runId);
   if (!run) return runId === undefined && runs.size === 0 ? getConfig().multiAgent.maxWorkers : 0;
   return Math.max(0, getConfig().multiAgent.maxWorkers - workingWorkers(run).length);
+}
+
+/**
+ * Slot-holding workers across every active prime family, including a staged spawn that has
+ * reserved topology but has not crossed its durable publication barrier yet.
+ *
+ * Public caller status deliberately excludes those staged rows and stays family-scoped. Global
+ * admission cannot: two independent primes may stage concurrently, so ignoring an unpublished
+ * reservation here would let both calls accept the same final global slot.
+ */
+function globalOccupiedWorkerSlots(): number {
+  let occupied = 0;
+  for (const run of runs.values()) {
+    for (const agent of run.agents.values()) {
+      if (agent.info.role === 'worker' && occupiesSlot(agent.info.state)) occupied += 1;
+    }
+  }
+  return occupied;
+}
+
+/** Remaining broker-wide worker admissions, or Infinity while the opt-in cap is disabled. */
+function globalFreeWorkerSlots(): number {
+  const limit = getConfig().multiAgent.globalMaxWorkers ?? 0;
+  if (limit <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, limit - globalOccupiedWorkerSlots());
 }
 
 /**
@@ -1809,6 +1834,17 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     throw new AgentError(`That would make ${total} live workers; the limit set in the app is ${max}.`);
   }
 
+  const globalMax = getConfig().multiAgent.globalMaxWorkers ?? 0;
+  const globalTotal = globalOccupiedWorkerSlots() + planned.length;
+  if (globalMax > 0 && globalTotal > globalMax) {
+    if (resumedDormant) parkRun(run, 'a new spawn was rejected by the global worker admission cap');
+    else if (createdFreshRun) runs.delete(run.runId);
+    throw new AgentError(
+      `GLOBAL_WORKER_LIMIT: that would make ${globalTotal} live workers across all prime families; ` +
+        `the global worker admission limit set in the app is ${globalMax}. Wait for a worker to stop and try again.`
+    );
+  }
+
   const ids: string[] = [];
   // Historical rows are intentionally never reused or deleted merely because the worker is
   // asleep/terminal. The old fixed 64-id scan therefore became a lifetime cap on one prime,
@@ -2132,11 +2168,20 @@ function stageMessagesActive(
       // slot is reserved here, synchronously, so two messages to two sleeping workers cannot
       // both be told the same last slot is theirs. Refused rather than queued: a message that
       // sits unread in a chat nobody is going to open is worse than being told to wait.
-      if (!reserved.has(to) && freeWorkerSlots(run?.runId) - reserved.size <= 0) {
-        throw new AgentError(
-          `NO_FREE_SLOT: ${toId} is asleep and all ${getConfig().multiAgent.maxWorkers} worker slots are busy, so it ` +
-            `cannot be woken right now${where}. Nothing was sent. Wait for a worker to report and try again.`
-        );
+      if (!reserved.has(to)) {
+        if (freeWorkerSlots(run?.runId) - reserved.size <= 0) {
+          throw new AgentError(
+            `NO_FREE_SLOT: ${toId} is asleep and all ${getConfig().multiAgent.maxWorkers} worker slots are busy, so it ` +
+              `cannot be woken right now${where}. Nothing was sent. Wait for a worker to report and try again.`
+          );
+        }
+        const globalMax = getConfig().multiAgent.globalMaxWorkers ?? 0;
+        if (globalMax > 0 && globalFreeWorkerSlots() - reserved.size <= 0) {
+          throw new AgentError(
+            `GLOBAL_WORKER_LIMIT: ${toId} is asleep and all ${globalMax} globally admitted worker slots are busy, so it ` +
+              `cannot be woken right now${where}. Nothing was sent. Wait for a worker to stop and try again.`
+          );
+        }
       }
       reserved.add(to);
     }
@@ -3134,7 +3179,7 @@ export function stageQueuedWorkerRevivals(ids: readonly string[], runId?: string
         message.offeredAt === null &&
         !unpublishedMessages.has(message)
     );
-    if (!hasUnseen || freeWorkerSlots(run.runId) <= 0) continue;
+    if (!hasUnseen || freeWorkerSlots(run.runId) <= 0 || globalFreeWorkerSlots() <= 0) continue;
     const sleptAt = agent.info.sleptAt;
     const assignment = beginRevival(agent);
     reserved.push({ agent, sleptAt, assignment });

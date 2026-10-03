@@ -169,6 +169,12 @@ describe('cross-platform packaging targets', () => {
     expect(() => releaseTargets('some')).toThrow();
     const canary = yamlFile('.github/workflows/canary.yml');
     expect(canary.jobs.candidate.with).toEqual({ platforms: 'common' });
+    // Built after every app-relevant push to main, and a running canary is never cancelled
+    // halfway through replacing the previous one.
+    expect(canary.on.push).toMatchObject({ branches: ['main'] });
+    expect(canary.on.push['paths-ignore']).toEqual(expect.arrayContaining(['docs/**', 'test/**']));
+    expect(canary.on).toHaveProperty('workflow_dispatch');
+    expect(canary.concurrency).toEqual({ group: 'canary', 'cancel-in-progress': false });
     // A stable release passes nothing, which is `all`.
     expect(yamlFile('.github/workflows/publish.yml').jobs.candidate?.with?.platforms).toBeUndefined();
   });

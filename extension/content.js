@@ -11539,8 +11539,11 @@
       if (attempt && boot.type === 'worker') attempt.phase = 'dispatching';
       return true;
     };
+    // Why Send ended without acceptance (#882): one short code from CLF_DOM.send, so a failed worker
+    // start or wake says which step it reached instead of only that it failed.
+    let sendRefusal = null;
     if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, authorizeBootstrapSend, null,
-                                  matchesSubmittedBootstrap))) {
+                                  matchesSubmittedBootstrap, null, why => { sendRefusal = why; }))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -11552,10 +11555,8 @@
       // The draft is a separate matter: left in the box it read as a message the user still had
       // to send (#864). Clear only our own unchanged text; anything the user typed stays.
       await bootstrapDraft.clear();
-      return void (await fail(t(
-        'content_bootstrap_send_not_accepted',
-        'ChatGPT did not accept the bootstrap send'
-      )));
+      const notAccepted = t('content_bootstrap_send_not_accepted', 'ChatGPT did not accept the bootstrap send');
+      return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted));
     }
     agent = boot.agent || null;
     agentCommandId = agent && typeof boot.id === 'string' ? boot.id : null;
