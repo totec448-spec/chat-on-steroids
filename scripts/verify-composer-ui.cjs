@@ -44,6 +44,8 @@ app.whenReady().then(async () => {
   const capture = async name => { await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
   const startDisclosureSample = () => js(`(()=>{window.__composerDisclosureSample=new Promise(resolve=>{const start=performance.now(),frames=[];const sample=()=>{frames.push({time:performance.now()-start,list:document.getElementById('composerModelChoices').getBoundingClientRect().height,popover:document.querySelector('#modelMenu > .composer-popover').getBoundingClientRect().height,chevron:getComputedStyle(document.querySelector('#composerModelToggle .picker-chevron')).transform});if(performance.now()-start>=320)resolve(frames);else requestAnimationFrame(sample)};sample()});return true})()`);
   const sampleDisclosure = () => js(`window.__composerDisclosureSample`);
+  // Animation time follows rendered frames, not the hosted runner's wall clock.
+  const settleEffortShortcut = () => js(`Promise.all(document.getElementById('composerSpark').getAnimations({subtree:true}).map(animation=>animation.finished)).then(()=>true)`);
   // Exercise both motion preferences explicitly; hosted macOS defaults to reduce.
   win.webContents.debugger.attach('1.3');
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
@@ -72,17 +74,17 @@ app.whenReady().then(async () => {
   await js(`window.__composerShortcutPair={model:document.getElementById('composerModel').value,effort:document.getElementById('composerReasoning').value};document.getElementById('chatInput').value='Keep this draft';document.getElementById('composerSpark').focus();document.getElementById('composerSpark').click()`);
   await check('Lightning immediately selects the lowest effort and offers maximum effort', `document.getElementById('composerReasoning').value==='low'&&document.getElementById('composerPowerTitle').textContent==='Low'&&document.getElementById('composerSpark').dataset.action==='max'&&document.getElementById('composerSpark').getAttribute('aria-label')==='Use maximum effort: Ultra'&&document.querySelector('#composerPowerChoices input').value==='0'`);
   await check('Effort shortcut preserves model, draft, open picker and button focus', `document.getElementById('composerModel').value===window.__composerShortcutPair.model&&document.getElementById('chatInput').value==='Keep this draft'&&document.getElementById('modelMenu').open&&document.activeElement.id==='composerSpark'&&!document.querySelector('.toast')`);
-  await pause(220);
+  await settleEffortShortcut();
   await check('Brain is the settled icon at minimum effort', `getComputedStyle(document.querySelector('.spark-brain')).opacity==='1'&&getComputedStyle(document.querySelector('.spark-lightning')).opacity==='0'&&getComputedStyle(document.querySelector('.spark-brain'),'::before').content!=='none'`);
   await capture('minimum-effort');
   await js(`document.getElementById('composerSpark').click()`);
   await check('Brain selects the highest effort instead of restoring the previous High', `window.__composerShortcutPair.effort==='high'&&document.getElementById('composerReasoning').value==='ultra'&&document.getElementById('composerPowerTitle').textContent==='Ultra'&&document.getElementById('composerSpark').dataset.action==='min'&&document.querySelector('#composerPowerChoices input').value==='5'`);
-  await pause(220);
+  await settleEffortShortcut();
   await check('Lightning is the settled icon at maximum effort', `getComputedStyle(document.querySelector('.spark-brain')).opacity==='0'&&getComputedStyle(document.querySelector('.spark-lightning')).opacity==='1'`);
   await capture('maximum-effort');
   await js(`for(let i=0;i<10;i++)document.getElementById('composerSpark').click()`);
   await check('Rapid effort clicks keep at most two animations and land on the correct endpoint', `document.getElementById('composerReasoning').value==='ultra'&&document.getElementById('composerModel').value===window.__composerShortcutPair.model&&document.getElementById('composerSpark').getAnimations({subtree:true}).length<=2`);
-  await pause(220);
+  await settleEffortShortcut();
   await check('Effort shortcut settles without background animation', `document.getElementById('composerSpark').getAnimations({subtree:true}).length===0`);
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   await js(`document.getElementById('composerModelToggle').click();document.getElementById('composerSpark').click()`);
