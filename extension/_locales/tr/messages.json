@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "Uygulama görevi kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
+  },
+  "popup_app_not_running_help": {
+    "message": "Chat On Steroids'in bu bilgisayarda açık olduğundan emin olun. Eklenti kendiliğinden bağlanır."
   }
 }

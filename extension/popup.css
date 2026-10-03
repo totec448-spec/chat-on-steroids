@@ -628,6 +628,13 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+.hint {
+  margin: -6px 6px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .alert {
   margin: -6px 0 16px;
   padding: 11px 14px;
@@ -637,3 +644,6 @@ button:focus-visible {
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* Korean separates words with spaces: wrap there, not inside a word. */
+html:lang(ko) body { word-break: keep-all; overflow-wrap: break-word; }

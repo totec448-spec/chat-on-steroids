@@ -20328,7 +20328,7 @@ describe('the goal loop', () => {
           ? {
               ok: false,
               status: 502,
-              data: { error: 'rate_limited: Provider returned error', retryable: true }
+              data: { error: 'rate_limited: Provider returned error', retryable: true, retryAfterMs: 37_000 }
             }
           : { ok: true, data: { reply: 'rewrite the parser in rust', model: MODEL } };
       }
@@ -20343,10 +20343,10 @@ describe('the goal loop', () => {
     // started from an empty New Chat has no later turn to try again from.
     const held = live;
     const timer = held.window.setTimeout;
-    const wakes: Array<() => void> = [];
+    const wakes: Array<{ fn: () => void; ms: number }> = [];
     held.window.setTimeout = ((fn: () => void, ms?: number) => {
-      if (ms === held.hook.GOAL_RETRY_MS) {
-        wakes.push(fn);
+      if (ms && ms >= held.hook.GOAL_RETRY_MS) {
+        wakes.push({ fn, ms });
         return 0;
       }
       return timer(fn, ms);
@@ -20363,9 +20363,10 @@ describe('the goal loop', () => {
 
     expect(attempts).toBe(1);
     expect(wakes, 'a rate-limited opening waits for the Goal retry clock').toHaveLength(1);
-    expect(live.document.body.textContent).toContain('Retrying Goal in 15 seconds');
+    expect(wakes[0]!.ms).toBe(37_000);
+    expect(live.document.body.textContent).toContain('Retrying Goal in 37 seconds');
     expect(live.document.body.textContent).not.toContain('The goal loop stopped');
-    wakes[0]!();
+    wakes[0]!.fn();
     await settle(800);
 
     expect(attempts).toBe(2);

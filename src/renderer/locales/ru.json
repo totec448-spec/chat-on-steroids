@@ -1813,5 +1813,9 @@
   "Remove this chat and its saved history from the app. The chat stays in ChatGPT.": "Убрать этот чат и его сохранённую историю из приложения. В ChatGPT чат останется.",
   "Chat removed from the app": "Чат убран из приложения",
   "Pet instructions copied": "Инструкции для питомцев скопированы",
-  "Skill added to your library": "Skill добавлен в вашу библиотеку"
+  "Skill added to your library": "Skill добавлен в вашу библиотеку",
+  "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Переключает сохранённые ID туннелей и API-ключ туннеля, например для другого аккаунта ChatGPT.",
+  "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Страница ChatGPT потеряла поток этого ответа. Ответ, возможно, ещё выполняется: перезагрузка переподключит страницу, не останавливая его.",
+  "Don't reload this answer": "Не перезагружать этот ответ",
+  "The reload has already started.": "Перезагрузка уже началась."
 }
