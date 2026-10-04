@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "Ứng dụng không thể lưu tác vụ. Hãy kiểm tra dung lượng đĩa trống và thử lưu lại."
   },
+  "popup_sign_in_transfer": {
+    "message": "Chuyển phiên sang CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Quyền cookie bị từ chối. Nhấp lại."
+  },
+  "popup_sign_in_imported": {
+    "message": "Đã chuyển phiên"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Bạn đã đăng nhập vào CoS browser."
+  },
+  "popup_sign_in_failed": {
+    "message": "Thất bại. Bắt đầu đăng nhập lại từ CoS."
+  },
   "popup_app_not_running_help": {
     "message": "Hãy chắc rằng Chat On Steroids đang mở trên máy tính này. Tiện ích sẽ tự kết nối."
   }

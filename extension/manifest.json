@@ -12,6 +12,7 @@
     "debugger",
     "tabs"
   ],
+  "optional_permissions": ["cookies"],
   "host_permissions": [
     "http://*/*",
     "https://*/*",

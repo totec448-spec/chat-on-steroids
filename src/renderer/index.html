@@ -532,55 +532,120 @@
                 <button type="button" data-language="zh-TW" lang="zh-TW" translate="no" title="繁體中文" aria-label="繁體中文" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#fe0000" d="M0 0h60v40H0z"/><path fill="#000095" d="M0 0h30v20H0z"/><path fill="#fff" d="m15 2 1.1 3.7 2.9-2.6-.9 3.8 3.8-.9-2.6 2.9L23 10l-3.7 1.1 2.6 2.9-3.8-.9.9 3.8-2.9-2.6L15 18l-1.1-3.7-2.9 2.6.9-3.8-3.8.9 2.6-2.9L7 10l3.7-1.1-2.6-2.9 3.8.9-.9-3.8 2.9 2.6z"/><circle cx="15" cy="10" r="4.5" fill="#000095"/><circle cx="15" cy="10" r="3.5" fill="#fff"/></svg></button>
               </div>
             </div>
-            <div class="lede">
-              <p>
-                Follow these six steps once. The pictures show where to click. Start with Core;
-                desktop control is optional.
-              </p>
-              <button class="btn" id="wizExpand" type="button" aria-controls="wizard" aria-expanded="true">Hide setup guide</button>
-            </div>
-            <div class="setup-progress" id="setupProgress" role="progressbar" aria-labelledby="setupTitle" aria-valuemin="0" aria-valuenow="0" aria-valuemax="6">
-              <span class="setup-progress-text" id="setupProgressText"></span>
-              <span class="setup-progress-track" aria-hidden="true"><span class="setup-progress-fill" id="setupProgressFill"></span></span>
+            <!--
+              The steps side by side: where the user is, what is done, and a way to any step. Only
+              the open step shows below it, so the page never reads as one long manual.
+            -->
+            <div class="setup-track">
+              <nav class="setup-rail" aria-label="Setup steps">
+                <ol>
+                  <li><button type="button" data-rail-step="browser"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Extension</span></button></li>
+                  <li><button type="button" data-rail-step="folder"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Folder</span></button></li>
+                  <li><button type="button" data-rail-step="tunnel"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Tunnel</span></button></li>
+                  <li><button type="button" data-rail-step="key"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">API key</span></button></li>
+                  <li><button type="button" data-rail-step="connect"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Connect</span></button></li>
+                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">ChatGPT</span></button></li>
+                  <li class="setup-rail-ready"><button type="button" data-rail-step="ready"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Ready</span></button></li>
+                </ol>
+              </nav>
+              <div class="setup-progress" id="setupProgress" role="progressbar" aria-labelledby="setupTitle" aria-valuemin="0" aria-valuenow="0" aria-valuemax="6">
+                <span class="setup-progress-text" id="setupProgressText"></span>
+              </div>
             </div>
 
             <ol class="wizard" id="wizard">
-              <!-- 1 -->
+              <!-- One step, two sequential tasks: external companion, then execution browser. -->
+              <li class="step" data-step="browser">
+                <div class="step-mark"><i class="ico tick ph ph-check" aria-hidden="true"></i></div>
+                <div class="step-body browser-setup">
+                  <div class="browser-setup-header">
+                    <ol class="browser-phases" aria-label="Connect your ChatGPT">
+                    <li id="browserPhaseExtension" aria-current="step"><span class="phase-number" aria-hidden="true" translate="no">A</span><span>Install</span></li>
+                    <li id="browserPhaseLocation"><span class="phase-number" aria-hidden="true" translate="no">B</span><span>Where to use it</span></li>
+                  </ol>
+                    <div class="browser-picker">
+                      <p class="step-lead">Choose your browser.</p>
+                      <div class="browser-segments" role="radiogroup" aria-label="Browser">
+                        <button type="button" role="radio" data-external-browser="chrome" aria-checked="true"><img src="./browser-icons/chrome.svg" alt="" /><span translate="no">Chrome</span></button>
+                        <button type="button" role="radio" data-external-browser="edge" aria-checked="false" tabindex="-1"><img src="./browser-icons/edge.svg" alt="" /><span translate="no">Edge</span></button>
+                        <button type="button" role="radio" data-external-browser="brave" aria-checked="false" tabindex="-1"><img src="./browser-icons/brave.svg" alt="" /><span translate="no">Brave</span></button>
+                      </div>
+                      </div>
+                    <h3 id="browserExtensionTitle" tabindex="-1">First, connect your browser</h3>
+                  </div>
+                  <section id="browserExtensionStage" class="browser-stage" aria-labelledby="browserExtensionTitle">
+                    <div class="browser-stage-copy">
+                      <ol class="browser-install-steps">
+                        <li><div><b>Open the extensions page and turn on Developer mode.</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button><details class="browser-picture-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>See where to click</summary>                    <figure class="browser-install-figure">
+                      <div class="setup-guide" data-setup-guide="extension"></div>
+                      <figcaption><span>Shown in Chrome. The same steps apply in Edge and Brave.</span></figcaption>
+                    </figure></details></div></li>
+                        <li><div><b class="browser-install-instruction">Click Load unpacked and choose the CoS extension folder.</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
+                          <details class="browser-picture-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>See where to click</summary><figure class="browser-install-figure">
+                            <div class="setup-guide" data-setup-guide="extension-load"></div>
+                            <figcaption><span>Shown in Chrome. The same steps apply in Edge and Brave.</span></figcaption>
+                          </figure></details>
+                        </div></li>
+                        <li><div><b>Open ChatGPT in that browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
+                      </ol>
+                      <details class="extension-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Need help?</summary><div class="extension-meta"><p class="extension-folder" id="extensionPath"></p><button class="btn btn-quiet" id="bridgeDownload" type="button">Download extension ZIP</button><p id="bridgeState" class="muted"></p></div></details>
+                    </div>
+
+                    <div class="browser-stage-footer">
+                      <div class="status-banner" id="extensionStatusBox" data-tone="wait" role="status" aria-live="polite"><span class="status-banner-title" id="extensionStatus"></span><span class="status-banner-detail" id="extensionSetupDetail"></span></div>
+                      <button class="btn step-next" id="browserContinue" type="button" disabled><span>Continue</span><i class="ico ph ph-arrow-right" aria-hidden="true"></i></button>
+                    </div>
+                  </section>
+                  <section id="browserLocationStage" class="browser-stage" aria-labelledby="browserLocationTitle" hidden>
+                    <div class="browser-stage-copy">
+                      <h3 id="browserLocationTitle" tabindex="-1">Where should ChatGPT run?</h3>
+                      <p class="step-lead">You can change this later in Settings.</p>
+                      <div class="browser-choice" role="radiogroup" aria-label="ChatGPT browser">
+                        <button class="browser-option" id="useCosBrowser" type="button" role="radio" data-browser-choice="cos"><img src="./browser-icons/cos.png" alt="" /><b>In Chat On Steroids</b><em>Use the app’s built-in browser.</em></button>
+                        <button class="browser-option" id="useExtensionBrowser" type="button" role="radio" data-browser-choice="extension"><img id="setupExternalIcon" src="./browser-icons/chrome.svg" alt="" /><b>In your browser</b><em id="setupExternalLabel"></em></button>
+                      </div>
+                      <div data-browser-variant="cos" class="browser-action"><button class="btn btn-solid" id="showCosBrowser" type="button"><i class="ico ph ph-sign-in" aria-hidden="true"></i><span>Sign in to ChatGPT</span></button><span class="status-pill" id="cosBrowserState" data-tone="off" role="status"></span></div>
+                      <div data-browser-variant="extension" class="browser-action"><button class="btn btn-solid" id="openSelectedChatGpt" type="button"><i class="ico ph ph-sign-in" aria-hidden="true"></i><span>Sign in to ChatGPT</span></button><span class="status-pill" id="externalBrowserState" data-tone="off" role="status"></span></div>
+                      <div id="browserConnectionLost" class="browser-connection-lost" role="status" hidden><p>Reconnect or update your browser extension to continue.</p><button id="browserReviewExtension" class="btn btn-quiet" type="button">Review extension</button></div>
+                      <button class="btn step-back browser-back" id="browserBack" type="button"><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back</span></button>
+                    </div>
+                    <div class="setup-guide" data-setup-guide="signin" data-browser-variant="cos"></div>
+                    <div class="setup-guide" data-setup-guide="external-browser" data-browser-variant="extension"></div>
+                  </section>
+                </div>
+              </li>
+              <!-- 2 -->
               <li class="step" data-step="folder">
                 <div class="step-mark">
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Pick a folder to share</h3>
-                  <p>
-                    Choose the folder you want ChatGPT to work in. You can add more folders later.
-                  </p>
+                  <p class="step-lead">ChatGPT can only work inside the folders you share.</p>
+                  <ul class="folder-list" id="wizFolders"></ul>
                   <div class="step-actions">
-                    <button class="btn btn-solid" id="wizAddFolder" type="button">
-                      <i class="ico ph ph-folder" aria-hidden="true"></i>Choose folder
+                    <button class="btn step-link" id="wizManageFolders" type="button">Manage folders</button>
+                  </div>
+                  <!-- Like Start the tunnel: the step's one action is its picture. -->
+                  <div class="step-art connect-art">
+                    <button class="connect-toggle" id="wizAddFolder" type="button" data-tone="off">
+                      <span class="connect-ring" aria-hidden="true"><svg class="setup-folder-icon" viewBox="0 0 48 48" fill="none"><path d="M6 15V11a3 3 0 0 1 3-3h10l5 6h15a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V15Z"/><path d="M6 18h36M24 24v10m-5-5h10"/></svg></span>
+                      <span class="connect-label">Add</span>
                     </button>
-                    <button class="btn" id="wizManageFolders" type="button">Manage folders</button>
-                    <span class="chosen" id="wizFolders">None yet</span>
                   </div>
                 </div>
               </li>
-
-              <!-- 2 -->
+              <!-- 3 -->
               <li class="step" data-step="tunnel">
                 <div class="step-mark">
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Create a tunnel</h3>
-                  <ol class="setup-instructions">
-                    <li>Open Tunnels and click “Create tunnel” at the top right of the page. Enter a name and description.</li>
-                    <li><strong>At the bottom, select your workspace under ChatGPT workspaces.</strong> Choose the same workspace you use in ChatGPT. You can search by name or workspace ID.</li>
-                    <li>Keep your existing organization selected. Selecting an organization alone does not make the tunnel appear in ChatGPT.</li>
-                    <li>Click Create, copy the new Tunnel ID and paste it below.</li>
-                  </ol>
+                  <p class="step-lead">A private line from ChatGPT to this app.</p>
                   <div class="step-actions">
                     <button
-                      class="btn btn-solid"
+                      class="btn btn-solid setup-tunnel-open"
                       type="button"
                       data-link="https://platform.openai.com/settings/organization/tunnels"
                     >
@@ -621,23 +686,17 @@
                   </details>
                 </div>
               </li>
-
-              <!-- 3 -->
+              <!-- 4 -->
               <li class="step" data-step="key">
                 <div class="step-mark">
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Create an API key</h3>
-                  <ol class="setup-instructions">
-                    <li>Open API keys and click “Create new secret key” at the top right of the page.</li>
-                    <li>Leave Owned by set to You. Select your project, for example Default project. A name is optional. An expiration date is required.</li>
-                    <li>Under Permissions, choose Restricted. Scroll down to Tunnels and enable Read and Use. Leave everything else at None.</li>
-                    <li>Create the key, copy it and paste it below. You can only copy the secret once.</li>
-                  </ol>
+                  <p class="step-lead">Opens your tunnel. Copy now: the key is shown only once.</p>
                   <div class="step-actions">
                     <button
-                      class="btn btn-solid"
+                      class="btn btn-solid setup-tunnel-open"
                       type="button"
                       data-link="https://platform.openai.com/settings/organization/api-keys"
                     >
@@ -655,57 +714,61 @@
                   </div>
                 </div>
               </li>
-
-              <!-- 4 -->
+              <!-- 5 -->
               <li class="step" data-step="connect">
                 <div class="step-mark">
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
                   <h3>Start the tunnel</h3>
-                  <p class="setup-important">Click Connect and wait for Connected. The tunnel must be running before you can add the plugin in ChatGPT.</p>
-                  <p id="backgroundRunningCopy">
+                  <p class="step-lead">Click Connect and wait for Connected.</p>
+                  <p class="status-pill" id="wizStatusPill" data-tone="off"></p>
+                  <p class="hint is-warn" id="wizStatus" hidden></p>
+                  <p class="hint step-quiet" id="backgroundRunningCopy">
                     Leave it running while you use the connector. It stays available when you close
                     the window.
                   </p>
-                  <div class="step-actions">
-                    <button class="btn btn-solid" id="wizConnect" type="button">Connect</button>
-                    <span class="chosen" id="wizStatus"></span>
+                  <!-- The step's one action, as large as its picture would be: what the step is for. -->
+                  <div class="step-art connect-art">
+                    <button class="connect-toggle" id="wizConnect" type="button" data-tone="off">
+                      <span class="connect-ring" aria-hidden="true"><svg class="setup-connect-icon" viewBox="0 0 48 48" fill="none"><path d="M18 7v12m12-12v12M13 19h22v5a11 11 0 0 1-22 0v-5Zm11 16v7"/></svg></span>
+                      <span class="connect-label" id="wizConnectLabel">Connect</span>
+                    </button>
                   </div>
                 </div>
               </li>
-
-              <!-- 5 -->
+              <!-- 6 -->
               <li class="step" data-step="chatgpt">
                 <div class="step-mark">
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
-                  <h3>Add it in ChatGPT</h3>
-                  <h4 class="setup-subheading">A · Developer mode (older ChatGPT versions only)</h4>
-                  <p>If your ChatGPT settings still show Developer mode, turn it on under Settings → Security and login. Newer versions of ChatGPT no longer have this switch; then skip this step.</p>
-                  <div class="setup-guide" data-setup-guide="developer"></div>
-                  <h4 class="setup-subheading">B · Create the Core plugin</h4>
-                  <div class="step-actions">
-                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
-                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open ChatGPT Plugins
-                    </button>
+                  <!-- Two columns of even weight: what to do and what to copy on the left; the
+                       pictures and the reference notes on the right. -->
+                  <div class="step-main">
+                    <h3>Add it in ChatGPT</h3>
+                    <p class="step-lead">Create the Core plugin with the name and description below.</p>
+                    <div class="step-actions">
+                      <button class="btn btn-solid setup-tunnel-open" type="button" data-link="https://chatgpt.com/plugins">
+                        <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open ChatGPT Plugins
+                      </button>
+                    </div>
+                    <div id="pluginMoves"></div>
+                    <p class="hint" id="wizChatgpt"></p>
+                    <!-- Only for a tunnel kind the pictures do not show (a published URL). -->
+                    <p class="hint" id="chatgptConn"></p>
                   </div>
-                  <ol class="setup-instructions">
-                    <li>Open the ChatGPT Plugins page using the button above. At the top right, click Add and choose Create MCP App (older versions show a + instead) to open New Plugin.</li>
-                    <li>Copy the name and description from the Core card below. Keep the name exactly as shown: CoS recognizes its tool calls by this name, and a renamed plugin's calls are not linked to your chats.</li>
-                    <li id="chatgptConn"></li>
-                    <li><strong>Under Authentication, choose No authentication.</strong> Do not paste your API key here.</li>
-                    <li>Read and accept the notice, then click Create. Keep the tunnel running while ChatGPT connects.</li>
-                  </ol>
-                  <div class="setup-guide" data-setup-guide="plugin"></div>
+                  <div class="step-side">
+                    <div class="setup-guide" data-setup-guide="plugin" data-moves-into="pluginMoves"></div>
+                  </div>
+                  <!-- Below both columns: the connectors side by side, then the note for older ChatGPT. -->
                   <!-- One card per connector. The name and description are what ChatGPT matches
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
                   <!-- One ChatGPT account on several computers: each needs its own plugins, and they
                        cannot share a name. The suffix names this computer's set; empty keeps the
                        plain names, and the cards below always show what to type. -->
-                  <details class="setup-optional" id="connectorSuffixField">
+                  <details class="setup-optional step-wide" id="connectorSuffixField">
                     <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Several computers, one ChatGPT account <span class="tag is-optional">optional</span></summary>
                     <div class="field">
                       <label for="connectorSuffix">Name for this computer</label>
@@ -723,58 +786,33 @@
                       <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.</p>
                     </div>
                   </details>
-                  <div class="connectors" id="connectorCards"></div>
-                  <div class="plugin-permission-step">
-                    <strong>Before you start: choose “Allow all actions”</strong>
-                    <p>In ChatGPT, open Settings → Plugins, select this plugin, and set its action permissions to <b>Allow all actions</b>. Repeat for the Desktop plugin if you added it.</p>
-                    <p>This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.</p>
-                  </div>
-                  <div class="step-actions">
-                    <span class="chosen" id="wizChatgpt"></span>
-                  </div>
+                  <div class="connectors step-wide" id="connectorCards"></div>
+                  <!-- Only older ChatGPT versions have this switch, so it waits folded until someone needs it. -->
+                  <details class="setup-optional setup-legacy step-wide">
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Developer mode (older ChatGPT versions only)</summary>
+                    <p>If your ChatGPT settings still show Developer mode, turn it on under Settings → Security and login. Newer versions of ChatGPT no longer have this switch; then skip this step.</p>
+                    <div class="setup-guide" data-setup-guide="developer"></div>
+                  </details>
                 </div>
               </li>
-
-              <!-- 6 -->
-              <!--
-                The extension is setup, not settings. It is what lets this app see which chat a
-                tool call came from, so the timeline, Compact & resume and sub-agents are all
-                dark without it — which made "buried in a settings pane behind a gear" exactly
-                the wrong place for the one-time instructions.
-              -->
-              <li class="step" data-step="browser">
+              <!-- 7: not a task but the proof. It reads back every check above, says plainly when
+                   everything works, and points straight at whatever does not yet. -->
+              <li class="step step-ready" data-step="ready">
                 <div class="step-mark">
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
-                  <h3>Add the browser extension</h3>
-                  <ol class="setup-instructions">
-                    <li>Open <code>chrome://extensions</code>.</li>
-                    <li>Turn on Developer mode at the top right.</li>
-                    <li>Click Open extension folder below and copy the folder path from the file manager’s address bar.</li>
-                    <li>In the browser, click Load unpacked, paste the copied folder path and select that folder.</li>
-                  </ol>
-                  <p>The extension pairs with this app automatically — there is no code to type.</p>
-                  <p class="hint is-required">
-                    <strong>Required for sub-agents:</strong> the companion extension must be loaded
-                    and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or
-                    coordinate worker chats.
-                  </p>
-                  <div class="step-actions">
-                    <button class="btn btn-solid" id="bridgeFolder" type="button">
-                      <i class="ico ph ph-folder" aria-hidden="true"></i>Open extension folder
-                    </button>
-                    <button
-                      class="btn"
-                      id="bridgeDownload"
-                      type="button"
-                    >
-                      <i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Download extension ZIP
-                    </button>
-                    <button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button>
-                    <span class="chosen" id="bridgeState"></span>
+                  <div class="ready-hero">
+                    <span class="ready-badge" aria-hidden="true"><i class="ph ph-check"></i></span>
+                    <div>
+                      <h3 id="readyTitle">You’re all set!</h3>
+                      <p class="step-lead" id="readyLead">ChatGPT can now work in your folders. Ask it anything in a new chat.</p>
+                    </div>
                   </div>
-                  <p class="hint" id="extensionPath"></p>
+                  <ul class="ready-checks" id="readyChecks"></ul>
+                  <div class="step-actions">
+                    <button class="btn btn-solid" id="readyStart" type="button"><i class="ico ph ph-chat-circle" aria-hidden="true"></i>Start a chat</button>
+                  </div>
                 </div>
               </li>
             </ol>
@@ -810,7 +848,6 @@
                 <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
               </div>
             </details>
-            <div id="toolApprovalSetup"></div>
           </div>
         </section>
 
@@ -968,7 +1005,8 @@
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the companion from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>

@@ -1051,7 +1051,9 @@ function versionHeaders() {
     'x-extension-version': version,
     'x-extension-protocol': String(BRIDGE_PROTOCOL),
     ...(workerStampValue ? { 'x-extension-build': workerStampValue } : {}),
-    ...(browserId ? { 'x-extension-browser': browserId } : {})
+    ...(browserId ? { 'x-extension-browser': browserId } : {}),
+    // The app tells the person's own browser apart from the CoS browser's copy of this extension.
+    'x-extension-host': globalThis.__cosBrowserWorker ? 'cos' : 'browser'
   };
 }
 
@@ -1063,7 +1065,15 @@ function versionHeaders() {
  * that already runs every two seconds in every open tab. Nothing is lost by it: a request
  * to a port the app has left fails, and a failure re-checks immediately.
  */
-async function discover(force = false) {
+/** One unforced discovery at a time: requests arriving together share its answer. */
+let discoveryFlight = null;
+function discover(force = false) {
+  if (force) return discoverNow(true);
+  discoveryFlight ??= discoverNow(false).finally(() => { discoveryFlight = null; });
+  return discoveryFlight;
+}
+
+async function discoverNow(force) {
   await load();
   if (port !== null && !force) {
     if (Date.now() - portCheckedAt < PORT_TRUST_MS) return { port, paired: token !== null, compatible: portCompatible !== false, version: appVersion, bridge: appProtocol };
@@ -2434,7 +2444,8 @@ function closeWakeSocket() {
 }
 function connectWakeSocket() {
   if (!token || disconnected || !port || typeof WebSocket === 'undefined') return;
-  const url = `ws://127.0.0.1:${port}/wake`;
+  // Which copy this is, never a credential: the token goes in the first message, below.
+  const url = `ws://127.0.0.1:${port}/wake?host=${globalThis.__cosBrowserWorker ? 'cos' : 'browser'}`;
   if (wakeSocket?.url === url && wakeSocket.readyState <= 1) return;
   closeWakeSocket();
   const connection = new WebSocket(url);
@@ -2691,6 +2702,16 @@ async function maintainOnce() {
   let observedTabs = [];
   try { observedTabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { /* Status/recovery still runs; no unobserved tab is pruned. */ }
   const openConversations = [...new Set(observedTabs.map(conversationForTab).filter(Boolean))];
+  // Observe login in an existing regular-profile page; extension pairing alone is not login.
+  const loginTab = observedTabs.find(tab => !tab.incognito && !tab.discarded && !tab.frozen && tab.status !== 'loading' &&
+    typeof tab.id === 'number' && typeof tabDocuments[String(tab.id)] === 'string' && signInStage(tab.url) === 'done');
+  const loginEpoch = loginTab ? tabEpochs[String(loginTab.id)] : undefined;
+  const loginDocument = loginTab ? tabDocuments[String(loginTab.id)] : undefined;
+  const loginResult = !globalThis.__cosBrowserWorker && loginTab
+    ? await chatGptSignedIn(loginTab.id).catch(() => null) : null;
+  const chatGptSignedInState = loginTab && loginDocument && tabDocuments[String(loginTab.id)] === loginDocument &&
+    tabEpochs[String(loginTab.id)] === loginEpoch ? loginResult : null;
+  if (intent !== connectionEpoch || !token || disconnected) return;
   // A discarded or frozen tab still answers the query with its URL, but its page is gone or
   // suspended: nothing the app owes that chat — recording, input, a wake — can arrive until
   // it is reloaded, and no close or silence path will ever say so. Report the shells
@@ -2701,6 +2722,7 @@ async function maintainOnce() {
     .map(conversationForTab)
     .filter(Boolean))];
   const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations, canReveal: true,
+    chatGptSignedIn: chatGptSignedInState,
     ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
   if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
@@ -3401,6 +3423,40 @@ const HANDLERS = {
     if (result && result.ok === true) void recoverDeferredRevivals().catch(() => undefined);
     return result;
   },
+  async cos_sign_in_transfer(message, sender) {
+    // A website's content script cannot request this disclosure. The popup reads no cookies
+    // itself; the worker retains them only across this one authenticated POST.
+    if (sender?.id !== chrome.runtime.id || sender.tab || sender.url !== chrome.runtime.getURL('popup.html') || globalThis.__cosBrowserWorker) {
+      return { ok: false, error: 'forbidden_transfer' };
+    }
+    if (!await chrome.permissions.contains({ permissions: ['cookies'] })) return { ok: false, error: 'permission_denied' };
+    if (typeof message.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(message.id)) return { ok: false, error: 'transfer_expired' };
+    try {
+      const [tab] = await signInTabs();
+      if (!tab || new URL(tab.url).origin !== 'https://chatgpt.com') {
+        return { ok: false, error: 'chatgpt_tab_required' };
+      }
+      const stores = await chrome.cookies.getAllCookieStores();
+      const store = stores.filter(store => store.tabIds.includes(tab.id));
+      if (store.length !== 1) return { ok: false, error: 'chatgpt_tab_required' };
+      const source = await chrome.cookies.getAll({ url: 'https://chatgpt.com/', storeId: store[0].id });
+      const cookies = source.filter(cookie => /^__Secure-next-auth\.session-token(?:\.\d+)?$/.test(cookie.name));
+      if (!cookies.length || cookies.length > 16 || cookies.some(cookie => cookie.partitionKey || cookie.value.length > 4096)) {
+        return { ok: false, error: 'invalid_session' };
+      }
+      const latest = await chrome.tabs.get(tab.id);
+      if (latest.incognito || latest.pendingUrl || new URL(latest.url).origin !== 'https://chatgpt.com') return { ok: false, error: 'chatgpt_tab_required' };
+      const result = await call('/cos-browser/sign-in', { method: 'POST', timeoutMs: 30_000,
+        body: JSON.stringify({ id: message.id, cookies: cookies.map(cookie => ({
+          name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path,
+          secure: cookie.secure, httpOnly: cookie.httpOnly, hostOnly: cookie.hostOnly,
+          sameSite: cookie.sameSite, ...(cookie.expirationDate === undefined ? {} : { expirationDate: cookie.expirationDate })
+        })) }) });
+      if (!result.ok) return { ok: false, error: result.data?.error || 'transfer_failed' };
+      void closeSignInTab(tab.id).catch(() => undefined);
+      return { ok: true, imported: true };
+    } catch { return { ok: false, error: 'transfer_failed' }; }
+  },
   async status() {
     await load();
     const found = await discover();
@@ -3415,6 +3471,20 @@ const HANDLERS = {
         .then(() => drainCloses())
         .catch(() => undefined);
     }
+    // This read runs only while a person has the popup open, never in maintenance. The app owns
+    // the expiring offer, so suspension/restart cannot restore an old transfer grant.
+    const signIn = found && token && !disconnected && !globalThis.__cosBrowserWorker
+      ? await call('/cos-browser/sign-in') : null;
+    // The transfer button is for a finished login only: the active tab must be ChatGPT, and
+    // ChatGPT itself must confirm an account there. An offer alone does not show it.
+    const offer = signIn?.ok ? signIn.data?.offer ?? null : null;
+    const ready = offer ? await (async () => {
+      for (const tab of await signInTabs()) {
+        if (signInStage(tab.url || '') !== 'done') continue;
+        if (await chatGptSignedIn(tab.id, { fresh: true }).catch(() => null) === true) return true;
+      }
+      return false;
+    })().catch(() => false) : false;
     return {
       connected: found !== null,
       port: found ? found.port : null,
@@ -3428,6 +3498,7 @@ const HANDLERS = {
       appProtocol: found ? found.bridge : null,
       extensionVersion: chrome.runtime.getManifest().version,
       extensionProtocol: BRIDGE_PROTOCOL,
+      signInOffer: ready ? offer : null,
       ...(pairingError ? { pairError: pairingError } : {})
     };
   },
@@ -4832,12 +4903,184 @@ if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addLi
   });
 }
 
+// A Google sign-in the CoS browser handed to this browser runs through ChatGPT's auth pages and
+// lands back on chatgpt.com. When a tab finishes that way and the app still has its transfer
+// offer, the popup opens on the transfer button, so the person does not have to find the
+// extension. Opening it transfers nothing: only the button does. Tabs in flight survive worker
+// suspension in session storage, because 2FA easily outlasts an idle worker.
+const SIGN_IN_FLOWS = 'cosSignInFlowTabs';
+const SIGN_IN_FLOW_MS = 15 * 60_000;
+/** Tabs whose watched login finished while the app waited: the only tabs a transfer may close. */
+const SIGN_IN_FINISHED = 'cosSignInFinishedTabs';
+/** Long enough to see the popup's receipt before its tab, and with it the popup, goes. */
+const SIGN_IN_CLOSE_DELAY_MS = 1500;
+/** One read-modify-write of the flows at a time: a URL change and its completion arrive together. */
+let signInFlowQueue = Promise.resolve();
+
+function signInStage(url) {
+  try {
+    const { protocol, hostname, pathname } = new URL(url);
+    if (protocol !== 'https:') return null;
+    if (hostname === 'auth.openai.com' || hostname === 'accounts.google.com') return 'auth';
+    if (hostname === 'chatgpt.com') return /^\/(?:api\/)?auth\//.test(pathname) ? 'auth' : 'done';
+  } catch { /* Not a URL this flow passes through. */ }
+  return null;
+}
+
+/**
+ * Whether ChatGPT in this tab has an account signed in, asked of ChatGPT itself with that tab's
+ * own cookies. Landing on chatgpt.com proves nothing: a logout also ends there. null: unknown.
+ *
+ * One page load asks this from several places (the login watcher, Setup's presence report,
+ * maintenance), and a sign-in passes through several loads in a row. They share one answer for
+ * that load, for a few seconds at most; the popup passes fresh, because a person is looking.
+ */
+const SESSION_ANSWER_MS = 5000;
+const sessionAnswers = new Map();
+function chatGptSignedIn(tabId, { fresh = false } = {}) {
+  const held = sessionAnswers.get(tabId);
+  if (!fresh && held && Date.now() - held.at < SESSION_ANSWER_MS) return held.answer;
+  const answer = askChatGptSignedIn(tabId);
+  const entry = { at: Date.now(), answer };
+  sessionAnswers.set(tabId, entry);
+  // Unknown is not an answer to share: the next caller asks again.
+  answer.then(result => { if (result === null && sessionAnswers.get(tabId) === entry) sessionAnswers.delete(tabId); },
+    () => { if (sessionAnswers.get(tabId) === entry) sessionAnswers.delete(tabId); });
+  return answer;
+}
+
+if (chrome.tabs?.onUpdated && typeof chrome.tabs.onUpdated.addListener === 'function') {
+  // A navigation is a new page: whatever the last one said no longer holds.
+  chrome.tabs.onUpdated.addListener((id, changeInfo) => {
+    if (changeInfo.url || changeInfo.status === 'loading') sessionAnswers.delete(id);
+  });
+}
+if (chrome.tabs?.onRemoved && typeof chrome.tabs.onRemoved.addListener === 'function') {
+  chrome.tabs.onRemoved.addListener(id => sessionAnswers.delete(id));
+}
+
+async function askChatGptSignedIn(tabId) {
+  const [frame] = await chrome.scripting.executeScript({ target: { tabId }, func: async () => {
+    try {
+      const response = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(4000) });
+      if (!response.ok) return null;
+      const session = await response.json();
+      return Boolean(session && typeof session === 'object' && (session.accessToken || session.user));
+    } catch { return null; }
+  } });
+  return typeof frame?.result === 'boolean' ? frame.result : null;
+}
+
+/**
+ * The tabs a transfer may read from, best first: a login tab the watcher saw finish, then the
+ * active tab of the last focused window. The CoS browser opens its login in a window of its own
+ * that need not have focus, so the active tab alone can be some other page.
+ */
+async function signInTabs() {
+  const finished = (await chrome.storage.session.get(SIGN_IN_FINISHED))[SIGN_IN_FINISHED] || {};
+  const ids = Object.entries(finished).filter(([, at]) => Date.now() - at < SIGN_IN_FLOW_MS).map(([id]) => Number(id));
+  const tabs = (await Promise.all(ids.map(id => chrome.tabs.get(id).catch(() => null)))).filter(Boolean);
+  const active = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (active.length === 1 && !tabs.some(tab => tab.id === active[0].id)) tabs.push(active[0]);
+  return tabs.filter(tab => Number.isInteger(tab.id) && !tab.incognito && !tab.pendingUrl &&
+    /^https:\/\/chatgpt\.com\//.test(tab.url || ''));
+}
+
+async function signInFinished(tab) {
+  const finished = (await chrome.storage.session.get(SIGN_IN_FINISHED))[SIGN_IN_FINISHED] || {};
+  await chrome.storage.session.set({ [SIGN_IN_FINISHED]: { ...finished, [String(tab.id)]: Date.now() } });
+  try { await chrome.action.openPopup({ windowId: tab.windowId }); }
+  catch {
+    // Browsers before Chrome 127 cannot open it: mark the button on this tab instead.
+    await chrome.action.setBadgeBackgroundColor({ color: '#1fbf75', tabId: tab.id }).catch(() => undefined);
+    await chrome.action.setBadgeText({ text: '1', tabId: tab.id }).catch(() => undefined);
+  }
+}
+
+/**
+ * After a transfer, the login tab this worker watched has done its job: it was opened in a window
+ * of its own by the CoS browser, so closing it closes that window. A tab the person signed in
+ * from by hand was never recorded and stays open.
+ */
+async function closeSignInTab(tabId) {
+  const finished = (await chrome.storage.session.get(SIGN_IN_FINISHED))[SIGN_IN_FINISHED] || {};
+  const at = finished[String(tabId)];
+  if (!at) return;
+  delete finished[String(tabId)];
+  await chrome.storage.session.set({ [SIGN_IN_FINISHED]: finished });
+  if (Date.now() - at > SIGN_IN_FLOW_MS) return;
+  await new Promise(resolve => setTimeout(resolve, SIGN_IN_CLOSE_DELAY_MS));
+  await chrome.tabs.remove(tabId);
+}
+
+if (!globalThis.__cosBrowserWorker) {
+  chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
+    const url = changeInfo.url || (changeInfo.status === 'complete' ? tab?.url : null);
+    if (!url || tab?.incognito) return;
+    const stage = signInStage(url);
+    signInFlowQueue = signInFlowQueue.then(async () => {
+      const flows = (await chrome.storage.session.get(SIGN_IN_FLOWS))[SIGN_IN_FLOWS] || {};
+      const key = String(id);
+      const flow = flows[key];
+      const save = () => chrome.storage.session.set({ [SIGN_IN_FLOWS]: flows });
+      if (stage === 'auth') {
+        if (!flow) { flows[key] = { at: Date.now(), retried: false }; await save(); }
+        return;
+      }
+      if (!flow || (stage === 'done' && changeInfo.status !== 'complete')) return;
+      const drop = () => { delete flows[key]; return save(); };
+      if (stage !== 'done' || Date.now() - flow.at >= SIGN_IN_FLOW_MS) return drop();
+      const reply = await call('/cos-browser/sign-in');
+      if (!reply.ok || !reply.data?.offer) return drop();
+      const signedIn = await chatGptSignedIn(id).catch(() => null);
+      if (signedIn === true) {
+        await drop();
+        void signInFinished(tab).catch(() => undefined);
+      } else if (signedIn === false && !flow.retried) {
+        // A stale session sends auth/login through auth/logout to ChatGPT's signed-out home.
+        // The CoS browser asked for the login form, so go back to it, once.
+        flows[key] = { ...flow, retried: true };
+        await save();
+        await chrome.tabs.update(id, { url: 'https://chatgpt.com/auth/login' });
+      }
+      // Otherwise keep watching: signing in from here passes through auth again.
+    }).catch(() => undefined);
+  });
+}
+
 // `chrome://extensions` Reload does not provide a dependable install/update event across
 // development/reload paths. The service worker itself *must* start, though. Ping first, so
 // ordinary worker wake-ups are one cheap message per ChatGPT tab and inject nothing; only a
 // dead or stale recorder pays the scripting cost.
 void restoreOpenChatgptTabs().then(() => recoverDeferredRevivals()).catch(() => undefined);
+/**
+ * Tells the app this browser has the extension, and whether ChatGPT is signed in here, without
+ * asking for work. Setup waits for exactly this, and a browser that was just set up has no chat
+ * for the bridge to hear about. The CoS browser's own copy never reports: it is not the person's
+ * browser. Only a yes/no about the session leaves the page, never the session itself.
+ */
+let presenceFlight = null;
+function reportPresence() {
+  if (globalThis.__cosBrowserWorker) return Promise.resolve();
+  presenceFlight ??= (async () => {
+    let tabs = [];
+    try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { /* Report presence without a login answer. */ }
+    const tab = tabs.find(candidate => !candidate.incognito && !candidate.discarded && candidate.status === 'complete' &&
+      typeof candidate.id === 'number' && signInStage(candidate.url || '') === 'done');
+    const signedIn = tab ? await chatGptSignedIn(tab.id).catch(() => null) : null;
+    await call('/browser/presence', { method: 'POST', body: JSON.stringify({ chatGptSignedIn: signedIn }) });
+  })().catch(() => undefined).finally(() => { presenceFlight = null; });
+  return presenceFlight;
+}
+
+if (!globalThis.__cosBrowserWorker) {
+  chrome.tabs.onUpdated.addListener((_id, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && signInStage(tab?.url || '') === 'done') void reportPresence();
+  });
+}
+
 void load()
   .then(() => ensurePaired())
   .catch(() => undefined)
+  .then(() => reportPresence())
   .then(() => scheduleRetry());

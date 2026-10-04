@@ -242,7 +242,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Automation | `src/main/goal.ts`, `src/shared/{goal,goal-templates}.ts`: objectives, switches, obligations, provider/helper decisions. |
 | Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication}.ts`: independent prime families, staged mutations and addressed messages. |
 | Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
-| Built-in browser (in progress) | `src/main/cos-browser/{tab-model,match-pattern}.ts`: Chrome-shaped tab/window state the companion extension reads through `chrome.tabs`/`chrome.windows` when it runs inside the app instead of Chrome. `chrome-api.ts` answers the extension's `chrome.*` calls from that model; `extension-worker.ts` and `src/preload/cos-browser-worker.ts` carry those calls and their events between the extension's service worker and the main process. Not wired yet; the host comes in a later change. |
+| Built-in browser | `src/main/cos-browser/` (`selection.ts` opt-in loading, `index.ts` lifecycle, `host.ts` windows/tabs/extension/sign-in, `tab-model.ts`, `chrome-api.ts`, `extension-worker.ts`, `match-pattern.ts`, `sign-in.ts`, `sign-in-transfer.ts`); `src/preload/cos-browser{,-worker,-sign-in}.ts`; `src/renderer/cos-browser.{html,ts,css}` toolbar and `cos-browser-sign-in.{html,ts,css}` Google sign-in card; `src/shared/cos-browser-sites.ts`. See §13 Built-in browser. |
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
@@ -1701,6 +1701,85 @@ and narrow/zoomed layouts with isolated data.
 
 **Intent:** make native ChatGPT observable and controllable for an exact authorized operation,
 while leaving ChatGPT's messages, model execution and account permissions with the provider.
+
+Setup's first step installs and version-checks the companion in the person's Chrome, Edge or Brave,
+then offers two equally weighted places for ChatGPT to run: the built-in CoS browser (opt-in, never
+preselected) or that browser, preserving the saved setting, and waits for ChatGPT to be signed in
+where it runs. The browser chosen for installation is a local choice until one place is picked;
+installation links use the fixed `browser:setupOpen` IPC without changing the setting.
+The bridge projects that browser apart using the explicit `x-extension-host: browser` header and
+its browser id. `browser-proof.ts` keeps, across restarts, the version last seen there and
+ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
+a live answer always wins. The extension reports presence and that answer on its own
+(`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
+so an idle browser with no chat still completes Setup. One page load asks once; maintenance shares
+the answer. Login is yes, no or unknown: unknown never completes the step, and pairing alone is not
+login. Each place answers only for itself: the CoS browser by `cosBrowserSignedIn` and its own
+companion reaching the app (`bridge.cosExtension`, from its requests or its `?host=cos` wake channel);
+Chrome's sign-in never completes the CoS path, nor the reverse. Once ChatGPT surely answers signed
+in, Setup's sign-in button opens ChatGPT's own sign-out (`chatgpt:signOut`) where it runs, and the
+status follows its next answer.
+
+### Built-in browser
+
+`ui.chatBrowser: 'cos'` runs ChatGPT and the unchanged companion extension in the app's own
+browser (`src/main/cos-browser`). Existing and new configs keep `chrome` until the user picks it in
+Settings. `syncCosBrowser()` starts it after the bridge listens (the extension looks for the app
+as soon as it loads), stops it when another browser is chosen, and the app stops it on quit.
+
+- **Session.** One persistent partition (`persist:cos-browser`). Its windows are `BaseWindow`s
+  with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing or
+  minimizing one hides it. `cosBrowser:show` (preload `showCosBrowser()`) brings its last window
+  forward, or opens one on ChatGPT; opening a chat from the app reveals that chat's window.
+- **Extension.** Loaded unchanged. Its `chrome.tabs`, `chrome.windows` and `chrome.debugger` are
+  answered by `TabModel` + `callChromeApi` through the worker preload; messaging, scripting,
+  storage, alarms and runtime stay Electron's. `ExtensionWorkerLink` keeps its worker alive and
+  queues events while none can take them.
+- **Navigation lock.** The app-wide `will-navigate`/`will-redirect`/window-open lockdown exempts
+  only web contents the host owns (`cosBrowser.browses(contents)`): a browser has to navigate, and
+  signing in is redirects. The host sets their rules: ChatGPT, OpenAI and sign-in pages open as its
+  own tabs (`opensInCosBrowser`); every other link opens in the system browser.
+- **Sign-in.** `AppState.cosBrowserSignedIn` is read from ChatGPT's session cookie in that
+  partition (null while the browser is not running) and pushed on every change. The toolbar has a
+  partition of its own (`cos-browser-ui`), so ChatGPT's zoom never reaches it. Setup's and the
+  chat's Sign in open `chatgpt.com/auth/login` directly; Google's sign-in is handed to the
+  person's own browser (below).
+- **Opt-in.** With another browser chosen there is no window, tray entry, process, hook or IPC
+  work: the module loads only through `cos-browser/selection.ts`, installs its own
+  bridge/session/IPC hooks, inert while stopped, and paints the current companion and generating
+  state on start so it is ready at once. Switching away stops it and returns exactly to the
+  extension path; `test/cos-browser-opt-in.test.ts` covers both states.
+
+The built-in CoS browser's Google sign-in leaves Electron: `cos-browser/host.ts` intercepts
+the main-frame navigation or popup and draws one card over that tab (`cos-browser-sign-in.html`,
+transparent over the dimmed page). A login leaving for Google has already torn its page down, so
+the host reloads ChatGPT's login under the card; tab views wear the app's page color meanwhile. The card offers installed Chrome/Edge/Brave from `browser.ts`, creates the offer
+only on that choice, waits with reopen/switch/cancel, and closes when the offer is imported. It
+opens a small normal window on a fresh ChatGPT login with its browser toolbar and normal
+profile. It never transfers an embedded OAuth URL, creates a temporary external profile,
+opens a debugging port, or impersonates Firefox. The user completes login and 2FA there,
+then explicitly clicks **Bring session to CoS browser** in that profile's companion popup. When a
+tab that passed through ChatGPT/OpenAI/Google auth lands back on chatgpt.com, ChatGPT's own
+`/api/auth/session` in that tab confirms a signed-in account, and the app still offers a transfer,
+the external worker opens that popup itself (a signed-out landing, e.g. after a logout redirect,
+is sent back to `chatgpt.com/auth/login` once instead). The popup's transfer button itself appears
+only under the same proof: the login tab the worker watched finish (its window need not have focus) or the active tab, confirmed account, pending offer (`chrome.action.openPopup`, a tab
+badge where unsupported); opening it reads and sends nothing. After an import it closes that watched
+login tab (and so its own window); a tab signed in by hand is never closed. Setup's and the chat's Sign in open
+`chatgpt.com/auth/login` directly when the CoS browser is signed out.
+The popup requests the declared optional `cookies` permission from that click; only its
+extension worker can read that tab's normal cookie store. Website/content-script requests
+cannot invoke transfer. Only ChatGPT's exact session token or contiguous numbered chunks
+cross the existing authenticated/protocol-checked `/cos-browser/sign-in` bridge route.
+`cos-browser/sign-in-transfer.ts` owns the one 15-minute process-local offer, writer exclusion
+and exact-browser receipt; suspension can re-read the offer, but app restart, tab destruction,
+browser replacement, expiry and credential revocation cannot revive it. Cookie values never
+enter status, app ledgers, recorder, popup responses or logs. The host validates all chunks,
+rejects live generation/debugger work, replaces previous token chunks, flushes and reads them
+back before opening ChatGPT; a failed write restores the previous token within its original
+browser epoch. A transfer receipt proves cookie import, separately from ChatGPT accepting
+that session. The small-window OS launch cannot elect among multiple profiles of the same
+browser; the user must use the profile containing the companion. There is no automatic sync.
 
 | Component | Responsibility |
 | --- | --- |

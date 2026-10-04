@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "O aplicativo não conseguiu salvar a tarefa. Verifique o espaço livre em disco e tente salvar de novo."
   },
+  "popup_sign_in_transfer": {
+    "message": "Levar sessão para o CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Acesso aos cookies negado. Clique de novo."
+  },
+  "popup_sign_in_imported": {
+    "message": "Sessão transferida"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Você entrou no CoS browser."
+  },
+  "popup_sign_in_failed": {
+    "message": "Falhou. Recomece o login pelo CoS."
+  },
   "popup_app_not_running_help": {
     "message": "Verifique se o Chat On Steroids está aberto neste computador. A extensão se conecta sozinha."
   }

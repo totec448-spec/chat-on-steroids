@@ -1,10 +1,34 @@
 import path from 'node:path';
 import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
-import { findPreferredBrowser, isPreferredBrowserRunning, openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
+import { findPreferredBrowser, isPreferredBrowserRunning, openInPreferredBrowser, openBrowserSignIn, preferredBrowserCandidates } from '../src/main/browser.js';
 import { runPowerShell } from '../src/main/exec.js';
 
+// These fixtures exercise Chrome startup; the fresh-install default now selects CoS.
+vi.mock('../src/main/config.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../src/main/config.js')>();
+  return { ...original, getConfig: () => {
+    const config = original.getConfig();
+    return { ...config, ui: { ...config.ui, chatBrowser: 'chrome' } };
+  } };
+});
+
 describe('browser-backed ChatGPT commands', () => {
+  it.each(['chrome', 'edge', 'brave'] as const)('opens sign-in in the selected %s family with its normal profile', async browser => {
+    const env = { ProgramFiles: 'C:\\Program Files' };
+    const executable = preferredBrowserCandidates('win32', env, undefined, browser)[0]!;
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    await openBrowserSignIn(browser, { platform: 'win32', env, usable: candidate => candidate === executable, launch });
+    expect(launch).toHaveBeenCalledWith(executable,
+      ['--new-window', '--window-size=520,760', 'https://chatgpt.com/auth/login'], path.win32.dirname(executable));
+    expect(JSON.stringify(launch.mock.calls)).not.toMatch(/remote-debugging|user-data-dir|user-agent/);
+  });
+  it('does not open a different family when the selected sign-in browser is missing', async () => {
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    await expect(openBrowserSignIn('brave', { platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: candidate => candidate.endsWith('chrome.exe'), launch })).rejects.toThrow('was not found');
+    expect(launch).not.toHaveBeenCalled();
+  });
   it('launches selected Edge when Chrome is also installed', async () => {
     const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
     const chrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';

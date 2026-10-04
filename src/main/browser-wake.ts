@@ -4,19 +4,28 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { logInfo } from './logger.js';
 
 const subscribers = new Set<(topic: 'wake' | 'browser-control') => void>();
+/** The CoS browser's own copy of the extension, or the one in the person's browser. */
+export type WakeHost = 'cos' | 'browser';
 export function wakeBrowserWork(topic: 'wake' | 'browser-control' = 'wake'): void {
   for (const wake of subscribers) wake(topic);
 }
 
 /** `changed` hears an authenticated channel open or close: whether the browser is there at all. */
 export function attachBrowserWake(server: http.Server, allowed: (request: http.IncomingMessage) => boolean,
-  authenticate: (token: string) => Promise<boolean>, changed: () => void = () => undefined): { connected(): boolean; revoke(): void; dispose(): void } {
+  authenticate: (token: string) => Promise<boolean>, changed: () => void = () => undefined): {
+    connected(host?: WakeHost): boolean; revoke(): void; dispose(): void;
+  } {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 512, perMessageDeflate: false });
   const authorized = new Map<WebSocket, number>();
+  /** Which copy of the extension holds each socket, as its URL says; older builds say nothing. */
+  const hosts = new Map<WebSocket, WakeHost>();
   let epoch = 0;
   const upgrade = (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => {
-    if (request.url !== '/wake' || !allowed(request) || sockets.clients.size >= 8) { socket.destroy(); return; }
+    const url = new URL(request.url ?? '', 'http://127.0.0.1');
+    if (url.pathname !== '/wake' || !allowed(request) || sockets.clients.size >= 8) { socket.destroy(); return; }
+    const host = url.searchParams.get('host');
     sockets.handleUpgrade(request, socket, head, (client) => {
+      if (host === 'cos' || host === 'browser') hosts.set(client, host);
       const generation = epoch;
       let authenticating = false;
       const deadline = setTimeout(() => client.terminate(), 5000);
@@ -24,6 +33,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
       client.on('error', () => client.terminate());
       client.on('close', () => {
         clearTimeout(deadline);
+        hosts.delete(client);
         if (authorized.delete(client)) { logInfo('bridge: browser wake channel disconnected'); changed(); }
       });
       client.on('message', (bytes, binary) => {
@@ -73,8 +83,8 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
     authorized.clear();
     if (had) changed();
   };
-  return { connected: () => [...authorized].some(([client, seen]) => client.readyState === WebSocket.OPEN &&
-    client.bufferedAmount < 1024 && Date.now() - seen <= 45000), revoke, dispose() {
+  return { connected: (host?: WakeHost) => [...authorized].some(([client, seen]) => client.readyState === WebSocket.OPEN &&
+    client.bufferedAmount < 1024 && Date.now() - seen <= 45000 && (host === undefined || hosts.get(client) === host)), revoke, dispose() {
     subscribers.delete(wake); clearInterval(heartbeat); server.off('upgrade', upgrade); revoke(); sockets.close();
   } };
 }

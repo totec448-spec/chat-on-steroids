@@ -17,6 +17,7 @@ import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import { userPromptText } from '../src/shared/user-prompt.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
 import { browserControl } from '../src/main/browser-control.js';
+import { cosSignInTransfer } from '../src/main/cos-browser/sign-in-transfer.js';
 import { foldProgress, type SessionEvent } from '../src/shared/session.js';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import type { SwarmSnapshot } from '../src/main/agents.js';
@@ -249,7 +250,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -261,6 +262,7 @@ function request(
   headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
   if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
   if (options.browser) headers['x-extension-browser'] = options.browser;
+  if (options.host) headers['x-extension-host'] = options.host;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -387,6 +389,7 @@ beforeEach(async () => {
   // just emptied — the previous test's cleanup showing up as the next test's first command.
   resetSwarm();
   resetBridgeForTests();
+  cosSignInTransfer.cancel();
   opened.length = 0;
   anonymousRedeemIndex = 0;
   // The app opens the chat itself, always: there is no queue for a tab to come and ask.
@@ -402,6 +405,44 @@ beforeEach(async () => {
 });
 
 // ------------------------------------------------------------------ origin
+
+describe('explicit CoS sign-in transfer over the paired bridge', () => {
+  const browser = 'signintestbrowser123456';
+  const cookie = { name: '__Secure-next-auth.session-token', value: 'synthetic-test-session', domain: '.chatgpt.com',
+    path: '/', secure: true, httpOnly: true, hostOnly: false, sameSite: 'lax' };
+  it('requires app intent, origin, authentication, protocol and an exact browser receipt', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const write = vi.fn(async () => {});
+    const offer = cosSignInTransfer.begin('brave', () => true, write);
+    const body = { id: offer.id, cookies: [cookie] };
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body, auth: null })).status).toBe(401);
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body, origin: 'https://chatgpt.com' })).status).toBe(403);
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body, protocol: 0 })).status).toBe(426);
+    expect((await request('POST', '/cos-browser/sign-in', { body })).status).toBe(400);
+    const status = await request('GET', '/cos-browser/sign-in');
+    expect(status.body).toEqual({ offer });
+    expect(JSON.stringify(status.body)).not.toContain(cookie.value);
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body: { ...body, cookies: [{ ...cookie, domain: '.google.com' }] } })).status).toBe(400);
+    expect(write).not.toHaveBeenCalled();
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body })).body).toEqual({ ok: true, imported: true });
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body })).status).toBe(200);
+    expect((await request('POST', '/cos-browser/sign-in', { browser: 'differentbrowser123456', body })).status).toBe(409);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+  it('rejects absent intent, disabled CoS and oversized transfers without writing', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const body = { id: randomUUID(), cookies: [cookie] };
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body })).status).toBe(409);
+    const write = vi.fn(async () => {});
+    const offer = cosSignInTransfer.begin('chrome', () => true, write);
+    expect((await request('POST', '/cos-browser/sign-in', { browser, raw: JSON.stringify({ id: offer.id, cookies: ['x'.repeat(100_000)] }) })).status).toBe(400);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'edge' } });
+    expect((await request('POST', '/cos-browser/sign-in', { browser, body: { ...body, id: offer.id } })).status).toBe(409);
+    expect(write).not.toHaveBeenCalled();
+  });
+});
 
 describe('direct browser control over the paired bridge', () => {
   it('recovers request-owned browser tabs only from exact server-side correlation, including a resumed session', async () => {
@@ -549,6 +590,133 @@ describe('who is allowed to talk to it', () => {
   it('binds a loopback port only', () => {
     expect(bridgePort()).toBeGreaterThan(0);
     expect(base.startsWith('http://127.0.0.1:')).toBe(true);
+  });
+
+  it('requires an explicitly external authenticated companion for external Setup presence', async () => {
+    await pair();
+    for (const host of ['cos', undefined, 'unknown']) {
+      await request('GET', '/status', { host });
+      expect((await bridgeStatus()).externalExtension).toBeNull();
+    }
+    await request('GET', '/hello', { host: 'browser', auth: null });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ version: APP_VERSION, present: false, lastSeenAt: null });
+    await request('GET', '/status', { host: 'browser', auth: 'wrong-token' });
+    expect((await bridgeStatus()).externalExtension?.present).toBe(false);
+    await request('GET', '/status', { host: 'browser' });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ version: APP_VERSION, present: true });
+    await request('GET', '/status', { host: 'cos', extensionVersion: '99.0.0' });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ version: APP_VERSION, present: true });
+    await unpair();
+    expect((await bridgeStatus()).externalExtension?.present).toBe(false);
+  });
+
+  it('retains an incompatible external version without granting presence', async () => {
+    const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
+    try {
+      expect((await request('POST', '/pair', { host: 'browser', extensionVersion: '0.0.1', protocol: 0 })).status).toBe(426);
+      // An incompatible peer leaves no lasting proof either.
+      expect((await bridgeStatus()).externalExtension).toEqual({ present: false, version: '0.0.1', lastSeenAt: null, signedIn: null, proof: null });
+      expect(changed).toHaveBeenCalled();
+    } finally { unsubscribe(); }
+  });
+
+  it('publishes external expiry while the CoS companion continues polling', async () => {
+    await pair();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
+    try {
+      await request('GET', '/status', { host: 'browser' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await request('GET', '/status', { host: 'cos' });
+      changed.mockClear();
+      await vi.advanceTimersByTimeAsync(30_002);
+      expect(changed).toHaveBeenCalled();
+      expect(await bridgeStatus()).toMatchObject({ present: true, externalExtension: { present: false } });
+      await request('GET', '/status', { host: 'browser' });
+      expect((await bridgeStatus()).externalExtension?.present).toBe(true);
+    } finally { unsubscribe(); vi.useRealTimers(); }
+  });
+
+  it('tells the CoS browser’s own extension apart and keeps external proof across a bridge restart', async () => {
+    await pair();
+    const browser = 'c'.repeat(32);
+    await request('GET', '/status', { host: 'cos' });
+    expect(await bridgeStatus()).toMatchObject({ cosExtension: { present: true }, externalExtension: null });
+    await request('POST', '/status', { host: 'browser', browser, body: { openConversations: [], chatGptSignedIn: true } });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, signedIn: true, proof: { version: APP_VERSION, signedIn: true } });
+    await stopBridge(); await startBridge();
+    base = `http://127.0.0.1:${bridgePort()}`;
+    // Presence needs a fresh sighting; what Setup proved does not.
+    expect(await bridgeStatus()).toMatchObject({ cosExtension: { present: false },
+      externalExtension: { present: false, signedIn: null, proof: { version: APP_VERSION, signedIn: true } } });
+    await pair();
+    await request('POST', '/status', { host: 'browser', browser, body: { openConversations: [], chatGptSignedIn: false } });
+    expect((await bridgeStatus()).externalExtension?.proof).toEqual({ version: APP_VERSION, signedIn: false });
+  });
+
+  it('hears an idle browser’s extension and its login through presence, without handing out work', async () => {
+    await pair();
+    const browser = 'd'.repeat(32);
+    const reply = await request('POST', '/browser/presence', { host: 'browser', browser, body: { chatGptSignedIn: false } });
+    expect(reply.status).toBe(200);
+    expect(reply.body).toEqual({ ok: true });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, signedIn: false, proof: { version: APP_VERSION, signedIn: false } });
+    await request('POST', '/browser/presence', { host: 'browser', browser, body: { chatGptSignedIn: true } });
+    expect((await bridgeStatus()).externalExtension?.proof).toEqual({ version: APP_VERSION, signedIn: true });
+    // The CoS browser's copy and unauthenticated callers say nothing about the person's browser.
+    await request('POST', '/browser/presence', { host: 'cos', browser, body: { chatGptSignedIn: false } });
+    await request('POST', '/browser/presence', { host: 'browser', browser, auth: 'wrong-token', body: { chatGptSignedIn: false } });
+    expect((await bridgeStatus()).externalExtension?.proof).toEqual({ version: APP_VERSION, signedIn: true });
+  });
+
+  it('counts an idle CoS companion as present through its own wake channel only', async () => {
+    await pair();
+    const connect = async (host: string) => {
+      const socket = new WebSocket(base.replace('http:', 'ws:') + `/wake?host=${host}`, { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+      return socket;
+    };
+    // No request at all: presence comes from the open channel alone.
+    const browser = await connect('browser');
+    try {
+      expect((await bridgeStatus()).cosExtension).toEqual({ present: false });
+      const cos = await connect('cos');
+      try { expect((await bridgeStatus()).cosExtension).toEqual({ present: true }); }
+      finally { const closed = once(cos, 'close'); cos.close(); await closed; }
+      await vi.waitFor(async () => expect((await bridgeStatus()).cosExtension).toEqual({ present: false }));
+    } finally { const closed = once(browser, 'close'); browser.close(); await closed; }
+  });
+
+  it('requires a fresh external sighting after a bridge restart', async () => {
+    await pair(); await request('GET', '/status', { host: 'browser' });
+    expect((await bridgeStatus()).externalExtension?.present).toBe(true);
+    await stopBridge(); await startBridge();
+    base = `http://127.0.0.1:${bridgePort()}`;
+    expect((await bridgeStatus()).externalExtension?.present).toBe(false);
+  });
+
+  it('reports external login only from its authenticated browser and expires the observation', async () => {
+    await pair();
+    const browser = randomUUID().replaceAll('-', '');
+    const body = { openConversations: [], chatGptSignedIn: true };
+    await request('POST', '/status', { host: 'browser', browser, body, auth: 'wrong-token' });
+    expect((await bridgeStatus()).externalExtension?.signedIn ?? null).toBeNull();
+    await request('POST', '/status', { host: 'browser', browser, body });
+    expect((await bridgeStatus()).externalExtension?.signedIn).toBe(true);
+    await request('POST', '/status', { host: 'cos', browser: randomUUID().replaceAll('-', ''), body: { ...body, chatGptSignedIn: false } });
+    expect((await bridgeStatus()).externalExtension?.signedIn).toBe(true);
+    await request('POST', '/status', { host: 'browser', browser, body: { ...body, chatGptSignedIn: false } });
+    expect((await bridgeStatus()).externalExtension?.signedIn).toBe(false);
+    await request('POST', '/status', { host: 'browser', browser, body });
+    await request('GET', '/status', { host: 'browser', browser: randomUUID().replaceAll('-', '') });
+    expect((await bridgeStatus()).externalExtension?.signedIn).toBeNull();
+    await request('POST', '/status', { host: 'browser', browser, body });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 61_000);
+      expect((await bridgeStatus()).externalExtension?.signedIn).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   // The suite binds ephemeral ports so it can never collide with the installed app, so the
@@ -699,7 +867,9 @@ describe('provisioning', () => {
   it('drops the token when the user disconnects the browser', async () => {
     await pair();
     expect((await request('GET', '/status')).status).toBe(200);
+    cosSignInTransfer.begin('edge', () => true, async () => {});
     await unpair();
+    expect(cosSignInTransfer.pending()).toBeNull();
     expect((await request('GET', '/status')).status).toBe(401);
   });
 

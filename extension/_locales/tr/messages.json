@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "Uygulama görevi kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
   },
+  "popup_sign_in_transfer": {
+    "message": "Oturumu CoS browser’a aktar"
+  },
+  "popup_sign_in_permission": {
+    "message": "Çerez erişimi reddedildi. Yeniden tıklayın."
+  },
+  "popup_sign_in_imported": {
+    "message": "Oturum aktarıldı"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "CoS browser’da oturum açtınız."
+  },
+  "popup_sign_in_failed": {
+    "message": "Başarısız. Oturum açmayı CoS üzerinden yeniden başlatın."
+  },
   "popup_app_not_running_help": {
     "message": "Chat On Steroids'in bu bilgisayarda açık olduğundan emin olun. Eklenti kendiliğinden bağlanır."
   }
