@@ -1867,7 +1867,7 @@ input[readonly] {
 .card.is-session:has(#timelineEmpty:not([hidden])) > h2, .card.is-session:has(#timelineEmpty:not([hidden])) > .subhead { visibility: hidden; }
 .card.is-session:has(#timelineEmpty:not([hidden])) #chatFoot { visibility: hidden; }
 /* One hairline for the input and every row stacked above it. */
-.card.is-session { position: relative; --welcome-resting-composer: calc(84px + 24px * var(--text-scale, 1)); --composer-edge: color-mix(in srgb, var(--ink) 6%, var(--card)); }
+.card.is-session { position: relative; container: chat-session / inline-size; --welcome-resting-composer: calc(84px + 24px * var(--text-scale, 1)); --composer-edge: color-mix(in srgb, var(--ink) 6%, var(--card)); }
 .card.is-session:has(> .composer:focus-within, > .composer-dock:focus-within) { --composer-edge: color-mix(in srgb, var(--ink) 8%, var(--card)); }
 .composer { --hover: color-mix(in srgb, var(--card) 88%, var(--ink)); --control-selected: color-mix(in srgb, var(--card) 94%, var(--ink)); --control-pressed: color-mix(in srgb, var(--card) 82%, var(--ink)); position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto 36px; align-content: end; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--composer-edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; }
 /* Keep the upstream resting optical center independent of a growing draft. */
@@ -3133,15 +3133,29 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .composer #createPlan[aria-pressed=true]:hover:not(:disabled) { color: var(--accent); background: color-mix(in srgb, var(--card) 66%, var(--accent)); }
 .composer .picker-chevron { width: 14px; height: 14px; flex: 0 0 14px; margin: 0; }
 .composer [open] > summary .picker-chevron { transform: rotate(270deg); }
-@media (max-width: 1000px) {
-  .card.is-session { --welcome-resting-composer: calc(128px + 24px * var(--text-scale, 1)); }
-  .composer { grid-template-columns: minmax(0, 1fr) minmax(0, auto) 36px; }
-  .composer .composer-primary-controls { grid-column: 1 / -1; }
-  .composer #contextMeter { grid-column: 1; grid-row: 3; justify-self: end; }
-  .composer #modelMenu { grid-column: 2; grid-row: 3; }
-  .composer .send-control { grid-column: 3; grid-row: 3; }
-  .composer:has(.composer-selected-skills:not([hidden]), #composerImages:not([hidden])) :is(#contextMeter, #modelMenu, .send-control) { grid-row: 4; }
-  .composer:has(.composer-selected-skills:not([hidden])):has(#composerImages:not([hidden])) :is(#contextMeter, #modelMenu, .send-control) { grid-row: 5; }
+/* The composer action bar never stacks. Measure the chat card rather than the app viewport: the
+   right work dock can make this column narrow even in a wide window. */
+@container chat-session (max-width: 650px) {
+  .composer { gap: 4px; }
+  .composer-primary-controls { gap: 1px; }
+  .composer #composerSettings > summary { gap: 4px; padding-inline: 6px; }
+  .composer #createPlan { gap: 4px; padding-inline: 6px; }
+  .composer #modelMenu { max-width: 112px; }
+  .composer #modelMenu > summary { gap: 3px; padding-inline: 5px; }
+}
+@container chat-session (max-width: 520px) {
+  .composer { width: calc(100% - 24px); padding-inline: 8px; gap: 3px; grid-template-columns: minmax(0, 1fr) auto minmax(0, 84px) 36px; }
+  .composer-primary-controls { gap: 0; }
+  .composer #attachmentMenu > summary,
+  .composer #composerSettings > summary,
+  .composer #createPlan { width: 32px; padding: 0; }
+  #composerModeLabel,
+  #composerSettings > summary .picker-chevron,
+  #createPlan > span,
+  #contextMeterCompact { display: none; }
+  .composer #contextMeterButton { width: 28px; padding: 0; }
+  .composer #modelMenu { width: 84px; max-width: 84px; }
+  .composer #modelMenu > summary { gap: 2px; padding-inline: 4px; }
 }
 
 html[data-theme="dark"] { color-scheme: dark; }
