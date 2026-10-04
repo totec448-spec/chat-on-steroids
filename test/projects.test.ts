@@ -8,6 +8,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
 import { addProject, addProjectFolder, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from '../src/main/projects.js';
+import { createProjectChatFolder, listProjectChatFolders, removeProjectChatFolder, renameProjectChatFolder, setSessionChatFolder } from '../src/main/project-chat-folders.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -140,6 +141,107 @@ it('retains project ownership through restart, resume and exact worker origins',
   const stale = await createSession({ title: 'Stale source' });
   await inheritSessionProject(stale.id, 'prime-original');
   expect((await getSession(stale.id))?.projectId).toBeUndefined();
+});
+
+it('keeps chat-folder membership on the durable local session across restart and resume', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Grouped chat', conversationId: 'grouped-before-resume' });
+  await assignSessionProject(session.id, project.id);
+  const workspace = await getSessionProject(session.id);
+
+  const created = await createProjectChatFolder(project.id, 'Language study');
+  const folder = created.folders[0]!;
+  expect(created.assignments).toEqual({});
+  expect((await setSessionChatFolder(project.id, session.id, folder.id)).assignments).toEqual({ [session.id]: folder.id });
+  expect(await rebindSession(session.id, 'grouped-before-resume', 'grouped-after-resume')).toBe(true);
+
+  resetDurableForTests(); initDurableStore(directory); resetSessionStoreForTests();
+  expect(await listProjectChatFolders()).toEqual([{ projectId: project.id, folders: [folder], assignments: { [session.id]: folder.id } }]);
+  expect(await getSessionProject(session.id)).toEqual(workspace);
+
+  const renamed = await renameProjectChatFolder(project.id, folder.id, 'Languages');
+  expect(renamed.folders[0]).toMatchObject({ id: folder.id, name: 'Languages' });
+  expect((await setSessionChatFolder(project.id, session.id, null)).assignments).toEqual({});
+  expect((await removeProjectChatFolder(project.id, folder.id)).folders).toEqual([]);
+  expect((await getSession(session.id))?.conversationId).toBe('grouped-after-resume');
+  expect(await getSessionProject(session.id)).toEqual(workspace);
+});
+
+it('rejects chat-folder assignments outside the exact project and keeps workers with their parent', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const prime = await createSession({ title: 'Prime', conversationId: 'folder-prime' });
+  await assignSessionProject(prime.id, project.id);
+  const foreign = await createSession({ title: 'Foreign', conversationId: 'folder-foreign' });
+  await assignSessionProject(foreign.id, other.id);
+  const worker = await createSession({
+    title: 'Worker', conversationId: 'folder-worker',
+    origin: { kind: 'worker', fromSessionId: prime.id, agentId: 'worker-1', task: 'Inspect' }
+  });
+  const folder = (await createProjectChatFolder(project.id, 'Related')).folders[0]!;
+
+  await expect(setSessionChatFolder(project.id, foreign.id, folder.id)).rejects.toThrow(/does not belong/);
+  await expect(setSessionChatFolder(project.id, worker.id, folder.id)).rejects.toThrow(/parent chat/);
+  await expect(setSessionChatFolder(project.id, prime.id, randomUUID())).rejects.toThrow(/folder not found/i);
+  expect((await listProjectChatFolders())[0]?.assignments).toEqual({});
+});
+
+it('rejects assignment overflow before writing and still permits moves and clears at capacity', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const existing = await createSession({ title: 'Already grouped' });
+  const extra = await createSession({ title: 'Next chat' });
+  await assignSessionProject(existing.id, project.id);
+  await assignSessionProject(extra.id, project.id);
+  await createProjectChatFolder(project.id, 'First');
+  const state = await createProjectChatFolder(project.id, 'Second');
+  const [first, second] = state.folders;
+  state.assignments = Object.fromEntries([
+    [existing.id, first!.id],
+    ...Array.from({ length: 9_999 }, (_, index) => [`historical-${index}`, first!.id])
+  ]);
+  await writeDurableNow('project-chat-folders', [state]);
+  const file = path.join(directory, 'state', 'project-chat-folders.json');
+  const before = await fs.readFile(file, 'utf8');
+  expect(await listProjectChatFolders()).toEqual([state]);
+
+  const failure = await setSessionChatFolder(project.id, extra.id, first!.id).then(() => null, error => error);
+  expect(failure).toBeInstanceOf(Error);
+  expect(failure.message).toMatch(/limit|invalid/i);
+  expect(await fs.readFile(file, 'utf8')).toBe(before);
+  expect(await listProjectChatFolders()).toEqual([state]);
+
+  const moved = await setSessionChatFolder(project.id, existing.id, second!.id);
+  expect(Object.keys(moved.assignments)).toHaveLength(10_000);
+  expect(moved.assignments[existing.id]).toBe(second!.id);
+  const cleared = await setSessionChatFolder(project.id, existing.id, null);
+  expect(Object.keys(cleared.assignments)).toHaveLength(9_999);
+  const admitted = await setSessionChatFolder(project.id, extra.id, first!.id);
+  expect(Object.keys(admitted.assignments)).toHaveLength(10_000);
+  expect(admitted.assignments[extra.id]).toBe(first!.id);
+});
+
+it('rejects a 201st chat-folder project before writing without blocking existing project edits', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const extra = await addProject(path.join(approved, 'second'));
+  const state = await createProjectChatFolder(project.id, 'Current');
+  const catalog = [state, ...Array.from({ length: 199 }, () => ({
+    projectId: randomUUID(), folders: [{ id: randomUUID(), name: 'Historical', createdAt: 1 }], assignments: {}
+  }))];
+  await writeDurableNow('project-chat-folders', catalog);
+  const file = path.join(directory, 'state', 'project-chat-folders.json');
+  const before = await fs.readFile(file, 'utf8');
+
+  const failure = await createProjectChatFolder(extra.id, 'Overflow').then(() => null, error => error);
+  expect(failure).toBeInstanceOf(Error);
+  expect(failure.message).toMatch(/limit|invalid/i);
+  expect(await fs.readFile(file, 'utf8')).toBe(before);
+  expect(await listProjectChatFolders()).toEqual(catalog);
+  await renameProjectChatFolder(project.id, state.folders[0]!.id, 'Renamed');
+  expect(await listProjectChatFolders()).toHaveLength(200);
+  await removeProjectChatFolder(project.id, state.folders[0]!.id);
+  expect(await listProjectChatFolders()).toHaveLength(199);
+  expect((await createProjectChatFolder(extra.id, 'Admitted')).folders[0]?.name).toBe('Admitted');
+  expect(await listProjectChatFolders()).toHaveLength(200);
 });
 
 it('fails closed when explicit project permission is removed and follows approved root renames', async () => {

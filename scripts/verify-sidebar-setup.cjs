@@ -35,13 +35,20 @@ app.whenReady().then(async () => {
       update:{current:'2.0.9',latest:null,stage:'idle',error:null,checkedAt:null}};
     const project = {id:'demo-project',name:'VideoClipper',path:'C:/demo',additionalPaths:['C:/shared'],createdAt:1};
     const projects = [project, {id:'second-project',name:'Documentation',path:'C:/docs',createdAt:2}];
+    let chatFolderStates=[]; let chatFolderSerial=0;
     const rows = Array.from({length:22},(_,i)=>({id:'task-'+i,title:'Project chat '+(i+1),projectId:project.id,
       conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:100-i,endedAt:2,events:0,userMessages:0,
       toolCalls:0,lastToolCallAt:null,processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,
       estimatedTokens:0,contextTokens:0,lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:null,activeTurnId:null,agents:[],origin:null}));
+    rows.push({...rows[0],id:'worker-child',title:'Worker child',conversationId:'worker-chat',chatIds:['worker-chat'],updatedAt:99.5,
+      origin:{kind:'worker',fromSessionId:'task-1',agentId:'worker-1',task:'Fixture worker'}});
     const ok=data=>Promise.resolve({ok:true,data});
     window.api = new Proxy({ getState:()=>ok(state),getLog:()=>ok([]),
-      listProjects:()=>ok(projects),listSessions:()=>ok({sessions:rows,total:22,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      listProjects:()=>ok(projects),listProjectChatFolders:()=>ok(chatFolderStates),listSessions:()=>ok({sessions:rows,total:23,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      createProjectChatFolder:(projectId,name)=>{const state={projectId,folders:[{id:'chat-folder-'+(++chatFolderSerial),name,createdAt:Date.now()}],assignments:{}};chatFolderStates=[...chatFolderStates.filter(row=>row.projectId!==projectId),state];return ok(state)},
+      renameProjectChatFolder:(projectId,folderId,name)=>{const state=chatFolderStates.find(row=>row.projectId===projectId);state.folders=state.folders.map(folder=>folder.id===folderId?{...folder,name}:folder);return ok({...state,assignments:{...state.assignments}})},
+      removeProjectChatFolder:(projectId,folderId)=>{const state=chatFolderStates.find(row=>row.projectId===projectId);state.folders=state.folders.filter(folder=>folder.id!==folderId);state.assignments=Object.fromEntries(Object.entries(state.assignments).filter(([,value])=>value!==folderId));return ok({...state,assignments:{...state.assignments}})},
+      setSessionChatFolder:(projectId,sessionId,folderId)=>{const state=chatFolderStates.find(row=>row.projectId===projectId);if(folderId)state.assignments[sessionId]=folderId;else delete state.assignments[sessionId];return ok({...state,assignments:{...state.assignments}})},
       getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]}),
       saveSettings:patch=>{state.config={...state.config,...patch};return ok(state)},
@@ -57,8 +64,12 @@ app.whenReady().then(async () => {
     const still=document.createElement('style'); still.textContent='*,*::before,*::after{animation:none!important;transition:none!important}'; document.head.append(still);
     window.fixtureReady=true;
   `;
+  // A worktree may share node_modules through a junction. Serve only these two pinned font
+  // files outside the fixture root; do not disable Vite's filesystem boundary or expose a parent.
+  const fontFiles = [['regular','Phosphor.woff2'],['fill','Phosphor-Fill.woff2']].map(([family,file]) =>
+    fs.realpathSync(path.join(path.dirname(require.resolve('@phosphor-icons/web/'+family)),file)));
   const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'),
-    server:{host:'127.0.0.1',port:0}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
+    server:{host:'127.0.0.1',port:0,fs:{allow:[root,...fontFiles]}}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request,response) => {
         const source = fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8')
           .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>', '<script type="module">'+fixture+'</script></body>');
@@ -78,6 +89,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     };
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group > .sess").length === 5'));i++) await new Promise(r=>setTimeout(r,25));
+    const iconFonts = await js(`(async () => {
+      await document.fonts.ready;
+      return { faces:[...document.fonts].filter(face=>face.family.includes('CoS Phosphor')).map(face=>({family:face.family,status:face.status})),
+        resources:performance.getEntriesByType('resource').filter(entry=>entry.name.includes('.woff')).map(entry=>({url:entry.name,status:entry.responseStatus})) };
+    })()`);
+    assert.ok(iconFonts.faces.length===2 && iconFonts.faces.every(face=>face.status==='loaded'),
+      'Sidebar icon font did not load: '+JSON.stringify(iconFonts));
     await js(`window.disclosureEvents=[]; for(const type of ['keydown','keypress','keyup','click']) document.addEventListener(type,e=>window.disclosureEvents.push({type,key:e.key,tag:e.target.tagName,cls:e.target.className,open:document.querySelector('.project-group')?.open}),true)`);
     // Project groups start closed. Exercise native summary activation before the
     // existing visible-row geometry, drag ordering and pagination checks.
@@ -100,7 +118,8 @@ app.whenReady().then(async () => {
         primaryRemove:!!rows[0].querySelector('.project-folder-remove'), removeCount:group.querySelectorAll('.project-folder-remove').length,
         removeLabel:group.querySelector('.project-folder-remove')?.getAttribute('aria-label')??'',
         addLabel:group.querySelector('.project-folder-add')?.getAttribute('aria-label')??'' }; })()`);
-    assert.deepEqual(folders.paths,['C:/demo','C:/shared']); assert.deepEqual(folders.roles,['listitem','listitem']);
+    assert.deepEqual(folders.paths,['C:/demo','C:/shared'],'Project folder paths: '+JSON.stringify(folders));
+    assert.deepEqual(folders.roles,['listitem','listitem'],'Project folder roles: '+JSON.stringify(folders));
     assert.equal(folders.primaryRemove,false); assert.equal(folders.removeCount,1);
     assert.match(folders.removeLabel,/C:\/shared/); assert.match(folders.addLabel,/VideoClipper/);
     await js(`document.querySelector('.project-heading').focus()`);
@@ -121,15 +140,33 @@ app.whenReady().then(async () => {
     assert.equal(geometry.color,'rgb(255, 255, 255)'); assert.equal(geometry.icon,'ph-pencil-simple');
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     await new Promise(r=>setTimeout(r,200));
-    const points=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
+    await js(`(() => {
+      window.nativeDragTrace=[];
+      for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture']) document.addEventListener(type,event=>{
+        if(window.nativeDragTrace.length<10)window.nativeDragTrace.push({type,button:event.button,buttons:event.buttons,primary:event.isPrimary,trusted:event.isTrusted,id:event.target.closest?.('[data-sort-scope]')?.dataset.id,x:event.clientX,y:event.clientY});
+      },true);
+    })()`);
+    const dragFocus={window:win.isFocused(),contents:win.webContents.isFocused(),visible:win.isVisible(),document:await js('document.hasFocus()')};
+    const points=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.querySelector('.sess-top').getBoundingClientRect();return {x:Math.round(r.left+25),y:Math.round(r.top+r.height/2)}})`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...points[0]});
-    await new Promise(r=>setTimeout(r,25));
-    win.webContents.sendInputEvent({type:'mouseMove',...points[2],y:points[2].y+12});
-    await new Promise(r=>setTimeout(r,40));
-    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...points[2],y:points[2].y+12});
-    await new Promise(r=>setTimeout(r,40));
+    // Activate pointer capture first, then measure the live drop target. Exposed folder actions
+    // can change row heights; pre-gesture coordinates are not the later visible target.
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],x:points[0].x,y:points[0].y+7});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const dropPoint=await js(`(() => {const r=document.querySelector('.project-group > [data-id="task-2"]').getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2+12)}})()`);
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],...dropPoint});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const dropGeometry=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.getBoundingClientRect();return {id:row.dataset.id,scope:row.dataset.sortScope,top:r.top,height:r.height,classes:row.className}})`);
+    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...dropPoint});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const dragTrace=await js('window.nativeDragTrace');
+    assert.ok(dragTrace.some(event=>event.type==='pointerdown' && event.buttons===1 && event.id==='task-0' && event.trusted),
+      'Native drag must press the first row: '+JSON.stringify({dragTrace,dragFocus}));
+    assert.ok(dragTrace.some(event=>event.type==='pointermove' && event.buttons===1 && event.trusted),
+      'Native drag must keep its button pressed while moving: '+JSON.stringify({dragTrace,dragFocus}));
     const moved=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>row.dataset.id)`);
-    assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4']);
+    assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4'],
+      'Native chat drag: '+JSON.stringify({moved,points,dropPoint,dropGeometry,dragTrace,dragFocus}));
     assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
     await new Promise(r=>setTimeout(r,200));
     await screenshot('sidebar.png');
@@ -140,6 +177,60 @@ app.whenReady().then(async () => {
     win.webContents.setZoomFactor(1);
     await js(`document.querySelector('.project-show-more').click()`);
     assert.equal(await js(`document.querySelectorAll('.project-group > .sess').length`),13);
+    await js(`{const button=document.querySelector('.project-chat-folder-add');button.focus();button.click()}`);
+    assert.equal(await js(`document.getElementById('chatFolderDialog')?.open`),true);
+    await js(`document.querySelector('#chatFolderDialog input').value='Research';document.querySelector('#chatFolderDialog form').requestSubmit()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Research'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder-name')?.textContent`),'Research');
+    assert.equal(await js(`document.activeElement?.dataset.sidebarFocus`),'chat-folder-add:demo-project');
+    const moveControl = await js(`(() => { const select=document.querySelector('.project-group > .sess .sess-folder-select'); return {label:select?.getAttribute('aria-label'), options:[...select.options].map(option=>option.textContent)}; })()`);
+    assert.match(moveControl.label,/folder/i); assert.deepEqual(moveControl.options,['Project root','Research']);
+    await js(`(() => {
+      const select=document.querySelector('.project-group > .sess .sess-folder-select');
+      select.closest('.sess').querySelector('.sess-top').focus();select.focus();
+      if(document.activeElement!==select)throw new Error('Move control must have keyboard focus before the change');
+      select.value='chat-folder-1';select.dispatchEvent(new Event('change',{bubbles:true}));
+    })()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder .sess')?.dataset.id==='task-1'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder .sess')?.dataset.id`),'task-1');
+    assert.equal(await js(`document.activeElement?.classList.contains('sess-folder-select')`),true);
+    await js(`document.querySelector('.project-chat-folder .worker-toggle').click()`);
+    assert.equal(await js(`document.querySelector('.project-chat-folder .worker-group .sess')?.dataset.id`),'worker-child');
+    assert.equal(await js(`document.querySelector('.project-chat-folder .worker-group .sess-folder-select')===null`),true);
+    const folderRow = await js(`(() => {
+      const row=document.querySelector('.project-chat-folder > .sess');
+      const title=row.querySelector('.sess-top b'), actions=row.querySelector('.sess-actions');
+      const titleBounds=title.getBoundingClientRect(), actionBounds=actions.getBoundingClientRect(), bounds=row.getBoundingClientRect();
+      return {titleWidth:title.clientWidth,titleContent:title.scrollWidth,titleBottom:titleBounds.bottom,actionsTop:actionBounds.top,actionsRight:actionBounds.right,rowRight:bounds.right};
+    })()`);
+    assert.ok(folderRow.titleWidth>=Math.min(folderRow.titleContent,120),'Folder controls must leave the chat title readable: '+JSON.stringify(folderRow));
+    assert.ok(folderRow.actionsTop>=folderRow.titleBottom-1,'Folder actions belong below the title');
+    assert.ok(folderRow.actionsRight<=folderRow.rowRight+1,'Folder actions must remain inside the row');
+    await screenshot('chat-folders.png');
+    await js(`{const button=document.querySelector('.project-chat-folder-action');button.focus();button.click()}`);
+    await js(`document.querySelector('#chatFolderDialog input').value='Sources';document.querySelector('#chatFolderDialog form').requestSubmit()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Sources'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder-name')?.textContent`),'Sources');
+    assert.match(await js(`document.activeElement?.dataset.sidebarFocus??''`),/^chat-folder-rename:/);
+    await js(`(() => {
+      const select=document.querySelector('.project-chat-folder .sess-folder-select');
+      select.closest('.sess').querySelector('.sess-top').focus();select.focus();
+      if(document.activeElement!==select)throw new Error('Move control must have keyboard focus before the change');
+      select.value='';select.dispatchEvent(new Event('change',{bubbles:true}));
+      document.getElementById('newChat').focus();
+    })()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-group > .sess')?.dataset.id==='task-1'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.activeElement?.id`),'newChat');
+    await js(`{const button=document.querySelectorAll('.project-chat-folder-action')[1];button.focus();button.click()}`);
+    for(let i=0;i<100 && (await js(`document.querySelector('.project-chat-folder')!==null`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder')===null`),true);
+    assert.equal(await js(`document.activeElement?.dataset.sidebarFocus`),'chat-folder-add:demo-project');
+    assert.equal(await js(`document.querySelector('.project-group > .sess')?.dataset.id`),'task-1');
+    await js(`document.querySelector('.project-chat-folder-add').click();document.querySelector('#chatFolderDialog input').value='Temporary';document.querySelector('#chatFolderDialog form').requestSubmit()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Temporary'`));i++) await new Promise(r=>setTimeout(r,10));
+    await js(`{const button=document.querySelectorAll('.project-chat-folder-action')[1];button.focus();button.click();document.getElementById('newChat').focus()}`);
+    for(let i=0;i<100 && (await js(`document.querySelector('.project-chat-folder')!==null`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.activeElement?.id`),'newChat');
     await js(`document.querySelector('[data-tab="setup"]').click(); document.getElementById('wizExpand').click()`);
     assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),true);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`),true);
@@ -223,7 +314,7 @@ app.whenReady().then(async () => {
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     const projectPoints = await js(`[...document.querySelectorAll('.project-heading')].map(heading=>{const r=heading.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...projectPoints[1]});
-    win.webContents.sendInputEvent({type:'mouseMove',...projectPoints[0],y:projectPoints[0].y-8});
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],...projectPoints[0],y:projectPoints[0].y-8});
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...projectPoints[0],y:projectPoints[0].y-8});
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     const projectOrder = `[...document.querySelectorAll('.project-group')].map(group=>group.dataset.projectId)`;
@@ -244,4 +335,8 @@ app.whenReady().then(async () => {
     await screenshot('project-order-restored.png');
     console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,projectOrder:{pointer:true,keyboard:true,restored:true},showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
-}).catch(error=>{console.error(error);app.exit(1)});
+}).catch(error=>{
+  // Keep the actual assertion values in the bounded CI summary, which otherwise prints [Array].
+  console.error('UI assertion error: '+JSON.stringify({message:error.message,actual:error.actual,expected:error.expected,stack:error.stack?.split('\n').slice(0,4)}));
+  app.exit(1);
+});

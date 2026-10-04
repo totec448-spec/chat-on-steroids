@@ -72,6 +72,7 @@ import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, addProjectFolder, getProject, getSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from './projects.js';
+import { createProjectChatFolder, listProjectChatFolders, removeProjectChatFolder, renameProjectChatFolder, setSessionChatFolder } from './project-chat-folders.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -845,6 +846,33 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const project = await removeProjectFolder(id, folder);
     push('session:changed');
     return project;
+  });
+  handle('projectChatFolders:list', () => listProjectChatFolders());
+  handle('projectChatFolders:create', async payload => {
+    const { projectId, name } = z.object({ projectId: z.string().uuid(), name: z.string().min(1).max(80) }).strict().parse(payload);
+    const state = await createProjectChatFolder(projectId, name);
+    push('session:changed');
+    return state;
+  });
+  handle('projectChatFolders:rename', async payload => {
+    const { projectId, folderId, name } = z.object({ projectId: z.string().uuid(), folderId: z.string().uuid(), name: z.string().min(1).max(80) }).strict().parse(payload);
+    const state = await renameProjectChatFolder(projectId, folderId, name);
+    push('session:changed');
+    return state;
+  });
+  handle('projectChatFolders:remove', async payload => {
+    const { projectId, folderId } = z.object({ projectId: z.string().uuid(), folderId: z.string().uuid() }).strict().parse(payload);
+    const state = await removeProjectChatFolder(projectId, folderId);
+    push('session:changed');
+    return state;
+  });
+  handle('projectChatFolders:setSession', async payload => {
+    const { projectId, sessionId, folderId } = z.object({
+      projectId: z.string().uuid(), sessionId: z.string().min(1).max(80), folderId: z.string().uuid().nullable()
+    }).strict().parse(payload);
+    const state = await setSessionChatFolder(projectId, sessionId, folderId);
+    push('session:changed');
+    return state;
   });
 
   // A folder dropped onto the Folders card. The renderer never sees a system path itself:

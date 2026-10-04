@@ -1979,6 +1979,11 @@ input[readonly] {
 .sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
 .sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
 .sess-action { padding: 3px; border: 0; background: transparent; }
+.sess:has(> .sess-actions > .sess-folder-select):is(:hover, :focus-within) { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+.sess:has(> .sess-actions > .sess-folder-select) > .sess-top { grid-column: 1; grid-row: 1; }
+.sess:has(> .sess-actions > .sess-folder-select) > .worker-toggle { grid-column: 2; grid-row: 1; }
+.sess:has(> .sess-actions > .sess-folder-select) > .sess-actions { grid-column: 1 / -1; grid-row: 2; margin-left: 0; min-width: 0; }
+.sess-folder-select { flex: 1; min-width: 0; height: 25px; padding: 2px 5px; border: 1px solid var(--edge); border-radius: 6px; background: var(--sunk); color: var(--ink); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
 .sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
@@ -3317,6 +3322,18 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .project-folder-remove:hover:not(:disabled) { color: var(--ink); }
 .project-folder-add { justify-self: start; min-height: 26px; padding: 3px 7px; gap: 5px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 .project-folder-add .ico { --ico: 12px; }
+.project-chat-folder-tools { margin: 0 8px 5px 24px; }
+.project-chat-folder-add { min-height: 26px; padding: 3px 7px; gap: 5px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.project-chat-folder-add .ico { --ico: 12px; }
+.project-chat-folder { margin: 5px 8px 5px 24px; padding-inline-start: 8px; border-inline-start: 1px solid var(--line); }
+.project-chat-folder-head { display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.project-chat-folder-head > .ico { --ico: 13px; color: var(--faint); }
+.project-chat-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-chat-folder-action { display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; color: var(--faint); opacity: 0; }
+.project-chat-folder-head:hover .project-chat-folder-action, .project-chat-folder-head:focus-within .project-chat-folder-action { opacity: 1; }
+.project-chat-folder > .sess, .project-chat-folder > .worker-group { margin-inline-start: 4px; }
+.chat-folder-dialog { width: min(420px, calc(100vw - 40px)); }
+.chat-folder-dialog .plugin-actions { display: flex; justify-content: flex-end; gap: 8px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
