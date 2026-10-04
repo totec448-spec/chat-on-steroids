@@ -1623,6 +1623,25 @@ describe('active agent tab discard protection', () => {
     }
   });
 
+  it('relays a page bootstrap step to the app by name and id only (#882)', async () => {
+    const steps: unknown[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/commands/step') { steps.push(JSON.parse(String(init?.body || '{}'))); return response(200, { ok: true }); }
+        return response(200, { ok: true, repairs: [] });
+      })
+    });
+    await worker.createTab({ id: 41, url: 'https://chatgpt.com/?clf=cmd-steps' });
+    await worker.registerTab(41);
+    expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model', text: 'never forwarded' }, 41))
+      .toEqual({ ok: true });
+    expect(steps).toEqual([{ id: 'cmd-steps', client: 'doc-1', step: 'model' }]);
+  });
+
   it('protects a newly created input tab until its conversation binds', async () => {
     const inputId = 'ffffffff-1111-4222-8333-444444444444';
     const session = new FakeStorageArea();
