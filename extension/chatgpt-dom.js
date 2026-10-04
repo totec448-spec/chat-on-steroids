@@ -1805,6 +1805,39 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /**
+   * The closing sentence every worker wake ends with (src/main/agents.ts planRevivalText), compared
+   * without whitespace: ProseMirror's textContent drops the paragraph break before it.
+   */
+  const REVIVAL_RESIDUE = new RegExp('\\(ChatOnSteroids:youarestill[A-Za-z0-9_-]{1,40}inthesamerun,' +
+    'andthisistheprimeagenttalkingtoyouagaininthechatyoualreadyknow\\.' +
+    'Pickupfromwhatyoudidherebeforeratherthanstartingover\\.' +
+    'Reportwithagentsaction=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
+
+  /**
+   * Empties an editor that holds only an earlier worker wake (#882).
+   *
+   * ChatGPT keeps unsent editor text as the chat's draft and restores it when the chat opens
+   * again. A wake whose Send never landed therefore came back in every reopened worker tab, and
+   * each later wake waited for an empty editor until its deadline: "the browser did not claim
+   * this command", then the worker failed. Only text that ends with the app's own wake sentence
+   * is reclaimed; anything a person added after it, an attachment, or a busy page keeps it.
+   */
+  function clearRevivalResidue() {
+    return safe(() => {
+      const box = composer();
+      if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
+      const text = String(box.textContent || '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+      if (!text || !REVIVAL_RESIDUE.test(text)) return false;
+      box.focus();
+      const selection = document.getSelection();
+      if (!selection || document.activeElement !== box) return false;
+      selection.selectAllChildren(box);
+      document.execCommand('delete', false);
+      return (box.textContent || '').trim() === '';
+    }, false);
+  }
+
   /** A visible editor can still be read-only while the provider mounts or changes models. */
   function composerWritable() {
     const box = composer();
@@ -3202,6 +3235,7 @@ var CLF_DOM = (() => {
     errors,
     composer,
     composerSubmitReady,
+    clearRevivalResidue,
     composerWritable,
     composerBox,
     pageTheme,
