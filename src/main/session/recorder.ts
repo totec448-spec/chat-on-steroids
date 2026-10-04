@@ -627,11 +627,6 @@ export function sessionIdForConversation(conversationId: string | null): string 
   return conversations.get(conversationId)?.sessionId ?? null;
 }
 
-/** The unattributed stream, when one has been created. Shown as its own row in the UI. */
-export function unattributedSession(): string | null {
-  return unattributedSessionId;
-}
-
 /**
  * `activeTurnId` is the generation id of the turn this conversation currently has open, or
  * null. It exists so a reloaded content script can adopt the turn it is standing in the
@@ -850,19 +845,6 @@ function noteCallEvidence(
     }
   }
   return stored;
-}
-
-/**
- * The chat a recorded session belongs to, when exactly one live chat is writing to it.
- *
- * Used by compaction to find the workspace of the chat being compacted, which it otherwise
- * has no way to name: a compaction request identifies a session, and the mapping only runs
- * the other way. Ambiguity is answered with null rather than a pick, for the same reason it
- * is everywhere else in the workspace code.
- */
-export function soleConversationForSession(sessionId: string): string | null {
-  const owners = [...conversations.values()].filter((entry) => entry.sessionId === sessionId);
-  return owners.length === 1 ? owners[0]!.conversationId : null;
 }
 
 export function freshCallOrigin(tool: string, after: number, requestId: string | null = null): string | null {
@@ -2594,6 +2576,7 @@ export async function recordAgentMessage(
       messageId: message.id,
       from: message.from,
       to: message.to,
+      ...(message.fromRunId ? { fromRunId: message.fromRunId } : {}),
       message: await storeText(sessionId, message.text, MAX_MESSAGE_CHARS),
       delivery
     });
@@ -2781,10 +2764,6 @@ export function resetRecorderForTests(): void {
     notifyTimer = null;
     changedSessions.clear();
   }
-}
-
-export function markSessionActive(sessionId: string): void {
-  lastActiveSessionId = sessionId;
 }
 
 export type { SessionSummary, SessionEvent };

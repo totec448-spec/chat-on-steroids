@@ -1,7 +1,7 @@
 name: PRs waiting on their author
 
-# Once a day: a contributor PR that has waited 10 quiet days on an answer or a fix gets one friendly
-# reminder, and is closed 7 days later if still nothing happens. Any push or reply resets the clock,
+# Once a day: a contributor PR that has waited 3 quiet days on an answer or a fix gets one friendly
+# reminder, and is closed 3 days later if still nothing happens. Any push or reply resets the clock,
 # and a closed PR can be reopened at any time. Drafts, bots and maintainers' own PRs are never touched.
 on:
   schedule:

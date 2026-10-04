@@ -51,6 +51,29 @@ it.each(languages)('restores %s and synchronizes accessible setup flags, setting
   expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe(locale);
 });
 
+it.each([
+  [['de-DE', 'de'], 'de'], [['zh-Hant-TW'], 'zh-TW'], [['zh-HK'], 'zh-TW'], [['zh-CN'], 'zh-CN'], [['zh'], 'zh-CN'],
+  [['pt-PT'], 'pt-PT'], [['pt-BR'], 'pt-BR'], [['pt'], 'pt-BR'], [['nl-NL', 'fr-FR'], 'fr'], [['nl', 'sv'], 'en'],
+  [['en-GB', 'de-DE'], 'en'], [['ja-JP'], 'ja'], [[], 'en']
+] as const)('maps system languages %j to %s', async (preferred, expected) => {
+  const { systemLanguage } = await import('../src/renderer/i18n.js');
+  expect(systemLanguage(preferred)).toBe(expected);
+});
+
+it('starts in the system language until a language is chosen, and a saved choice wins', async () => {
+  vi.spyOn(dom.window.navigator, 'languages', 'get').mockReturnValue(['de-DE', 'de']);
+  const first = await import('../src/renderer/i18n.js');
+  first.initLanguage();
+  expect(first.currentLanguage()).toBe('de');
+  expect(document.documentElement.lang).toBe('de');
+  expect(document.querySelector('.setup-heading h1')!.textContent).toBe(catalogs.de!.Setup);
+  // Following the system writes nothing: a later system change still applies until someone chooses.
+  expect(window.localStorage.getItem('cos.ui.language')).toBeNull();
+  window.localStorage.setItem('cos.ui.language', 'en');
+  vi.resetModules();
+  expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
+});
+
 it('defaults to English, rejects unsupported variants and switches even when storage fails', async () => {
   expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
   expect(window.localStorage.getItem('cos.ui.language')).toBeNull();
@@ -70,6 +93,38 @@ it('defaults to English, rejects unsupported variants and switches even when sto
   expect(t('unknown /Save/<img src=x>')).toBe('unknown /Save/<img src=x>');
 });
 
+it.each([
+  ['fr', /compétences?/iu], ['ja', /スキル/u], ['ko', /스킬/u], ['tr', /beceri/iu],
+  ['vi', /kỹ năng/iu], ['zh-CN', /技能/u], ['zh-TW', /技能/u]
+] as const)('uses the Skills page terminology in all four routing strings for %s', (locale, term) => {
+  const catalog = catalogs[locale];
+  if (!catalog) throw new Error(`Missing routing locale: ${locale}`);
+  expect(catalog.Skills).toMatch(term);
+  for (const key of [
+    'Choose whether imported Skills can be matched to ordinary messages.',
+    'Auto-select Skills',
+    'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.',
+    'Auto-selected Skill: /{0}'
+  ]) {
+    expect(catalog[key], `${locale}: ${key}`).toMatch(term);
+    expect(catalog[key], `${locale}: ${key}`).not.toMatch(/\bskills?\b/iu);
+  }
+});
+
+it.each(languages)('explains exact-name Skill routing rather than topic matching in %s', async locale => {
+  const source = 'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.';
+  const input = document.getElementById('autoSelectSkills') as HTMLInputElement;
+  const hint = input.closest('.setting')!.querySelector('em')!;
+  expect(hint.textContent).toBe(source);
+  expect(input.checked).toBe(false);
+  if (locale !== 'en') expect(catalogs[locale]).toHaveProperty(source);
+  const { initLanguage, setLanguage } = await import('../src/renderer/i18n.js');
+  initLanguage(); setLanguage(locale);
+  expect(hint.textContent).toBe(catalogs[locale]?.[source] ?? source);
+  expect(document.getElementById('autoSelectSkills')).toBe(input);
+  expect(input.checked).toBe(false);
+});
+
 it('translates known IPC failures and keeps provider errors and successful replies literal', async () => {
   window.localStorage.setItem('cos.ui.language', 'ja');
   const { run } = await import('../src/renderer/dom.js');
@@ -87,21 +142,6 @@ it('preserves nested translated duration arguments in Turkish', async () => {
   const { setLanguage, t } = await import('../src/renderer/i18n.js');
   setLanguage('tr');
   expect(t('{0} for {1}{2}s', [t('Worked'), `${t('{0}m', [1])} `, 5])).toBe('1 dk 5 sn · Çalıştı');
-});
-
-it.each(languages)('localizes project-folder management labels and keeps folder names verbatim in %s', async locale => {
-  window.localStorage.setItem('cos.ui.language', locale);
-  const { t } = await import('../src/renderer/i18n.js');
-  const source = 'Remove folder {0} from project {1}';
-  if (locale !== 'en') {
-    for (const key of [source, 'Primary project folder', 'Add folder to project {0}']) {
-      expect(catalogs[locale], `${locale}: ${key}`).toHaveProperty(key);
-    }
-  }
-  const expected = (catalogs[locale]?.[source] ?? source).replace('{0}', 'C:\\資料\\shared').replace('{1}', 'Workspace');
-  expect(t(source, ['C:\\資料\\shared', 'Workspace'])).toBe(expected);
-  expect(t('Primary project folder')).toBe(catalogs[locale]?.['Primary project folder'] ?? 'Primary project folder');
-  expect(t('Add folder to project {0}', ['Workspace'])).toBe((catalogs[locale]?.['Add folder to project {0}'] ?? 'Add folder to project {0}').replace('{0}', 'Workspace'));
 });
 
 describe('app interface localization', () => {

@@ -315,16 +315,13 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   pending.shift()!({ ok: true, data: current });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // The title-bar theme action uses the same serialized settings owner as Appearance. Two
-  // quick presses must request dark then light even though the first save has not answered.
-  const theme = w.document.getElementById('themeBtn') as HTMLButtonElement;
-  expect(theme.getAttribute('aria-label')).toBe('Switch to dark mode');
-  theme.click();
+  // Appearance changes must request dark then light in order,
+  // even though the first dark save has not answered yet.
+  const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
+  theme.value = 'dark'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(calls).toHaveLength(4));
   expect(calls[3].ui.theme).toBe('dark');
-  expect(w.document.documentElement.dataset.theme).toBe('dark');
-  expect(theme.getAttribute('aria-label')).toBe('Switch to light mode');
-  theme.click();
+  theme.value = 'light'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   expect(calls).toHaveLength(4);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'dark' } });
@@ -675,7 +672,7 @@ it('keeps project keyboard focus across activity repaint without taking composer
 
 // Adapted from @Haz4rdovisk's #345: typed Setup values used to reach the app only on blur, so a
 // Connect click right after typing did nothing.
-it.each(['headerConnect', 'wizConnect', 'connectionPopoverToggle'])(
+it.each(['wizConnect', 'connectionPopoverToggle'])(
   'persists valid Setup drafts before %s starts the tunnel',
   async (buttonId) => {
     let live: any;
@@ -722,61 +719,6 @@ it.each(['headerConnect', 'wizConnect', 'connectionPopoverToggle'])(
   }
 );
 
-it('keeps titlebar Connect clickable with incomplete setup and focuses the missing Setup step', async () => {
-  const connect = vi.fn();
-  const mounted = await mountChat({}, [], { connect });
-  const doc = mounted.window.document;
-  const header = doc.getElementById('headerConnect') as HTMLButtonElement;
-  const popover = doc.getElementById('connectionPopoverToggle') as HTMLButtonElement;
-  const wizard = doc.getElementById('wizConnect') as HTMLButtonElement;
-  const missing = doc.querySelector<HTMLElement>('[data-step="key"]')!;
-
-  expect(header.textContent).toBe('Connect');
-  expect(header.disabled).toBe(false);
-  expect(popover.disabled).toBe(true);
-  expect(wizard.disabled).toBe(true);
-  header.click();
-
-  await vi.waitFor(() => expect(doc.querySelector('[data-panel="setup"]')?.classList.contains('is-active')).toBe(true));
-  expect(missing.classList.contains('is-current')).toBe(true);
-  expect(doc.activeElement).toBe(missing);
-  expect(connect).not.toHaveBeenCalled();
-});
-
-it('shows titlebar Connect only before connection and never turns it into Disconnect', async () => {
-  const connect = vi.fn();
-  const disconnect = vi.fn();
-  const mounted = await mountChat({ hasApiKey: true }, [], { connect, disconnect });
-  const header = mounted.window.document.getElementById('headerConnect') as HTMLButtonElement;
-  const pushState = (state: any) => mounted.push({ ...mounted.state, status: { ...mounted.state.status, state } });
-
-  for (const state of ['disconnected', 'auth-failed', 'tunnel-unavailable'] as const) {
-    pushState(state);
-    expect(header.hidden).toBe(false);
-    expect(header.textContent).toBe('Connect');
-    expect(header.disabled).toBe(false);
-    expect(header.classList.contains('is-running')).toBe(false);
-  }
-  for (const state of ['starting-server', 'connecting-tunnel'] as const) {
-    pushState(state);
-    expect(header.hidden).toBe(false);
-    expect(header.textContent).toBe('Connecting…');
-    expect(header.disabled).toBe(true);
-    expect(header.classList.contains('is-running')).toBe(false);
-  }
-  for (const state of ['connected', 'offline', 'disconnecting'] as const) {
-    pushState(state);
-    expect(header.hidden).toBe(true);
-    expect(header.classList.contains('is-running')).toBe(false);
-  }
-
-  pushState('connected');
-  header.click();
-  await settle();
-  expect(disconnect).not.toHaveBeenCalled();
-  expect(connect).not.toHaveBeenCalled();
-});
-
 it('keeps global connection controls in a compact sidebar popover', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
@@ -794,12 +736,8 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   mounted.push(connected);
 
   const trigger = doc.getElementById('sidebarConnection') as HTMLButtonElement;
-  const topbarAction = doc.getElementById('headerConnect') as HTMLButtonElement;
   const popover = doc.getElementById('connectionPopover') as HTMLElement;
   expect(doc.querySelector('#chatTitle')!.closest('header')!.querySelector('#connectBtn')).toBeNull();
-  expect(topbarAction.closest('.app-topbar')).not.toBeNull();
-  expect(topbarAction.hidden).toBe(true);
-  expect(topbarAction.classList.contains('is-running')).toBe(false);
   expect(trigger.closest('.sidebar-bottom')).not.toBeNull();
   expect(trigger.textContent?.trim()).toBe('');
   expect(trigger.getAttribute('aria-label')).toMatch(/Connected.*verified/i);
@@ -1064,6 +1002,20 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('edge');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
   expect(browser.value).toBe('chrome');
+});
+
+it('saves Auto-select Skills from Settings and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const toggle = w.document.getElementById('autoSelectSkills') as HTMLInputElement;
+  expect(toggle).not.toBeNull();
+  expect(toggle.checked).toBe(false);
+  toggle.checked = true;
+  toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.autoSelectSkills).toBe(true);
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, autoSelectSkills: false } } });
+  expect(toggle.checked).toBe(false);
 });
 
 it('saves and restores the global worker admission cap from Settings', async () => {
@@ -2088,6 +2040,54 @@ it('gives twenty rapid New Chat sends independent visible local chats before any
   expect(sendInput.mock.calls.every(([request]) => request.sessionId === null)).toBe(true);
 });
 
+it('shows the frozen Auto-selected Skill receipt for an accepted ordinary send', async () => {
+  const rows: any[] = [], summaries: any[] = [];
+  const ok = (data: any) => ({ ok: true, data });
+  const sendInput = vi.fn(async (request: any) => {
+    const row = {
+      ...request,
+      sessionId: request.id,
+      opening: true,
+      autoSkills: [{ id: 'code-review', revision: 'a'.repeat(64) }],
+      state: 'queued',
+      owner: null,
+      createdAt: Date.now(),
+      conversationId: null
+    };
+    rows.push(row);
+    summaries.push({
+      id: row.sessionId,
+      title: row.text,
+      conversationId: null,
+      origin: { kind: 'desktop' },
+      createdAt: row.createdAt,
+      updatedAt: row.createdAt,
+      eventCount: 0,
+      projectId: null,
+      selectedModel: null,
+      usage: {}
+    });
+    return ok(row);
+  });
+  const mounted = await mountChat({}, [], {
+    sendInput,
+    getChatModels: async () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high'] }] }),
+    listInputs: async () => ok([...rows]),
+    runningTools: async () => ok([]),
+    livePreview: async () => ok(null),
+    listPausedHelpers: async () => ok([]),
+    listSessions: async () => ok({ sessions: [...summaries], activeId: null, pressure: [] }),
+    getSession: async (id: string) => ok({ summary: summaries.find(row => row.id === id), events: [], nextCursor: null })
+  });
+  const w = mounted.window, doc = w.document, field = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  (doc.getElementById('newChat') as HTMLButtonElement).click();
+  await settle();
+  field.value = 'Review this source code change for correctness.';
+  doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(doc.querySelector('.toast')?.textContent).toContain('Auto-selected Skill: /code-review'));
+});
+
 it('does not steal a newer New Chat draft when an older admission response arrives', async () => {
   let release!: (value: any) => void;
   const rows: any[] = [], summaries: any[] = [];
@@ -2112,4 +2112,49 @@ it('does not steal a newer New Chat draft when an older admission response arriv
   expect(field.value).toBe('Keep this newer draft');
   expect(doc.querySelector('.sess.is-sel')).toBeNull();
   expect(doc.getElementById('chatTitle')!.textContent).toBe('New chat');
+});
+
+it('shows each startup log line once and in order when lines arrive while the log is loading', async () => {
+  // Seen on Windows: the Activity page listed "session catalog ready" and "renderer state ready"
+  // both before "app started" and again after it. Those lines arrived live while the page was
+  // still loading the log, and the loaded log contained them too.
+  let live: (entry: any) => void = () => undefined;
+  let release!: (reply: any) => void;
+  const line = (time: number, message: string) => ({ time, level: 'info', message });
+  const mounted = await mountChat({}, [], {
+    getLog: () => new Promise(resolve => { release = resolve; }),
+    onLogEntry: (fn: any) => { live = fn; return () => undefined; }
+  });
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  live(line(2, 'session catalog ready'));
+  live(line(3, 'renderer state ready'));
+  release({ ok: true, data: [line(1, 'app started'), line(2, 'session catalog ready'), line(3, 'renderer state ready')] });
+  await settle(); await settle();
+  live(line(4, 'window loaded'));
+  // A row shows the line's source and text in separate cells; compare without the spacing.
+  const rows = () => [...mounted.window.document.querySelectorAll('#fullFeed > *')].map(row => (row.textContent ?? '').replace(/\s/g, ''));
+  await vi.waitFor(() => expect(rows()).toHaveLength(4));
+  expect(rows().map(text => ['app started', 'session catalog ready', 'renderer state ready', 'window loaded'].find(m => text.includes(m.replace(/\s/g, '')))))
+    .toEqual(['app started', 'session catalog ready', 'renderer state ready', 'window loaded']);
+});
+
+it.each(['.project-color', '.project-new'])('keeps keyboard focus on a project row button (%s) across an activity repaint', async selector => {
+  // Seen live on Windows: after picking a project color, focus went back to the color button and
+  // the next sidebar repaint dropped it to the page. Only the project heading kept its focus.
+  const { project, session } = projectSidebarFixture();
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
+  });
+  const doc = mounted.window.document;
+  const control = () => doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] ${selector}`)!;
+  await vi.waitFor(() => expect(control()).not.toBeNull());
+  await settle();
+  const before = control();
+  before.focus();
+  expect(doc.activeElement).toBe(before);
+  mounted.push(structuredClone(mounted.state));
+  await settle();
+  expect(control()).not.toBe(before); // the repaint really replaced the row
+  expect(doc.activeElement).toBe(control());
 });

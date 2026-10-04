@@ -116,6 +116,7 @@ import {
   statusForCaller,
   stageFinishAgent,
   stageMessages,
+  stagePrimeMessage,
   stageSpawn,
   swarmRunning,
   swarmStateForCaller,
@@ -1115,6 +1116,27 @@ async function measureSleepingWorkers(caller: Caller): Promise<void> {
   }
 }
 
+/** Publish a staged broker mutation only after its exact revision is durable. */
+async function acceptAgentMutation(
+  staged: { commit(): void | boolean; rollback(): void },
+  failure: string,
+  commitFailure: string = failure
+): Promise<void> {
+  try {
+    let durable: boolean;
+    try {
+      durable = await persistCriticalSwarmNow();
+    } catch (error) {
+      throw new Error(`${failure} (${error instanceof Error ? error.message : String(error)})`);
+    }
+    if (!durable) throw new Error(failure);
+    if (staged.commit() === false) throw new Error(commitFailure);
+  } catch (error) {
+    staged.rollback();
+    throw error;
+  }
+}
+
 function registerAgentsTool(reg: SurfaceRegistrar): void {
   reg.register(
     'agents',
@@ -1185,6 +1207,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(40)
           .optional()
           .describe('message: one recipient; messaging a sleeping worker wakes it.'),
+        target_run_id: z
+          .string()
+          .min(1)
+          .max(36)
+          .optional()
+          .describe('message: existing prime run id; prime-only, no worker/status access.'),
         text: z.string().min(1).max(4000).optional().describe('message: what to say.'),
         result: z
           .string()
@@ -1196,7 +1224,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           )
       })
       .superRefine((input, ctx) => {
-        const reject = (field: 'context' | 'workers' | 'messages' | 'to' | 'text' | 'result', message: string): void => {
+        const reject = (field: 'context' | 'workers' | 'messages' | 'to' | 'target_run_id' | 'text' | 'result', message: string): void => {
           if (input[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message });
         };
         if (input.action !== 'spawn') {
@@ -1206,6 +1234,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         if (input.action !== 'message') {
           reject('messages', 'messages is only valid with action=message');
           reject('to', 'to is only valid with action=message');
+          reject('target_run_id', 'target_run_id is only valid with action=message');
           reject('text', 'text is only valid with action=message');
         }
         if (input.action !== 'finish') reject('result', 'result is only valid with action=finish');
@@ -1233,27 +1262,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             context: input.context ?? null,
             caller: await callerNow(startedAt, { exact: true, runId: input.run_id })
           });
-          let accepted = false;
-          try {
-            let durable = false;
-            try {
-              durable = await persistCriticalSwarmNow();
-            } catch (error) {
-              throw new Error(
-                `The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request. (${error instanceof Error ? error.message : String(error)})`
-              );
-            }
-            if (!durable) {
-              throw new Error(
-                'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.'
-              );
-            }
-            staged.commit();
-            accepted = true;
-          } catch (error) {
-            if (!accepted) staged.rollback();
-            throw error;
-          }
+          await acceptAgentMutation(staged,
+            'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.');
           const { created, becamePrime, runId, defaultNotes } = staged;
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
@@ -1291,6 +1301,38 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         }
 
         if (input.action === 'message') {
+          if (input.target_run_id) {
+            if (input.messages?.length) {
+              return fail('agents action=message with target_run_id takes one text message, not messages[].');
+            }
+            if (input.to && input.to !== PRIME_ID) {
+              return fail('agents action=message with target_run_id can address only the destination prime.');
+            }
+            if (!input.text) {
+              return fail('agents action=message with target_run_id requires text.');
+            }
+            const caller = await callerNow(startedAt, { runId: input.run_id, member: true });
+            const staged = stagePrimeMessage(caller, input.target_run_id, input.text);
+            await acceptAgentMutation(staged,
+              'The prime message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request.',
+              'TARGET_RUN_UNAVAILABLE: the destination prime family changed before acceptance. Nothing was queued.');
+            if (currentCall()) currentCall()!.caller.runId = staged.sourceRunId;
+            await recordAgentMessage(staged.message, 'sent', caller.conversationId);
+            return {
+              content: [{
+                type: 'text' as const,
+                text:
+                  `Queued for prime family ${staged.targetRunId}. The recipient can reply with target_run_id=${staged.sourceRunId}.`
+              }],
+              structuredContent: {
+                action: 'message',
+                run_id: staged.sourceRunId,
+                target_run_id: staged.targetRunId,
+                queued: [{ to: PRIME_ID }]
+              }
+            };
+          }
+
           // Two spellings of one operation. A single message is the common case and stays a
           // pair of scalars; `messages` is the same thing in bulk. Both in one call is a
           // request whose intended order nobody can read, so it is refused rather than
@@ -1309,25 +1351,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // One call, one identity resolution, one all-or-nothing delivery: a prime
           // redirecting its whole run cannot end up with two of its three messages sent.
           const staged = stageMessages(caller, items);
-          let accepted = false;
-          try {
-            let durable = false;
-            try {
-              durable = await persistCriticalSwarmNow();
-            } catch (error) {
-              throw new Error(
-                `The agent message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request. (${error instanceof Error ? error.message : String(error)})`
-              );
-            }
-            if (!durable) {
-              throw new Error('The agent message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request.');
-            }
-            staged.commit();
-            accepted = true;
-          } catch (error) {
-            if (!accepted) staged.rollback();
-            throw error;
-          }
+          await acceptAgentMutation(staged,
+            'The agent message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request.');
           const sent = staged.messages;
           const woken = staged.waking;
           // Reopening a sleeping worker's chat is a browser side effect, so it happens only
@@ -1364,28 +1389,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             );
           }
           const staged = stageFinishAgent(await callerNow(startedAt, { runId: input.run_id, member: true }), input.result);
-          let accepted = staged.repeat;
-          try {
-            if (!staged.repeat) {
-              let durable = false;
-              try {
-                durable = await persistCriticalSwarmNow();
-              } catch (error) {
-                throw new Error(
-                  `The worker finish could not cross its durable acceptance barrier. Nothing was published; retry the same finish result. (${error instanceof Error ? error.message : String(error)})`
-                );
-              }
-              if (!durable) {
-                throw new Error(
-                  'The worker finish could not cross its durable acceptance barrier. Nothing was published; retry the same finish result.'
-                );
-              }
-              staged.commit();
-              accepted = true;
-            }
-          } catch (error) {
-            if (!accepted) staged.rollback();
-            throw error;
+          if (!staged.repeat) {
+            await acceptAgentMutation(staged,
+              'The worker finish could not cross its durable acceptance barrier. Nothing was published; retry the same finish result.');
           }
           const { info, report, repeat } = staged;
           if (report) await recordAgentMessage(report, 'sent', info.conversationId);

@@ -175,21 +175,48 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   options(effort, effortChoices, nextEffort);
 }
 
+/** The next shortcut action is a projection of the same select Send reads. */
+function paintEffortShortcut(supported: readonly ReasoningEffort[]): void {
+  const spark = document.getElementById('composerSpark') as HTMLButtonElement | null;
+  if (!spark) return;
+  const minimum = supported.length > 1 && $<HTMLSelectElement>('composerReasoning').value === supported[0];
+  const action = minimum ? 'max' : 'min';
+  if (spark.dataset.action !== action) {
+    for (const glyph of spark.querySelectorAll<HTMLElement>('.ico')) {
+      for (const animation of glyph.getAnimations?.() ?? []) animation.cancel();
+    }
+  }
+  spark.dataset.action = action;
+  spark.disabled = supported.length < 2;
+  const label = () => spark.disabled ? t('Thinking effort') : minimum
+    ? t('Use maximum effort: {0}', [effortLabel(supported.at(-1)!)])
+    : t('Use minimum effort: {0}', [effortLabel(supported[0]!)]);
+  ui(spark, 'title', label); ui(spark, 'aria-label', label);
+}
+
 function paintComposerChoices(): void {
   const models = document.getElementById('composerModelChoices');
+  const modelOptions = document.getElementById('composerModelOptions');
   const powers = document.getElementById('composerPowerChoices');
-  if (!models || !powers) return;
+  if (!models || !modelOptions || !powers) return;
   const selected = $<HTMLSelectElement>('composerModel');
   const effort = $<HTMLSelectElement>('composerReasoning');
   const choices = composerModels();
   const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   if (models.dataset.signature === signature) return;
   models.dataset.signature = signature;
-  models.replaceChildren();
+  const supported = choices.find(choice => choice.id === selected.value)?.efforts ?? [];
+  paintEffortShortcut(supported);
+  modelOptions.replaceChildren();
   powers.replaceChildren();
   const title = document.getElementById('composerPowerTitle');
   const subtitle = document.getElementById('composerPowerModel');
+  const toggle = document.getElementById('composerModelToggle') as HTMLButtonElement | null;
+  if (toggle) toggle.disabled = !choices.length;
   if (!choices.length) {
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    models.hidden = true;
+    models.inert = true;
     if (currentModelChosen()) {
       if (title) ui(title, 'textContent', () => t("ChatGPT’s current model"));
       if (subtitle) ui(subtitle, 'textContent', () => t("Sent without choosing a model"));
@@ -226,18 +253,19 @@ function paintComposerChoices(): void {
       selected.dispatchEvent(new window.Event('change', { bubbles: true }));
       if (focused) models.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
     });
-    models.append(button);
+    modelOptions.append(button);
   }
-  const supported = choices.find(choice => choice.id === selected.value)?.efforts ?? [];
-  if (title) ui(title, 'textContent', () => t('Thinking effort'));
   const current = supported.findIndex(power => power === effort.value);
-  if (subtitle) ui(subtitle, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
+  if (title) ui(title, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
+  const selectedLabel = distinctModelChoices(choices).find(choice => choice.id === selected.value)?.label;
+  if (subtitle) ui(subtitle, 'textContent', () => typeof selectedLabel === 'function' ? selectedLabel() : selectedLabel ?? t('Select model'));
   if (!supported.length) return;
   const choose = (power: ReasoningEffort | string): void => {
     if (composerContext) composerContext.edited = true;
     effort.value = power;
-    if (subtitle) ui(subtitle, 'textContent', () => effortLabel(power));
+    if (title) ui(title, 'textContent', () => effortLabel(power));
     paintComposerLabel();
+    paintEffortShortcut(supported);
     models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   };
   // One effort (an Instant model) is not a choice: no slider, just its name. A stale saved
@@ -434,8 +462,52 @@ export function initChatModels(onPaint?: () => void): void {
       paintComposerContext(); paintStatus();
     });
   }
-  document.getElementById('modelMenu')?.addEventListener('toggle', () => {
-    if (($('modelMenu') as HTMLDetailsElement).open && !catalog.models.length) $('refreshComposerModels').click();
+  const modelMenu = document.getElementById('modelMenu') as HTMLDetailsElement | null;
+  const modelToggle = document.getElementById('composerModelToggle') as HTMLButtonElement | null;
+  const modelChoices = document.getElementById('composerModelChoices');
+  const closeModelChoices = (): void => {
+    modelToggle?.setAttribute('aria-expanded', 'false');
+    if (modelChoices) { modelChoices.hidden = true; modelChoices.inert = true; }
+  };
+  modelToggle?.addEventListener('click', () => {
+    if (!modelChoices) return;
+    const open = modelChoices.hidden;
+    modelToggle.setAttribute('aria-expanded', String(open));
+    modelChoices.hidden = !open;
+    modelChoices.inert = !open;
+    if (open) modelChoices.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  });
+  document.getElementById('composerSpark')?.addEventListener('click', event => {
+    const spark = event.currentTarget as HTMLElement;
+    const effort = $<HTMLSelectElement>('composerReasoning');
+    const supported = composerModels().find(model => model.id === $<HTMLSelectElement>('composerModel').value)?.efforts ?? [];
+    if (supported.length < 2) return;
+    const minimum = effort.value === supported[0];
+    const outgoing = spark.querySelector<HTMLElement>(minimum ? '.spark-brain' : '.spark-lightning');
+    const incoming = spark.querySelector<HTMLElement>(minimum ? '.spark-lightning' : '.spark-brain');
+    const glyphs = [...spark.querySelectorAll<HTMLElement>('.ico')];
+    for (const glyph of glyphs) for (const animation of glyph.getAnimations()) animation.cancel();
+    // Change the existing selection synchronously; animation never commits or restores it.
+    effort.value = minimum ? supported.at(-1)! : supported[0]!;
+    effort.dispatchEvent(new window.Event('change', { bubbles: true }));
+    if (!outgoing || !incoming) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    outgoing.animate(reduced ? [{ opacity: 1 }, { opacity: 0 }] : [
+      { opacity: 1, transform: 'scale(1) rotate(0deg)' }, { opacity: 0, transform: 'scale(.65) rotate(-18deg)' }
+    ], { duration: 150, easing: 'ease-out' });
+    incoming.animate(reduced ? [{ opacity: 0 }, { opacity: 1 }] : [
+      { opacity: 0, transform: 'scale(.65) rotate(18deg)' }, { opacity: 1, transform: 'scale(1) rotate(0deg)' }
+    ], { duration: 200, easing: 'cubic-bezier(.16, 1, .3, 1)' });
+  });
+  modelMenu?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault(); event.stopPropagation();
+    if (modelChoices && !modelChoices.hidden) { closeModelChoices(); modelToggle?.focus(); }
+    else { modelMenu.open = false; modelMenu.querySelector('summary')?.focus(); }
+  });
+  modelMenu?.addEventListener('toggle', () => {
+    if (!modelMenu.open) closeModelChoices();
+    else if (!catalog.models.length) $('refreshComposerModels').click();
   });
   for (const [modelId, effortId, allowEmpty] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {

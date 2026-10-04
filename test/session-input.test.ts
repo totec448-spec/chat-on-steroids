@@ -8,7 +8,8 @@ import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writ
 import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
-  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy
+  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy,
+  noteInputStartupError
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
@@ -88,6 +89,38 @@ afterEach(async () => {
 });
 
 describe('durable user input ownership', () => {
+  it.each([
+    ['held for Setup', 'Message queued. Finish Setup to send: Enter a tunnel ID that looks like tunnel_ followed by 32 hex characters.', 'queued'],
+    ['held after a failed browser start', 'Message queued. Browser startup failed: Chrome refused startup', 'queued'],
+    ['simply never picked up', null, 'failed']
+  ] as const)('applies the 60-second browser pickup deadline only to a message the app is not holding (%s)', async (_case, held, state) => {
+    // Seen on Windows without Setup: the follow-up said "Message queued. Finish Setup to send" and
+    // a minute later failed as "the browser did not pick up this message", losing the queue entry
+    // and naming the wrong cause.
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    expect(row.transportIntent).toBe('browser');
+    if (held) await noteInputStartupError(row.id, held);
+    now += 60_001;
+    resetInputForTests();
+    const after = (await listInputs()).find(entry => entry.id === row.id);
+    expect(after?.state).toBe(state);
+    if (held) expect(after?.error).toBe(held);
+    else expect(after?.error).toContain('did not pick up this message');
+  });
+  it('gives a released hold its full 60 seconds for the browser to pick it up', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    await noteInputStartupError(row.id, 'Message queued. Finish Setup to send: Add a folder before connecting.');
+    now += 10 * 60_000; // Setup takes a while.
+    await noteInputStartupError(row.id, null); // Setup done: the browser may take it now.
+    now += 59_000;
+    resetInputForTests();
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
+    now += 2_000;
+    resetInputForTests();
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
+  });
   it('preserves messages beyond the former composer limit through admission, restart and browser claim', async () => {
     binding.finishEnabled = false;
     const text = 'Long user request. '.repeat(2000);

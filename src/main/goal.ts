@@ -288,11 +288,6 @@ const LOOP_RESPONSE_FORMAT = {
   }
 } as const;
 
-/** The persisted instruction used for the next draft. Exported for focused contract tests. */
-export function goalSystemPrompt(): string {
-  return getConfig().goal.prompt;
-}
-
 /** The persisted driver instruction, used instead of the gate once a chat carries a goal. */
 export function goalObjectivePrompt(): string {
   return getConfig().goal.objectivePrompt;
@@ -1133,11 +1128,6 @@ export function moveGoalSwitch(fromConversationId: string, toConversationId: str
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
   return true;
-}
-
-export function goalSettings(): { enabled: boolean; mode: GoalMode; model: string; reasoning: string } {
-  const goal = getConfig().goal;
-  return { enabled: goal.enabled, mode: goal.mode, model: goal.model, reasoning: goal.reasoning };
 }
 
 export function goalBackendFor(mode: GoalMode): GoalBackend {

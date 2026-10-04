@@ -19,6 +19,7 @@ import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
+import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
@@ -32,8 +33,9 @@ import { answerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { LocalProject } from '../shared/projects.js';
+import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
+import type { RunningExecProcess } from '../shared/background-exec.js';
 /**
  * Desktop chat workspace: recorded prose/tool truth, exact-session controls and a composer.
  * The extension remains the ChatGPT transport; main owns permissions, delivery, Goal and
@@ -149,6 +151,10 @@ const expandedProjects = new Set<string>();
 const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
+}
+/** A project color as people say it, in the interface language. */
+function projectColorName(color: ProjectColor): string {
+  return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
 }
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
@@ -730,11 +736,15 @@ function paintSessions(): void {
   if (sidebarOrder?.interacting) return;
   document.getElementById('sessionTooltip')?.remove();
   const projectList = $('projectList'), chatList = $('chatList');
-  // Activity replaces sidebar nodes. Keep an actively focused project disclosure
-  // attached to its exact project, without moving focus from the composer or settings.
+  // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure
+  // or one of its buttons) attached to its exact project, without moving focus from the
+  // composer or settings. A keyboard user tabbing to a project's buttons lost focus to the
+  // page on the next repaint, and so did the color button after a pick.
   const focused = document.activeElement;
-  const focusedProject = focused instanceof HTMLElement && projectList.contains(focused) && focused.matches('.project-heading')
-    ? focused.closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
+  const focusedControl = focused instanceof HTMLElement && projectList.contains(focused)
+    ? ['.project-heading', '.project-color', '.project-new', '.project-remove', '.project-show-more'].find(selector => focused.matches(selector))
+    : undefined;
+  const focusedProject = focusedControl ? (focused as HTMLElement).closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
   for (const entry of sessions) {
@@ -790,6 +800,7 @@ function paintSessions(): void {
   for (const { id } of orderedProjects) {
     const project = projects.find(row => row.id === id);
     const section = document.createElement('details'); section.className = 'project-group'; section.dataset.projectId = id;
+    if (project?.color) section.dataset.projectColor = project.color;
     section.dataset.sortId = id; section.dataset.sortScope = SIDEBAR_PROJECT_SCOPE;
     section.open = expandedProjects.has(id);
     const heading = el('summary', 'project-heading');
@@ -808,6 +819,91 @@ function paintSessions(): void {
       section.open = open;
     });
     if (project) {
+      const colorWrap = el('span', 'project-color-wrap');
+      const color = el('button', 'btn project-color') as HTMLButtonElement;
+      color.type = 'button'; color.dataset.color = project.color ?? '';
+      color.setAttribute('aria-haspopup', 'menu'); color.setAttribute('aria-expanded', 'false');
+      ui(color, 'title', () => t('Change project color'));
+      ui(color, 'aria-label', () => t('Change project color'));
+      const menu = el('span', 'project-color-menu'); menu.hidden = true; menu.setAttribute('role', 'menu');
+      ui(menu, 'aria-label', () => t('Change project color'));
+      const closeColorMenu = (restoreFocus = false): void => {
+        menu.hidden = true; color.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) color.focus();
+      };
+      const openColorMenu = (): void => {
+        menu.hidden = false; color.setAttribute('aria-expanded', 'true');
+        const selected = menu.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
+          menu.querySelector<HTMLButtonElement>('.project-color-choice');
+        selected?.focus();
+      };
+      color.addEventListener('click', event => {
+        event.preventDefault(); event.stopPropagation();
+        if (color.disabled) return;
+        if (menu.hidden) openColorMenu(); else closeColorMenu(true);
+      });
+      let savingColor = false;
+      for (const choice of [null, ...PROJECT_COLORS] as const) {
+        const option = el('button', 'project-color-choice') as HTMLButtonElement;
+        option.type = 'button'; option.dataset.projectColorChoice = choice ?? ''; option.dataset.color = choice ?? '';
+        option.setAttribute('role', 'menuitemradio');
+        option.setAttribute('aria-checked', String((project.color ?? null) === choice));
+        // The menu is named "Change project color"; each choice says the color itself.
+        const label = (): string => choice ? projectColorName(choice) : t('None');
+        ui(option, 'aria-label', label); ui(option, 'title', label);
+        if (!choice) option.textContent = t('None');
+        option.addEventListener('click', async event => {
+          event.preventDefault(); event.stopPropagation();
+          if (savingColor) return;
+          if ((project.color ?? null) === choice) return closeColorMenu(true);
+          savingColor = true;
+          const selectionAtSave = selectedId;
+          const generationAtSave = selectionGeneration;
+          let restoreColorFocus = colorWrap.contains(document.activeElement);
+          // Disabling a focused choice can move focus to body. A later deliberate focus
+          // change belongs to the user, not to the pending save's repaint.
+          const noticeFocus = (event: FocusEvent): void => {
+            if (event.target !== document.body && !colorWrap.contains(event.target as Node)) restoreColorFocus = false;
+          };
+          document.addEventListener('focusin', noticeFocus);
+          color.disabled = true;
+          menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = true; });
+          let updated: LocalProject | null | undefined;
+          try { updated = await run(api.setProjectColor(id, choice as ProjectColor | null)); }
+          finally { document.removeEventListener('focusin', noticeFocus); }
+          // In an inactive document, activeElement can change without a focusin notification.
+          // Check its current owner as well before replacing the palette or restoring focus.
+          restoreColorFocus = restoreColorFocus &&
+            (document.activeElement === document.body || colorWrap.contains(document.activeElement));
+          if (!updated) {
+            savingColor = false; color.disabled = false;
+            menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = false; });
+            if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) openColorMenu();
+            return;
+          }
+          ++sessionsLoadGeneration;
+          projects = projects.map(row => row.id === id ? updated : row);
+          paintSessions();
+          if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) {
+            $('projectList').querySelector<HTMLElement>(`.project-group[data-project-id="${id}"] .project-color`)?.focus({ preventScroll: true });
+          }
+        });
+        menu.append(option);
+      }
+      menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return closeColorMenu(true); }
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        const options = [...menu.querySelectorAll<HTMLButtonElement>('.project-color-choice:not(:disabled)')];
+        if (!options.length) return;
+        const current = options.indexOf(document.activeElement as HTMLButtonElement);
+        const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+        event.preventDefault(); event.stopPropagation();
+        options[(Math.max(0, current) + delta + options.length) % options.length]?.focus();
+      });
+      colorWrap.addEventListener('focusout', () => queueMicrotask(() => {
+        if (!colorWrap.contains(document.activeElement)) closeColorMenu();
+      }));
+      colorWrap.append(color, menu); heading.append(colorWrap);
       const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
       ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);
@@ -846,55 +942,6 @@ function paintSessions(): void {
         } finally { remove.disabled = false; }
       });
       heading.append(remove);
-
-      const folderList = el('div', 'project-folders');
-      folderList.setAttribute('role', 'list');
-      ui(folderList, 'aria-label', () => t('Project folders'));
-      const renderFolder = (folder: string, primary: boolean): HTMLElement => {
-        const row = el('div', 'project-folder-row'); row.setAttribute('role', 'listitem');
-        const value = el('span', 'project-folder-path', folder); value.setAttribute('translate', 'no'); value.title = folder;
-        row.append(icon('i-folder'), value);
-        if (primary) row.append(ui(el('span', 'project-folder-primary'), 'textContent', () => t('Primary project folder')));
-        else {
-          const detach = el('button', 'btn project-folder-remove') as HTMLButtonElement;
-          detach.type = 'button'; detach.append(icon('i-x'));
-          ui(detach, 'title', () => t('Remove folder {0} from project {1}', [folder, project.name]));
-          ui(detach, 'aria-label', () => t('Remove folder {0} from project {1}', [folder, project.name]));
-          detach.addEventListener('click', async event => {
-            event.preventDefault(); event.stopPropagation();
-            if (detach.disabled) return;
-            detach.disabled = true;
-            try {
-              const updated = await run(api.removeProjectFolder(id, folder));
-              if (!updated) return;
-              ++sessionsLoadGeneration;
-              projects = projects.map(row => row.id === id ? updated : row);
-              expandedProjects.add(id); paintSessions();
-            } finally { detach.disabled = false; }
-          });
-          row.append(detach);
-        }
-        return row;
-      };
-      folderList.append(renderFolder(project.path, true), ...(project.additionalPaths ?? []).map(folder => renderFolder(folder, false)));
-      const addFolder = el('button', 'btn project-folder-add') as HTMLButtonElement;
-      const addLabel = el('span'); ui(addLabel, 'textContent', () => t('Add folder'));
-      addFolder.type = 'button'; addFolder.append(icon('i-plus'), addLabel);
-      ui(addFolder, 'title', () => t('Add folder to project {0}', [project.name]));
-      ui(addFolder, 'aria-label', () => t('Add folder to project {0}', [project.name]));
-      addFolder.addEventListener('click', async event => {
-        event.preventDefault(); event.stopPropagation();
-        if (addFolder.disabled) return;
-        addFolder.disabled = true;
-        try {
-          const updated = await run(api.addProjectFolder(id));
-          if (!updated) return;
-          ++sessionsLoadGeneration;
-          projects = projects.map(row => row.id === id ? updated : row);
-          expandedProjects.add(id); paintSessions();
-        } finally { addFolder.disabled = false; }
-      });
-      folderList.append(addFolder); section.append(folderList);
     }
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
@@ -920,8 +967,8 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
-  if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
-    ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
+  if (focusedProject && focusedControl) projectSections.find(section => section.dataset.projectId === focusedProject)
+    ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
@@ -2347,7 +2394,11 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
   raw.append(facts);
 
-  if (call.changes && call.changes.length > 0) {
+  const ownerId = context?.id ?? selectedId, generation = selectionGeneration;
+  const current = () => context ? context.current() : ownerId === selectedId && generation === selectionGeneration;
+  if (call.outcome === 'ok' && call.changes?.length && ownerId) {
+    raw.append(renderEditCards(call, ownerId, current));
+  } else if (call.changes && call.changes.length > 0) {
     const changes = el('ul', 'changes');
     for (const change of call.changes) {
       const li = el('li');
@@ -2682,6 +2733,8 @@ function answerActions(turnId: string): HTMLElement {
 
 function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
+  // A note the app filed about its own work (a recovery reload), not ChatGPT's phase caption.
+  if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
   const time = document.createElement('time');
@@ -3215,7 +3268,8 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     }
     const latest = recap ?? [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
-    const observedPhase = rows[i - 1]?.matches('.ev-progress')
+    // Only ChatGPT's own caption names the phase; the app's recovery notes never title a group.
+    const observedPhase = rows[i - 1]?.matches('.ev-progress:not([data-app-note])')
       ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
     const label = observedPhase || latestHead?.querySelector('b')?.textContent
       || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
@@ -3279,6 +3333,7 @@ function composerSessionSelection(summary: SessionSummary | null | undefined) {
 }
 function paintDetail(followBottom = historyBefore === null): void {
   paintStateLine();
+  paintBackgroundProcesses();
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
   applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, composerSessionSelection(summary) ?? null);
   const config = deps.state()?.config;
@@ -3541,6 +3596,231 @@ let runningToolsFor: string | null = null;
 let runningToolsAt = 0;
 let runningToolsEvents = -1;
 let runningToolsRequest = 0;
+let backgroundProcesses: RunningExecProcess[] = [];
+let backgroundProcessesFor: string | null = null;
+let backgroundProcessesRequest = 0;
+let backgroundProcessClock: number | null = null;
+let backgroundProcessStopping: string | null = null;
+let backgroundProcessFocusAfterRefresh: { session: string; selection: number } | null = null;
+const expandedBackgroundProcessSessions = new Set<string>();
+
+function backgroundProcessKey(row: RunningExecProcess): string {
+  return row.processId + ':' + row.incarnation;
+}
+
+function backgroundCommand(command: string): string {
+  const compact = command.replace(/\s+/g, ' ').trim();
+  return compact.length > 120 ? compact.slice(0, 117) + '…' : compact;
+}
+
+function backgroundElapsed(startedAt: number): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function syncBackgroundProcessClock(visible: boolean): void {
+  if (visible && backgroundProcessClock === null) {
+    backgroundProcessClock = window.setInterval(() => paintBackgroundProcessTimes(), 1_000);
+  } else if (!visible && backgroundProcessClock !== null) {
+    window.clearInterval(backgroundProcessClock);
+    backgroundProcessClock = null;
+  }
+}
+
+function sortedBackgroundProcesses(): RunningExecProcess[] {
+  return backgroundProcessesFor === selectedId
+    ? [...backgroundProcesses].sort((a, b) => a.startedAt - b.startedAt)
+    : [];
+}
+
+function paintBackgroundProcessTimes(): void {
+  const rows = sortedBackgroundProcesses();
+  if (!selectedId || !rows.length) return;
+  const first = rows[0]!;
+  const host = $('backgroundExecStatus');
+  ui(host.querySelector<HTMLElement>('.background-exec-time')!, 'textContent', () => t('Running for {0}', [backgroundElapsed(first.startedAt)]));
+  $('backgroundExecList').querySelectorAll<HTMLElement>('.background-exec-process-time').forEach(time => {
+    const startedAt = Number(time.dataset.startedAt);
+    if (Number.isFinite(startedAt)) ui(time, 'textContent', () => t('Running for {0}', [backgroundElapsed(startedAt)]));
+  });
+}
+
+async function stopBackgroundProcess(row: RunningExecProcess, restoreFocus: boolean): Promise<void> {
+  if (!selectedId || backgroundProcessStopping !== null) return;
+  const session = selectedId;
+  if (restoreFocus) backgroundProcessFocusAfterRefresh = { session, selection: selectionGeneration };
+  backgroundProcessStopping = backgroundProcessKey(row);
+  paintBackgroundProcessStops();
+  const reply = await api.stopProcess(session, row.processId, row.incarnation);
+  if (session !== selectedId) {
+    if (backgroundProcessFocusAfterRefresh?.session === session) backgroundProcessFocusAfterRefresh = null;
+    return;
+  }
+  backgroundProcessStopping = null;
+  paintBackgroundProcessStops();
+  if (!reply.ok || !reply.data) {
+    toast(reply.ok ? t('Background process is no longer running') : reply.error);
+    refreshBackgroundProcesses();
+    return;
+  }
+  refreshBackgroundProcesses();
+}
+
+function backgroundProcessStopLabel(row: RunningExecProcess): string {
+  const command = backgroundCommand(row.command);
+  return t('Stop background process') + ': #' + row.processId + (command ? ' ' + command : '');
+}
+
+function configureBackgroundProcessStop(stop: HTMLButtonElement, row: RunningExecProcess): void {
+  ui(stop, 'title', () => t('Stop background process'));
+  ui(stop, 'aria-label', () => backgroundProcessStopLabel(row));
+  const label = stop.querySelector<HTMLElement>('span');
+  if (label) ui(label, 'textContent', () => t('Stop'));
+  stop.disabled = backgroundProcessStopping !== null;
+  stop.onclick = event => {
+    event.stopPropagation();
+    void stopBackgroundProcess(row, event.detail === 0);
+  };
+}
+
+function paintBackgroundProcessStops(): void {
+  const disabled = backgroundProcessStopping !== null;
+  $('backgroundExecStatus').querySelectorAll<HTMLButtonElement>('.background-exec-stop').forEach(stop => { stop.disabled = disabled; });
+  $('backgroundExecList').querySelectorAll<HTMLButtonElement>('.background-exec-stop').forEach(stop => { stop.disabled = disabled; });
+}
+
+function paintBackgroundProcesses(): void {
+  const host = $('backgroundExecStatus');
+  const liveStatus = $('backgroundExecLiveStatus');
+  const list = $('backgroundExecList');
+  const rows = sortedBackgroundProcesses();
+  if (!selectedId || !rows.length) {
+    if (selectedId) expandedBackgroundProcessSessions.delete(selectedId);
+    host.hidden = true;
+    host.removeAttribute('title');
+    host.removeAttribute('aria-expanded');
+    host.removeAttribute('aria-controls');
+    host.removeAttribute('tabindex');
+    host.setAttribute('role', 'status');
+    host.classList.remove('is-expandable', 'is-expanded');
+    host.onclick = null;
+    host.onkeydown = null;
+    list.hidden = true;
+    list.replaceChildren();
+    liveStatus.textContent = '';
+    liveStatus.hidden = true;
+    syncBackgroundProcessClock(false);
+    return;
+  }
+  const first = rows[0]!;
+  const multiple = rows.length > 1;
+  if (!multiple) expandedBackgroundProcessSessions.delete(selectedId);
+  const expanded = multiple && expandedBackgroundProcessSessions.has(selectedId);
+  const command = backgroundCommand(first.command) || '#' + first.processId;
+  ui(host.querySelector<HTMLElement>('.queue-label')!, 'textContent', () => rows.length === 1
+    ? t('Background process running · {0}', [command])
+    : t('{0} background processes running', [rows.length]));
+  // Native title tooltips reset while hovered when their text changes. Keep this attribute
+  // lifecycle-stable; the visible elapsed labels still tick once per second.
+  host.title = rows.map(row => '#' + row.processId + ' ' + backgroundCommand(row.command)).join('\n');
+  liveStatus.hidden = !multiple;
+  liveStatus.textContent = multiple ? t('{0} background processes running', [rows.length]) : '';
+  const stop = host.querySelector<HTMLButtonElement>('.background-exec-stop')!;
+  stop.hidden = multiple;
+  configureBackgroundProcessStop(stop, first);
+  const chevron = host.querySelector<HTMLElement>('.background-exec-chevron')!;
+  chevron.hidden = !multiple;
+  host.classList.toggle('is-expandable', multiple);
+  host.classList.toggle('is-expanded', expanded);
+  if (multiple) {
+    host.setAttribute('role', 'button');
+    host.setAttribute('aria-expanded', String(expanded));
+    host.setAttribute('aria-controls', 'backgroundExecList');
+    host.tabIndex = 0;
+    const toggle = () => {
+      if (!selectedId) return;
+      if (expandedBackgroundProcessSessions.has(selectedId)) expandedBackgroundProcessSessions.delete(selectedId);
+      else expandedBackgroundProcessSessions.add(selectedId);
+      paintBackgroundProcesses();
+    };
+    host.onclick = event => {
+      if ((event.target as HTMLElement).closest('button')) return;
+      toggle();
+    };
+    host.onkeydown = event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      toggle();
+    };
+  } else {
+    host.setAttribute('role', 'status');
+    host.removeAttribute('aria-expanded');
+    host.removeAttribute('aria-controls');
+    host.removeAttribute('tabindex');
+    host.onclick = null;
+    host.onkeydown = null;
+  }
+  list.hidden = !expanded;
+  list.replaceChildren();
+  if (expanded) {
+    for (const row of rows) {
+      const item = el('div', 'background-exec-process');
+      item.setAttribute('role', 'listitem');
+      item.dataset.processId = String(row.processId);
+      item.dataset.incarnation = String(row.incarnation);
+      item.title = row.command;
+      const compactCommand = backgroundCommand(row.command);
+      const itemCommand = el('span', 'background-exec-process-command', '#' + row.processId + (compactCommand ? ' ' + compactCommand : ''));
+      const itemTime = el('span', 'background-exec-time background-exec-process-time');
+      itemTime.dataset.startedAt = String(row.startedAt);
+      const itemStop = el('button', 'background-exec-stop') as HTMLButtonElement;
+      itemStop.type = 'button';
+      const stopIcon = el('i', 'ico ph ph-power');
+      stopIcon.setAttribute('aria-hidden', 'true');
+      itemStop.append(stopIcon, el('span'));
+      configureBackgroundProcessStop(itemStop, row);
+      item.append(itemCommand, itemTime, itemStop);
+      list.append(item);
+    }
+  }
+  host.hidden = false;
+  paintBackgroundProcessTimes();
+  syncBackgroundProcessClock(true);
+}
+
+function refreshBackgroundProcesses(): void {
+  const session = selectedId;
+  const request = ++backgroundProcessesRequest;
+  if (!session) {
+    backgroundProcesses = [];
+    backgroundProcessesFor = null;
+    backgroundProcessStopping = null;
+    paintBackgroundProcesses();
+    return;
+  }
+  void api.runningProcesses(session).then(reply => {
+    if (request !== backgroundProcessesRequest || session !== selectedId) return;
+    // Older preloads and isolated UI fixtures may not implement this new read yet. Treat a
+    // successful-but-non-array payload as no projection instead of throwing from presentation.
+    backgroundProcesses = reply.ok && Array.isArray(reply.data) ? reply.data : [];
+    backgroundProcessesFor = session;
+    if (!backgroundProcesses.some(row => backgroundProcessKey(row) === backgroundProcessStopping)) backgroundProcessStopping = null;
+    paintBackgroundProcesses();
+    const focus = backgroundProcessFocusAfterRefresh;
+    if (focus?.session === session) {
+      backgroundProcessFocusAfterRefresh = null;
+      if (focus.selection === selectionGeneration && !$('composerDock').hidden) {
+        const rows = sortedBackgroundProcesses();
+        if (rows.length > 1) $('backgroundExecStatus').focus();
+        else if (rows.length === 1) $('backgroundExecStatus').querySelector<HTMLButtonElement>('.background-exec-stop')?.focus();
+      }
+    }
+  });
+}
 /** The newest sentence the running turn shows that ChatGPT has not published yet (#942). */
 let livePreviewText: string | null = null;
 let livePreviewFor: string | null = null;
@@ -4419,7 +4699,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -4640,7 +4920,8 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
     };
     row.append(cancel);
   }
-  if (entry.state === 'queued' && (entry.error?.startsWith('Message queued. Browser startup failed:') || entry.error?.startsWith('Local chat setup failed:'))) {
+  if (entry.state === 'queued' && (entry.error?.startsWith('Message queued. Browser startup failed:') ||
+      entry.error?.startsWith('Message queued. Finish Setup to send:') || entry.error?.startsWith('Local chat setup failed:'))) {
     const retry = dockAction(() => t("Retry browser"), 'i-retry', () => {});
     retry.classList.add('delivery-retry');
     retry.onclick = async () => { retry.setAttribute('disabled', ''); await run(api.retryInputBrowser(entry.id)); void refreshInputQueue(); };
@@ -4896,6 +5177,7 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     accepted = true;
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    showAutoSkillReceipt(result);
     await adoptAcceptedOpening(result);
   } finally {
     if (accepted) dismissInputNotice(entry.id);
@@ -4904,6 +5186,9 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     cancelledStarts.delete(args.id); startingInputs.delete(args.id);
     paintDeliveryControls(); void refreshInputQueue();
   }
+}
+function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
+  if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
 async function stopCurrentTurn(): Promise<void> {
   const id = selectedId, turnId = controlledTurnId, generation = selectionGeneration;
@@ -4993,6 +5278,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
       const retained = (await run(api.listInputs()))?.find(row => row.id === id);
       if (retained) {
         pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== id), retained];
+        showAutoSkillReceipt(retained);
         await adoptAcceptedOpening(retained);
         return true;
       }
@@ -5009,6 +5295,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
     // that durable row visible while the next listing crosses the process boundary.
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    showAutoSkillReceipt(result);
     if (sessionId === null && selectionGeneration === generation && pendingNewInput?.id === id && result.automation &&
         ($<HTMLSelectElement>('chatAutomation').value !== result.automation || openingLoopDelivery() !== result.loopAfterTurn))
       await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation, openingLoopDelivery()));
@@ -5057,6 +5344,7 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
   const parent = selected?.origin?.kind === 'worker' ? selected.origin.fromSessionId : null;
@@ -5096,6 +5384,7 @@ function selectNewChat(projectId: string | null = null): void {
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
   applyComposerSessionModel(null, null);
@@ -5669,6 +5958,7 @@ export function initChat(next: Deps): void {
   });
 
   api.onSessionChanged(scheduleReload);
+  api.onBackgroundProcessesChanged(refreshBackgroundProcesses);
   api.onTaskProgress(progress => {
     if (!goalProgress || progress.requestId !== goalProgress.requestId || goalProgress.selection !== selectionGeneration) return;
     Object.assign(goalProgress, progress); paintGoalProgress();

@@ -114,7 +114,6 @@ export const WORKER_THINKING_MAX_MS = 2 * 60 * 60_000;
  */
 export const WORKER_CONTEXT_CEILING_TOKENS = 400_000;
 
-
 export class AgentError extends Error {}
 
 /** Raised at every `agents` action reached from a conversation outside the active run. */
@@ -606,20 +605,34 @@ function familyKey(owner: Family): string {
 }
 
 /**
- * How many earlier run ids a family still answers to when its own prime selects it.
+ * Earlier run ids retained by one family.
  *
  * Every wake of a parked family is a new incarnation with a new id, and that id is a fence for
- * browser commands. But the prime was handed the earlier ids itself, in spawn and status results
- * and on every worker report ("[run_id=…]"). On 2.1.24 (#881, #882) a prime answered a report
- * with the id written on it and was told AGENTS_BUSY, "no agent family belongs to this
- * conversation", about its own family. An earlier id only ever selects among families the
- * caller already belongs to; it never reaches another prime's workers and never moves a fence.
+ * browser commands. But two existing contracts need older opaque ids after that fence rotates:
+ * the family's own prime may answer a worker report carrying one of its recent run ids (#881,
+ * #882), and a foreign prime may hold the source_run_id printed on an unacknowledged cross-prime
+ * message. Keep the latter as one stable family reply alias and preserve the historical eight
+ * recent incarnation selectors beside it. Neither kind can select a foreign worker or move the
+ * current browser-command fence.
  */
-const MAX_FORMER_RUN_IDS = 8;
+const MAX_RECENT_FORMER_RUN_IDS = 8;
+const MAX_FORMER_RUN_IDS = MAX_RECENT_FORMER_RUN_IDS + 1;
+
+function boundedFormerRunIds(ids: readonly string[]): string[] {
+  const unique = [...new Set(ids)];
+  if (unique.length <= MAX_FORMER_RUN_IDS) return unique;
+  const stableReplyAddress = unique[0]!;
+  return [stableReplyAddress, ...unique.slice(-MAX_RECENT_FORMER_RUN_IDS)];
+}
 
 /** Whether a caller's run_id names this family, now or in one of its earlier incarnations. */
 function answersTo(owner: Family, runId: string): boolean {
   return familyKey(owner) === runId || Boolean(owner.formerRunIds?.includes(runId));
+}
+
+/** Opaque cross-prime reply address that remains valid while incarnation fences rotate. */
+function familyReplyAddress(owner: Family): string {
+  return owner.formerRunIds?.[0] ?? familyKey(owner);
 }
 
 function allFamilies(): Family[] {
@@ -638,6 +651,20 @@ function setupProfileId(value: unknown): string | undefined {
 function setupProfileMatches(caller: Caller, owner: FamilyOwner): boolean {
   const current = setupProfileId(caller.setupProfileId);
   return !current || !owner.setupProfileId || current === owner.setupProfileId;
+}
+
+/**
+ * Resolves an explicit prime-family address without changing caller ownership.
+ *
+ * A foreign run id is intentionally usable only by the prime-to-prime message path. Status,
+ * workers and every ordinary message still resolve through familiesForCaller(), so knowing this
+ * opaque address grants no control over the destination family.
+ */
+function familyForAddress(runId: string): Family | null {
+  const matches = allFamilies().filter(
+    owner => !unpublishedRuns.has(owner as Run) && answersTo(owner, runId)
+  );
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 function exactCaller(caller: Caller): Caller {
@@ -890,7 +917,7 @@ function reactivateDormantRun(dormant: DormantRun): Run | null {
   prime.info.lastSeenAt = now;
   const run: Run = {
     runId: randomUUID(),
-    formerRunIds: [...(dormant.formerRunIds ?? []), familyKey(dormant)].slice(-MAX_FORMER_RUN_IDS),
+    formerRunIds: boundedFormerRunIds([...(dormant.formerRunIds ?? []), familyKey(dormant)]),
     setupProfileId: dormant.setupProfileId,
     primeConversationId: dormant.primeConversationId,
     primeRequestId: dormant.primeRequestId,
@@ -1525,10 +1552,6 @@ export function hasRetiredWorkerLeases(): boolean {
   return retiredWorkers.size > 0;
 }
 
-export function forgetRetiredWorker(conversationId: string): void {
-  if (retiredWorkers.delete(conversationId)) retiredPersist?.();
-}
-
 // -------------------------------------------------------------------- spawn
 
 export interface SpawnInput {
@@ -2103,6 +2126,123 @@ export interface StagedAgentMessages {
   commit: () => void;
   /** Removes an unaccepted batch and supersedes any failed durable snapshot with the safe state. */
   rollback: () => void;
+}
+
+export interface StagedPrimeMessage {
+  /** Address the recipient can use to reply to this prime family. */
+  sourceRunId: string;
+  /** Current canonical address of the destination family. */
+  targetRunId: string;
+  /** Stable copy for the caller to record after acceptance. */
+  message: AgentMessage;
+  /** Publishes the already-durable row. False only if the destination disappeared meanwhile. */
+  commit: () => boolean;
+  /** Removes an unaccepted row and queues a newer safe snapshot. */
+  rollback: () => void;
+}
+
+/**
+ * Queues one message from an existing prime to another existing prime family.
+ *
+ * The destination is an explicit opaque run address, not discovery authority. Only a prime may
+ * use it, only the destination prime receives the row, and workers remain invisible/unreachable
+ * across the family boundary. The source address rides with the durable message so the recipient
+ * can reply even after either family parks and wakes under a newer incarnation id.
+ */
+export function stagePrimeMessage(
+  input: Caller,
+  targetRunId: string,
+  text: string
+): StagedPrimeMessage {
+  requireEnabled();
+  const caller = exactCaller(input);
+  requireFamilySelection(caller);
+  if (!hasCallerIdentity(caller)) throw new IdentityLostError();
+
+  const source = selectedFamily(caller);
+  if (!source) {
+    throw new AgentError(
+      'No prime family belongs to this conversation. Call agents action=spawn before messaging another prime.'
+    );
+  }
+  if (!ownsPrime(caller, source)) {
+    throw new AgentError('Only a prime agent may message another prime family.');
+  }
+  if (source.transfer) {
+    throw new AgentError('PRIME_TRANSFER_IN_PROGRESS: this prime is being compacted/resumed.');
+  }
+
+  const address = targetRunId.trim();
+  const target = address ? familyForAddress(address) : null;
+  if (!target) {
+    throw new AgentError(
+      'TARGET_RUN_UNAVAILABLE: no addressable prime family matches target_run_id. Nothing was sent.'
+    );
+  }
+  if (ownsPrime(caller, target)) {
+    throw new AgentError('A prime cannot message one of its own families through target_run_id.');
+  }
+  const targetPrime = target.agents.get(PRIME_ID);
+  if (!targetPrime) {
+    throw new AgentError(
+      'TARGET_RUN_UNAVAILABLE: the addressed prime family has no reachable prime. Nothing was sent.'
+    );
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) throw new AgentError('The message is empty');
+  if (trimmed.length > MAX_MESSAGE_CHARS) {
+    throw new AgentError(`Message is too long (limit ${MAX_MESSAGE_CHARS} characters)`);
+  }
+  assertRoom(targetPrime, 1);
+
+  const sourceRunId = familyReplyAddress(source);
+  const canonicalTargetRunId = familyKey(target);
+  const message: AgentMessage = {
+    ...newMessage(PRIME_ID, PRIME_ID, trimmed),
+    fromRunId: sourceRunId
+  };
+  unpublishedMessages.add(message);
+  enqueue(targetPrime, message);
+  changed();
+
+  let settled: boolean | null = null;
+  const remove = (): void => {
+    unpublishedMessages.delete(message);
+    const index = targetPrime.queue.indexOf(message);
+    if (index >= 0) targetPrime.queue.splice(index, 1);
+    recount(targetPrime);
+  };
+  const destinationStillOwnsPrime = (): boolean =>
+    allFamilies().some(
+      owner => owner.agents.get(PRIME_ID) === targetPrime && answersTo(owner, address)
+    );
+
+  return {
+    sourceRunId,
+    targetRunId: canonicalTargetRunId,
+    message: { ...message },
+    commit: () => {
+      if (settled !== null) return settled;
+      if (!destinationStillOwnsPrime()) {
+        remove();
+        settled = false;
+        changed();
+        return false;
+      }
+      unpublishedMessages.delete(message);
+      recount(targetPrime);
+      settled = true;
+      changed('telemetry');
+      return true;
+    },
+    rollback: () => {
+      if (settled !== null) return;
+      remove();
+      settled = false;
+      changed();
+    }
+  };
 }
 
 /**
@@ -2964,20 +3104,6 @@ function sleepAgent(agent: Agent, reason: string): FinishResult | null {
   logInfo(`multi-agent: ${agent.info.id} ${terminal ? 'finished for good' : 'is sleeping'} — ${reason}`);
   changed();
   return { info: { ...agent.info }, report: { ...report }, repeat: false };
-}
-
-/**
- * Sleeps a worker the browser proved has stopped, addressed by its own chat.
- *
- * The counterpart of {@link finishWorkerConversation} for the paths that have an observation
- * but no result text of the worker's own.
- */
-export function sleepWorkerConversation(conversationId: string, reason: string): FinishResult | null {
-  const run = runForConversation(conversationId);
-  if (!run || !conversationId) return null;
-  const agent = agentForConversationId(conversationId);
-  if (!agent || agent.info.role !== 'worker') return null;
-  return sleepAgent(agent, reason);
 }
 
 /** Sleeps a worker by slot id. Used by sweeps that already know which row they proved quiet. */
@@ -4611,12 +4737,17 @@ function snapshotSwarmIncludingUnpublished(): SwarmSnapshot | null {
   return buildSwarmSnapshot(true);
 }
 
-/** Earlier ids from disk: UUIDs only, never the family's own current id, at most the bound. */
+/**
+ * Earlier ids from disk: UUIDs only, never the current id, with one stable plus eight recent.
+ * A legacy snapshot that already discarded an older peer address contains no trustworthy source
+ * family for that opaque UUID, so restore preserves what exists and never reconstructs by guess.
+ */
 function savedFormerRunIds(saved: unknown, current: string): string[] | undefined {
   if (!Array.isArray(saved)) return undefined;
   const ids = saved.filter((id): id is string => typeof id === 'string' && id !== current &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)).slice(-MAX_FORMER_RUN_IDS);
-  return ids.length ? ids : undefined;
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+  const bounded = boundedFormerRunIds(ids);
+  return bounded.length ? bounded : undefined;
 }
 
 function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {

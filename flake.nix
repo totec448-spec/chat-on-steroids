@@ -107,8 +107,34 @@
         }
       );
 
-      checks = forAllSystems (system: {
-        node-modules = (developmentFor system).nodeModules;
-      });
+      checks = forAllSystems (
+        system:
+        let
+          inherit (developmentFor system) pkgs nodejs nodeModules;
+        in
+        {
+          node-modules = nodeModules;
+          native-runtime = pkgs.runCommand "chat-on-steroids-native-runtime" {
+            nativeBuildInputs = [ nodejs ];
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.vips ];
+          } ''
+            cd ${nodeModules}
+            node - <<'JS'
+            const assert = require('node:assert/strict');
+            const fs = require('node:fs');
+            const sharp = require('sharp');
+            const Parser = require('tree-sitter');
+            const parser = new Parser();
+            parser.setLanguage(require('tree-sitter-bash'));
+            assert.equal(parser.parse('echo ready').rootNode.hasError, false);
+            assert.equal(typeof require('node-pty').spawn, 'function');
+            assert.ok(fs.existsSync(require('electron')));
+            sharp({ create: { width: 1, height: 1, channels: 4, background: '#000' } })
+              .png().toBuffer().then(bytes => assert.ok(bytes.length > 0));
+            JS
+            touch $out
+          '';
+        }
+      );
     };
 }

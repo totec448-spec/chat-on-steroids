@@ -36,8 +36,6 @@
           <button class="btn" id="zoomOut" type="button">Zoom Out <kbd>Ctrl+−</kbd></button>
           <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
         </div></details>
-        <button class="btn topbar-theme" id="themeBtn" type="button" aria-label="Switch to light mode" title="Switch to light mode"><i class="ico ph ph-sun" id="themeIcon" aria-hidden="true"></i></button>
-        <button class="btn topbar-connection" id="headerConnect" type="button" hidden>Connect</button>
       </div>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
@@ -142,6 +140,7 @@
           <span id="headerSub">Not set up yet</span>
         </span>
         <span class="state">
+          <button class="btn connect-prompt" id="headerConnect" type="button" hidden>Connect</button>
           <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
                lives in the tray and is closed to it, so "installs the next time you start it"
                can mean days. This is the press that means now. -->
@@ -476,7 +475,7 @@
         <section class="panel setup-panel scroll" data-panel="setup">
           <div class="sheet settings-page-content">
             <div class="setup-heading settings-page-head">
-              <div><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
+              <div><h1 id="setupTitle">Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
               <div class="language-tabs" role="group" aria-label="Language">
                 <button type="button" data-language="de" lang="de" translate="no" title="Deutsch" aria-label="Deutsch" aria-pressed="false"><svg class="language-flag" viewBox="0 0 900 600" aria-hidden="true"><image href="./flags/de.svg" width="900" height="600"/></svg></button>
                 <button type="button" data-language="en" lang="en" translate="no" title="English" aria-label="English" aria-pressed="true"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#012169" d="M0 0h60v40H0z"/><path stroke="#fff" stroke-width="8" d="m0 0 60 40M60 0 0 40"/><path stroke="#c8102e" stroke-width="3" d="m0 0 60 40M60 0 0 40"/><path stroke="#fff" stroke-width="13" d="M30 0v40M0 20h60"/><path stroke="#c8102e" stroke-width="7" d="M30 0v40M0 20h60"/></svg></button>
@@ -540,7 +539,7 @@
               </p>
               <button class="btn" id="wizExpand" type="button" aria-controls="wizard" aria-expanded="true">Hide setup guide</button>
             </div>
-            <div class="setup-progress" id="setupProgress" role="progressbar" aria-valuemin="0" aria-valuenow="0" aria-valuemax="6">
+            <div class="setup-progress" id="setupProgress" role="progressbar" aria-labelledby="setupTitle" aria-valuemin="0" aria-valuenow="0" aria-valuemax="6">
               <span class="setup-progress-text" id="setupProgressText"></span>
               <span class="setup-progress-track" aria-hidden="true"><span class="setup-progress-fill" id="setupProgressFill"></span></span>
             </div>
@@ -857,8 +856,8 @@
                     <input id="autoContinue" type="checkbox" />
                   </label>
                   <details class="setting-timing"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Recovery timing details</summary><p>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered tickets share reload intervals of 2, 5, 10 and 15 minutes.</p></details>
-                  <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
-                  <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
                   <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Compact &amp; Resume briefs keep tool calls and their results. Goal and Loop always read only your messages and the assistant's updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
@@ -866,28 +865,32 @@
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Choose the default model and reasoning for new chats and sub-agents, from what your account offers.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
-                  <div class="setting"><span class="setting-text"><b>Default new-chat model</b><em>Used when you start a new chat. A chat you continue keeps its own model.</em></span><select id="defaultChatModel"><option value="">Automatic</option></select></div>
-                  <div class="setting"><span class="setting-text"><b>Default new-chat reasoning</b><em>Used with the ordinary chat model above; workers and helpers keep their own defaults.</em></span><select id="defaultChatReasoning"><option value="">Automatic</option></select></div>
-                  <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
-                  <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="defaultChatModelTitle">Default new-chat model</b><em>Used when you start a new chat. A chat you continue keeps its own model.</em></span><select id="defaultChatModel" aria-labelledby="defaultChatModelTitle"><option value="">Automatic</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="defaultChatReasoningTitle">Default new-chat reasoning</b><em>Used with the ordinary chat model above; workers and helpers keep their own defaults.</em></span><select id="defaultChatReasoning" aria-labelledby="defaultChatReasoningTitle"><option value="">Automatic</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="workerModelTitle">Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel" aria-labelledby="workerModelTitle"><option value="" disabled>No observed choices</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="workerReasoningTitle">Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning" aria-labelledby="workerReasoningTitle"><option value="" disabled>No observed choices</option></select></div>
                   </div>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Skills</h2><p>Choose whether imported Skills can be matched to ordinary messages.</p></div></header>
+                <div class="settings-surface pane">
+                  <label class="setting"><span class="setting-text"><b>Auto-select Skills</b><em>Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.</em></span><input id="autoSelectSkills" type="checkbox" /></label>
+                </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Workers & recovery</h2><p>Set worker limits and which chats can resume after interruptions.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Sub-agent workers</b>
+                      <b id="maWorkersTitle">Sub-agent workers</b>
                       <em>Needs the browser extension to be connected. This sets the most worker chats one run may open.</em>
                     </span>
-                    <input id="maWorkers" class="num" type="number" min="1" max="8" step="1" />
+                    <input id="maWorkers" aria-labelledby="maWorkersTitle" class="num" type="number" min="1" max="8" step="1" />
                     <span class="unit">max</span>
                   </div>
 
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Workers across all chats</b>
+                      <b id="globalMaWorkersTitle">Workers across all chats</b>
                       <em>The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.</em>
                     </span>
-                    <input id="globalMaWorkers" class="num" type="number" min="0" max="64" step="1" />
+                    <input id="globalMaWorkers" aria-labelledby="globalMaWorkersTitle" class="num" type="number" min="0" max="64" step="1" />
                   </div>
 
                   <label class="setting">
@@ -939,7 +942,7 @@
                 <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Session finish</b><em>Holds the turn open near its end so the next step arrives in the same turn. Goal and Loop use it with GPT-6 Pro (Astra), Loop also with older Pro models; other models only when your message asks. Turning it on changes the connector's tools, so ChatGPT needs a plugin refresh (automatic after 20 seconds with Automatic plugin refresh).</em></span><input id="finishTool" type="checkbox" /></label>
-                  <div class="setting"><span class="setting-text"><b>Requested notice</b><em>How long before its end the model should hold the turn. A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="finishLeadMinutesTitle">Requested notice</b><em>How long before its end the model should hold the turn. A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes" aria-labelledby="finishLeadMinutesTitle"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
                   <p class="muted">When the model ends the turn this way with Goal or Loop on in this chat, the next step is written from that prompt and response source. Otherwise you get a notification.</p>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
@@ -955,19 +958,19 @@
                   <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Compact automatically</b>
+                      <b id="autoCompactTitle">Compact automatically</b>
                       <em id="autoCompactHint"></em>
                     </span>
-                    <input id="autoCompactTokens" class="num" type="number" min="10000" max="4000000" step="10000" />
+                    <input id="autoCompactTokens" aria-labelledby="autoCompactTitle" class="num" type="number" min="10000" max="4000000" step="10000" />
                     <span class="unit">tokens</span>
-                    <span class="sw"><input type="checkbox" id="autoCompact" /><i></i></span>
+                    <span class="sw"><input type="checkbox" id="autoCompact" aria-labelledby="autoCompactTitle" /><i></i></span>
                   </div>
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Handoff length</b>
+                      <b id="handoffLengthTitle">Handoff length</b>
                       <em>How much a Compact &amp; Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.</em>
                     </span>
-                    <select id="handoffLength">
+                    <select id="handoffLength" aria-labelledby="handoffLengthTitle">
                       <option value="thorough">Thorough · 10k–30k tokens</option>
                       <option value="standard">Standard · 4k–10k tokens</option>
                       <option value="short">Short · 2k–6k tokens</option>
@@ -978,10 +981,10 @@
                 <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Provider</b>
+                      <b id="goalProviderTitle">Provider</b>
                       <em>OpenRouter, or your own OpenAI-compatible endpoint (Ollama, vLLM, LM Studio, a gateway) for the API response source.</em>
                     </span>
-                    <select id="goalProvider">
+                    <select id="goalProvider" aria-labelledby="goalProviderTitle">
                       <option value="openrouter">OpenRouter</option>
                       <option value="custom">Custom endpoint</option>
                     </select>
@@ -1039,10 +1042,10 @@
 
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Reasoning</b>
+                      <b id="goalReasoningTitle">Reasoning</b>
                       <em>Choose a reasoning level supported by the selected API model. Default uses the provider's setting.</em>
                     </span>
-                    <select id="goalReasoning">
+                    <select id="goalReasoning" aria-labelledby="goalReasoningTitle">
                       <option value="default">Default</option>
                     </select>
                   </div>
@@ -1122,7 +1125,7 @@
 
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
+            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
             <form class="composer" id="composer">
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
               <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
@@ -1180,11 +1183,19 @@
                   <summary><span id="composerModelLabel">Model</span><svg class="disclosure-chevron dropdown-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></summary>
                   <div class="composer-popover">
                     <p id="composerModelStatus" class="muted" role="status" hidden></p>
-                    <div id="composerModelChoices" role="group" aria-label="Model"></div>
-                    <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Thinking effort</strong><span id="composerPowerModel">Observed models</span></div></div>
+                    <div class="power-header">
+                      <button id="composerSpark" class="power-spark" data-keep-menu="true" data-action="min" type="button" title="Thinking effort" aria-label="Thinking effort" disabled>
+                        <i class="ico ph ph-lightning spark-lightning" aria-hidden="true"></i><i class="ico ph ph-brain spark-brain" aria-hidden="true"></i>
+                      </button>
+                      <div class="power-caption">
+                        <strong id="composerPowerTitle">Thinking effort</strong>
+                        <button id="composerModelToggle" data-keep-menu="true" type="button" aria-expanded="false" aria-controls="composerModelChoices" aria-label="ChatGPT model" disabled><span id="composerPowerModel">Observed models</span><svg class="disclosure-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></button>
+                      </div>
+                      <button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i></button>
+                    </div>
                     <div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
                     <label hidden>Reasoning<select id="composerReasoning" aria-label="Reasoning effort"><option value="" disabled>No observed choices</option></select></label>
-                    <button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i><span>Reload ChatGPT models</span></button>
+                    <div id="composerModelChoices" role="group" aria-label="Model" hidden inert><div class="model-list-clip"><div id="composerModelOptions"></div></div></div>
                   </div>
                 </details>
                 <button class="btn" id="generateFinishGoal" type="button" hidden>Generate Goal</button>
@@ -1223,6 +1234,9 @@
                 </button>
                 <button class="btn" id="copyLogText" type="button">
                   <i class="ico ph ph-copy" aria-hidden="true"></i>Text
+                </button>
+                <button class="btn" id="saveDiagnosticsReport" type="button" title="Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.">
+                  <i class="ico ph ph-file-text" aria-hidden="true"></i>Diagnostics report
                 </button>
               </span>
             </h2>
