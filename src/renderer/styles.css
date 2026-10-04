@@ -3617,7 +3617,29 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock { display: none; }
 .composer-dock-body { display: flow-root; }
 @media (prefers-reduced-motion: reduce) { .composer-dock { transition: none; animation: none !important; } }
-.composer-dock .queued-input, #activeGoalRow, .recovery-notice { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
+.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
+.background-exec-status[hidden] { display: none; }
+.background-exec-status .ico { color: var(--ink); }
+.background-exec-status.is-expandable { cursor: pointer; }
+.background-exec-status.is-expandable:hover { background: var(--hover); color: var(--ink); }
+.background-exec-status.is-expandable:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.background-exec-chevron { flex: 0 0 16px; width: 16px; height: 16px; color: var(--faint); transition: transform 120ms ease; }
+.background-exec-status.is-expanded .background-exec-chevron { transform: rotate(90deg); }
+.background-exec-list[hidden] { display: none; }
+.background-exec-list { max-height: min(220px, 30vh); overflow-y: auto; overscroll-behavior: contain; background: var(--card); }
+.background-exec-process { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 12px 6px 37px; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
+.background-exec-process-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.background-exec-time { flex-shrink: 0; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.background-exec-stop { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 5px 7px; background: transparent; color: var(--soft); font: inherit; cursor: pointer; }
+.background-exec-stop:hover { color: var(--ink); background: var(--hover); }
+.background-exec-stop:disabled { cursor: default; opacity: .55; }
+@media (max-width: 480px) {
+  /* Preserve the actionable process row at laptop zoom / phone-width windows. The row tooltip
+     still carries elapsed time and full commands; the Stop control keeps its accessible label. */
+  .background-exec-time, .background-exec-stop > span { display: none; }
+  .background-exec-stop { padding-inline: 5px; }
+  .background-exec-process { padding-left: 28px; }
+}
 .recovery-countdown { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
 .composer-dock-body > :nth-last-child(1 of :not([hidden])) { border-bottom: 0; }
 .composer-dock-body > :nth-last-child(1 of :not([hidden])) > .queued-input:last-child { border-bottom: 0; }
@@ -3626,7 +3648,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock .queue-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Plan stages are read before they run; show up to three lines instead of one. */
 .composer-dock .queued-input .queue-label, .plan-stage-heading .queue-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
-#finishQueue { max-height: 300px; overflow-y: auto; }
+#finishQueue {
+  max-height: min(240px, 30vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 .composer-dock button { flex-shrink: 0; }
 .composer-dock .dock-action { border: 0; border-radius: 5px; background: transparent; color: var(--soft); padding: 4px; display: inline-flex; align-items: center; cursor: pointer; }
 .composer-dock .dock-action:hover { color: var(--ink); background: var(--hover); }
@@ -3635,6 +3662,15 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock .queued-input.is-editing > button { grid-column: 2; justify-self: center; }
 .composer-dock textarea { width: 100%; min-height: 65px; padding: 8px; font: inherit; resize: vertical; }
 #taskPlanPreview { max-height: 300px; overflow-y: auto; }
+@media (max-width: 700px), (max-height: 900px) {
+  /* A crowded dock can contain plan, process, recovery, queue and Goal rows simultaneously.
+     Bound the whole surface on narrow/short viewports, while keeping the process row pinned
+     and the two large sublists independently scrollable. Wide desktop layouts are unchanged. */
+  .composer-dock-body { max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .background-exec-status { position: sticky; top: 0; z-index: 2; background: var(--card); }
+  .agent-plan-body, #finishQueue { max-height: 22vh; }
+  #taskPlanPreview { max-height: 28vh; }
+}
 /* Status spans need a real row: inline padding does not contribute to dock height. */
 #taskPlanPreview > .muted { display: block; line-height: 20px; }
 #taskPlanPreview > .muted, #taskPlanPreview > .task-progress-text { margin: 0; padding: 10px 12px; }

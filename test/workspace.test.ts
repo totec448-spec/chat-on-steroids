@@ -10,13 +10,14 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import {
   executionPrincipal,
   execOwner,
   execOwnershipFailure,
   noteExecOwner,
+  onBackgroundExecChange,
   resetExecOwnershipForTests
 } from '../src/main/codex/ownership.js';
 import { observeRequestCorrelation, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
@@ -142,13 +143,19 @@ describe('live process ownership across chat replacement', () => {
     expect(temporary).toBe('request:wfr_exec_request');
     noteExecOwner(104, temporary);
     expect(execOwnershipFailure(104, executionPrincipal('wfr_exec_request', null, true))).toBeNull();
+    const changed = vi.fn();
+    const unsubscribe = onBackgroundExecChange(changed);
+    changed.mockClear();
     expect(observeRequestCorrelation({
       requestId: 'wfr_exec_request', conversationId: 'conv-request', sessionId: 'session-request',
       messageId: 'msg-request', tool: 'write_stdin', observedAt: Date.now()
     })).toBe('stored');
+    expect(execOwner(104)).toBe('session-request');
+    expect(changed).toHaveBeenCalledTimes(1);
     expect(executionPrincipal('wfr_exec_request', null, true)).toBe('session-request');
     expect(execOwnershipFailure(104, 'session-request')).toBeNull();
     expect(execOwnershipFailure(104, 'session-other')).toBe('different-owner');
+    unsubscribe();
   });
 
   it('keeps an unresolved request out of a process it did not open, then admits it after exact proof', () => {
@@ -160,6 +167,19 @@ describe('live process ownership across chat replacement', () => {
     })).toBe('stored');
     expect(execOwnershipFailure(105, 'request:wfr_unknown')).toBeNull();
     expect(execOwnershipFailure(105, 'session-other')).toBe('different-owner');
+  });
+
+  it('stores durable custody when proof lands before a yielded exec publishes its owner', () => {
+    const temporary = executionPrincipal('wfr_exec_race', null, true);
+    expect(temporary).toBe('request:wfr_exec_race');
+    expect(observeRequestCorrelation({
+      requestId: 'wfr_exec_race', conversationId: 'conv-race', sessionId: 'session-race',
+      messageId: 'msg-race', tool: 'exec_command', observedAt: Date.now()
+    })).toBe('stored');
+    // exec_command captured `temporary` before the proof arrived, then yielded later.
+    noteExecOwner(106, temporary);
+    expect(execOwner(106)).toBe('session-race');
+    expect(execOwnershipFailure(106, 'session-race')).toBeNull();
   });
 });
 
