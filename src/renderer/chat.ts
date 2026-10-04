@@ -2708,6 +2708,8 @@ function answerActions(turnId: string): HTMLElement {
 
 function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
+  // A note the app filed about its own work (a recovery reload), not ChatGPT's phase caption.
+  if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
   const time = document.createElement('time');
@@ -3241,7 +3243,8 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     }
     const latest = recap ?? [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
-    const observedPhase = rows[i - 1]?.matches('.ev-progress')
+    // Only ChatGPT's own caption names the phase; the app's recovery notes never title a group.
+    const observedPhase = rows[i - 1]?.matches('.ev-progress:not([data-app-note])')
       ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
     const label = observedPhase || latestHead?.querySelector('b')?.textContent
       || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
