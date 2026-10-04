@@ -18,7 +18,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
-          'pet-overlay': resolve(__dirname, 'src/preload/pet-overlay.ts')
+          'pet-overlay': resolve(__dirname, 'src/preload/pet-overlay.ts'),
+          'cos-browser-worker': resolve(__dirname, 'src/preload/cos-browser-worker.ts')
         }
       }
     }
