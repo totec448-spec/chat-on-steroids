@@ -319,7 +319,10 @@ only. `setup-profiles.ts` switches both in one queued config commit, incrementin
 Keys remain in `secrets.bin`: the original profile keeps `openaiApiKey`, others use `setup:<id>`.
 Settings writes fence changed tunnel IDs by profile identity/epoch; key writes name their exact
 profile. Connection lifecycle reuses the selected key and reconnects when the OpenAI profile
-epoch changes, even if its tunnel ID matches. Roots, chats, models and other settings stay shared.
+epoch changes, even if its tunnel ID matches. Each Core MCP endpoint generation freezes the local
+Setup profile ID that created it while roots/capabilities remain live: a config switch may precede
+old-endpoint drain, so late accepted calls must retain the old connection provenance. This ID is
+not a provider account ID. Roots, chats, model observations and other settings stay shared.
 Removing a profile removes its inactive snapshot and encrypted key; removing the active profile
 selects a survivor in the same config commit. The last profile cannot be removed.
 Appearance's profile popover uses content-sized bounded width and a grid with a fixed delete
@@ -2708,6 +2711,18 @@ If late proof identifies a provisional prime as an existing worker, its accepted
 attached to that worker's real root prime; the worker cannot control descendants or spawn more.
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
 family prevents a duplicate but remains hidden from status until accepted.
+
+A fresh family also freezes the Setup profile carried by the exact Core endpoint generation that
+accepted its spawn. That local profile ID survives active/dormant snapshots, restart and family
+reactivation; legacy histories without it remain unclaimed rather than being assigned from a later
+call. When both caller and family have provenance, a different profile cannot select, extend or
+control that family through `agents`. An exact worker conversation calling ordinary local tools
+through a different profile is refused before liveness, input acknowledgement/delivery and the
+handler, so losing agent-role resolution cannot turn it into an ordinary chat or consume the
+owning connection's pending input. This is provenance/fencing only: there is no profile discovery,
+browser-profile routing, automatic account selection or cross-account model failover here. The
+existing model catalog remains provider-observed shared state until a later account-aware owner is
+introduced; do not describe this field as proof of which ChatGPT account supplied a model.
 
 Worker model and reasoning belong to the user's saved app settings by default. Model-visible
 instructions and the agents schema require omitting each override unless the user explicitly
