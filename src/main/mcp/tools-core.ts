@@ -2185,6 +2185,17 @@ async function readOne(
   requested: string,
   options: ReadOneOptions
 ): Promise<{ text: string; bytes: number; image?: { data: string; mimeType: string } }> {
+  // The virtual root itself: a model that has not looked yet naturally starts at "/", and "Path
+  // is empty" left it guessing the names. The shared folders are what "/" contains.
+  if (typeof requested === 'string' && (process.platform === 'win32' ? /^[/\\]+$/ : /^\/+$/).test(requested.trim())) {
+    if (!options.canBrowse) {
+      return { text: `--- / ---\nTOOL_DISABLED: listing folders needs the Browse folders permission.`, bytes: 0 };
+    }
+    const text = options.roots.length === 0
+      ? '--- / — no folders are shared yet ---'
+      : `--- / — ${options.roots.length} entr${options.roots.length === 1 ? 'y' : 'ies'}, one level ---\n${options.roots.map(root => `d ${root.name}`).join('\n')}`;
+    return { text, bytes: Buffer.byteLength(text, 'utf8') };
+  }
   const resolved = await resolveIn(options.roots, requested);
   const info = await statInfo(resolved.real, resolved.virtual, { scanContent: !options.canRead });
 

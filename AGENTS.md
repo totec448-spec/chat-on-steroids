@@ -829,7 +829,9 @@ identity, evidence and host-specific integration around them.
 
 ### Reading, searching and patching
 
-`read` batches paths, lists directories, handles globs and returns numbered bounded text.
+`read` batches paths, lists directories, handles globs and returns numbered bounded text. The virtual
+root `/` lists the shared folders (virtual names only, Browse folders permission), so a model
+that starts at `/` does not have to guess them.
 Its 512 KiB text budget is separate from its four-image/12 MiB base64 budget. Images use
 `view_image`'s full per-file validation; a rejected image does not discard other valid sections.
 `tools-core.ts` owns its contract; `codex/read-backend.ts` owns listing/decoding semantics;
