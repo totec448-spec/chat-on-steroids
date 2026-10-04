@@ -1949,5 +1949,8 @@
   "{0} unchanged lines": "{0} dòng không đổi",
   "More edited files are available in the recording.": "Các tệp đã chỉnh sửa khác có trong bản ghi.",
   "1 sub-agent in this round": "1 tác nhân phụ trong vòng này",
-  "{0} sub-agents in this round": "{0} tác nhân phụ trong vòng này"
+  "{0} sub-agents in this round": "{0} tác nhân phụ trong vòng này",
+  "The Chat On Steroids browser is still running": "Trình duyệt Chat On Steroids vẫn đang chạy",
+  "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "Các cuộc trò chuyện vẫn tiếp tục. Chọn “Hiện trình duyệt” trong menu của biểu tượng khay để mở lại.",
+  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Các cuộc trò chuyện vẫn tiếp tục. Chọn “Hiện trình duyệt” trong menu của biểu tượng thanh menu để mở lại."
 }

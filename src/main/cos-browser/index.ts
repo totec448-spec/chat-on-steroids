@@ -2,11 +2,12 @@
  * The app's one CoS browser, running while it is the selected ChatGPT browser. Load it through
  * selection.ts: this module installs app hooks as it loads, and the default path never loads it.
  */
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, Notification } from 'electron';
 import path from 'node:path';
 import { bridgeStatus, onBridgeChange } from '../bridge.js';
-import { getConfig } from '../config.js';
+import { getConfig, updateConfig } from '../config.js';
 import { logWarn } from '../logger.js';
+import { mainText } from '../main-texts.js';
 import { liveConversations, onSessionChange } from '../session/recorder.js';
 import { CosBrowser } from './host.js';
 
@@ -17,8 +18,28 @@ const out = path.join(app.getAppPath(), 'out');
 export const cosBrowser = new CosBrowser({
   preloadDir: path.join(out, 'preload'),
   rendererDir: path.join(out, 'renderer'),
-  rendererUrl: () => process.env.ELECTRON_RENDERER_URL ?? null
+  rendererUrl: () => process.env.ELECTRON_RENDERER_URL ?? null,
+  onUserHide: showTrayHint
 });
+
+/**
+ * The first time the user closes or minimizes the CoS browser, says where it went: it hides to the
+ * tray and its chats go on, which a closed window does not suggest. Once per install.
+ */
+function showTrayHint(): void {
+  if (getConfig().ui.cosBrowserTrayHint === true) return;
+  void updateConfig(config => ({ ...config, ui: { ...config.ui, cosBrowserTrayHint: true } }))
+    .then(() => {
+      if (!Notification.isSupported()) return;
+      new Notification({
+        title: mainText('The Chat On Steroids browser is still running'),
+        body: mainText(process.platform === 'darwin'
+          ? 'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'
+          : 'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.')
+      }).show();
+    })
+    .catch(error => logWarn(`cos browser: tray notice: ${error instanceof Error ? error.message : String(error)}`));
+}
 
 /** The dot on the toolbar's companion button: does its extension reach the app right now. */
 function paintCompanion(): void {

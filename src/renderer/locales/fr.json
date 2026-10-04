@@ -1949,5 +1949,8 @@
   "{0} unchanged lines": "{0} lignes inchangées",
   "More edited files are available in the recording.": "D’autres fichiers modifiés sont disponibles dans l’enregistrement.",
   "1 sub-agent in this round": "1 sous-agent dans cette étape",
-  "{0} sub-agents in this round": "{0} sous-agents dans cette étape"
+  "{0} sub-agents in this round": "{0} sous-agents dans cette étape",
+  "The Chat On Steroids browser is still running": "Le navigateur Chat On Steroids est toujours ouvert",
+  "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "Vos chats continuent. Choisissez « Afficher le navigateur » dans le menu de l’icône de la zone de notification pour le rouvrir.",
+  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Vos chats continuent. Choisissez « Afficher le navigateur » dans le menu de l’icône de la barre des menus pour le rouvrir."
 }
