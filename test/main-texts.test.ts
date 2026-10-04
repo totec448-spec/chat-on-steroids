@@ -55,3 +55,26 @@ it('shows the published translation, keeps English for anything unknown, and rep
   expect(texts.mainText('Quit')).toBe('Quit');
   expect(texts.mainText('Open')).toBe('Abrir');
 });
+
+it('starts a launch to the tray in the last language, before any window has published', async () => {
+  // A background launch builds the tray without a window, so the renderer never publishes; the
+  // main process keeps the last set it received and takes it back at startup.
+  const before = await import('../src/main/main-texts.js');
+  before.setMainTextTranslations({ Quit: de.Quit!, Open: de.Open! });
+  const saved = JSON.parse(JSON.stringify(before.mainTextTranslations()));
+
+  vi.resetModules();
+  const after = await import('../src/main/main-texts.js');
+  expect(after.mainText('Quit')).toBe('Quit');
+  after.restoreMainTextTranslations(saved);
+  expect(after.mainText('Quit')).toBe(de.Quit);
+  expect(after.mainText('Open')).toBe(de.Open);
+
+  // A missing or damaged file leaves English, and cannot smuggle in other texts.
+  for (const damaged of [null, 'Beenden', ['Beenden'], { Quit: 5 }, { 'Unrelated text': 'x' }]) {
+    vi.resetModules();
+    const fresh = await import('../src/main/main-texts.js');
+    fresh.restoreMainTextTranslations(damaged);
+    expect(fresh.mainText('Quit')).toBe('Quit');
+  }
+});
