@@ -450,10 +450,15 @@ interface Command {
 }
 
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
-const COMMAND_STEPS = ['revival-waiting', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
+const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
+/** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
+const REVIVAL_WAIT_STEPS = new Set<string>(['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor']);
 type CommandStep = typeof COMMAND_STEPS[number];
 const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
   'revival-waiting': 'its chat was still answering or its message box was not empty',
+  'revival-busy': 'its chat was still answering',
+  'revival-draft': 'its message box was not empty',
+  'revival-editor': 'its page never showed a usable message box',
   composer: 'waiting for ChatGPT\'s message box',
   model: 'choosing the model and reasoning',
   'composer-after-model': 'waiting for the message box after choosing the model',
@@ -4197,7 +4202,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const step = COMMAND_STEPS.find(candidate => candidate === body['step']);
     const command = commands.find(entry => entry.id === body['id']);
     // A wake reports its wait before it redeems, so it has no owner yet; every later step needs one.
-    const allowed = step === 'revival-waiting' ? command?.owner === null : command?.owner != null && command.owner === body['client'];
+    const allowed = step && REVIVAL_WAIT_STEPS.has(step) ? command?.owner === null : command?.owner != null && command.owner === body['client'];
     if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     return json(res, 200, { ok: true }, origin);
@@ -9384,8 +9389,9 @@ function expire(command: Command): void {
 function commandExpiryReason(command: Command): string {
   if (command.lastError) return command.lastError;
   if (command.claimedAt !== null) return `the chat this app opened did not report back in time (${commandProgress(command)})`;
-  return command.progress?.step === 'revival-waiting'
-    ? `the browser did not claim this command before its deadline (${COMMAND_STEP_TEXT['revival-waiting']})`
+  const step = command.progress?.step;
+  return step && REVIVAL_WAIT_STEPS.has(step)
+    ? `the browser did not claim this command before its deadline (${COMMAND_STEP_TEXT[step]})`
     : 'the browser did not claim this command before its deadline';
 }
 
@@ -9401,7 +9407,7 @@ function commandProgress(command: Command, now = Date.now()): string {
     if (progress.opened === 'os') return 'it was opened through the operating system, and no page with the extension picked up its task';
     return 'no browser opened it';
   }
-  if (!progress.step || progress.step === 'revival-waiting' || progress.stepAt === undefined) return 'the page picked up its task, then reported nothing more';
+  if (!progress.step || REVIVAL_WAIT_STEPS.has(progress.step) || progress.stepAt === undefined) return 'the page picked up its task, then reported nothing more';
   const seconds = Math.max(0, Math.round((now - progress.stepAt) / 1000));
   return `last step: ${COMMAND_STEP_TEXT[progress.step]}, reported ${seconds} s before the app gave up`;
 }

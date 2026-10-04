@@ -6860,6 +6860,29 @@ describe('a command that runs out of time says how far its page got', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each([
+    ['revival-busy', 'its chat was still answering'],
+    ['revival-draft', 'its message box was not empty'],
+    ['revival-editor', 'its page never showed a usable message box']
+  ])('names why a wake waited: %s', async (reason, text) => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      const conversationId = 'dededede-7654-3210-fedc-ba9876543210';
+      await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+      finishAgent({ conversationId }, 'reported, waiting for more');
+      wake([{ to: 'worker-1', text: 'continue with the second half' }]);
+      const { id } = await waitForRevival();
+      expect((await step(id, 'revival-busy', 'revival-document')).body).toEqual({ ok: true });
+      expect((await step(id, reason, 'revival-document')).body).toEqual({ ok: true });
+      const prior = new Set(getLog());
+      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS + 1_000);
+      expect(giveUp(prior, 'revive:')).toContain(`the browser did not claim this command before its deadline (${text})`);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('says a wake waited for a busy chat or a non-empty message box', async () => {
     vi.useFakeTimers();
     try {
