@@ -19,6 +19,14 @@ const { observeRequestCorrelation, resetCorrelationRegistryForTests } = await im
 const broker = await import('../src/main/agents.js');
 const { resetRequestPlansForTests } = await import('../src/main/session/request-plans.js');
 const { openContinuationNow, resetContinuationsForTests } = await import('../src/main/session/continuation.js');
+// Keep cold module loading in file setup rather than charging it to the recorder round-trip's
+// 30-second assertion budget. The timed case below still uses the real DOM, recorder and broker.
+const { JSDOM } = await import('jsdom');
+const { readFileSync } = await import('node:fs');
+const { recordRequestEvidence, noteChatOrigin, resetRecorderForTests } = await import('../src/main/session/recorder.js');
+const { findSessionByConversation, getSession } = await import('../src/main/session/store.js');
+const { dispatch, ok } = await import('../src/main/mcp/kernel.js');
+const { currentCaller } = await import('../src/main/mcp/call-context.js');
 
 let directory: string;
 const request = { requestId: 'wfr_request_prime' };
@@ -345,12 +353,6 @@ it('keeps late proof inside the handoff when the durable session moved before br
 });
 
 it('joins dump-shaped paired tool sources through the real recorder into worker membership and the prime inbox', async () => {
-  const { JSDOM } = await import('jsdom');
-  const { readFileSync } = await import('node:fs');
-  const { recordRequestEvidence, noteChatOrigin, resetRecorderForTests } = await import('../src/main/session/recorder.js');
-  const { findSessionByConversation, getSession } = await import('../src/main/session/store.js');
-  const { dispatch, ok } = await import('../src/main/mcp/kernel.js');
-  const { currentCaller } = await import('../src/main/mcp/call-context.js');
   const script = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
   const prime = 'a1111111-1111-4111-8111-111111111111';
   const worker = 'b2222222-2222-4222-8222-222222222222';
