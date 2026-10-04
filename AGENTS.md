@@ -423,7 +423,11 @@ internal length and closing boundary; authored whitespace after the frame remain
 ### Text Skills
 
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
-bounded UTF-8 import/read and metadata catalog. `skill-access.ts` exposes only that canonical
+bounded UTF-8 import/read and metadata catalog. Valid YAML name/description fields use the
+shared bounded parser before publication, including folded/literal multiline descriptions;
+catalog fields are normalized to one bounded line without rewriting the source body. Legacy
+plain Markdown or invalid/incomplete headers keep the existing heading/prose fallback.
+`skill-access.ts` exposes only that canonical
 directory as `/skills` to Core, including nested code-mode calls. Current capability/Read-only
 guards still apply. This root is not saved in config, does not satisfy connection folder setup,
 and never becomes the default or learned project cwd, including native paths through an
