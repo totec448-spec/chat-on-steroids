@@ -103,14 +103,20 @@ app.whenReady().then(async () => {
   await js(`composerFixture.scenario('empty')`); await pause(400);
   await click('#rightDockToggle'); await pause(300);
   await check('Composer controls fit with the right work panel open', `(()=>{const composer=document.getElementById('composer').getBoundingClientRect();const mode=document.getElementById('createPlan').getBoundingClientRect(),context=document.getElementById('contextMeter').getBoundingClientRect(),send=document.getElementById('chatSend').getBoundingClientRect();return mode.right<=context.left||mode.bottom<=context.top})()`);
+  win.setContentSize(900, 960); await pause(250);
+  await check('Narrow chat column with the right work panel keeps one action row', `(()=>{const nodes=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>document.getElementById(id).getBoundingClientRect()),card=document.querySelector('.card.is-session').getBoundingClientRect();const centers=nodes.map(r=>r.top+r.height/2);return card.width<520&&nodes.every(r=>r.left>=card.left&&r.right<=card.right)&&nodes.every((r,i)=>nodes.every((s,j)=>i===j||r.right<=s.left+.5||s.right<=r.left+.5||r.bottom<=s.top+.5||s.bottom<=r.top+.5))&&Math.max(...centers)-Math.min(...centers)<1})()`);
+  await check('Narrow work-dock column compacts labels by column width', `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
+  await capture('dock-900');
   await click('#rightDockToggle');
-  for (const width of [1440, 900]) {
+  for (const width of [1440, 900, 700, 640]) {
     win.setContentSize(width, 960); await pause(250);
     await click('#newChat'); await type('');
     const titleTop = await js(`document.getElementById('timelineEmpty').getBoundingClientRect().top`);
     await type(Array.from({length:12}, (_, i) => `Draft line ${i+1}`).join('\n'));
     await check('Welcome remains fixed while draft grows at '+width, `Math.abs(document.getElementById('timelineEmpty').getBoundingClientRect().top-${titleTop})<1`);
     await check('Toolbar fits at '+width, `(()=>{const nodes=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>document.getElementById(id).getBoundingClientRect());return nodes.every(r=>r.left>=0&&r.right<=innerWidth)&&nodes.every((r,i)=>nodes.every((s,j)=>i===j||r.right<=s.left+.5||s.right<=r.left+.5||r.bottom<=s.top+.5||s.bottom<=r.top+.5))})()`);
+    await check('Composer actions stay on one row at '+width, `(()=>{const centers=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.top+r.height/2});return Math.max(...centers)-Math.min(...centers)<1})()`);
+    if (width <= 700) await check('Narrow composer compacts labels instead of stacking at '+width, `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
     await type(''); await capture('empty-'+width);
   }
   await click('#composerSettings > summary'); await click('[data-mode="goal"]');
