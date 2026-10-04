@@ -81,7 +81,9 @@ describe.runIf(process.platform === 'win32')('Windows Codex runtime launch bound
     await writeFile(path.join(runtime, 'package.json'), '{"type":"module"}');
     for (const name of ['env', 'ripgrep', 'exec', 'codex-plugin-runtime']) {
       const source = await readFile(new URL(`../src/main/${name}.ts`, import.meta.url), 'utf8');
-      await writeFile(path.join(runtime, `${name}.js`), stripTypeScriptTypes(source));
+      // The app bundle is CommonJS, where each module has its own __dirname; ES modules do not.
+      const prelude = source.includes('__dirname') ? 'const __dirname = import.meta.dirname;\n' : '';
+      await writeFile(path.join(runtime, `${name}.js`), prelude + stripTypeScriptTypes(source));
     }
     await writeFile(script, `
       if (process.type === 'browser') require('electron').app.exit(42);
