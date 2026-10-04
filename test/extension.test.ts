@@ -1183,6 +1183,47 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(receipts).toBe(0);
     });
 
+  it.each([
+    ['progress', 'changed-progress:app-progress'],
+    ['first-unanswered', 'first-unanswered'],
+    ['navigating', 'navigating']
+  ] as const)('names exactly why a claimed repair took no action: %s (#1086)', async (scenario, detail) => {
+    // A long run logged "the page changed before the action" ten times in a row with nothing
+    // else happening, and nothing said which check moved.
+    let armed = false, handed = false, claimed = false;
+    const failures: (string | null)[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/repairs/claim') { claimed = true; return response(200, { allowed: true }); }
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repairFailed')) failures.push(url.searchParams.get('detail'));
+        if (armed && !handed) { handed = true; return response(200, { repairs: [{ conversationId: CHAT,
+          token: 'exact-repair', reason: 'silence', requiresClaim: true }] }); }
+        return response(200, { repairs: [] });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }],
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}`,
+        ...(claimed && scenario === 'navigating' ? { pendingUrl: 'https://chatgpt.com/' } : {}) }),
+      tabsSendMessage: async (_id, message) => {
+        if (message.type !== 'clf-repair-check') return { ok: true };
+        const state = { revision: 1, turnId: 'source', questionId: 'question' };
+        if (!message.expected) return scenario === 'first-unanswered' && !claimed ? null : { safe: true, ...state };
+        return scenario === 'progress'
+          ? { safe: false, why: 'changed', changed: 'progress', progressBy: 'app-progress', ...state, revision: 2 }
+          : { safe: true, ...state };
+      } });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+    expect(claimed).toBe(true);
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(failures).toEqual([detail]);
+  });
+
   it.each(['empty', 'draft-before-claim', 'draft-after-claim', 'question-after-claim', 'unresponsive'] as const)(
     'preserves the compaction draft at the browser claim boundary: %s', async scenario => {
       let armed = false, handed = false, claimed = false, repaired = 0, failed = 0;

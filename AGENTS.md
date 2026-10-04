@@ -2409,6 +2409,11 @@ still requires independent validation. These checks use existing RPC and repair 
 A veto names its reason (`why`: page-changed, stop-requested, tool-running, sending, page-busy,
 compaction, draft, changed). The extension reports it with `/status?repairHeld=<token>&why=`, which
 hands nothing out and changes no repair; the app logs each token and reason once (#820).
+A claimed repair that the second check or the tab stops reports `why=changed&detail=` (#1086):
+`changed-turn`, `changed-question`, `changed-progress[:<source>]` (the source that last moved
+`turnProgressRevision`: adopted, sent, page-call, page-step, page-text, tool-resumed, or `app-<kind>`
+for app activity), `first-unanswered`, `navigating`, `other-chat`, `new-document`, `woke-up`, or the
+second check's own hold reason. The app logs it in words and drops values it does not know.
 The maintenance projection must retain each repair's reason. Compaction uses the same two
 document checks in draft-only mode: its exact ticket can recover its busy source, but an unsent
 text/attachment draft or a new user question vetoes the reload. Suspended shells are checked

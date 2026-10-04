@@ -21921,7 +21921,12 @@ describe('ordinary Continue native recovery', () => {
     expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, expected: before })).toMatchObject({ safe: true });
     work = [...work, { kind: 'page_tool', turnId, messageId: 'second-step', label: 'Prepared the PDF', seq: 101, time: Date.now() }];
     await live.hook.pullActivity();
-    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, expected: before })).toMatchObject({ safe: false });
+    // The refusal names what moved and what moved it, so the app's log can say so (#1086).
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, expected: before }))
+      .toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'app-page_tool' });
+    userTurn(live.document, 'newer-question', 'A newer instruction');
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, expected: before }))
+      .toMatchObject({ safe: false, why: 'changed', changed: 'question' });
   });
 
   it.each(['busy', 'idle', 'draft', 'revoked', 'became-idle'] as const)('uses Stop only for an unchanged active page (%s)', async scenario => {
