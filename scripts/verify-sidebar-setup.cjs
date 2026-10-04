@@ -147,13 +147,18 @@ app.whenReady().then(async () => {
       },true);
     })()`);
     const dragFocus={window:win.isFocused(),contents:win.webContents.isFocused(),visible:win.isVisible(),document:await js('document.hasFocus()')};
-    const points=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
+    const points=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.querySelector('.sess-top').getBoundingClientRect();return {x:Math.round(r.left+25),y:Math.round(r.top+r.height/2)}})`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...points[0]});
-    await new Promise(r=>setTimeout(r,25));
-    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],...points[2],y:points[2].y+12});
-    await new Promise(r=>setTimeout(r,40));
-    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...points[2],y:points[2].y+12});
-    await new Promise(r=>setTimeout(r,40));
+    // Activate pointer capture first, then measure the live drop target. Exposed folder actions
+    // can change row heights; pre-gesture coordinates are not the later visible target.
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],x:points[0].x,y:points[0].y+7});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const dropPoint=await js(`(() => {const r=document.querySelector('.project-group > [data-id="task-2"]').getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2+12)}})()`);
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],...dropPoint});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const dropGeometry=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.getBoundingClientRect();return {id:row.dataset.id,scope:row.dataset.sortScope,top:r.top,height:r.height,classes:row.className}})`);
+    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...dropPoint});
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     const dragTrace=await js('window.nativeDragTrace');
     assert.ok(dragTrace.some(event=>event.type==='pointerdown' && event.buttons===1 && event.id==='task-0' && event.trusted),
       'Native drag must press the first row: '+JSON.stringify({dragTrace,dragFocus}));
@@ -161,7 +166,7 @@ app.whenReady().then(async () => {
       'Native drag must keep its button pressed while moving: '+JSON.stringify({dragTrace,dragFocus}));
     const moved=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>row.dataset.id)`);
     assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4'],
-      'Native chat drag: '+JSON.stringify({moved,points,dragTrace,dragFocus}));
+      'Native chat drag: '+JSON.stringify({moved,points,dropPoint,dropGeometry,dragTrace,dragFocus}));
     assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
     await new Promise(r=>setTimeout(r,200));
     await screenshot('sidebar.png');
