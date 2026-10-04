@@ -1586,6 +1586,17 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
+With Follow new output enabled, only a reader gesture changes that following intent. Its
+pending scroll belongs to the selected-chat generation, not a wall-clock grace period:
+scroll delivery may wait for a slow rendering opportunity. Input with no movement expires
+at the next animation frame unless its scrollbar/middle pointer is still held; pointer release,
+cancellation and blur retire an unused press. A moving gesture lasts through its native `scrollend`, including
+smooth/inertial updates. A finished gesture or an A -> B -> A selection cannot lend intent
+to a later programmatic clamp or repaint. The ordinary geometry check remains when the
+setting is off; this adds no preference, history authority or delivery state.
+An eligible middle-click toggle can begin moving after release; its unused input stays pending
+until the first scroll, another click, Escape or blur. Interactive controls and a pane without
+vertical overflow cannot arm that post-release toggle.
 The chat scroll container reserves its scrollbar gutter even without overflow. At a fixed
 window/sidebar width and zoom, tool disclosures, history controls and tail reserves must not
 change prose width or line wrapping. `scripts/verify-chat-width.cjs` checks these transitions
