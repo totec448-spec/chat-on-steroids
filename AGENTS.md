@@ -2344,6 +2344,10 @@ chats retain their no-reload behavior for these blocking notices; no new grant c
 | Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; the shared 2/5/10/15-minute pickup schedule follows its initial silence/busy wait. |
 | Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
 
+An automatic handoff's opened chat holds its attempt for up to 15 minutes, but a page that reports
+a step before typing (`composer`, `model`, `composer-after-model`) and then nothing for 3 minutes
+releases it early. The ticket stays; its send was never attempted, so the next pickup opens a fresh chat.
+
 Unattributed recovery keeps a bounded incident per exact unresolved request id, with one
 shared timer. At the first filed unattributed call it freezes the chats then shown Active,
 using the same shared activity predicate as the renderer. One candidate is eligible after 15 seconds;
