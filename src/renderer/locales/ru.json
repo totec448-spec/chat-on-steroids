@@ -1842,5 +1842,6 @@
   "Loading edit…": "Загрузка правки…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "Предпросмотр ограничен 600 строками. Откройте проверку для просмотра всей правки.",
   "{0} unchanged lines": "Неизменённых строк: {0}",
-  "More edited files are available in the recording.": "Другие изменённые файлы доступны в записи."
+  "More edited files are available in the recording.": "Другие изменённые файлы доступны в записи.",
+  "{0} sub-agents in this round": "Подагенты в этом раунде: {0}"
 }

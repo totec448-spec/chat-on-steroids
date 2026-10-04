@@ -1842,5 +1842,6 @@
   "Loading edit…": "Düzenleme yükleniyor…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "Önizleme 600 satırla sınırlıdır. Tam düzenleme için İnceleme bölümünü açın.",
   "{0} unchanged lines": "{0} değişmeyen satır",
-  "More edited files are available in the recording.": "Kaydı inceleyerek diğer düzenlenen dosyalara ulaşabilirsiniz."
+  "More edited files are available in the recording.": "Kaydı inceleyerek diğer düzenlenen dosyalara ulaşabilirsiniz.",
+  "{0} sub-agents in this round": "Bu turda {0} alt ajan"
 }

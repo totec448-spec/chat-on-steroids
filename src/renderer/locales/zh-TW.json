@@ -1842,5 +1842,6 @@
   "Loading edit…": "正在載入編輯…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "預覽限制為600行。開啟審查查看完整編輯。",
   "{0} unchanged lines": "{0} 行未變更",
-  "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。"
+  "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。",
+  "{0} sub-agents in this round": "本輪有 {0} 個子代理"
 }
