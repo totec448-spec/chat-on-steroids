@@ -250,6 +250,35 @@ let recoveryMonitoring = false;
 /** Discard custody; command openings retain their identity until app policy takes over. */
 let discardProtectedTabs = {};
 const COMMAND_TAB_PROTECTION_MS = 30 * 60_000;
+/**
+ * This install's connector names in ChatGPT, as the paired app reports them. A computer that
+ * shares its ChatGPT account with another one names its connectors with a suffix, e.g.
+ * "Chat On Steroids Core (Windows)"; pages recognize exactly these names as this app's traffic.
+ * Kept in local storage so a restarted service worker does not fall back to the plain names
+ * and claim the other computer's calls until the app answers again. Null until the app says.
+ */
+let connectorNames = null;
+
+/** The app's names, or null for anything that is not three plain "Chat On Steroids …" strings. */
+function cleanConnectorNames(value) {
+  if (!value || typeof value !== 'object') return null;
+  const names = {};
+  for (const [surface, word] of [['core', 'Core'], ['desktop', 'Desktop'], ['plugins', 'Plugins']]) {
+    const name = value[surface];
+    if (typeof name !== 'string' || name.length > 80 || (name !== `Chat On Steroids ${word}` &&
+        !/^Chat On Steroids (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u.test(name)) ||
+        !name.startsWith(`Chat On Steroids ${word}`)) return null;
+    names[surface] = name;
+  }
+  return names;
+}
+
+async function rememberConnectorNames(value) {
+  const names = cleanConnectorNames(value);
+  if (!names || JSON.stringify(names) === JSON.stringify(connectorNames)) return;
+  connectorNames = names;
+  try { await chrome.storage.local.set({ connectorNames: names }); } catch { /* Kept in memory for this worker. */ }
+}
 
 function load() {
   if (loaded) return Promise.resolve();
@@ -265,8 +294,9 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames']);
   port = typeof stored.port === 'number' ? stored.port : null;
+  connectorNames = cleanConnectorNames(stored.connectorNames);
   // Tells this browser apart from another one paired with the same app, so a new chat is opened
   // and sent in one browser only. Random, local, and never tied to the profile or the user.
   browserId = typeof stored.browserId === 'string' && /^[a-z0-9]{16,64}$/.test(stored.browserId) ? stored.browserId : '';
@@ -2759,6 +2789,7 @@ async function maintainOnce() {
     await refreshRendering();
   }
   inspectRequestedModels(reply.data.modelCatalogRequest);
+  await rememberConnectorNames(reply.data.connectorNames);
   inspectRequestedPluginRefresh(reply.data.pluginRefreshRequests, reply.data.background === true, reply.data.browserOnly === true);
   const repairConversations = new Set(repairs.map(entry => entry.conversationId));
   // Reloading the same document races its final input offer. Repair it now; the
@@ -3365,6 +3396,7 @@ const HANDLERS = {
       port: found ? found.port : null,
       paired: token !== null,
       disconnected,
+      connectorNames,
       pending: journal.length,
       pendingCommandAcks: commandAckOutbox.length,
       compatible: found ? found.compatible !== false : null,

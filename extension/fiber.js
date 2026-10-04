@@ -123,8 +123,30 @@
    *
    * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
+   *
+   * A computer that shares its ChatGPT account with another names its connectors with a suffix
+   * ("Chat On Steroids Core (Windows)"). The content script passes this install's names with
+   * every ask, and only those are ours: the other computer's calls run there, not here. Measured
+   * 2026-10-04: the call path, `invocation.server` and `app_name` all carry the name as typed.
    */
-  const OUR_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'TobisComputer'];
+  const PLAIN_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins'];
+  const LEGACY_APPS = ['TobisComputer'];
+  const SUFFIXED_APP = /^Chat On Steroids (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
+  let OUR_APPS = [...PLAIN_APPS, ...LEGACY_APPS];
+  /** Takes the names an ask carries: three "Chat On Steroids …" names, in core/desktop/plugins order. */
+  function adoptAppNames(names) {
+    if (!Array.isArray(names) || names.length !== 3) return;
+    const words = ['Core', 'Desktop', 'Plugins'];
+    for (let at = 0; at < 3; at++) {
+      const name = names[at];
+      if (typeof name !== 'string' || (name !== PLAIN_APPS[at] && SUFFIXED_APP.exec(name)?.[1] !== words[at])) return;
+    }
+    OUR_APPS = [...names, ...LEGACY_APPS];
+  }
+  /** The Plugins connector of any computer: it only sets that connector's larger action limits. */
+  function pluginsConnectorName(name) {
+    return name === PLAIN_APPS[2] || SUFFIXED_APP.exec(typeof name === 'string' ? name : '')?.[1] === 'Plugins';
+  }
 
   /** Whether an `invoked_resource.app_name` names one of this app's own connectors. */
   function ourApp(name) {
@@ -2558,7 +2580,7 @@
       }
     }
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
-    const externalPlugins = connector.name === 'Chat On Steroids Plugins';
+    const externalPlugins = pluginsConnectorName(connector.name);
     if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
     const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
     // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
@@ -2604,7 +2626,7 @@
         if (props.actions === observedActions) continue;
         if (observedActions) return null;
         observedActions = props.actions;
-        const externalPlugins = props.connector.name === 'Chat On Steroids Plugins';
+        const externalPlugins = pluginsConnectorName(props.connector.name);
         if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
@@ -2628,6 +2650,7 @@
     if (!data || typeof data !== 'object' || ![ASK, 'clf-picker-ask', 'clf-plugin-ask'].includes(data.source)) return;
     const nonce = typeof data.nonce === 'string' ? data.nonce.slice(0, 64) : '';
     if (!nonce) return;
+    adoptAppNames(data.apps);
     const previousPaths = currentPaths;
     currentPaths = new WeakMap();
     try {

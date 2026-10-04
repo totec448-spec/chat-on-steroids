@@ -319,7 +319,10 @@ only. `setup-profiles.ts` switches both in one queued config commit, incrementin
 Keys remain in `secrets.bin`: the original profile keeps `openaiApiKey`, others use `setup:<id>`.
 Settings writes fence changed tunnel IDs by profile identity/epoch; key writes name their exact
 profile. Connection lifecycle reuses the selected key and reconnects when the OpenAI profile
-epoch changes, even if its tunnel ID matches. Roots, chats, models and other settings stay shared.
+epoch changes, even if its tunnel ID matches. Each Core MCP endpoint generation freezes the local
+Setup profile ID that created it while roots/capabilities remain live: a config switch may precede
+old-endpoint drain, so late accepted calls must retain the old connection provenance. This ID is
+not a provider account ID. Roots, chats, model observations and other settings stay shared.
 Removing a profile removes its inactive snapshot and encrypted key; removing the active profile
 selects a survivor in the same config commit. The last profile cannot be removed.
 Appearance's profile popover uses content-sized bounded width and a grid with a fixed delete
@@ -1046,6 +1049,25 @@ leave the mention off the user's own prompts, which on other accounts start plai
 probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep it, because they need
 the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
 
+One ChatGPT account used on several computers needs one connector set per computer, and the sets
+cannot share a name. `connectorSuffix` (Settings › Setup, "Several computers, one ChatGPT account";
+top-level config, never part of a setup profile) names this install's set: "Windows" gives
+"Chat On Steroids Core (Windows)", "… Desktop (Windows)" and "… Plugins (Windows)"; empty keeps the
+plain names. ChatGPT records a connector's calls under the exact name typed (call path,
+`invocation.server` and `invoked_resource.app_name`, measured 2026-10-04), so:
+- `surfaceDefinition()` reads the suffix on every call: Setup cards, server instructions,
+  protected-resource metadata and plugin refresh use the suffixed names without a restart.
+- The `/status` reply carries `connectorNames`; the extension keeps the last valid set in local
+  storage and hands it to pages with `status`. Pages recognize exactly these names (plus the legacy
+  `TobisComputer`), never a prefix, so one computer never records or attributes the other's calls.
+- `usage.js` reports every Core-like app from the page's system hints; the content script mentions
+  the one with this install's exact name, and none when it is missing or ambiguous.
+- Plugin refresh treats any "Chat On Steroids Plugins (…)" as the Plugins kind for its action limits.
+- Every instruction that names a connector for the user to act on (Setup cards, the Plugins page's
+  setup hint, refresh guide and saved-settings message) uses this install's name, never the plain one.
+- Allowed suffix: up to 32 letters, digits, spaces, `.`, `_`, `-`. The settings save refuses
+  anything else; a damaged stored value loads as no suffix. Diagnostics reports leave it out.
+
 | Delivery choice | Eligibility and behavior |
 | --- | --- |
 | Immediate / `auto` | In an exact active non-Pro turn before its first MCP call, **Send directly** claims that original turn, stops its native generation, then uses normal browser Send. **Inject now** is a separate choice, including before the first call: authored `delivery: tool` captures the exact turn, waits visibly in the existing outbox, and only enters that turn's eligible outer MCP result. It never falls back to browser Send and fails visibly if its turn ends before delivery. After the first MCP call, injection remains available; Pro (including Astra) keeps injection throughout. A new turn resets eligibility; old tool history does not count. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
@@ -1586,6 +1608,17 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
+With Follow new output enabled, only a reader gesture changes that following intent. Its
+pending scroll belongs to the selected-chat generation, not a wall-clock grace period:
+scroll delivery may wait for a slow rendering opportunity. Input with no movement expires
+at the next animation frame unless its scrollbar/middle pointer is still held; pointer release,
+cancellation and blur retire an unused press. A moving gesture lasts through its native `scrollend`, including
+smooth/inertial updates. A finished gesture or an A -> B -> A selection cannot lend intent
+to a later programmatic clamp or repaint. The ordinary geometry check remains when the
+setting is off; this adds no preference, history authority or delivery state.
+An eligible middle-click toggle can begin moving after release; its unused input stays pending
+until the first scroll, another click, Escape or blur. Interactive controls and a pane without
+vertical overflow cannot arm that post-release toggle.
 The chat scroll container reserves its scrollbar gutter even without overflow. At a fixed
 window/sidebar width and zoom, tool disclosures, history controls and tail reserves must not
 change prose width or line wrapping. `scripts/verify-chat-width.cjs` checks these transitions
@@ -2698,6 +2731,18 @@ attached to that worker's real root prime; the worker cannot control descendants
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
 family prevents a duplicate but remains hidden from status until accepted.
 
+A fresh family also freezes the Setup profile carried by the exact Core endpoint generation that
+accepted its spawn. That local profile ID survives active/dormant snapshots, restart and family
+reactivation; legacy histories without it remain unclaimed rather than being assigned from a later
+call. When both caller and family have provenance, a different profile cannot select, extend or
+control that family through `agents`. An exact worker conversation calling ordinary local tools
+through a different profile is refused before liveness, input acknowledgement/delivery and the
+handler, so losing agent-role resolution cannot turn it into an ordinary chat or consume the
+owning connection's pending input. This is provenance/fencing only: there is no profile discovery,
+browser-profile routing, automatic account selection or cross-account model failover here. The
+existing model catalog remains provider-observed shared state until a later account-aware owner is
+introduced; do not describe this field as proof of which ChatGPT account supplied a model.
+
 Worker model and reasoning belong to the user's saved app settings by default. Model-visible
 instructions and the agents schema require omitting each override unless the user explicitly
 requests it; do not ask for those settings merely to spawn. `agents.ts` resolves omitted fields
@@ -3383,20 +3428,15 @@ event-time order when late attribution repairs append older calls, so the overvi
 every worker transcript just to paint one line. These fields are read-only telemetry; lifecycle,
 scheduling, messaging and execution authority remain with the existing broker/tool owners.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
-A collapsed Sub-agents card below the selected prime's timeline projects the same exact-family
-worker summaries as the existing overview. It reuses createAgentPanel with an independent reading
-selection and preserves the sidebar and right dock. Collapsed cards do not fetch worker history.
-The input queue remains directly after the transcript so delivery receipts preserve its position.
-Collapse, parent navigation and loss of worker membership retire pending loads, including a return
-to the same id; opening worker history leaves the prime composer selected.
-Its body has a viewport-bounded independent scroll and contains overscroll. Opening it is
-explicit reading: it releases the existing follow-output/send hold; Jump to latest resumes
-following. A refresh of the inspected worker does not release that hold again. Activity-round
-summaries show the participating workers' usual avatars/colors and link to inline history;
-the card links back to their rounds on the currently loaded timeline page. These links derive
-from recorded communication and successful agent messages/structured spawn receipts, never
-status rosters. Only a unique worker identity within the selected parent gets a link; ambiguous
-reused names remain unlinked. Timeline context stays primary, and no full-history scan is added.
+Each collapsed activity round that used workers shows one Phosphor Sub-agents icon and the
+number of distinct workers. Its keyboard-reachable button labels that count accessibly and
+opens the existing Sub-agents dock with those exact workers highlighted; it does not expand
+the round, load worker transcripts or move the timeline reader. Inspection releases the existing
+follow-output/send hold; Jump to latest resumes following. Membership and selection generations
+fence activation, and parent changes clear highlights. Participation derives from recorded
+communication and successful agent messages/complete structured spawn receipts, never status
+rosters, foreign families, rejected/truncated calls or ambiguous reused worker names.
+Worker history remains owned by the existing dock; there is no aggregate timeline history card.
 
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
@@ -3424,6 +3464,16 @@ beside the session record. That historical review belongs to the recorded tool c
 the file's later contents, and it is retrieved only by session/call/change identity. Failed,
 inexact or oversized edits do not gain fabricated review evidence. Current Git Changes and recorded
 edit review therefore share a diff renderer but have separate truth owners.
+Recorded successful edits also expose lazy inline diff cards under their exact tool call. They
+use the existing getToolEditReview IPC and immutable snapshots, never the current filesystem or
+patch intent. Each reply must match call id, change index and path, and retain its captured session
+generation through syntax loading. Cards cap files at 32 and preview lines at 600; unavailable
+assets stay explicit. Copy file copies the entire recorded resulting file and Expand increases
+only the bounded viewport. Unavailable reads reset lazy-load admission so closing and reopening
+retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
+file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
+surfaces. The existing Review dock remains available.
+
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
 The horizontal preview separator paints a one-pixel hover line with a three-pixel drag area.

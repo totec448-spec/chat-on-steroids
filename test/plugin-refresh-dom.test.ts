@@ -169,3 +169,18 @@ it('reports the page connector tunnel and a settled empty Plugins list', async (
   connector.name = 'Chat On Steroids Plugins'; connector.actions = [];
   expect(await api.pluginRefreshView('Chat On Steroids Plugins')).toMatchObject({ tools: [], settled: true });
 });
+it.each([
+  ['Chat On Steroids Plugins (Windows)', 257, true],
+  ['Chat On Steroids Core (Windows)', 17, false],
+  ['Chat On Steroids Plugins Backup', 17, false]
+] as const)('applies the Plugins connector\'s limits to %s by its kind, whatever the computer', async (connector, count, accepted) => {
+  // One ChatGPT account on two computers: this computer's Plugins connector carries its suffix
+  // and still holds every enabled external plugin's tools.
+  const { api, props } = page();
+  props.connector.name = connector;
+  props.actions = Array.from({ length: count }, (_, i) => ({ name: `tool_${i}`, description: `Tool ${i}`, description_model: null,
+    params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
+  const view = await api.pluginRefreshView(connector);
+  if (accepted) expect(view?.tools).toHaveLength(count);
+  else expect(view).toBeNull();
+});

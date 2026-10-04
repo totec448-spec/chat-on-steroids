@@ -296,7 +296,9 @@ interface TurnFixture {
 async function scan(
   fibers: Fiber[],
   turnSections: TurnFixture[] = [],
-  repeatStableScan = false
+  repeatStableScan = false,
+  /** This install's connector names, as the content script passes them with every ask. */
+  apps?: unknown
 ): Promise<{
   rows: Descriptor[];
   version: number;
@@ -440,7 +442,7 @@ async function scan(
   // Dispatched rather than posted: jsdom's own postMessage does not set `source`, and the
   // helper refuses any message that did not come from this window.
   window.dispatchEvent(
-    new window.MessageEvent('message', { data: { source: 'clf-fiber-ask', nonce }, source: window })
+    new window.MessageEvent('message', { data: { source: 'clf-fiber-ask', nonce, ...(apps === undefined ? {} : { apps }) }, source: window })
   );
 
   const data = await reply;
@@ -591,6 +593,27 @@ describe('reading a row out of the page', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ index: 0, tool: 'search_files', app: APP, answered: true });
+  });
+
+  /**
+   * One ChatGPT account on two computers: each computer's connectors carry its own suffix, and
+   * ChatGPT records every call under the exact name typed (measured 2026-10-04). This page's
+   * install recognizes exactly its own names; the other computer's calls run there.
+   */
+  it.each([
+    ['this install\'s suffixed names', ['Chat On Steroids Core (Windows)', 'Chat On Steroids Desktop (Windows)', 'Chat On Steroids Plugins (Windows)'], 'Chat On Steroids Core (Windows)', true],
+    ['the plain name while this install uses a suffix', ['Chat On Steroids Core (Windows)', 'Chat On Steroids Desktop (Windows)', 'Chat On Steroids Plugins (Windows)'], APP, false],
+    ['another computer\'s suffixed name', ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins'], 'Chat On Steroids Core (Mac)', false],
+    ['names that are not this app\'s, which are ignored', ['Chat On Steroids Backup', 'x', 'y'], APP, true]
+  ])('recognizes calls by %s', async (_case, apps, app, ours) => {
+    const ask = request('req-1', 'read_file', { app });
+    const { rows } = await scan([row([ask, answer('res-1', 'req-1', 'read_file', app)])], [], false, apps);
+    expect(rows.length === 1 && rows[0]!.app === app && rows[0]!.tool === 'read_file').toBe(ours);
+    // A call still running has no answer yet; the request path alone names the connector, and
+    // only this install's calls count as the turn's evidence.
+    const running = request('req-2', 'read_file', { app });
+    const { turns } = await scan([], [{ id: 'running-turn', messages: [running] }], false, apps);
+    expect(turns[0]!.calls.map(call => call.tool)).toEqual(ours ? ['read_file'] : []);
   });
 
   it('names six sequential calls in the same chat, each as itself', async () => {

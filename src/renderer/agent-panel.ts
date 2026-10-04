@@ -2,7 +2,7 @@ import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
-import { compactNumber, disclosureChevron, el, icon } from './dom.js';
+import { compactNumber, el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { workerAvatar } from './agent-communication.js';
 
@@ -10,76 +10,41 @@ import { workerAvatar } from './agent-communication.js';
 export function createAgentPanel(options: {
   host: HTMLElement;
   mount?: HTMLElement;
-  inline?: boolean;
   toggle?: HTMLButtonElement;
   onShow?: () => void;
   onEscape?: () => void;
-  rounds?: (id: string) => Array<{ label: string; open: () => void }>;
   load: (id: string) => Promise<{ events: SessionEvent[] } | null>;
   render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
 }) {
-  const pane = el(options.inline ? 'details' : 'aside', options.inline ? 'agent-panel inline-agent-panel' : 'agent-panel'); pane.hidden = true;
-  const disclosure = options.inline ? pane as HTMLDetailsElement : null;
-  const caption = el('span');
-  if (disclosure) {
-    const summary = el('summary', 'inline-agent-summary');
-    summary.append(icon('i-agents'), caption, disclosureChevron('inline-agent-chevron'));
-    disclosure.append(summary);
-  }
+  const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
-  if (!options.mount && !options.inline) attachWorkPanelResize(options.host, pane);
+  if (!options.mount) attachWorkPanelResize(options.host, pane);
   const head = el('div', 'agent-panel-header'); head.hidden = true;
   const back = el('button', 'btn btn-icon agent-back'); back.append(icon('i-back'));
   ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
   ui(back, 'aria-label', () => t("Back to sub-agents"));
   const title = el('strong');
   const body = el('div', 'agent-panel-body');
-  const selectedRounds = options.rounds ? roundLinks('') : null;
-  if (selectedRounds) selectedRounds.hidden = true;
-  head.append(back, title); pane.append(head, ...(selectedRounds ? [selectedRounds] : []), body); (options.mount ?? options.host).append(pane);
+  head.append(back, title); pane.append(head, body); (options.mount ?? options.host).append(pane);
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
   let generation = 0;
-  function roundLinks(id: string): HTMLElement {
-    const links = el('nav', 'agent-round-links'); links.dataset.workerSession = id;
-    ui(links, 'aria-label', () => t('Activity'));
-    return links;
-  }
-  function refreshRounds(): void {
-    const owner = parent, epoch = generation;
-    for (const links of pane.querySelectorAll<HTMLElement>('.agent-round-links')) {
-      const id = links.dataset.workerSession!;
-      const rounds = options.rounds?.(id) ?? [];
-      rounds.forEach((round, index) => {
-        const button = links.children[index] as HTMLButtonElement | undefined ?? el('button', 'agent-round-link');
-        button.setAttribute('type', 'button'); button.textContent = round.label;
-        button.onclick = () => { if (parent === owner && generation === epoch && workers.some(worker => worker.id === id)) round.open(); };
-        if (!button.parentElement) links.append(button);
-      });
-      while (links.children.length > rounds.length) links.lastElementChild!.remove();
-      links.hidden = links.childElementCount === 0;
-    }
-  }
+  let highlighted = new Set<string>();
   function hide(): void {
-    generation++; selected = null;
-    if (selectedRounds) { selectedRounds.dataset.workerSession = ''; selectedRounds.hidden = true; }
-    if (disclosure) { disclosure.open = false; pane.hidden = parent === null || workers.length === 0; }
-    else pane.hidden = true;
+    generation++; selected = null; highlighted.clear(); pane.hidden = true;
     if (!options.mount) options.host.classList.remove('has-agent-panel');
     options.toggle?.setAttribute('aria-expanded', 'false');
   }
   function show(): void {
     options.onShow?.();
     pane.hidden = false;
-    if (disclosure) disclosure.open = true;
     if (!options.mount) options.host.classList.add('has-agent-panel');
     options.toggle?.setAttribute('aria-expanded', 'true');
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
-    if (selectedRounds) selectedRounds.dataset.workerSession = '';
     const isActive = (worker: SessionSummary): boolean => {
       const state = options.agent?.(worker)?.state;
       return state ? ['invited', 'active', 'detached', 'waking'].includes(state) : options.working(worker);
@@ -92,6 +57,8 @@ export function createAgentPanel(options: {
       if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
       for (const worker of group) {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');
+        row.dataset.workerSession = worker.id;
+        row.classList.toggle('is-round-worker', highlighted.has(worker.id));
         const owner = options.agent?.(worker);
         const state = owner?.state ?? (workerReportedFinish(worker) ? 'sleeping' : active ? 'working' : 'history');
         row.dataset.state = state;
@@ -140,12 +107,9 @@ export function createAgentPanel(options: {
         row.append(avatar, content);
         row.title = task || original;
         row.onclick = () => void open(worker.id);
-        const entry = el('div', 'agent-panel-entry'); entry.append(row);
-        if (options.rounds) entry.append(roundLinks(worker.id));
-        body.append(entry);
+        body.append(row);
       }
     }
-    refreshRounds();
   }
   async function open(id: string, refresh = false): Promise<void> {
     const worker = workers.find(row => row.id === id);
@@ -154,9 +118,8 @@ export function createAgentPanel(options: {
     if (!refresh) show();
     selected = id; const request = ++generation;
     head.hidden = false; title.textContent = worker.title;
-    if (selectedRounds) { selectedRounds.dataset.workerSession = id; refreshRounds(); }
     if (!preserve) body.replaceChildren(el('p', 'meta', () => t("Loading conversation…")));
-    const current = () => request === generation && selected === id && !pane.hidden && (!disclosure || disclosure.open);
+    const current = () => request === generation && selected === id && !pane.hidden;
     const detail = await options.load(id);
     if (!current()) return;
     if (!detail) { body.replaceChildren(el('p', 'meta', () => t("Conversation unavailable"))); return; }
@@ -165,21 +128,10 @@ export function createAgentPanel(options: {
     const position = body.scrollTop;
     const follow = !preserve || position + body.clientHeight >= body.scrollHeight - 40;
     body.replaceChildren(openMain, ...options.render(detail.events, id, current));
-    refreshRounds();
     body.scrollTop = follow ? body.scrollHeight : position;
   }
-  if (disclosure) disclosure.addEventListener('toggle', () => {
-    if (disclosure.open) { options.onShow?.(); if (!selected) list(); }
-    else { generation++; selected = null; head.hidden = true; body.replaceChildren(); if (selectedRounds) { selectedRounds.dataset.workerSession = ''; selectedRounds.hidden = true; } }
-  });
   back.onclick = list;
-  if (disclosure) {
-    // Native inner scrolling is independent of the prime's history-prefetch handlers.
-    pane.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
-    pane.addEventListener('touchmove', event => event.stopPropagation(), { passive: true });
-  }
   pane.addEventListener('keydown', event => {
-    if (disclosure) event.stopPropagation();
     if (event.key !== 'Escape') return;
     event.preventDefault(); hide();
     if (options.onEscape) options.onEscape(); else options.toggle?.focus();
@@ -187,19 +139,19 @@ export function createAgentPanel(options: {
   if (options.toggle) options.toggle.onclick = () => { if (pane.hidden) { show(); list(); } else hide(); };
   return {
     hide,
-    show: () => { show(); list(); },
+    show: () => { highlighted.clear(); show(); list(); },
+    showWorkers(ids: string[]): void {
+      highlighted = new Set(workers.filter(worker => ids.includes(worker.id)).map(worker => worker.id));
+      if (!highlighted.size) return;
+      show(); list();
+      body.querySelector<HTMLButtonElement>('.is-round-worker')?.focus({ preventScroll: true });
+    },
     open,
-    refreshRounds,
     update(id: string | null, next: SessionSummary[]): void {
       if (parent !== id) { hide(); parent = id; }
       const previous = workers.find(worker => worker.id === selected);
       workers = next;
-      if (disclosure) {
-        pane.hidden = id === null || workers.length === 0;
-        ui(caption, 'textContent', () => `${t('Sub-agents')} · ${workers.length}`);
-        if (pane.hidden) { hide(); return; }
-        if (!disclosure.open) return;
-      }
+      highlighted = new Set([...highlighted].filter(id => workers.some(worker => worker.id === id)));
       if (options.toggle) {
         options.toggle.hidden = id === null;
         ui(options.toggle, 'title', () => t("Sub-agents · {0} recorded", [workers.length]));

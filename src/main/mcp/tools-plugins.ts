@@ -20,7 +20,7 @@ async function runPluginTool(name: string, args: unknown): Promise<ToolResult> {
  * Only the new surface uses them; Core/Desktop retain their existing registrar unchanged.
  * Admission is checked by the manager on every call, including stale cached tool names.
  */
-export function registerPluginTools(server: McpServer): PluginToolSchema[] {
+export function registerPluginTools(server: McpServer, setupProfileId: string | null = null): PluginToolSchema[] {
   const tools = pluginManager.tools();
   const codeMode = canAddCodeMode(tools);
   const declaration = codeModeDeclaration();
@@ -38,7 +38,7 @@ export function registerPluginTools(server: McpServer): PluginToolSchema[] {
           return pluginManager.redactResult(parsed.success ? await runCode(parsed.data) : fail('INVALID_ARGUMENTS: exec requires a code string.')) as ToolResult;
         }
         return runPluginTool(request.params.name, request.params.arguments ?? {});
-      });
+      }, undefined, setupProfileId);
     return server.server.projectCallToolResult(result, tool?.outputSchema);
   });
   return tools.map(tool => ({ ...tool, description: tool.description ?? '' }));
