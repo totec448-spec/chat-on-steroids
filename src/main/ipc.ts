@@ -798,7 +798,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)
       : scope.projectId ? projectWorkspace(scope.projectId) : Promise.resolve(null);
     const before = await folder();
-    const library = await listSkillLibrary({ projectPath: before?.real ?? null });
+    const library = await listSkillLibrary({ projectPath: before?.real ?? null, refreshCodexPlugins: true });
     if ((await folder())?.real !== before?.real) throw new Error('The project changed while Skills were loading');
     return library;
   });
