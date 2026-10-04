@@ -51,6 +51,29 @@ it.each(languages)('restores %s and synchronizes accessible setup flags, setting
   expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe(locale);
 });
 
+it.each([
+  [['de-DE', 'de'], 'de'], [['zh-Hant-TW'], 'zh-TW'], [['zh-HK'], 'zh-TW'], [['zh-CN'], 'zh-CN'], [['zh'], 'zh-CN'],
+  [['pt-PT'], 'pt-PT'], [['pt-BR'], 'pt-BR'], [['pt'], 'pt-BR'], [['nl-NL', 'fr-FR'], 'fr'], [['nl', 'sv'], 'en'],
+  [['en-GB', 'de-DE'], 'en'], [['ja-JP'], 'ja'], [[], 'en']
+] as const)('maps system languages %j to %s', async (preferred, expected) => {
+  const { systemLanguage } = await import('../src/renderer/i18n.js');
+  expect(systemLanguage(preferred)).toBe(expected);
+});
+
+it('starts in the system language until a language is chosen, and a saved choice wins', async () => {
+  vi.spyOn(dom.window.navigator, 'languages', 'get').mockReturnValue(['de-DE', 'de']);
+  const first = await import('../src/renderer/i18n.js');
+  first.initLanguage();
+  expect(first.currentLanguage()).toBe('de');
+  expect(document.documentElement.lang).toBe('de');
+  expect(document.querySelector('.setup-heading h1')!.textContent).toBe(catalogs.de!.Setup);
+  // Following the system writes nothing: a later system change still applies until someone chooses.
+  expect(window.localStorage.getItem('cos.ui.language')).toBeNull();
+  window.localStorage.setItem('cos.ui.language', 'en');
+  vi.resetModules();
+  expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
+});
+
 it('defaults to English, rejects unsupported variants and switches even when storage fails', async () => {
   expect((await import('../src/renderer/i18n.js')).currentLanguage()).toBe('en');
   expect(window.localStorage.getItem('cos.ui.language')).toBeNull();

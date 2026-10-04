@@ -296,10 +296,6 @@ export function noteOutcome(outcome: ToolOutcome): void {
   if (store.outcome === null || rank[outcome] > rank[store.outcome]) store.outcome = outcome;
 }
 
-export function noteChange(change: FileChange): void {
-  storage.getStore()?.evidence.changes.push(change);
-}
-
 export function noteChanges(changes: readonly FileChange[], reviews?: readonly { before: string; after: string }[]): void {
   const store = storage.getStore();
   if (!store) return;
@@ -308,10 +304,6 @@ export function noteChanges(changes: readonly FileChange[], reviews?: readonly {
   if (reviews?.length === changes.length) {
     reviews.forEach((review, index) => store.evidence.reviews.push({ changeIndex: offset + index, ...review }));
   }
-}
-
-export function noteAsset(asset: AssetRef): void {
-  storage.getStore()?.evidence.assets.push(asset);
 }
 
 export function noteCount(count: number): void {

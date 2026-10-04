@@ -44,8 +44,3 @@ export function locateRipgrep(): string | null {
   if (isExecutableFile(dev)) return dev;
   return pathCandidate();
 }
-
-export function ripgrepVersionFile(): string | null {
-  const executable = locateRipgrep();
-  return executable ? path.join(path.dirname(executable), 'VERSION') : null;
-}

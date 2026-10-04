@@ -2113,3 +2113,48 @@ it('does not steal a newer New Chat draft when an older admission response arriv
   expect(doc.querySelector('.sess.is-sel')).toBeNull();
   expect(doc.getElementById('chatTitle')!.textContent).toBe('New chat');
 });
+
+it('shows each startup log line once and in order when lines arrive while the log is loading', async () => {
+  // Seen on Windows: the Activity page listed "session catalog ready" and "renderer state ready"
+  // both before "app started" and again after it. Those lines arrived live while the page was
+  // still loading the log, and the loaded log contained them too.
+  let live: (entry: any) => void = () => undefined;
+  let release!: (reply: any) => void;
+  const line = (time: number, message: string) => ({ time, level: 'info', message });
+  const mounted = await mountChat({}, [], {
+    getLog: () => new Promise(resolve => { release = resolve; }),
+    onLogEntry: (fn: any) => { live = fn; return () => undefined; }
+  });
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  live(line(2, 'session catalog ready'));
+  live(line(3, 'renderer state ready'));
+  release({ ok: true, data: [line(1, 'app started'), line(2, 'session catalog ready'), line(3, 'renderer state ready')] });
+  await settle(); await settle();
+  live(line(4, 'window loaded'));
+  // A row shows the line's source and text in separate cells; compare without the spacing.
+  const rows = () => [...mounted.window.document.querySelectorAll('#fullFeed > *')].map(row => (row.textContent ?? '').replace(/\s/g, ''));
+  await vi.waitFor(() => expect(rows()).toHaveLength(4));
+  expect(rows().map(text => ['app started', 'session catalog ready', 'renderer state ready', 'window loaded'].find(m => text.includes(m.replace(/\s/g, '')))))
+    .toEqual(['app started', 'session catalog ready', 'renderer state ready', 'window loaded']);
+});
+
+it.each(['.project-color', '.project-new'])('keeps keyboard focus on a project row button (%s) across an activity repaint', async selector => {
+  // Seen live on Windows: after picking a project color, focus went back to the color button and
+  // the next sidebar repaint dropped it to the page. Only the project heading kept its focus.
+  const { project, session } = projectSidebarFixture();
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
+  });
+  const doc = mounted.window.document;
+  const control = () => doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] ${selector}`)!;
+  await vi.waitFor(() => expect(control()).not.toBeNull());
+  await settle();
+  const before = control();
+  before.focus();
+  expect(doc.activeElement).toBe(before);
+  mounted.push(structuredClone(mounted.state));
+  await settle();
+  expect(control()).not.toBe(before); // the repaint really replaced the row
+  expect(doc.activeElement).toBe(control());
+});
