@@ -170,7 +170,6 @@ jobs:
             publish/Chat-On-Steroids-Linux-arm64.AppImage \
             publish/Chat-On-Steroids-Linux-arm64.deb \
             publish/Chat-On-Steroids-Extension.zip \
-            publish/Chat-On-Steroids-Firefox.zip \
             publish/Chat-On-Steroids-Native-Sources.tar.gz \
             publish/SHA256SUMS.txt \
             --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \

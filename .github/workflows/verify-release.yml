@@ -1,7 +1,7 @@
 name: Verify published release
 
 # What users download, checked right after it is published: every file matches SHA256SUMS.txt and
-# both extension packages are tagged builds. A problem opens an issue instead of waiting for a
+# the published Chromium extension package is a tagged build. A problem opens an issue instead of waiting for a
 # user report. publish.yml calls it right after publishing: a release created with the workflow's
 # own token triggers no other workflow, so `release: published` alone never ran for our releases.
 # It can also be run by hand for any existing tag.
@@ -45,7 +45,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Download the published files
         run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
-      - name: Verify checksums and extension packages
+      - name: Verify checksums and extension package
         run: node scripts/verify-release-assets.mjs assets "$TAG" problems.md
       - name: Open an issue when the release is not sound
         if: failure()
