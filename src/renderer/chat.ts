@@ -1101,7 +1101,8 @@ function paintGoalProgress(): void {
     ['silence', 'listening', 'native-busy', 'quiet'].includes(wait.reason) && controlledRecovery.some(countdown =>
       ['silence', 'post-reload', 'native-busy', 'thinking-failed'].includes(countdown.kind) &&
       countdown.deadline === wait.until && (countdown.visibleAt ?? 0) <= Date.now());
-  row.hidden = !phase || sharedRecoveryWait;
+  // "Goal reached" is said by the Goal row itself; a second row would only repeat it.
+  row.hidden = !phase || sharedRecoveryWait || (phase === 'no-reply' && !error && goalReachedShown());
   if (row.hidden) { row.replaceChildren(); row.setAttribute('aria-busy', 'false'); return; }
   const busy = ['settling', 'saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
   row.setAttribute('aria-busy', String(busy));
@@ -1176,15 +1177,22 @@ function dockAction(label: string | (() => string), symbol: string, click: (even
   button.type = 'button'; ui(button, 'title', description); ui(button, 'aria-label', description);
   button.append(icon(symbol)); button.onclick = click; return button;
 }
+/** Whether the selected chat's last Goal decision, still current, was "the goal is met". */
+function goalReachedShown(): boolean {
+  return controlledSessionId === selectedId && controlledSelection === selectionGeneration && goalDraftView?.stage === 'no-reply' &&
+    !finishGoalDraftView;
+}
 function paintActiveGoal(): void {
   const row = $('activeGoalRow');
   const mode = $<HTMLSelectElement>('chatAutomation').value;
   row.hidden = mode === 'off';
   if (row.hidden) { row.replaceChildren(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective').value.trim();
-  const label = el('span', 'queue-label', () => `${mode === 'loop' ? t("Loop") : t("Pursuing goal")}${objective ? ' · ' + objective : ''}`);
+  // A run whose helper decided the goal is met has ended; the objective stays for a later message.
+  const reached = mode === 'goal' && goalReachedShown();
+  const label = el('span', 'queue-label', () => `${mode === 'loop' ? t("Loop") : reached ? t("Goal reached") : t("Pursuing goal")}${objective ? ' · ' + objective : ''}`);
   label.title = objective;
-  row.replaceChildren(icon('i-pulse'), label,
+  row.replaceChildren(icon(reached ? 'i-check' : 'i-pulse'), label,
     dockAction(() => t("Pause automation"), 'i-power', () => { const select = $<HTMLSelectElement>('chatAutomation'); select.value = 'off'; select.dispatchEvent(new Event('change')); }),
     dockAction(() => t("Edit task"), 'i-pencil', event => {
       // This opener is outside the menu; its click must not immediately dismiss it.
