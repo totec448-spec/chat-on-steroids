@@ -239,3 +239,12 @@ it('tells its owner when the user puts a shown window away, never when the app h
   expect(base.hide).toHaveBeenCalledTimes(2);
   expect(onUserHide).toHaveBeenCalledTimes(1);
 });
+
+it('loads only web pages and the empty page into a tab, whatever the extension asks', () => {
+  const { host, contents } = browserFixture('https://chatgpt.com/');
+  for (const url of ['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'chrome://settings', 'not a url']) host.control.navigate(contents.id, url);
+  expect(contents.loadURL).not.toHaveBeenCalled();
+  host.control.navigate(contents.id, 'https://chatgpt.com/c/abc');
+  host.control.navigate(contents.id, 'about:blank');
+  expect((contents.loadURL.mock.calls as unknown as string[][]).map(call => call[0])).toEqual(['https://chatgpt.com/c/abc', 'about:blank']);
+});
