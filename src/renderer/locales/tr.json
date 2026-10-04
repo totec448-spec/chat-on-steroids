@@ -1813,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Kayıtlı tünel kimliklerini ve tünel API anahtarını değiştirir; örneğin başka bir ChatGPT hesabı için.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT sayfası bu yanıtın canlı akışını kaybetti. Yanıt hâlâ sürüyor olabilir: yeniden yükleme, yanıtı durdurmadan sayfayı yeniden bağlar.",
   "Don't reload this answer": "Bu yanıtı yeniden yükleme",
-  "The reload has already started.": "Yeniden yükleme zaten başladı."
+  "The reload has already started.": "Yeniden yükleme zaten başladı.",
+  "Background process running · {0}": "Arka plan işlemi çalışıyor · {0}",
+  "{0} background processes running · {1}": "{0} arka plan işlemi çalışıyor · {1}",
+  "Running for {0}": "{0} süredir çalışıyor",
+  "Stop background process": "Arka plan işlemini durdur",
+  "Stop": "Durdur",
+  "Background process is no longer running": "Arka plan işlemi artık çalışmıyor",
+  "{0} background processes running": "{0} arka plan işlemi çalışıyor"
 }

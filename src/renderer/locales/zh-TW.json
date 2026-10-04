@@ -1813,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "切換已儲存的隧道 ID 與隧道 API 金鑰，例如用於另一個 ChatGPT 帳號。",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT 頁面遺失了這則回答的即時串流。回答可能仍在進行：重新整理會重新連接頁面，而不會停止回答。",
   "Don't reload this answer": "不要重新整理這則回答",
-  "The reload has already started.": "重新整理已經開始。"
+  "The reload has already started.": "重新整理已經開始。",
+  "Background process running · {0}": "背景程序正在執行 · {0}",
+  "{0} background processes running · {1}": "{0} 個背景程序正在執行 · {1}",
+  "Running for {0}": "已執行 {0}",
+  "Stop background process": "停止背景程序",
+  "Stop": "停止",
+  "Background process is no longer running": "背景程序已不再執行",
+  "{0} background processes running": "{0} 個背景程序正在執行"
 }

@@ -1813,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "저장된 터널 ID와 터널 API 키를 전환합니다. 예를 들어 다른 ChatGPT 계정을 쓸 때 사용합니다.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT 페이지가 이 답변의 실시간 스트림을 잃었습니다. 답변은 아직 진행 중일 수 있으며, 새로고침은 답변을 멈추지 않고 페이지를 다시 연결합니다.",
   "Don't reload this answer": "이 답변은 새로고침하지 않기",
-  "The reload has already started.": "새로고침이 이미 시작되었습니다."
+  "The reload has already started.": "새로고침이 이미 시작되었습니다.",
+  "Background process running · {0}": "백그라운드 프로세스 실행 중 · {0}",
+  "{0} background processes running · {1}": "백그라운드 프로세스 {0}개 실행 중 · {1}",
+  "Running for {0}": "실행 시간 {0}",
+  "Stop background process": "백그라운드 프로세스 중지",
+  "Stop": "중지",
+  "Background process is no longer running": "백그라운드 프로세스가 더 이상 실행 중이 아닙니다",
+  "{0} background processes running": "백그라운드 프로세스 {0}개 실행 중"
 }

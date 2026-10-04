@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const processes = vi.hoisted(() => new Map<number, number | null>());
+const terminateProcess = vi.hoisted(() => vi.fn(async () => true));
 vi.mock('../src/main/codex/manager.js', () => ({ unifiedExecManager: {
   setProcessReleaseListener: () => {},
+  setProcessChangeListener: () => {},
+  terminateProcess,
+  listProcesses: () => [...processes]
+    .filter(([, exit]) => exit === null)
+    .map(([processId]) => ({ processId, incarnation: processId + 500, command: 'command-' + processId, cwd: '/repo', pid: processId + 1000, tty: false, startedAt: 900_000 + processId })),
   backgroundState: (owned: Set<number>) => ({
     running: [...processes].filter(([id, exit]) => owned.has(id) && exit === null).map(([id]) => id),
     exitedUnread: [...processes].filter(([id, exit]) => owned.has(id) && exit !== null).map(([processId, exitCode]) => ({ processId, exitCode }))
@@ -9,9 +15,9 @@ vi.mock('../src/main/codex/manager.js', () => ({ unifiedExecManager: {
 } }));
 import {
   backgroundExecObligations, backgroundExecRecoveryNotices, forgetExecOwner, noteExecOwner, noteExecAttended,
-  resetExecOwnershipForTests, UNATTENDED_EXEC_NOTICE_MS
+  resetExecOwnershipForTests, runningExecProcesses, stopExecProcess, UNATTENDED_EXEC_NOTICE_MS
 } from '../src/main/codex/ownership.js';
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000); processes.clear(); resetExecOwnershipForTests(); });
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000); processes.clear(); terminateProcess.mockClear(); resetExecOwnershipForTests(); });
 afterEach(() => { vi.useRealTimers(); });
 function process(id = 10, exit: number | null = null, owner = 'session-a') {
   processes.set(id, exit); noteExecOwner(id, owner);
@@ -22,6 +28,26 @@ it('leaves completed output to the process delivery owner', () => {
   process(10, 7);
   expect(notice()).toEqual([]);
   expect(backgroundExecObligations('session-a').exitedUnread).toEqual([{ processId: 10, exitCode: 7 }]);
+});
+it('projects only live processes owned by the requested durable session', () => {
+  process(10, null, 'session-a');
+  process(11, null, 'session-b');
+  process(12, 0, 'session-a');
+  expect(runningExecProcesses('session-a')).toEqual([{
+    processId: 10,
+    incarnation: 510,
+    command: 'command-10',
+    startedAt: 900_010,
+    tty: false
+  }]);
+});
+it('stops only a process owned by the requested durable session', async () => {
+  process(10, null, 'session-a');
+  process(11, null, 'session-b');
+  await expect(stopExecProcess('session-a', 10, 510)).resolves.toBe(true);
+  await expect(stopExecProcess('session-a', 11, 511)).resolves.toBe(false);
+  expect(terminateProcess).toHaveBeenCalledTimes(1);
+  expect(terminateProcess).toHaveBeenCalledWith(10, 510);
 });
 it('reoffers a failed response but suppresses pending and published reminders', () => {
   process();
