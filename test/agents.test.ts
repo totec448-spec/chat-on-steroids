@@ -294,6 +294,45 @@ describe('exact worker prime provenance', () => {
   });
 });
 
+describe('worker family Setup-profile provenance', () => {
+  it('pins a fresh family to its creating profile across park/restart and refuses another profile', () => {
+    const profileA: Caller = { ...prime, setupProfileId: 'profile-a' };
+    const profileB: Caller = { ...prime, setupProfileId: 'profile-b' };
+    const run = spawn({ caller: profileA, workers: [{ task: 'A-owned work' }] });
+    expect(snapshotSwarm()?.activeRuns?.[0]?.setupProfileId).toBe('profile-a');
+
+    expect(() => spawn({ caller: profileB, workers: [{ task: 'must not cross profiles' }] }))
+      .toThrow(/CONNECTION_PROFILE_MISMATCH/);
+    expect(swarmState(run.runId).agents.filter(agent => agent.role === 'worker')).toHaveLength(1);
+
+    expect(bindConversation('worker-1', 'c-profile-a-worker', run.runId)).toBe(true);
+    finishAgent({ conversationId: 'c-profile-a-worker' }, 'A work done');
+    expect(releaseQuiescentRun({}, run.runId)).toBe(true);
+    const parked = snapshotSwarm()!;
+    expect(parked.dormantRuns?.[0]?.setupProfileId).toBe('profile-a');
+
+    resetAgentsForTests();
+    restoreSwarm(JSON.parse(JSON.stringify(parked)));
+    expect(() => spawn({ caller: profileB, workers: [{ task: 'still must not cross profiles' }] }))
+      .toThrow(/CONNECTION_PROFILE_MISMATCH/);
+    const resumed = spawn({ caller: profileA, workers: [{ task: 'same connection may extend its family' }] });
+    expect(snapshotSwarm()?.activeRuns?.find(owner => owner.runId === resumed.runId)?.setupProfileId).toBe('profile-a');
+  });
+
+  it('does not retroactively guess a profile for legacy family history', () => {
+    const run = spawn({ caller: prime, workers: [{ task: 'legacy-style work' }] });
+    const legacy = JSON.parse(JSON.stringify(snapshotSwarm()));
+    delete legacy.setupProfileId;
+    delete legacy.activeRuns[0].setupProfileId;
+    resetAgentsForTests();
+    restoreSwarm(legacy);
+
+    const extended = spawn({ caller: { ...prime, setupProfileId: 'profile-b' }, workers: [{ task: 'later work' }] });
+    expect(extended.runId).toBe(run.runId);
+    expect(snapshotSwarm()?.activeRuns?.[0]?.setupProfileId).toBeUndefined();
+  });
+});
+
 describe('worker chats the browser may close', () => {
   it('names the stopped worker chats beyond the ones most recently used, and no working one', async () => {
     vi.useFakeTimers();
@@ -3055,6 +3094,36 @@ describe('through the MCP endpoint', () => {
     expect(text).not.toContain('worker-1');
     expect(text).not.toContain('task 1');
     expect(text).not.toContain(PRIME_CHAT);
+  });
+
+  it('threads endpoint Setup-profile provenance into the family and fails closed on another profile', async () => {
+    toolContext.setupProfileId = 'profile-a';
+    const created = await structuredAsChat(PRIME_CHAT, 'spawn', { workers: [{ task: 'profile A work' }] });
+    const runId = String(created.run_id);
+    expect(runId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(snapshotSwarm()?.activeRuns?.find(owner => owner.runId === runId)?.setupProfileId).toBe('profile-a');
+    expect(bindConversation('worker-1', 'c-profile-wire-worker', runId)).toBe(true);
+
+    toolContext.setupProfileId = 'profile-b';
+    const primeRefused = await asChat(PRIME_CHAT, 'status');
+    expect(primeRefused).toContain('CONNECTION_PROFILE_MISMATCH');
+
+    const requestId = 'wfr_profile_b_worker_read';
+    await recordChatObservations('c-profile-wire-worker', [
+      { kind: 'turn_start', time: Date.now(), turnId: 't-profile-b-worker' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: 't-profile-b-worker',
+        calls: [{ messageId: 'm-profile-b-worker', tool: 'read', order: 0, answered: false, requestId }]
+      }
+    ]);
+    const workerRefused = textOfReply(await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] }));
+    expect(workerRefused).toContain('WORKER_CONNECTION_PROFILE_MISMATCH');
+    expect(workerRefused).not.toMatch(REFUSED_ON_ROOTS);
+
+    toolContext.setupProfileId = 'profile-a';
+    expect(await asChat(PRIME_CHAT, 'status')).not.toContain('CONNECTION_PROFILE_MISMATCH');
   });
 
   it('shows a parked prime only its own history while another prime owns the active run', async () => {
