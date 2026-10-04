@@ -1581,6 +1581,48 @@ describe('active agent tab discard protection', () => {
     expect(posted.at(-1)?.stalledConversations).toEqual([DISCARDED, FROZEN]);
   });
 
+  it.each([
+    ['focuses the open tab, restoring a minimized window', true, 'minimized'],
+    ['opens the chat in a new tab when none has it', false, 'normal']
+  ])('shows a chat the app asks it to open: %s (#882)', async (_name, open, state) => {
+    const TARGET = 'dddddddd-eeee-4fff-8aaa-333333333333';
+    const posted: Array<{ canReveal?: boolean }> = [];
+    let handed = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          posted.push(JSON.parse(String(init?.body || '{}')));
+          const reveals = handed ? [] : [TARGET, 'not a chat id'];
+          handed = true;
+          return response(200, { ok: true, repairs: [], reveals });
+        }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [
+        { id: 3, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete' },
+        ...(open ? [{ id: 5, windowId: 7, url: `https://chatgpt.com/c/${TARGET}`, status: 'complete' }] : [])
+      ],
+      windowsGet: async () => ({ focused: false, state } as { focused?: boolean })
+    });
+
+    await worker.fireAlarm();
+    await vi.waitFor(() => expect(worker.windowsUpdate.mock.calls.length + worker.tabsCreate.mock.calls.length).toBeGreaterThan(0));
+
+    expect(posted[0]?.canReveal).toBe(true);
+    if (open) {
+      expect(worker.tabsUpdate).toHaveBeenCalledWith(5, { active: true });
+      expect(worker.tabsCreate).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(worker.windowsUpdate).toHaveBeenCalledWith(7, { state: 'normal', focused: true }));
+    } else {
+      expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+      expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${TARGET}`, active: true });
+    }
+  });
+
   it('protects a newly created input tab until its conversation binds', async () => {
     const inputId = 'ffffffff-1111-4222-8333-444444444444';
     const session = new FakeStorageArea();
