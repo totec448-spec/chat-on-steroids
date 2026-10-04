@@ -124,7 +124,8 @@ app.whenReady().then(async () => {
   await js(`(async()=>{const language=document.getElementById('uiLanguage');language.value='en';language.dispatchEvent(new Event('change',{bubbles:true}));const {data}=await window.api.getState();await window.api.saveSettings({patch:{ui:{...data.config.ui,theme:'dark',language:'en'}}})})()`); await pause(150);
   await click('#composerModelToggle');
   await check('Model name opens the observed list without changing the selection', `!document.getElementById('composerModelChoices').hidden&&document.getElementById('composerModelToggle').getAttribute('aria-expanded')==='true'&&document.getElementById('composerModel').value==='gpt-6-sol'`);
-  await check('Every account model is offered', `document.querySelectorAll('#composerModelChoices .model-choice').length===5`);
+  await check('Every account model is offered', `document.querySelectorAll('#composerModelChoices .model-choice:not([data-model=""])').length===5`);
+  await check('Automatic leads the list, as a choice that switches nothing', `document.querySelector('#composerModelChoices .model-choice')?.dataset.model===''`);
   await click('[data-model="gpt-5.5"]');
   await check('Model click preserves open menu and exact identity', `document.getElementById('modelMenu').open&&document.getElementById('composerModel').value==='gpt-5.5'`);
   await js(`{const input=document.querySelector('#composerPowerChoices input');input.value='0';input.dispatchEvent(new Event('input',{bubbles:true}));}`);
