@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -36,7 +36,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await flushDurable(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests();
+  vi.unstubAllEnvs(); await flushDurable(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests();
   await removeTempDir(directory);
 });
 
@@ -177,4 +177,29 @@ it('fails closed if an auto-selected Skill body changes after metadata routing b
   await fs.writeFile(path.join(directory, 'skills', 'code-review', 'SKILL.md'),
     '---\nname: Code Review\ndescription: Review source code changes for correctness and maintainability.\n---\n\nCHANGED_BODY_MUST_NOT_BE_INJECTED\n');
   await expect(prepareSkillFollowup(row.text, row.text, undefined, row)).rejects.toThrow(/changed|revision|route/i);
+});
+
+it('keeps personal and project Skills in a routed chat\'s Skill list', async () => {
+  // Routing reads only the app's own Skills, but the opening prompt still lists every Skill the
+  // chat can use. A routed send used to list only the app's own, dropping the user's ~/.codex
+  // Skills (and project and Codex plugin Skills) from new chats whenever auto-select was on.
+  vi.stubEnv('HOME', path.join(directory, 'home')); vi.stubEnv('USERPROFILE', path.join(directory, 'home'));
+  vi.stubEnv('CODEX_HOME', path.join(directory, 'codex')); vi.stubEnv('ProgramData', path.join(directory, 'admin'));
+  await fs.mkdir(path.join(directory, 'codex', 'skills', 'release-notes'), { recursive: true });
+  await fs.writeFile(path.join(directory, 'codex', 'skills', 'release-notes', 'SKILL.md'),
+    '---\nname: Release Notes\ndescription: Write plain release notes from merged changes.\n---\n\nPERSONAL_BODY\n');
+  await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
+  await enableAutoRouting();
+  await saveConfig({ ...getConfig(), roots: [{ name: 'workspace', path: directory }] });
+
+  const routed = await enqueueInput(request('Please use Code Review for this source change.'));
+  expect(routedIds(routed)).toEqual(['code-review']);
+  const none = await enqueueInput(request('Prepare a quarterly budget summary.'));
+  expect(routedIds(none)).toEqual([]);
+  for (const row of [routed, none]) {
+    const prompt = await prepareSessionPrompt(row.text, row);
+    expect(prompt).toContain('Release Notes');
+    expect(prompt).toContain('Code Review');
+    expect(prompt).not.toContain('PERSONAL_BODY');
+  }
 });
