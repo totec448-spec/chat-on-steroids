@@ -702,6 +702,27 @@
                   <!-- One card per connector. The name and description are what ChatGPT matches
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
+                  <!-- One ChatGPT account on several computers: each needs its own plugins, and they
+                       cannot share a name. The suffix names this computer's set; empty keeps the
+                       plain names, and the cards below always show what to type. -->
+                  <details class="setup-optional" id="connectorSuffixField">
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Several computers, one ChatGPT account <span class="tag is-optional">optional</span></summary>
+                    <div class="field">
+                      <label for="connectorSuffix">Name for this computer</label>
+                      <input
+                        id="connectorSuffix"
+                        translate="no"
+                        type="text"
+                        spellcheck="false"
+                        autocomplete="off"
+                        maxlength="32"
+                        placeholder="Windows"
+                        aria-describedby="connectorSuffixHint"
+                      />
+                      <p class="hint is-warn" id="connectorSuffixError" role="alert" hidden>Use up to 32 letters, digits, spaces, dots, dashes or underscores.</p>
+                      <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins in ChatGPT to match.</p>
+                    </div>
+                  </details>
                   <div class="connectors" id="connectorCards"></div>
                   <div class="plugin-permission-step">
                     <strong>Before you start: choose “Allow all actions”</strong>

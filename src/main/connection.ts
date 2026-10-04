@@ -13,7 +13,7 @@ import { effectiveCapabilities, getConfig } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import { lastRequestAt, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from './mcp/server.js';
 import { lastToolCallAt } from './mcp/tools.js';
-import { SURFACE_LIST, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
+import { SURFACE_LIST, surfaceDefinition, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
 import { getSecret } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
@@ -159,7 +159,7 @@ function describeSurfaces(): SurfaceStatus[] {
     const previous = status.surfaces.find((entry) => entry.id === surface.id);
     return {
       id: surface.id,
-      connectorName: surface.connectorName,
+      connectorName: surfaceDefinition(surface.id).connectorName,
       description: surface.description,
       cardSummary: surface.cardSummary,
       optional: !surface.required,

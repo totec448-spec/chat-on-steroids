@@ -1949,6 +1949,36 @@ describe('session IPC contracts', () => {
   });
 });
 
+it('saves this computer\'s connector suffix normalized, refuses an invalid one, and keeps a newer one through an older form', async () => {
+  // The saves below change the theme, which repaints the window.
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const base = getConfig();
+  expect(await save({ ...base, connectorSuffix: '  Windows   VM ' }, base)).toMatchObject({ ok: true });
+  expect(getConfig().connectorSuffix).toBe('Windows VM');
+
+  // Invalid characters are refused, and nothing in that save is written.
+  const before = getConfig();
+  expect(await save({ ...before, connectorSuffix: 'Win/VM', ui: { ...before.ui, theme: before.ui.theme === 'light' ? 'dark' : 'light' } }, before))
+    .toMatchObject({ ok: false });
+  expect(getConfig().connectorSuffix).toBe('Windows VM');
+  expect(getConfig().ui.theme).toBe(before.ui.theme);
+
+  // A form opened before another writer changed the suffix, saving something else, keeps the newer suffix.
+  const stale = getConfig();
+  await saveConfig({ ...getConfig(), connectorSuffix: 'Mac' });
+  expect(await save({ ...stale, ui: { ...stale.ui, theme: stale.ui.theme === 'light' ? 'dark' : 'light' } }, stale)).toMatchObject({ ok: true });
+  expect(getConfig().connectorSuffix).toBe('Mac');
+
+  // A caller that does not carry the field at all (the Plugins page) leaves it alone.
+  const { connectorSuffix: _omitted, ...withoutSuffix } = getConfig();
+  expect(await save(withoutSuffix, withoutSuffix)).toMatchObject({ ok: true });
+  expect(getConfig().connectorSuffix).toBe('Mac');
+
+  const clear = getConfig();
+  expect(await save({ ...clear, connectorSuffix: '' }, clear)).toMatchObject({ ok: true });
+  expect(getConfig().connectorSuffix).toBe('');
+});
+
 describe('renderer pushes after the window is gone', () => {
   it('does not touch a destroyed BrowserWindow, whose members all throw', async () => {
     // Electron keeps the object after the window is destroyed, so the existing `?.` on
