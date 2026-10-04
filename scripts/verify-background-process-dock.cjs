@@ -100,7 +100,7 @@ app.whenReady().then(async () => {
     assert.match(one.time, /^Running for 1m \d+s$/); assert.equal(one.stop.trim(), 'Stop'); assert.equal(one.stopTitle, 'Stop background process');
     // The elapsed label may update, but the native hover tooltip must remain byte-for-byte stable
     // so Chromium does not dismiss/reopen it once per second.
-    await new Promise(resolve => setTimeout(resolve, 1_100));
+    await wait(`document.querySelector('#backgroundExecStatus .background-exec-time').textContent!==${JSON.stringify(one.time)}`);
     const afterTick = await js(`({title:document.getElementById('backgroundExecStatus').title,time:document.querySelector('#backgroundExecStatus .background-exec-time').textContent})`);
     assert.equal(afterTick.title, one.title); assert.notEqual(afterTick.time, one.time);
 
