@@ -62,6 +62,7 @@ const bridge = await import('../src/main/bridge.js');
 const startup = await import('../src/main/browser-startup.js');
 const connection = await import('../src/main/connection.js');
 const { setChatBlocked } = await import('../src/main/session/blocked-chats.js');
+const controlActions = await import('../src/main/control-actions.js');
 const controlApi = await import('../src/main/control-api.js');
 const { listInputs, resetInputForTests } = input;
 
@@ -594,23 +595,53 @@ describe('sending', () => {
 
   it('checks the switch again when a queued action gets its turn', async () => {
     const real = startInput.sendDesktopInput;
-    let release!: () => void;
+    let release!: () => void, entered!: () => void, queued!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
-    const sends = vi.spyOn(startInput, 'sendDesktopInput').mockImplementation(async (args) => { await held; return real(args); });
+    const firstEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const secondQueued = new Promise<void>((resolve) => { queued = resolve; });
+    const queuedId = randomUUID();
+    const sends = vi.spyOn(startInput, 'sendDesktopInput').mockImplementation(async (args) => { entered(); await held; return real(args); });
+    const dispatched = vi.spyOn(controlActions, 'serveAction');
+    const emit = http.Server.prototype.emit;
+    const received = vi.spyOn(http.Server.prototype, 'emit').mockImplementation(function (this: http.Server, event: string | symbol, ...args: unknown[]) {
+      const result = Reflect.apply(emit, this, [event, ...args]) as boolean;
+      if (event === 'request') {
+        const request = args[0] as http.IncomingMessage;
+        if (request.headers['x-test-input-id'] === queuedId) {
+          // The real readBody listener was installed by emit above. Its resolved continuation
+          // queues the action before this microtask, while the first action is still held.
+          request.once('end', () => queueMicrotask(queued));
+        }
+      }
+      return result;
+    });
+    const pending: Promise<Reply>[] = [];
     try {
       const other = await makeSession('Second in line', 'chat-second');
       const first = post('/v1/inputs', sendBody());
-      const second = post('/v1/inputs', sendBody({ sessionId: other }));
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      pending.push(first);
+      // Elapsed time does not prove that the first request passed the final permission gate.
+      await Promise.race([firstEntered, first.then(reply => { throw new Error(`First action returned ${reply.status} before admission`); })]);
+      const second = post('/v1/inputs', sendBody({ id: queuedId, sessionId: other }), { 'x-test-input-id': queuedId });
+      pending.push(second);
+      await Promise.race([secondQueued, second.then(reply => { throw new Error(`Queued action returned ${reply.status} before waiting`); })]);
+      expect(dispatched).toHaveBeenCalledTimes(1);
+      expect(sends).toHaveBeenCalledTimes(1);
       gate.actions = false;
       release();
       expect((await first).status).toBe(202);
       const refused = await second;
       expect(refused.status).toBe(403);
       expect(refused.body).toEqual({ error: 'actions_disabled' });
+      // A late check inside send() alone would still return 403, but the queued request must
+      // be refused before it reaches that dispatcher at all.
+      expect(dispatched).toHaveBeenCalledTimes(1);
       expect((await outbox()).map((entry) => entry.sessionId)).toEqual([chatSession]);
     } finally {
       release();
+      await Promise.allSettled(pending);
+      received.mockRestore();
+      dispatched.mockRestore();
       sends.mockRestore();
     }
   });
