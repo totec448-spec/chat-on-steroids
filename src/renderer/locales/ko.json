@@ -1843,5 +1843,6 @@
   "Preview limited to 600 lines. Open Review for the complete edit.": "미리보기는 600줄로 제한됩니다. 전체 편집을 보려면 검토를 여세요.",
   "{0} unchanged lines": "변경 없는 줄 {0}개",
   "More edited files are available in the recording.": "기록에서 더 많은 편집된 파일을 확인할 수 있습니다.",
+  "1 sub-agent in this round": "이 라운드의 하위 에이전트 1개",
   "{0} sub-agents in this round": "이 라운드의 하위 에이전트 {0}개"
 }
