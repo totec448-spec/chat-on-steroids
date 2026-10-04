@@ -4663,7 +4663,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -5140,6 +5140,7 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     accepted = true;
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    showAutoSkillReceipt(result);
     await adoptAcceptedOpening(result);
   } finally {
     if (accepted) dismissInputNotice(entry.id);
@@ -5148,6 +5149,9 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     cancelledStarts.delete(args.id); startingInputs.delete(args.id);
     paintDeliveryControls(); void refreshInputQueue();
   }
+}
+function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
+  if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
 async function stopCurrentTurn(): Promise<void> {
   const id = selectedId, turnId = controlledTurnId, generation = selectionGeneration;
@@ -5237,6 +5241,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
       const retained = (await run(api.listInputs()))?.find(row => row.id === id);
       if (retained) {
         pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== id), retained];
+        showAutoSkillReceipt(retained);
         await adoptAcceptedOpening(retained);
         return true;
       }
@@ -5253,6 +5258,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
     // that durable row visible while the next listing crosses the process boundary.
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    showAutoSkillReceipt(result);
     if (sessionId === null && selectionGeneration === generation && pendingNewInput?.id === id && result.automation &&
         ($<HTMLSelectElement>('chatAutomation').value !== result.automation || openingLoopDelivery() !== result.loopAfterTurn))
       await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation, openingLoopDelivery()));
