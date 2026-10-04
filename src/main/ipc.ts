@@ -91,6 +91,7 @@ import {
   sessionControlsFor, cancelAssistantRecovery, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
+  revealChatInBrowser,
   onBridgeChange,
   startBridge,
   stopBridge,
@@ -1249,7 +1250,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
     }
-    await openInPreferredBrowser(chatUrl(conversationId));
+    // The extension's own browser first: the OS may pick another browser or account (#882).
+    if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId));
     return true;
   });
 
