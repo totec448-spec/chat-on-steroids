@@ -2583,8 +2583,9 @@ it must not guess a new rebind, delete history or become the path for new contin
 ## 16. Multiple prime families and reusable workers
 
 **Intent:** each prime can delegate bounded work to its own reusable workers while several
-independent user tasks run at once. Inside a family the topology is a star: workers report to
-their prime and cannot create worker descendants.
+independent user tasks run at once. Inside a family the worker topology is a star: workers report
+to their prime and cannot create worker descendants. Existing primes may also exchange a message
+across families when the sender already has the destination's explicit run address.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
@@ -2606,9 +2607,16 @@ and task text remain intact. The recorder notifies its consumers after this orig
 Several recovered fleets may belong to the same real prime. Keep each run, worker conversation
 and inbox intact; parked histories are keyed by their last run incarnation, not just the prime.
 `agents status` returns `available_runs`; `run_id` selects an already-owned family for ambiguous
-operations. Naming a foreign run grants no authority. Ordinary prime results collect all its
-inboxes under one shared output budget, label repeated worker names by run, and acknowledge
-only messages actually offered. A wake returns its fresh incarnation ID.
+operations and still never selects a foreign family. `target_run_id` is the one narrow exception:
+on `agents action=message`, an existing prime may use that opaque address to queue text only to
+the other family's prime. It grants no status/discovery or worker access. Cross-prime inbox rows
+carry `source_run_id` so replies do not need global family discovery. That reply address stays
+stable while wake creates fresh incarnation IDs: the family retains one opaque reply alias plus
+the eight most recent former incarnation selectors, while browser-command fences still require
+the current incarnation. Restore preserves an alias that was actually saved; it does not infer a
+legacy reply address that an older build had already evicted from its bounded history. Ordinary prime results
+collect all its inboxes under one shared output budget, label repeated worker names by run, and
+acknowledge only messages actually offered. A wake returns its fresh incarnation ID.
 If late proof identifies a provisional prime as an existing worker, its accepted fleet is
 attached to that worker's real root prime; the worker cannot control descendants or spawn more.
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
@@ -2638,7 +2646,9 @@ constraints; it does not turn arbitrary tool-result text into higher-priority in
 sleeping worker with `agents action=message` before spawning a replacement. Messaging, inbox
 delivery and report receipts are at-least-once transports with durable message identities;
 acknowledgement belongs to the exact recipient/run, not a UI read. Pending reports remain
-available when the last worker sleeps and the family parks.
+available when the last worker sleeps and the family parks. Prime-to-prime messages use that
+same staged durability barrier; the sender's run address is durable routing metadata, and a
+foreign `target_run_id` never widens the recipient to its workers.
 
 Attached and detached workers share `WORKER_SILENCE_MS` (three minutes). Only accepted new
 assistant output, native work or exactly attributed tool activity renews this clock. Page
