@@ -7,6 +7,8 @@
  * the shape of all of it over the actual MCP endpoint.
  */
 
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -418,6 +420,49 @@ describe('spawning a run', () => {
     expect(staged.waking).toEqual(['worker-1']);
     staged.commit();
     expect(pendingWorkerRevivals()[0]).toMatchObject({ id: 'worker-1', conversationId: 'c-worker-1' });
+  });
+});
+
+describe('a worker wake ChatGPT restored as the chat draft (#882)', () => {
+  // The extension recognizes leftover wakes by the closing sentence this module writes. Feed it
+  // the real text, so the two cannot drift apart.
+  const domWithDraft = (text: string) => {
+    const dom = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div><div data-testid="composer-trailing-actions"><button type="button" data-testid="send-button">Send</button></div></form>',
+      { url: 'https://chatgpt.com/c/abc', runScripts: 'outside-only', pretendToBeVisual: true });
+    const box = dom.window.document.getElementById('prompt-textarea')!;
+    for (const paragraph of text.split(/\n\n/)) { const p = dom.window.document.createElement('p'); p.textContent = paragraph; box.append(p); }
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value() { return [{ width: 10, height: 10 }]; } });
+    dom.window.document.execCommand = (command: string) => {
+      const range = dom.window.document.getSelection()?.rangeCount ? dom.window.document.getSelection()!.getRangeAt(0) : null;
+      if (command !== 'delete' || !range) return false;
+      range.deleteContents(); return true;
+    };
+    dom.window.eval(readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8'));
+    return { dom, box, api: (dom.window as unknown as { CLF_DOM: { clearRevivalResidue(): boolean; composerSubmitReady(): boolean } }).CLF_DOM };
+  };
+
+  it('lets the page reclaim an unsent wake, and only that', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'first round done');
+    stageMessages(prime, [{ to: 'worker-1', text: 'Regenerate PAGE-EVID_MASTER_v0.2.csv; keep raw source_status.' }]).commit();
+    const wake = pendingWorkerRevivals()[0]!.text;
+
+    const left = domWithDraft(wake);
+    expect(left.api.composerSubmitReady()).toBe(false);
+    expect(left.api.clearRevivalResidue()).toBe(true);
+    expect(left.box.textContent).toBe('');
+    left.dom.window.close();
+
+    // Something a person added after the wake keeps the whole draft.
+    const edited = domWithDraft(`${wake} Also check the totals.`);
+    expect(edited.api.clearRevivalResidue()).toBe(false);
+    expect(edited.box.textContent).toContain('Also check the totals.');
+    edited.dom.window.close();
+
+    const own = domWithDraft('My own unsent note');
+    expect(own.api.clearRevivalResidue()).toBe(false);
+    own.dom.window.close();
   });
 });
 

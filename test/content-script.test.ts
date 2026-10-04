@@ -15888,6 +15888,54 @@ describe('the fresh chat the app opened', () => {
     ]);
   });
 
+  it.each([
+    ['an earlier wake ChatGPT restored as the draft', 'is delivered', true],
+    ['a draft the person typed', 'waits and keeps the draft', false]
+  ] as const)('with %s in the editor, a new wake %s', async (_label, _outcome, reclaim) => {
+    // #882: ChatGPT keeps unsent editor text as the chat's draft and restores it when the worker
+    // tab opens again. The wake waited for an empty editor until its deadline, every time.
+    const chat = reclaim ? '25252525-3636-4747-8888-818181818181' : '26262626-3737-4848-8989-828282828282';
+    const draft = reclaim
+      ? 'Old instruction.\n\n(Chat On Steroids: you are still worker-1 in the same run, and this is the prime agent talking to you again in the chat you already know. Pick up from what you did here before rather than starting over. Report with agents action=message to="prime" as you go and action=finish when this piece is done.)'
+      : 'My own note for this worker';
+    let redeemCalls = 0;
+    let sends = 0;
+    live = await nonProHarness(
+      `https://chatgpt.com/c/${chat}`,
+      {
+        activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, activeTurnId: null } }),
+        redeem: () => {
+          redeemCalls++;
+          return { ok: true, command: { id: `cmd-revive-${reclaim}`, type: 'worker', text: 'New instruction.', agent: 'worker-1', conversationId: chat } };
+        },
+        ack: () => ({ ok: true })
+      },
+      (document) => {
+        const box = document.querySelector('#prompt-textarea')!;
+        box.textContent = '';
+        for (const part of draft.split('\n\n')) { const paragraph = document.createElement('p'); paragraph.textContent = part; box.append(paragraph); }
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
+          document.querySelector('#prompt-textarea')!.textContent = '';
+        });
+      }
+    );
+    const handedOff = live.runtimeMessage({ type: 'clf-run-command', id: `cmd-revive-${reclaim}`, conversationId: chat });
+    await settle(300);
+    if (reclaim) {
+      expect(await handedOff).toEqual({ ok: true, claimed: true });
+      expect(redeemCalls).toBe(1);
+      expect(sends).toBe(1);
+      expect(live.sent.filter((message) => message.type === 'ack')).toEqual([
+        expect.objectContaining({ id: 'cmd-revive-true', status: 'sent', conversationId: chat, agent: 'worker-1' })
+      ]);
+    } else {
+      expect(redeemCalls).toBe(0);
+      expect(sends).toBe(0);
+      expect(composerText(live.document)).toContain('My own note for this worker');
+    }
+  });
+
   it('does not redeem until deferred-revival custody survives a transient persistence failure', async () => {
     const chat = '24242424-3535-4646-8787-808080808080';
     let custodyCalls = 0;
