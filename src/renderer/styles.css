@@ -432,8 +432,6 @@ code {
 .app-topbar > .btn, .view-menu { -webkit-app-region: no-drag; height: 100%; }
 .app-topbar > .btn { padding: 0 5px; }
 .app-topbar > .btn .ico { --ico: 14px; }
-.app-topbar > .topbar-theme { margin-inline-start: auto; width: 28px; justify-content: center; }
-.app-topbar > .topbar-connection { min-width: 68px; padding-inline: 8px; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; }
 .view-menu { position: relative; font-size: calc(12px * var(--text-scale, 1)); }
 .view-menu > summary { display: flex; align-items: center; height: 100%; list-style: none; cursor: pointer; padding: 0 9px; border-radius: 6px; }
 .view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
@@ -3730,6 +3728,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .queue-delivery { flex-shrink: 0; font-size: calc(11px * var(--text-scale, 1)); padding: 3px 7px; }
 .queue-delivery[aria-pressed="true"] { color: var(--text); border-color: var(--soft); }
 
+/* Compact connection disclosure; extension-only preferences remain in the companion. */
+.connect-prompt { background: var(--red); color: white; border: 0; padding: 8px 18px; font-weight: 600; }
+.connect-prompt[hidden] { display: none; }
 @media (prefers-reduced-motion: no-preference) { .skill-autocomplete:not([hidden]) { animation: skill-reveal 120ms ease-out; } }
 @keyframes skill-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .slash-menu-section-title { padding: 6px 8px; color: var(--soft); font-size: 11px; }
