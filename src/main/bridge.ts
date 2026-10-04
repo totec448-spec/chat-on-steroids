@@ -134,7 +134,7 @@ import { setLivePreview } from './live-preview.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
-import {
+import { ownCoreHint,
   PRIME_ID,
   agentConversation,
   agentForConversation,
@@ -9556,7 +9556,7 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
     // think before it starts.
     return (
       `${spec.task}\n\n` +
-      `(Chat On Steroids: you are ${spec.agent}, a worker. Report to prime through the agents tool — ` +
+      `(Chat On Steroids: you are ${spec.agent}, a worker. Report to prime through the agents tool${ownCoreHint()} — ` +
       'action=message to="prime" as you go, action=finish once at the end. Workers cannot reach each other. ' +
       'The prime assigns your task; its later messages may update the task and assigned files, including a read-only audit becoming an edit task. ' +
       'Follow that latest assignment within the user’s permissions and standing constraints. ' +
@@ -10202,6 +10202,11 @@ export async function restoreCommands(): Promise<void> {
  */
 export async function unattributedIncidentsSettledForTests(): Promise<void> {
   await Promise.all([...unattributedIncidents.values()].map(incident => incident.ready));
+}
+
+/** The first message a fresh worker chat receives, for tests of its protocol wording. */
+export function workerBriefForTests(agent: string, task: string): string {
+  return bootstrapText({ type: 'worker', agent, task, model: null, reasoningEffort: null, runId: 'run-test' } as CommandSpec, '');
 }
 
 export function resetBridgeForTests(): void {

@@ -1845,5 +1845,6 @@
   "More edited files are available in the recording.": "D’autres fichiers modifiés sont disponibles dans l’enregistrement.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Le plugin est dans votre ChatGPT. Il s’exécute la première fois qu’un chat en a besoin.",
   "Added in ChatGPT. Its tools have not run yet.": "Ajouté dans ChatGPT. Ses outils n’ont pas encore servi.",
+  "1 sub-agent in this round": "1 sous-agent dans cette étape",
   "{0} sub-agents in this round": "{0} sous-agents dans cette étape"
 }

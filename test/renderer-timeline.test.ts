@@ -4629,6 +4629,8 @@ it('opens round participants in the existing dock without moving the prime reade
   const indicators = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-workers')];
   expect(indicators.map(button => button.textContent)).toEqual(['2', '1']);
   expect(indicators[0]!.getAttribute('aria-label')).toBe('2 sub-agents in this round');
+  // One worker reads as one, not "1 sub-agents" (seen on the 2.1.27 canary).
+  expect(indicators[1]!.getAttribute('aria-label')).toBe('1 sub-agent in this round');
   expect(indicators[0]!.type).toBe('button');
   expect(indicators[0]!.querySelectorAll('.ico')).toHaveLength(1);
   expect(indicators[0]!.querySelector('.agent-avatar')).toBeNull();
