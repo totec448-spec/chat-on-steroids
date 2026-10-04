@@ -20,8 +20,8 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
-  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })) },
-  shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => '') },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })) },
+  shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   nativeTheme: { themeSource: 'system' },
   safeStorage: {
     isAsyncEncryptionAvailable: vi.fn(async () => true),
@@ -29,7 +29,7 @@ vi.mock('electron', () => ({
     encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
     decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
-  app: { on: vi.fn(), getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
+  app: { on: vi.fn(), getPath: (_name: string) => '', getLocale: () => 'en-US', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
@@ -1981,4 +1981,31 @@ describe('Stop IPC exact session and turn authority', () => {
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
     expect(await invoke({ id: missing.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'session_not_recorded' });
   });
+});
+
+it('saves a diagnostics report through the renderer channel without personal details', async () => {
+  const { flushLogFile, initLogFile, logInfo } = await import('../src/main/logger.js');
+  const home = path.join(dir, 'home-jane');
+  const clients = path.join(home, 'Acme Clients');
+  await fs.mkdir(clients, { recursive: true });
+  initLogFile(path.join(dir, 'app.log'));
+  logInfo(`tool read rejected: ENOENT, open '${path.join(clients, 'invoice 7.xlsx')}' for jane@example.com`);
+  logInfo('bridge: gave up on worker:run-1:worker-2 — the chat this app opened did not report back in time');
+  await flushLogFile();
+  await createSession({ title: 'Quarterly tax return draft', conversationId: 'diagnostics-report-session' });
+  const getPath = app.getPath;
+  const target = path.join(dir, 'report.txt');
+  (app as { getPath: (name: string) => string }).getPath = (name: string) => name === 'home' ? home : dir;
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  try {
+    expect(await handlers.get('diagnostics:saveReport')!(null, undefined)).toEqual({ ok: true, data: { saved: true, name: 'report.txt' } });
+  } finally {
+    (app as { getPath: typeof getPath }).getPath = getPath;
+  }
+  const report = await fs.readFile(target, 'utf8');
+  expect(report).toContain('# Chat On Steroids diagnostics report');
+  expect(report).toContain('did not report back in time');
+  expect(report).toMatch(/open '~[\\/]<p:[0-9a-f]{4}>[\\/]<p:[0-9a-f]{4}>\.xlsx'/);
+  for (const personal of ['home-jane', 'Acme', 'invoice', 'jane@example.com', 'Quarterly tax return']) expect(report).not.toContain(personal);
+  expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
 });
