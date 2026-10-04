@@ -9,6 +9,80 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.27] — Workers stay on track, and you stay in control
+
+Workers that think for a long time keep working instead of being put to sleep, and waking several workers at once works reliably. You can now see and stop the commands the app runs for ChatGPT, and cancel a reload you don't want. Settings get a General page, and on macOS the app explains its Keychain prompt before it appears.
+
+### ✨ Highlights
+
+- **Long-thinking workers stay awake.** A worker that thought for half an hour between steps used to show as "sleeping" again and again while it worked. The app now checks whether the worker's chat is still answering before it puts it to sleep.
+- **Waking workers works reliably.** Several waiting workers now wake at once instead of one after another, a woken worker's tab is no longer reloaded under it, and a new worker no longer gives up 12 seconds after its model is selected.
+- **See and stop background commands.** Commands ChatGPT started that are still running show above the composer, with how long they have run and a Stop button for each.
+- **Cancel an "Interrupted response" reload.** When ChatGPT's page loses an answer's live stream, the app counts down to a reload that reconnects it. If the answer is clearly still working, click × to skip the reload for that answer.
+- **One ChatGPT account on several computers.** Give each computer a name in Setup, for example "Windows", and its plugins get their own names in ChatGPT. Each computer then records its own chats and runs its own tools, instead of one computer picking up the other's work. Workers are also told exactly which computer's plugin to report through.
+- **No waiting for a model list on ChatGPT Go and Free.** These plans show no model picker, so the app used to wait up to two minutes before your first message could go out. Messages now go out right away with ChatGPT's own model, and "Automatic" is the first choice in the model menu. A model you pick or set as your default is still used exactly.
+
+### 🛠 Fixed
+
+- **Compact & resume finds your Project again** after ChatGPT moved the Project link on its page, instead of stopping with "could not open the source Project".
+- **Compact & resume recovers in minutes, not a quarter of an hour,** when its new chat gets stuck before typing, for example while choosing the model. Workers waiting for the handoff are back sooner too.
+- **Compact & resume no longer creates a second session** when the new chat takes longer than a minute to open, and a resumed chat keeps its tab.
+- **Recovery after a restart is safer.** A saved handoff brief can only resume the handoff it was written for.
+- **Goal waits as long as the provider asks** after a rate limit, instead of retrying every 15 seconds.
+- **Skills with multi-line descriptions** show the right description.
+- **Uninstalling a plugin** no longer fails when its folder is still in use.
+- **When a new worker's first message isn't accepted,** the error now says why.
+- **Window screenshots work on older Windows 10 versions,** which used to refuse them as out of date.
+- **A pet you're dragging stays in your hand** when the screen area changes.
+- **When a worker can't start or wake, the app says where it stopped,** for example while choosing the model, or because its chat was still answering or its message box wasn't empty, instead of only "did not report back in time".
+- **A message sent before Setup is finished** now stays queued and says Setup needs to be finished, instead of failing a minute later and blaming the browser connection.
+- **In developer mode, tool groups are named after what they did** again, not after the app's recovery note shown in front of them.
+- **The Read-only button stays readable while it's on.** Its label used to vanish into the button's own color.
+- **Open in ChatGPT opens the chat in the right browser.** With several Chrome windows or profiles open, it used to open in whichever one you used last, which could be signed in to another account.
+- **Scrolling up to read stays put** while new output arrives, also on slower machines where the scroll used to be missed and the chat jumped back to the end.
+- **Workers stay with the connection that started them.** After you switch to another Setup profile, a worker from the first one says so and waits, instead of running its tools through the wrong connection.
+- **When Goal decides your goal is met, the chat says "Goal reached"** instead of still showing "Pursuing goal".
+- **When ChatGPT reads the top folder "/", it gets the list of your shared folders** instead of an error, so it no longer has to guess their names.
+- **A quick first answer in a new chat no longer leaves its turn open for ten minutes.** When ChatGPT redrew a new chat and the answer had already finished, the app missed the end of the turn, and Goal kept saying "Pursuing goal" without deciding.
+
+### ✨ New
+
+- **See which rounds used sub-agents.** A round that worked with sub-agents shows an icon with their number. Click it to open the Sub-agents panel with those workers highlighted.
+- **See each edit's changes in place.** A recorded file edit shows its diff right in the step, loaded only when you open it, with Copy for the whole file.
+- **The app starts in your system's language** the first time you open it.
+- **Settings › General.** App-wide options (following new output, status words, the Core mention, screenshot privacy and developer options) have their own page instead of hiding under Setup › Advanced.
+- **Handoff length.** Choose how long Compact & resume briefs are: Thorough (the default, 10k–30k tokens), Standard or Short.
+- **Keychain notice on macOS.** Before macOS asks for your login password after an update, the app tells you why and what to choose.
+- **Only trusted chats can use your tools (optional).** When it's on, only chats you mark as trusted can use this computer's tools.
+- **Limit workers across all chats,** not only per chat.
+- **A clearer agent monitor:** failed workers in the History heading, and each worker's latest action and number of actions.
+- **Project colors.** Give a project one of six colors to tell your projects apart at a glance.
+- **The tray menu and desktop notices speak your language.**
+- **Clear workers asks first,** because it removes their saved histories for good.
+- **Main chats can message each other.** A main chat can send a message to another main chat it already knows, so two groups of workers can coordinate without you passing messages along.
+- **Diagnostics report.** Activity › Diagnostics report saves one file to attach to a bug report: versions, settings, the connection state and the log, with your user name, folder and file names, chat titles and tasks removed.
+- **A quicker model picker.** Thinking effort comes first, one button jumps between the current model's lowest and highest effort, and the full model list opens from the model name.
+- **Pick a Skill by naming it (optional).** Turn on Settings › Agents & automation › Auto-select Skills, and a message that names one of your imported Skills exactly, like "use systematic debugging", attaches it automatically.
+- **Skills from your Codex plugins.** If you use Codex, Skills from the Codex plugins you have installed and enabled now appear in your Skills library.
+
+### 💅 Polish
+
+- **The composer stays on one line** in narrow windows and with the side panel open.
+- **The extension popup says what to do** when it can't reach the app.
+- **Plainer words in more places:** removing a chat says it stays in ChatGPT, the Setup profile and the Read-only button explain themselves, and the extension says why it hasn't updated yet.
+- **The tool approval reminder appears only once Core is set up,** not on a fresh install where it can't apply yet.
+- **The Activity page shows each startup line once,** in the right order.
+- **Keyboard focus stays on a project's buttons** when the sidebar refreshes.
+- **Light theme:** small secondary text is easier to read, and 14 settings fields are now named for screen readers.
+- **Korean text wraps between words,** not inside them.
+- **Pets and Skills use one word in each language,** matching the sidebar, and a few Portuguese and Turkish texts now address you the same way as the rest of the app.
+
+### 💛 Thank you
+
+To **@xuan2261** for the trusted-chats option, the worker limit across chats, the agent monitor additions, project colors, the safer restart recovery, Goal's rate-limit wait, the Skill description fix, messages between main chats, Codex plugin Skills, picking Skills by name, the Project link fix for Compact & resume, window screenshots on older Windows 10, the steadier reading position and keeping workers with the connection that started them. To **@redzrush101** for inline edit diffs and the sub-agent count on rounds. To **@Haz4rdovisk** for the quicker model picker. To **@27mfp** for the one-line composer and the background command list. To **@m1d0e1** for finding and fixing the lost worker starts and the duplicate resume sessions. To **@Akilaydin** for fixing the bug report form. And to **@tude91979059-byte**, **@BroNils** and **@tngcphng** for the detailed reports and logs behind this release's worker and recovery fixes.
+
+**Updating?** The extension updates itself once no chat is busy. If it stays on the old version, reload it once in `chrome://extensions`. On macOS, the app asks once for your login password so the new version can open its saved keys: choose **Always Allow**.
+
 ## [2.1.26] — New chats and long runs stay on track
 
 Your first message lands, your long runs keep going, and the app tells you what it's doing. This release fixes the lost first answers in new chats and the sends that failed in existing chats, and stops the false stalls and reload loops in long Goal, Loop and worker runs. You can now also watch a new chat's first answer take shape.
