@@ -3718,6 +3718,9 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+The fail-first workflow selects Windows for changed `test/windows-*` and `test/computer*`
+suites through `scripts/pr-fail-first.mjs`; other changes keep the Linux runner. The selected
+job still runs changed tests against base code: platform-skipped native tests are not proof.
 
 When delegation is authorized, reuse a suitable worker. Give each assignment the project,
 concrete task, evidence, allowed files, ownership boundaries, checks and expected handoff.
