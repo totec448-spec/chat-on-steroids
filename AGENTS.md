@@ -462,6 +462,10 @@ only its `skills/` root is scanned. Disabled plugins, unlisted stale cache entri
 source checkouts and unapproved Codex homes remain invisible. The catalog carries the runtime's
 plugin/package source provenance. Plugin skill command identity is based on marketplace + plugin
 and package-relative Skill path so an installed version upgrade does not rename the command.
+The Windows npm shim is not executed through a shell: its JavaScript entry runs through the
+current executable with child-only `ELECTRON_RUN_AS_NODE=1`. A native Codex executable keeps its
+existing environment. This distinction prevents a packaged Electron executable from reopening
+the app instead of running the npm entry; it changes neither installed Electron fuses nor roots.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
