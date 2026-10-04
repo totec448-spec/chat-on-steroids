@@ -453,8 +453,19 @@ bounded YAML/TOML parsing and layered configuration. Invalid policy never enable
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
 When `CODEX_HOME` is already inside an approved root and has a plugin cache, that same read-only
-catalog may project Skills from the authoritative `codex plugin list --json` installed/enabled
-snapshot. CoS does not infer state by enumerating cached versions: the runtime-provided plugin,
+catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
+Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
+prompt preparation, follow-up selection and MCP instructions never start or await the CLI.
+A missing or invalidated snapshot means no plugin Skills yet, including while a refresh is
+pending. The in-memory cache is bounded to eight home/cwd contexts, coalesces a context's
+in-flight refresh, and invalidates on the approved cache directory identity/mtime or any read
+Skills configuration bytes changing. An unchanged successful snapshot is reused; a failed
+refresh may be retried by another explicit inspection. After a CLI wait, publication performs
+one cache-only library read under the current home, configuration and permissions; a changed
+context cannot publish the old selection and this read never starts a second CLI. No timer, directory watcher, disk store
+or new renderer authority is added. Every use still rechecks current approved paths, package
+identity and ordinary read permission. This is last-observed runtime metadata, not continuous
+proof of the external CLI's current state. CoS does not infer state by enumerating cached versions: the runtime-provided plugin,
 marketplace and installed version select exactly
 `plugins/cache/<marketplace>/<plugin>/<version>`. That package must still pass the normal sandbox
 checks plus `plugin.json` (or compatibility `.codex-plugin/plugin.json`) identity validation before

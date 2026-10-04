@@ -11,13 +11,51 @@ import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatte
 import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
 import type { CodexPluginRuntimeEntry, CodexPluginSkillProvenance, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
 
-export interface SkillLibraryScope { projectPath?: string | null }
+export interface SkillLibraryScope {
+  projectPath?: string | null;
+  /** Only explicit library inspection may refresh the CLI snapshot; prompt preparation never does. */
+  refreshCodexPlugins?: boolean;
+}
 type CodexPluginCandidate = Omit<CodexPluginSkillProvenance, 'skillPath'>;
 type Candidate = { file: string; scope: SkillScope; source: SkillSource; codexPlugin?: CodexPluginCandidate };
 export interface SkillLibraryRuntime {
   codexPlugins: (codexHome: string, cwd: string) => Promise<CodexPluginRuntimeEntry[]>;
 }
 const DEFAULT_RUNTIME: SkillLibraryRuntime = { codexPlugins: listInstalledCodexPlugins };
+type PluginSnapshot = { fingerprint: string; entries: CodexPluginRuntimeEntry[]; pending?: Promise<void>; error?: string };
+const pluginSnapshots = new WeakMap<SkillLibraryRuntime['codexPlugins'], Map<string, PluginSnapshot>>();
+const MAX_PLUGIN_SNAPSHOTS = 8;
+
+async function pluginSnapshot(
+  codexHome: string, cwd: string, fingerprint: string, refresh: boolean, runtime: SkillLibraryRuntime
+): Promise<CodexPluginRuntimeEntry[]> {
+  let snapshots = pluginSnapshots.get(runtime.codexPlugins);
+  const key = `${identity(codexHome)}\0${identity(cwd)}`;
+  let snapshot = snapshots?.get(key);
+  if (snapshot?.fingerprint !== fingerprint) snapshot = undefined;
+  // In particular, a send never awaits an in-flight refresh, or starts a CLI on a cache miss.
+  if (!refresh) return snapshot?.entries ?? [];
+  if (snapshot?.error && !snapshot.pending) snapshot = undefined;
+  if (!snapshots) { snapshots = new Map(); pluginSnapshots.set(runtime.codexPlugins, snapshots); }
+  if (!snapshot) {
+    if (!snapshots.has(key) && snapshots.size >= MAX_PLUGIN_SNAPSHOTS) {
+      const retired = [...snapshots].find(([, value]) => !value.pending);
+      if (!retired) throw new Error('Codex plugin refresh capacity reached');
+      snapshots.delete(retired[0]);
+    }
+    // Do not overlap process generations when metadata changes during an older refresh.
+    if (snapshots.get(key)?.pending) throw new Error('Codex plugin metadata changed during refresh; inspect Skills again after it finishes');
+    snapshot = { fingerprint, entries: [] };
+    snapshots.set(key, snapshot);
+    const current = snapshot;
+    current.pending = Promise.resolve().then(() => runtime.codexPlugins(codexHome, cwd)).then(entries => {
+      current.entries = entries;
+    }).catch(error => { current.error = errorText(error); }).finally(() => { current.pending = undefined; });
+  }
+  await snapshot.pending;
+  if (snapshot.error) throw new Error(snapshot.error);
+  return snapshot.entries;
+}
 const identity = (file: string): string => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
 const samePath = (a: string, b: string): boolean => identity(a) === identity(b);
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -191,6 +229,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
   library.roots.push({ path: '/skills', scope: 'managed', source: 'managed' });
   const addError = (message: string): void => { if (library.errors.length < 64) library.errors.push(message.slice(0, 600)); };
   const config: SkillConfiguration = { rules: [] };
+  const configurationFingerprint = createHash('sha256');
   let invalidConfiguration = false;
   const search = effectiveCapabilities(getConfig()).read ? await locations(scope) : { roots: [], configs: [], codexHome: '' };
   for (const file of [...new Set(search.configs)]) {
@@ -200,7 +239,9 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
       // sandbox's public missing-file diagnostic deliberately does not expose ENOENT.
       const candidate = await approved(file, true);
       if (!(await fs.lstat(candidate.real)).isFile()) throw new Error('Skills configuration must be a regular file');
-      const layer = parseSkillConfiguration((await readApproved(file)).text);
+      const text = (await readApproved(file)).text;
+      configurationFingerprint.update(identity(file)).update('\0').update(text).update('\0');
+      const layer = parseSkillConfiguration(text);
       if (layer.includeInstructions !== undefined) config.includeInstructions = layer.includeInstructions;
       if (layer.bundledEnabled !== undefined) config.bundledEnabled = layer.bundledEnabled;
       if (layer.maxContextTokens !== undefined) config.maxContextTokens = layer.maxContextTokens;
@@ -212,6 +253,8 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
       }
     }
   }
+  let inspectedPluginSnapshot = false;
+  let pluginRefreshError: string | undefined;
   if (search.codexHome) {
     let codexApproved = false;
     try { await approved(search.codexHome, true); codexApproved = true; } catch { /* Global Codex state grants no new read root. */ }
@@ -220,11 +263,26 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
         const cacheRoot = await approvedDirectory(path.join(search.codexHome, 'plugins', 'cache'));
         if (cacheRoot) {
           const cwd = scope.projectPath ? (await approved(scope.projectPath)).real : search.codexHome;
-          const plugins = await runtime.codexPlugins(search.codexHome, cwd);
-          search.roots.push(...await codexPluginCandidates(search.codexHome, plugins, addError));
+          const stat = await fs.lstat(cacheRoot.real);
+          const fingerprint = configurationFingerprint.update(JSON.stringify([
+            cacheRoot.real, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, invalidConfiguration
+          ])).digest('hex');
+          inspectedPluginSnapshot = scope.refreshCodexPlugins === true;
+          const plugins = await pluginSnapshot(search.codexHome, cwd, fingerprint, inspectedPluginSnapshot, runtime);
+          if (!inspectedPluginSnapshot) search.roots.push(...await codexPluginCandidates(search.codexHome, plugins, addError));
         }
-      } catch (error) { addError(`Codex plugin runtime: ${errorText(error)}`); }
+      } catch (error) {
+        pluginRefreshError = `Codex plugin runtime: ${errorText(error)}`;
+        addError(pluginRefreshError);
+      }
     }
+  }
+  if (inspectedPluginSnapshot) {
+    // The explicit CLI wait may outlive a config/home/permission change. Re-enter the
+    // cache-only read once; it revalidates current metadata without another CLI launch.
+    const current = await listSkillLibrary({ ...scope, refreshCodexPlugins: false }, runtime);
+    if (pluginRefreshError && current.errors.length < 64) current.errors.push(pluginRefreshError.slice(0, 600));
+    return current;
   }
   library.includeInstructions = !invalidConfiguration && (config.includeInstructions ?? true);
   if (config.maxContextTokens !== undefined) library.maxContextTokens = config.maxContextTokens;
