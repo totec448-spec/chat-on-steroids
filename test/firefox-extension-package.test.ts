@@ -17,6 +17,11 @@ afterEach(async () => {
 });
 
 describe('Firefox companion packaging groundwork', () => {
+  it('keeps the manual npm staging entrypoint while release publication remains separate', async () => {
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    expect(pkg.scripts['extension:firefox:stage']).toBe('node scripts/stage-firefox-extension.mjs');
+  });
+
   it('derives only the Gecko manifest delta from the canonical companion manifest', async () => {
     const source = JSON.parse(await fs.readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
     const manifest = firefoxManifest(source);

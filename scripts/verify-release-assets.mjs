@@ -17,11 +17,9 @@ export const RELEASE_FILES = [
   'Chat-On-Steroids-Linux-arm64.AppImage',
   'Chat-On-Steroids-Linux-arm64.deb',
   'Chat-On-Steroids-Extension.zip',
-  'Chat-On-Steroids-Firefox.zip',
   'Chat-On-Steroids-Native-Sources.tar.gz'
 ];
 const EXTENSION = 'Chat-On-Steroids-Extension.zip';
-const FIREFOX_EXTENSION = 'Chat-On-Steroids-Firefox.zip';
 
 function sha256(file) {
   return new Promise((resolve, reject) => {
@@ -32,7 +30,7 @@ function sha256(file) {
 
 /**
  * What a user downloads, checked after publishing: every file is there and matches the published
- * checksum, and both extension packages are tagged versions with their build stamp (#568, #572).
+ * checksum, and the published extension package is the tagged version with its build stamp (#568, #572).
  * Returns the problems in plain sentences; an empty list means the release is sound.
  */
 export async function verifyReleaseAssets({ dir, tag }) {
@@ -48,23 +46,14 @@ export async function verifyReleaseAssets({ dir, tag }) {
     if (await sha256(file) !== sums.get(name)) problems.push(`${name} does not match its SHA256SUMS.txt checksum.`);
   }
   const wanted = tag.replace(/^v/, '');
-  for (const extensionName of [EXTENSION, FIREFOX_EXTENSION]) {
-    const extension = path.join(dir, extensionName);
-    if (!existsSync(extension)) continue;
+  const extension = path.join(dir, EXTENSION);
+  if (existsSync(extension)) {
     const entries = unzipSync(readFileSync(extension));
     const stamp = entries['build-stamp.txt'] ? strFromU8(entries['build-stamp.txt']).trim() : '';
-    if (!stamp) problems.push(`${extensionName} is missing build-stamp.txt.`);
+    if (!stamp) problems.push(`${EXTENSION} is missing build-stamp.txt.`);
     const manifest = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])) : null;
     const version = manifest?.version ?? null;
-    if (version !== wanted) problems.push(`The extension in ${extensionName} is version ${version ?? 'unknown'}, not ${wanted}.`);
-    if (extensionName === FIREFOX_EXTENSION && manifest) {
-      if (manifest.minimum_chrome_version !== undefined || manifest.background?.service_worker || manifest.background?.scripts?.[0] !== 'background.js') {
-        problems.push(`${FIREFOX_EXTENSION} does not contain the generated Firefox background manifest.`);
-      }
-      if (manifest.browser_specific_settings?.gecko?.id !== 'chat-on-steroids-companion@local') {
-        problems.push(`${FIREFOX_EXTENSION} has the wrong Firefox add-on id.`);
-      }
-    }
+    if (version !== wanted) problems.push(`The extension in ${EXTENSION} is version ${version ?? 'unknown'}, not ${wanted}.`);
   }
   return problems;
 }
@@ -77,7 +66,7 @@ async function main() {
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
-  } else console.log(`${tag}: all ${RELEASE_FILES.length} files match SHA256SUMS.txt and both extension packages are tagged builds.`);
+  } else console.log(`${tag}: all ${RELEASE_FILES.length} files match SHA256SUMS.txt and the extension package is the tagged build.`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main();

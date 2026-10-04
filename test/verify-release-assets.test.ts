@@ -16,31 +16,18 @@ let dir = '';
 afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ''; });
 
 /** A complete, correct release folder; `change` edits it before the checksums are written. */
-function release(change: { manifest?: object; firefoxManifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void } = {}) {
+function release(change: { manifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void } = {}) {
   dir = mkdtempSync(path.join(tmpdir(), 'release-'));
   const extensionEntries: Record<string, Uint8Array> = {
     'manifest.json': strToU8(JSON.stringify(change.manifest ?? { version: '2.1.21' }))
   };
-  const firefoxEntries: Record<string, Uint8Array> = {
-    'manifest.json': strToU8(JSON.stringify(change.firefoxManifest ?? {
-      version: '2.1.21',
-      background: { scripts: ['background.js'], type: 'module' },
-      browser_specific_settings: { gecko: { id: 'chat-on-steroids-companion@local' } }
-    }))
-  };
   if (change.stamp !== null) {
     extensionEntries['build-stamp.txt'] = strToU8(change.stamp ?? '7b3057119b13\n');
-    firefoxEntries['build-stamp.txt'] = strToU8(change.stamp ?? '7b3057119b13\n');
   }
-  for (const name of EXTENSION_FILES) {
-    extensionEntries[name] = strToU8(name);
-    firefoxEntries[name] = strToU8(name);
-  }
+  for (const name of EXTENSION_FILES) extensionEntries[name] = strToU8(name);
   const sums: string[] = [];
   for (const name of RELEASE_FILES) {
-    const bytes = name === 'Chat-On-Steroids-Extension.zip' ? zipSync(extensionEntries)
-      : name === 'Chat-On-Steroids-Firefox.zip' ? zipSync(firefoxEntries)
-        : Buffer.from(`contents of ${name}`);
+    const bytes = name === 'Chat-On-Steroids-Extension.zip' ? zipSync(extensionEntries) : Buffer.from(`contents of ${name}`);
     sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${name}`);
     if (name !== change.omit) writeFileSync(path.join(dir, name), bytes);
   }
@@ -50,6 +37,7 @@ function release(change: { manifest?: object; firefoxManifest?: object; stamp?: 
 }
 
 it('accepts a complete release whose files match their checksums and whose extension is the tagged build', async () => {
+  expect(RELEASE_FILES).not.toContain('Chat-On-Steroids-Firefox.zip');
   expect(await verifyReleaseAssets({ dir: release(), tag: 'v2.1.21' })).toEqual([]);
 });
 
@@ -60,29 +48,13 @@ it('reports a file whose bytes differ from the published checksum', async () => 
   ]);
 });
 
-it('reports missing files and extension packages whose version or build stamp is wrong', async () => {
+it('reports missing files and a Chromium extension whose version or build stamp is wrong', async () => {
   expect(await verifyReleaseAssets({ dir: release({ omit: 'Chat-On-Steroids-Linux-arm64.deb' }), tag: 'v2.1.21' }))
     .toEqual(['Chat-On-Steroids-Linux-arm64.deb is missing from the release.']);
   rmSync(dir, { recursive: true, force: true });
   expect(await verifyReleaseAssets({ dir: release({ manifest: { version: '2.1.20' }, stamp: null }), tag: 'v2.1.21' })).toEqual([
     'Chat-On-Steroids-Extension.zip is missing build-stamp.txt.',
-    'The extension in Chat-On-Steroids-Extension.zip is version 2.1.20, not 2.1.21.',
-    'Chat-On-Steroids-Firefox.zip is missing build-stamp.txt.'
-  ]);
-});
-
-it('rejects a Firefox artifact whose generated manifest shape drifted', async () => {
-  expect(await verifyReleaseAssets({
-    dir: release({ firefoxManifest: {
-      version: '2.1.21',
-      minimum_chrome_version: '125',
-      background: { service_worker: 'background.js', type: 'module' },
-      browser_specific_settings: { gecko: { id: 'wrong@example.invalid' } }
-    } }),
-    tag: 'v2.1.21'
-  })).toEqual([
-    'Chat-On-Steroids-Firefox.zip does not contain the generated Firefox background manifest.',
-    'Chat-On-Steroids-Firefox.zip has the wrong Firefox add-on id.'
+    'The extension in Chat-On-Steroids-Extension.zip is version 2.1.20, not 2.1.21.'
   ]);
 });
 
