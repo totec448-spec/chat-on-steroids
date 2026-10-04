@@ -10,7 +10,7 @@ export function renderEditCards(call: ToolCallRecord, sessionId: string, current
     const header = el('summary', 'edit-card-header');
     header.append(icon('i-file-text'), el('b', '', () => `${t(call.summary.kind === 'create' ? 'Created' : call.summary.kind === 'delete' ? 'Deleted' : 'Edited')} ${change.path.split(/[\\/]/).pop()}`),
       el('span', 'metric-added', `+${change.added}`), el('span', 'metric-removed', `−${change.removed}`), disclosureChevron('edit-chevron'));
-    if (change.approximate) header.append(el('span', 'meta', () => t('(approx.)')));
+    if (change.approximate) header.append(el('span', 'meta', () => t(' (approx.)')));
     const path = el('div', 'edit-card-path', change.path);
     const controls = el('div', 'edit-card-controls');
     const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement; copy.type = 'button'; copy.disabled = true;
