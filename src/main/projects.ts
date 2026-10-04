@@ -6,13 +6,14 @@ import { readDurable, writeDurableNow } from './durable.js';
 import { getConfig } from './config.js';
 import { nativePathIdentity, resolvePath } from './sandbox.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
-import type { LocalProject } from '../shared/projects.js';
+import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
 
 const MAX_ADDITIONAL_FOLDERS = 64;
 const projectPathSchema = z.string().min(1).max(32768);
 const projectSchema = z.object({
   id: z.string().uuid(), name: z.string().min(1).max(160), path: projectPathSchema,
   additionalPaths: z.array(projectPathSchema).max(MAX_ADDITIONAL_FOLDERS).optional(),
+  color: z.enum(PROJECT_COLORS).optional(),
   createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional()
 });
 const catalogSchema = z.array(projectSchema).max(200);
@@ -142,6 +143,25 @@ export function removeProjectFolder(projectId: string, folderPath: string): Prom
   mutations = operation.catch(() => undefined);
   return operation;
 }
+
+/** Presentation metadata only; changing it never revalidates or alters project workspace authority. */
+export function setProjectColor(projectId: string, color: ProjectColor | null): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    const normalized = z.enum(PROJECT_COLORS).nullable().parse(color);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId);
+    if (!project) throw new Error('Project not found');
+    if (project.color === (normalized ?? undefined)) return project;
+    const { color: _, ...withoutColor } = project;
+    const updated: LocalProject = normalized ? { ...withoutColor, color: normalized } : withoutColor;
+    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
 /** Remove only the grouping. One catalog commit also covers unloaded sessions and
  * in-flight inputs without rewriting their durable workspace/receipt identities. */
 export function removeProject(id: string): Promise<LocalProject> {

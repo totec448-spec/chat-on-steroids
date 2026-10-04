@@ -754,6 +754,12 @@ opening project/worker prompt is the bounded discoverability consumer: it names 
 additional folders by virtual path while still naming the primary as the sole default cwd and
 instruction directory. Unapproved/unavailable additional members are omitted, never treated as
 permission or as a reason to fail an otherwise valid primary project.
+Projects may also store one optional color from the fixed `PROJECT_COLORS` palette. Color is
+sidebar presentation metadata only: changing or removing it never resolves paths, changes the
+primary/additional folder set, grants permission, rebinds sessions, or changes prompt/workspace
+selection. Legacy rows without color remain unchanged. The sidebar keeps an unset color control
+quiet until hover/focus and opens an explicit keyboard-reachable palette; choosing a swatch (or
+None) calls the same `projects:color` owner rather than cycling through values.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
