@@ -337,6 +337,7 @@
   "verified link": "已驗證的連線",
   "last ChatGPT call": "最近一次 ChatGPT 呼叫",
   "Copy": "複製",
+  "Copy file": "複製檔案",
   "Connect your workspace to ChatGPT.": "將工作區連線到 ChatGPT。",
   "Developer mode": "開發者模式",
   "Show all steps": "顯示全部步驟",
@@ -1831,5 +1832,12 @@
   "{0} background processes running": "{0} 個背景程序正在執行",
   "Diagnostics report": "診斷報告",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "將版本、設定、連線狀態和記錄儲存為一個檔案（已移除個人資訊），可附加到錯誤回報中。",
-  "Diagnostics report saved as {0}. Read it before you share it.": "診斷報告已儲存為 {0}。分享前請先檢查內容。"
+  "Diagnostics report saved as {0}. Read it before you share it.": "診斷報告已儲存為 {0}。分享前請先檢查內容。",
+  "Created": "已建立",
+  "Edited": "已編輯",
+  "Diff for {0}": "{0} 的差異",
+  "Loading edit…": "正在載入編輯…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "預覽限制為600行。開啟審查查看完整編輯。",
+  "{0} unchanged lines": "{0} 行未變更",
+  "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。"
 }

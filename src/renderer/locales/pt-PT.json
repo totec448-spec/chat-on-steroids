@@ -164,6 +164,7 @@
   "verified link": "ligação verificada",
   "last ChatGPT call": "última chamada do ChatGPT",
   "Copy": "Copiar",
+  "Copy file": "Copiar ficheiro",
   "Connect your workspace to ChatGPT.": "Ligue a sua área de trabalho ao ChatGPT.",
   "Developer mode": "Modo de programador",
   "Show all steps": "Mostrar todos os passos",
@@ -1831,5 +1832,12 @@
   "{0} background processes running": "{0} processos em segundo plano em execução",
   "Diagnostics report": "Relatório de diagnóstico",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Guarda um ficheiro com as versões, as definições, o estado da ligação e o registo, sem dados pessoais, para anexar a um relatório de erro.",
-  "Diagnostics report saved as {0}. Read it before you share it.": "Relatório de diagnóstico guardado como {0}. Leia-o antes de o partilhar."
+  "Diagnostics report saved as {0}. Read it before you share it.": "Relatório de diagnóstico guardado como {0}. Leia-o antes de o partilhar.",
+  "Created": "Criado",
+  "Edited": "Editado",
+  "Diff for {0}": "Diff de {0}",
+  "Loading edit…": "A carregar edição…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "Pré-visualização limitada a 600 linhas. Abra Revisão para ver a edição completa.",
+  "{0} unchanged lines": "{0} linhas sem alterações",
+  "More edited files are available in the recording.": "Estão disponíveis mais ficheiros editados no registo."
 }

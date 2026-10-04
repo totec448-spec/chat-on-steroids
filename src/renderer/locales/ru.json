@@ -164,6 +164,7 @@
   "verified link": "подтверждённая связь",
   "last ChatGPT call": "последний вызов ChatGPT",
   "Copy": "Копировать",
+  "Copy file": "Копировать файл",
   "Connect your workspace to ChatGPT.": "Подключите рабочее пространство к ChatGPT.",
   "Developer mode": "Режим разработчика",
   "Show all steps": "Показать все шаги",
@@ -1831,5 +1832,12 @@
   "{0} background processes running": "{0} фоновых процессов запущено",
   "Diagnostics report": "Диагностический отчёт",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Сохраняет один файл с версиями, настройками, состоянием подключения и журналом без личных данных, чтобы приложить его к сообщению об ошибке.",
-  "Diagnostics report saved as {0}. Read it before you share it.": "Диагностический отчёт сохранён как {0}. Прочитайте его, прежде чем делиться."
+  "Diagnostics report saved as {0}. Read it before you share it.": "Диагностический отчёт сохранён как {0}. Прочитайте его, прежде чем делиться.",
+  "Created": "Создан",
+  "Edited": "Изменён",
+  "Diff for {0}": "Различия для {0}",
+  "Loading edit…": "Загрузка правки…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "Предпросмотр ограничен 600 строками. Откройте проверку для просмотра всей правки.",
+  "{0} unchanged lines": "Неизменённых строк: {0}",
+  "More edited files are available in the recording.": "Другие изменённые файлы доступны в записи."
 }

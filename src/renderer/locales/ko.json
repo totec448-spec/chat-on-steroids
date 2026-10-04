@@ -151,6 +151,7 @@
   "verified link": "확인된 연결",
   "last ChatGPT call": "마지막 ChatGPT 호출",
   "Copy": "복사",
+  "Copy file": "파일 복사",
   "Connect your workspace to ChatGPT.": "워크스페이스를 ChatGPT에 연결하세요.",
   "Developer mode": "개발자 모드",
   "Show all steps": "모든 단계 보기",
@@ -1831,5 +1832,12 @@
   "{0} background processes running": "백그라운드 프로세스 {0}개 실행 중",
   "Diagnostics report": "진단 보고서",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "버전, 설정, 연결 상태, 로그를 개인 정보를 제외하고 하나의 파일로 저장합니다. 버그 보고서에 첨부할 수 있습니다.",
-  "Diagnostics report saved as {0}. Read it before you share it.": "진단 보고서를 {0}(으)로 저장했습니다. 공유하기 전에 내용을 확인하세요."
+  "Diagnostics report saved as {0}. Read it before you share it.": "진단 보고서를 {0}(으)로 저장했습니다. 공유하기 전에 내용을 확인하세요.",
+  "Created": "생성됨",
+  "Edited": "편집됨",
+  "Diff for {0}": "{0}의 차이",
+  "Loading edit…": "편집 불러오는 중…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "미리보기는 600줄로 제한됩니다. 전체 편집을 보려면 검토를 여세요.",
+  "{0} unchanged lines": "변경 없는 줄 {0}개",
+  "More edited files are available in the recording.": "기록에서 더 많은 편집된 파일을 확인할 수 있습니다."
 }
