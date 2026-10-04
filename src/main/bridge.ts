@@ -82,7 +82,7 @@ import {
   goalReplySourceTurn,
   consumeGoalReplyForInputNow,
   goalSwitchFor,
-  goalViewFor,
+  goalViewFor, goalOutcomeFor,
   pendingGoalReplies,
   retireGoalDrafts,
   goalDraftNeedsIntervention,
@@ -1742,7 +1742,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     (stopping || runningToolCalls(id) > 0 || (activityExpiry !== undefined ? activityExpiry !== null && activityExpiry > Date.now() :
       live?.activeTurnId === session.activeTurnId)) ? session.activeTurnId : null;
   const finishHeld = !blocked && await sessionFinishHeld(sessionId, activeTurnId, id);
-  const draft = goalViewFor(id);
+  const draft = goalViewFor(id) ?? goalOutcomeFor(id);
   const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
   const plan = await readSessionPlan(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);

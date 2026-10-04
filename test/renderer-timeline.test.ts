@@ -3795,6 +3795,29 @@ it('renders existing-chat Goal draft stages from main controls without starting 
   expect(opening).not.toHaveBeenCalled();
 });
 
+it('says the goal was reached instead of still pursuing it, and only once', async () => {
+  // Found on Windows (2026-10-04): the helper decided the goal was met and sent nothing, yet the
+  // row kept saying "Pursuing goal", so the run looked as if it were still working.
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let draft: unknown = { stage: 'no-reply', model: 'fixture', text: '', error: null };
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, automation: 'goal',
+    objective: 'Write one poem about tides', goalDraft: draft } });
+  await append([]);
+  const goalRow = w.document.getElementById('activeGoalRow')!;
+  expect(goalRow.textContent).toContain('Goal reached · Write one poem about tides');
+  expect(goalRow.textContent).not.toContain('Pursuing goal');
+  expect(goalRow.querySelector('.ico')!.className).toContain('ph-check');
+  // Pause and Edit stay: the objective can be continued or changed.
+  expect(goalRow.querySelectorAll('.dock-action')).toHaveLength(2);
+  expect(w.document.getElementById('goalLifecycle')!.hidden).toBe(true);
+  // A newer turn replaces the outcome; the run is pursuing again.
+  draft = null; await append([]);
+  expect(goalRow.textContent).toContain('Pursuing goal · Write one poem about tides');
+  expect(goalRow.querySelector('.ico')!.className).toContain('ph-activity');
+});
+
 it('shows the immediate recovery deadline before a draft exists and clears it on fresh work', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api, original = api.getSessionControls;
