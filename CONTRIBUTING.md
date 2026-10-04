@@ -63,7 +63,7 @@ Release CI builds and smoke-tests every platform/architecture on a native runner
 
 ## Canary builds
 
-The `canary` prerelease is a test build of `main`, replaced on every run of `canary.yml`. It has no release notes and no support. Issues and pull requests are accepted only for problems that also happen on the latest stable release.
+The `canary` prerelease is a test build of `main`, rebuilt automatically after every change to `main` that can affect the app (documentation and test-only changes are skipped). A newer build replaces the previous one. It has no release notes and no support. Issues and pull requests are accepted only for problems that also happen on the latest stable release.
 
 ## Issues
 

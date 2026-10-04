@@ -77,6 +77,14 @@ it('places context before the model picker and keeps native compaction actions i
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
 });
 
+it('keeps composer actions on one row by compacting labels instead of stacking at narrow widths', () => {
+  expect(css).not.toContain('@media (max-width: 1000px)');
+  expect(css).toContain('container: chat-session / inline-size');
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?\.composer \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto minmax\(0, 84px\) 36px;/);
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?#composerModeLabel,[\s\S]*?#contextMeterCompact \{ display: none; \}/);
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?\.composer #modelMenu \{ width: 84px; max-width: 84px; \}/);
+});
+
 it('centers the accessible Chats refresh icon without an extra grid text row', () => {
   const refresh = document.getElementById('chatRefresh')!;
   expect(refresh.getAttribute('aria-label')).toBe('Refresh chats');
@@ -178,8 +186,9 @@ describe('the session card header', () => {
     expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
     expect(rule('#workspaceSettings')).toContain('height: 36px');
     expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
-    expect(document.getElementById('connectionAdvanced')).not.toBeNull();
-    expect(document.getElementById('connectionAdvancedGrid')).not.toBeNull();
+    expect(document.getElementById('connectionPopover')!.querySelector('details')).toBeNull();
+    expect(document.getElementById('connectionAdvanced')).toBeNull();
+    expect(document.getElementById('connectionPopoverVerified')).toBeNull();
     expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
     expect(header.querySelector('.session-controls')).toBeNull();
   });
@@ -293,8 +302,8 @@ describe('the session-row chat actions', () => {
   });
 
   it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}openSessionChat\(summary\.id\)/);
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}toggleSessionBlock\(summary\.id/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?toggleSessionBlock\(summary\.id/);
     expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
     expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
   });
@@ -317,7 +326,10 @@ describe('the session-row chat actions', () => {
    */
   it('blocks the Unattributed row through the one switch that can answer for it', () => {
     expect(chatSource).toMatch(
-      /if \(summary\.conversationId === null\)[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)/
+      /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
+    );
+    expect(chatSource).toMatch(
+      /strictChatAllowlist === true[\s\S]{0,300}actionBar\.append\(remove\)[\s\S]{0,120}return row/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
@@ -366,15 +378,31 @@ describe('the chat panel cards', () => {
 
   it('gives the session card one row per child, including its navigation row', () => {
     const card = document.getElementById('chatBody')!.closest('.card')!;
-    // Subhead, scrolling conversation, shared plan/queue dock, composer and footer.
+    // Subhead, scrolling conversation, shared process/plan/queue dock, composer and footer.
     const layoutChildren = [...card.children].filter(child => child.id !== 'chatSettingsBtn');
     expect(layoutChildren.length).toBe(5);
     const dockBody = document.getElementById('composerDock')!.firstElementChild!;
     expect(dockBody.classList.contains('composer-dock-body')).toBe(true);
-    expect(dockBody.firstElementChild?.id).toBe('agentPlan');
+    expect(dockBody.firstElementChild?.id).toBe('backgroundExecStatus');
+    expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
+    expect((document.getElementById('backgroundExecLiveStatus') as HTMLElement).hidden).toBe(true);
+    expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
     expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
+  });
+
+  it('keeps long queued task plans inside their own scroll area beneath persistent dock rows', () => {
+    expect(rule('#finishQueue')).toContain('max-height: min(240px, 30vh)');
+    expect(rule('#finishQueue')).toContain('overflow-y: auto');
+    expect(rule('#finishQueue')).toContain('overscroll-behavior: contain');
+    expect(rule('.background-exec-list')).toContain('max-height: min(220px, 30vh)');
+    expect(rule('.background-exec-list')).toContain('overflow-y: auto');
+    expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
+    expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
+    expect(document.getElementById('finishQueue')!.previousElementSibling?.id).toBe('taskPlanPreview');
   });
 
   /**
@@ -512,7 +540,14 @@ describe('the settings sheet', () => {
   it('asks for a single compaction threshold', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
-    expect(numbers).toEqual(['maWorkers', 'autoCompactTokens']);
+    expect(numbers).toEqual(['maWorkers', 'globalMaWorkers', 'autoCompactTokens']);
+    const globalWorkers = document.getElementById('globalMaWorkers') as HTMLInputElement;
+    expect([globalWorkers.min, globalWorkers.max, globalWorkers.step]).toEqual(['0', '64', '1']);
+    const globalSetting = globalWorkers.closest('.setting')!;
+    expect(globalSetting.querySelector('b')?.textContent).toBe('Workers across all chats');
+    expect(globalSetting.querySelector('em')?.textContent).toBe(
+      'The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.'
+    );
     for (const id of ['sessRecord', 'sessRetain', 'sessAdvisory', 'sessLimit']) {
       expect(document.getElementById(id), `#${id} is back`).toBeNull();
     }
@@ -534,6 +569,12 @@ describe('the settings sheet', () => {
         const variable = input.id === 'browserOverwrite' ? 'overwrite' : 'durations';
         expect(browserPreferencesSource).toContain(`('${input.id}')`);
         expect(browserPreferencesSource).toContain(`${variable}.addEventListener('change'`);
+        continue;
+      }
+      // Search narrows a transient provider listing; it is not an app setting and must never
+      // enter config. Keep the exception explicit and prove the local input listener exists.
+      if (input.id === 'goalModelSearch') {
+        expect(chatSource).toMatch(/const modelSearch = \$<HTMLInputElement>\('goalModelSearch'\);[\s\S]{0,260}modelSearch\.addEventListener\('input'/);
         continue;
       }
       // A credential is the one exception, and it is an exception on purpose: it is written

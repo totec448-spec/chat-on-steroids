@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -216,6 +216,9 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   const live = { events: [...events], inputs: [] as InputEntry[], sent: [] as InputArgs[], automation: 'off', controlCalls: [] as Array<{ id: string; action: string }>, compacting: false, finishHeld: true };
   let sessionListener: (change?: unknown) => void = () => undefined;
   let writeSessionListener: (id: string) => void = () => undefined;
+  let backgroundProcessListener: () => void = () => undefined;
+  let backgroundProcesses: Array<{ processId: number; incarnation: number; command: string; startedAt: number; tty: boolean }> = [];
+  let resolveBackgroundStop: (() => void) | null = null;
   const taskProgressListeners = new Set<(progress: any) => void>();
   const api: any = new Proxy(
     {
@@ -259,7 +262,19 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         entry.state = 'cancelled'; entry.cancelledByUser = true;
         return ok(true);
       }),
-      runningTools: () => ok([]), livePreview: () => ok(null), listPausedHelpers: () => ok(pausedHelpers),
+      runningTools: () => ok([]),
+      runningProcesses: () => ok(structuredClone(backgroundProcesses)),
+      stopProcess: vi.fn(async (_sessionId: string, processId: number, incarnation: number) => {
+        if (options.deferProcessStop) await new Promise<void>(resolve => { resolveBackgroundStop = resolve; });
+        backgroundProcesses = backgroundProcesses.filter(row => row.processId !== processId || row.incarnation !== incarnation);
+        backgroundProcessListener();
+        return { ok: true, data: true };
+      }),
+      onBackgroundProcessesChanged: (listener: () => void) => {
+        backgroundProcessListener = listener;
+        return () => undefined;
+      },
+      livePreview: () => ok(null), listPausedHelpers: () => ok(pausedHelpers),
       retryHelper: (id: string, sourceSessionId: string) => {
         live.controlCalls.push({ id: sourceSessionId, action: `retry:${id}` });
         pausedHelpers = pausedHelpers.filter(row => row.id !== id);
@@ -322,6 +337,12 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     notifySession: () => sessionListener({ allTranscripts: true }),
     writeSession: (id: string) => writeSessionListener(id),
     progress: (value: any) => { for (const listener of taskProgressListeners) listener(value); },
+    resolveBackgroundStop: () => { const resolve = resolveBackgroundStop; resolveBackgroundStop = null; resolve?.(); },
+    async publishBackgroundProcesses(rows: Array<{ processId: number; incarnation: number; command: string; startedAt: number; tty: boolean }>) {
+      backgroundProcesses = structuredClone(rows);
+      backgroundProcessListener();
+      await settle();
+    },
     async append(more: SessionEvent[]) {
       live.events.push(...more);
       sessionListener({ allTranscripts: true });
@@ -351,6 +372,120 @@ it('makes parent and worker session selectors keyboard-focusable and activates t
   expect(activate.defaultPrevented).toBe(true);
   await settle();
   expect(w.document.querySelector(`.sess.is-sel[data-id="${worker.id}"]`)).not.toBeNull();
+});
+
+it('shows elapsed runtime and stops the owned background process from the dock', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  await publishBackgroundProcesses([{
+    processId: 4101,
+    incarnation: 91,
+    command: 'npm run dev',
+    startedAt: Date.now() - 90_000,
+    tty: false
+  }]);
+  const row = w.document.getElementById('backgroundExecStatus')!;
+  expect(row.hidden).toBe(false);
+  expect(row.querySelector('.background-exec-time')?.textContent).toMatch(/^Running for 1m 3\ds$/);
+  const stop = row.querySelector<HTMLButtonElement>('.background-exec-stop')!;
+  expect(stop.textContent).toContain('Stop');
+  stop.click();
+  await settle();
+  expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4101, 91);
+  expect(row.hidden).toBe(true);
+});
+
+it('expands multiple background processes and stops each one from its own row', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  const startedAt = Date.now() - 45_000;
+  await publishBackgroundProcesses([
+    { processId: 4201, incarnation: 101, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4202, incarnation: 102, command: 'node server.js', startedAt: startedAt + 5_000, tty: true },
+    { processId: 4203, incarnation: 103, command: 'npm run worker', startedAt: startedAt + 10_000, tty: false }
+  ]);
+  const summaryRow = w.document.getElementById('backgroundExecStatus')!;
+  const list = w.document.getElementById('backgroundExecList')!;
+  expect(summaryRow.hidden).toBe(false);
+  expect(summaryRow.getAttribute('role')).toBe('button');
+  expect(summaryRow.getAttribute('aria-expanded')).toBe('false');
+  expect(summaryRow.getAttribute('aria-controls')).toBe('backgroundExecList');
+  expect((w.document.getElementById('backgroundExecLiveStatus') as HTMLElement).hidden).toBe(false);
+  expect(w.document.getElementById('backgroundExecLiveStatus')?.textContent).toContain('3 background processes running');
+  expect(summaryRow.querySelector('.queue-label')?.textContent).toBe('3 background processes running');
+  expect(summaryRow.querySelector('.queue-label')?.textContent).not.toContain('npm run watch');
+  expect(summaryRow.querySelector<HTMLButtonElement>('.background-exec-stop')!.hidden).toBe(true);
+  expect(list.hidden).toBe(true);
+
+  summaryRow.click();
+  expect(summaryRow.getAttribute('aria-expanded')).toBe('true');
+  expect(list.hidden).toBe(false);
+  const processRows = [...list.querySelectorAll<HTMLElement>('.background-exec-process')];
+  expect(processRows).toHaveLength(3);
+  expect(processRows[0]?.textContent).toContain('#4201 npm run watch');
+  expect(processRows[1]?.textContent).toContain('#4202 node server.js');
+  expect(processRows[2]?.textContent).toContain('#4203 npm run worker');
+  expect(processRows[0]?.querySelector('.background-exec-process-time')?.textContent).toMatch(/^Running for 4\ds$/);
+  expect(processRows[0]?.querySelector('.background-exec-stop')?.getAttribute('aria-label')).toContain('#4201 npm run watch');
+  expect(processRows[1]?.querySelector('.background-exec-stop')?.getAttribute('aria-label')).toContain('#4202 node server.js');
+
+  const secondStop = processRows[1]!.querySelector<HTMLButtonElement>('.background-exec-stop')!;
+  secondStop.focus();
+  secondStop.click();
+  expect(w.document.activeElement).toBe(secondStop);
+  await settle();
+  expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4202, 102);
+  expect(w.document.activeElement).toBe(summaryRow);
+  expect(summaryRow.querySelector('.queue-label')?.textContent).toBe('2 background processes running');
+  expect(summaryRow.getAttribute('role')).toBe('button');
+  expect(summaryRow.getAttribute('aria-expanded')).toBe('true');
+  expect(list.hidden).toBe(false);
+  expect(list.querySelectorAll('.background-exec-process')).toHaveLength(2);
+});
+
+it('does not restore background-process Stop focus after navigating away and back', async () => {
+  const { w, publishBackgroundProcesses, resolveBackgroundStop } = await boot([], true, [], [], { deferProcessStop: true });
+  const startedAt = Date.now() - 30_000;
+  await publishBackgroundProcesses([
+    { processId: 4301, incarnation: 111, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4302, incarnation: 112, command: 'node server.js', startedAt: startedAt + 5_000, tty: false }
+  ]);
+  const summaryRow = w.document.getElementById('backgroundExecStatus')!;
+  summaryRow.click();
+  const stop = w.document.querySelectorAll<HTMLButtonElement>('#backgroundExecList .background-exec-stop')[1]!;
+  stop.focus();
+  stop.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
+  await settle();
+  expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4302, 112);
+
+  (w.document.getElementById('newChat') as HTMLButtonElement).click();
+  await settle();
+  (w.document.querySelector('#sessionList [data-id] [data-session-select]') as HTMLElement).click();
+  await settle();
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.focus();
+  resolveBackgroundStop();
+  await settle();
+  expect(w.document.activeElement).toBe(input);
+});
+
+it('stacks a running process row with queued plan tasks above the composer', async () => {
+  const { w, live, append, publishBackgroundProcesses } = await boot([]);
+  await publishBackgroundProcesses([{ processId: 4201, incarnation: 92, command: 'npm run dev', startedAt: Date.now() - 5_000, tty: false }]);
+  live.inputs.push(...Array.from({ length: 5 }, (_, index) => ({
+    id: `plan-stage-${index}`, sessionId: summary([]).id, text: `Plan task ${index + 1}`, mode: 'after-turn' as const, dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued' as const, owner: null, createdAt: Date.now() + index, conversationId: 'chat-b'
+  })));
+  await append([]);
+  const processRow = w.document.getElementById('backgroundExecStatus')!;
+  const queue = w.document.getElementById('finishQueue')!;
+  const dock = w.document.querySelector('.composer-dock-body')!;
+  expect(processRow.hidden).toBe(false);
+  expect(queue.hidden).toBe(false);
+  expect(queue.querySelectorAll('.queued-input')).toHaveLength(5);
+  expect(queue.textContent).toContain('Plan task 5');
+  const visible = [...dock.children].filter(node => !(node as HTMLElement).hidden);
+  expect(visible).toContain(processRow);
+  expect(visible).toContain(queue);
+  expect(visible.indexOf(processRow)).toBeLessThan(visible.indexOf(queue));
 });
 
 it('keeps legacy Files, Agents and Review toggles out of the chat while dock controls remain available', async () => {
@@ -1424,6 +1559,41 @@ it('keeps the project visible when its removal fails', async () => {
   await settle();
   expect(w.document.querySelector('.project-group')).not.toBeNull();
   expect((w.document.querySelector('.project-remove') as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('picks and clears project color without changing project membership', async () => {
+  const project = {
+    id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1
+  };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
+  const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  const color = group.querySelector<HTMLButtonElement>('.project-color')!;
+  expect(color.dataset.color).toBe('');
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  color.click(); await settle();
+  expect(color.getAttribute('aria-expanded')).toBe('true');
+  const none = group.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!;
+  const blue = group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  expect(w.document.activeElement).toBe(none);
+  none.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.activeElement).toBe(blue);
+  blue.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  expect(w.document.activeElement).toBe(color);
+  color.click(); await settle();
+  group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(1, project.id, 'blue');
+  let refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBe('blue');
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('blue');
+  refreshed.querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
+  refreshed.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(2, project.id, null);
+  refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBeUndefined();
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {

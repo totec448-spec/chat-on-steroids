@@ -49,6 +49,63 @@ describe('the order a recorded turn is read in', () => {
   });
 
   /**
+   * Work done after ChatGPT opened a paragraph but before its text could be read is drawn above it.
+   * A live agentic turn: the second paragraph says the file "already got its fourth line", yet the
+   * edit reached the app 119 ms after the paragraph was opened; and the round's recap, read 14 s
+   * before the third paragraph's text, headed the next round instead of closing its own. A call that
+   * arrived 10 s after a paragraph opened was issued after it, however late the hidden tab read it.
+   */
+  it('places work done before a paragraph was written above it, and its recap with it', () => {
+    const prose = (seq: number, time: number, authoredAt: number, label: string): Row => ({ ...row(seq, time, 'assistant_message', 't1', label), authoredAt });
+    const rows: Row[] = [
+      row(3, 1790959781045, 'turn_start', 't1', 'start'),
+      prose(6, 1790959781339, 1790959777101, 'plan paragraph'),
+      row(8, 1790959803756, 'tool_call', 't1', 'create'),
+      row(9, 1790959810875, 'tool_call', 't1', 'edit'),
+      row(10, 1790959814727, 'page_tool', 't1', 'Created, edited, and validated'),
+      prose(13, 1790959814727, 1790959810756, 'already edited'),
+      row(16, 1790959829140, 'tool_call', 't1', 'count lines'),
+      row(17, 1790959835467, 'page_tool', 't1', 'Validated and counted'),
+      row(18, 1790959835234, 'tool_call', 't1', 'list windows'),
+      row(19, 1790959849395, 'page_tool', 't1', 'Listed windows'),
+      row(20, 1790959845275, 'tool_call', 't1', 'call after the paragraph'),
+      prose(23, 1790959849396, 1790959835275, 'validation closed'),
+      row(24, 1790959858851, 'tool_call', 't1', 'list apps'),
+      row(28, 1790959905874, 'tool_call', 't1', 'window state'),
+      row(29, 1790959906106, 'page_tool', 't1', 'Identified foreground'),
+      prose(36, 1790959915441, 1790959905851, 'desktop revealed'),
+      row(37, 1790959918644, 'tool_call', 't1', 'chrome state')
+    ];
+    expect(reading(rows)).toEqual(['start', 'plan paragraph', 'create', 'edit', 'Created, edited, and validated', 'already edited',
+      'count lines', 'list windows', 'Validated and counted', 'Listed windows', 'validation closed',
+      'call after the paragraph', 'list apps', 'window state', 'Identified foreground', 'desktop revealed', 'chrome state']);
+  });
+
+  /**
+   * A whole turn read late in one pass (after a reload, or a new chat's first turn): every paragraph
+   * and step is read a few ms apart, minutes after the work. Each step still goes only before the
+   * paragraph after it on the page, as it is drawn there, not before the first paragraph.
+   */
+  it('keeps each step with its own paragraph when a turn is read late in one pass', () => {
+    const late = 1_790_000_420_000;
+    const prose = (seq: number, read: number, authoredAt: number, label: string, final?: boolean): Row =>
+      ({ ...row(seq, read, 'assistant_message', 't1', label), authoredAt, ...(final ? { final } : {}) });
+    const rows: Row[] = [
+      row(3, 1_790_000_000_000, 'turn_start', 't1', 'start'),
+      prose(66, late, 1_790_000_001_500, 'first paragraph'),
+      row(4, 1_790_000_005_000, 'tool_call', 't1', 'first call'),
+      row(67, late + 1, 'page_tool', 't1', 'first recap'),
+      prose(68, late + 2, 1_790_000_009_000, 'second paragraph'),
+      row(5, 1_790_000_012_000, 'tool_call', 't1', 'second call'),
+      row(69, late + 3, 'page_tool', 't1', 'second recap'),
+      prose(73, late + 4, 1_790_000_030_000, 'answer', true),
+      row(7, 1_790_000_040_000, 'turn_end', 't1', 'end')
+    ];
+    expect(reading(rows)).toEqual(['start', 'first paragraph', 'first call', 'first recap', 'second paragraph',
+      'second call', 'second recap', 'answer', 'end']);
+  });
+
+  /**
    * A message the app handed between two agents, drawn where it was delivered.
    *
    * Live: prime's message to worker-1 was stamped 1787057617031 — three milliseconds after

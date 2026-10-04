@@ -7,7 +7,7 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, r
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, removeProject } from '../src/main/projects.js';
+import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -35,6 +35,17 @@ it('persists one project per canonical directory and validates approved director
   await expect(addProject('first')).rejects.toThrow(/absolute/);
   resetDurableForTests(); initDurableStore(directory);
   expect(await listProjects()).toEqual([one]);
+});
+
+it('persists only predefined presentation colors without changing project workspace authority', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const colored = await setProjectColor(project.id, 'purple');
+  expect(colored).toEqual({ ...project, color: 'purple' });
+  expect(await projectWorkspace(project.id)).toMatchObject({ real: project.path, virtual: '/work/first' });
+  resetDurableForTests(); initDurableStore(directory);
+  expect(await listProjects()).toEqual([colored]);
+  await expect(setProjectColor(project.id, 'chartreuse' as any)).rejects.toThrow();
+  expect(await setProjectColor(project.id, null)).toEqual(project);
 });
 
 it('resolves a native picker alias to the approved identity without granting outside aliases', async () => {

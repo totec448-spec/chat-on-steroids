@@ -3,7 +3,9 @@ import { el, icon } from './dom.js';
 import { t, ui } from './i18n.js';
 
 /** Only the displayed seconds tick here. Main owns every deadline and cancellation. */
-export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly RecoveryCountdown[], now = Date.now()): boolean {
+/** `actionFor` may add one control to a row, e.g. the user's cancel for an interrupted-response reload. */
+export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly RecoveryCountdown[], now = Date.now(),
+  actionFor?: (countdown: RecoveryCountdown) => HTMLElement | null): boolean {
   const key = JSON.stringify(countdowns);
   if (!countdowns.length) { delete host.dataset.countdowns; return false; }
   if (host.dataset.countdowns !== key) {
@@ -34,11 +36,15 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
         : countdown.kind === 'unattributed'
         ? t('This chat is a possible source. An attributed MCP call cancels its reload.')
         : countdown.kind === 'silence' ? t('New activity cancels this countdown.')
+        : countdown.kind === 'assistant-error'
+        ? t("ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.")
         : t('New activity cancels recovery. The countdown shows the next check or delivery attempt.'));
       const timer = el('span', 'recovery-countdown');
       timer.setAttribute('role', 'timer');
       timer.setAttribute('aria-live', 'off');
       row.append(icon('i-pulse'), label, timer);
+      const action = actionFor?.(countdown);
+      if (action) row.append(action);
       return row;
     }));
     host.dataset.countdowns = key;

@@ -5,9 +5,9 @@ import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
-import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
+import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
@@ -30,7 +30,7 @@ import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
-import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from '../shared/types.js';
+import type { AppState, Capability, ChatBrowser, Config, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
   isNewer,
@@ -44,6 +44,7 @@ import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
+import { publishMainTexts } from './main-texts.js';
 
 declare global {
   interface Window {
@@ -52,8 +53,12 @@ declare global {
 }
 
 const api = window.api;
+// First: main announces a Keychain read before it starts and may not get through again until it ends.
+initKeychainNotice(api);
 initLanguage();
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
+// The tray menu and desktop notices come from the main process, which has no catalogs.
+publishMainTexts(texts => api.setMainTexts?.(texts));
 // The browser extension shows its texts in the app's language, not Chrome's; the app hands it on.
 const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.(currentLanguage())).catch(() => undefined); };
 publishUiLanguage();
@@ -62,7 +67,6 @@ const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
-const connectionAdvanced = initConnectionAdvanced();
 const appearance = initAppearance(patch => { void save(patch); });
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
@@ -179,15 +183,12 @@ function setConnectionPopover(open: boolean): void {
   popover.hidden = !open;
   trigger.setAttribute('aria-expanded', String(open));
   if (open) {
-    $<HTMLDetailsElement>('connectionAdvanced').open = false;
-    $<HTMLDetailsElement>('connectionRuntime').open = false;
     positionConnectionPopover();
     paintClock();
-    connectionAdvanced.refreshIfOpen();
   }
 }
 
-/** Keep this diagnostic surface anchored to the status button and inside the viewport. */
+/** Keep the connection controls anchored to the status button and inside the viewport. */
 function positionConnectionPopover(): void {
   const popover = $('connectionPopover');
   if (popover.hidden) return;
@@ -594,6 +595,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
     },
     ui: {
       ...previous.ui,
+      defaultChatModel: $<HTMLSelectElement>('defaultChatModel').value || undefined,
+      defaultChatReasoning: ($<HTMLSelectElement>('defaultChatReasoning').value || undefined) as Config['ui']['defaultChatReasoning'],
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
@@ -1180,10 +1183,6 @@ function apply(next: AppState): void {
   connectBtn.disabled = disconnecting || (!running && missing !== null);
   connectBtn.title = !running && missing ? missing.text : '';
 
-  ui($('connectionPopoverExtension'), 'textContent', () => next.bridge.extensionVersion
-    ? `v${next.bridge.extensionVersion}`
-    : t("Not reported"));
-
   // ---- out of date, app or extension
   paintUpdate(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {});
@@ -1195,6 +1194,10 @@ function apply(next: AppState): void {
   // ---- permissions
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
   $('readOnlyBtn').setAttribute('aria-pressed', String(config.readOnly));
+  // The lock reads like a state; the title says which way a click goes and what it changes.
+  ui($('readOnlyBtn'), 'title', () => config.readOnly
+    ? t('Read-only is on: ChatGPT can only look. Click to allow changes again.')
+    : t('Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.'));
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
     const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control';
@@ -1592,7 +1595,7 @@ function facts(next: AppState): HTMLElement[] {
 }
 
 /**
- * Repaints only what ages: the two numbers and the header note. Runs every second so
+ * Repaints only what ages: the two numbers and status tooltips. Runs every second so
  * "verified 8s ago" keeps counting between reports instead of freezing.
  */
 function paintClock(): void {
@@ -1628,13 +1631,7 @@ function paintClock(): void {
   browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
   ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
   ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
-  $('connectionPopoverVerified').hidden = connected;
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
-  ui($('connectionPopoverVerified'), 'textContent', () => disconnecting ? t('Closing connection…') : running
-    ? status.handshakeAt === null
-      ? t("no handshake yet")
-      : t("verified {0}", [ago(status.handshakeAt)])
-    : t("Connection is off"));
 
   const triggerText = status.handshakeAt !== null && running
     ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`

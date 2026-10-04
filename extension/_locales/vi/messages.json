@@ -1147,5 +1147,8 @@
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "Ứng dụng không thể lưu tác vụ. Hãy kiểm tra dung lượng đĩa trống và thử lưu lại."
+  },
+  "popup_app_not_running_help": {
+    "message": "Hãy chắc rằng Chat On Steroids đang mở trên máy tính này. Tiện ích sẽ tự kết nối."
   }
 }

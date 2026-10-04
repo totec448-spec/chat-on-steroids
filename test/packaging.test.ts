@@ -169,6 +169,12 @@ describe('cross-platform packaging targets', () => {
     expect(() => releaseTargets('some')).toThrow();
     const canary = yamlFile('.github/workflows/canary.yml');
     expect(canary.jobs.candidate.with).toEqual({ platforms: 'common' });
+    // Built after every app-relevant push to main, and a running canary is never cancelled
+    // halfway through replacing the previous one.
+    expect(canary.on.push).toMatchObject({ branches: ['main'] });
+    expect(canary.on.push['paths-ignore']).toEqual(expect.arrayContaining(['docs/**', 'test/**']));
+    expect(canary.on).toHaveProperty('workflow_dispatch');
+    expect(canary.concurrency).toEqual({ group: 'canary', 'cancel-in-progress': false });
     // A stable release passes nothing, which is `all`.
     expect(yamlFile('.github/workflows/publish.yml').jobs.candidate?.with?.platforms).toBeUndefined();
   });
@@ -213,6 +219,9 @@ describe('cross-platform packaging targets', () => {
     ]);
     expect(parsed.jobs.package['runs-on']).toBe('${{ matrix.runner }}');
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
+    expect(workflow).not.toContain('Package Firefox extension groundwork');
+    expect(workflow).not.toContain('npm run extension:firefox:stage');
+    expect(workflow).not.toContain('Chat-On-Steroids-Firefox.zip');
     expect(workflow).toContain('Install generated DEB on target distro');
     expect(workflow).toContain('Launch installed DEB normally under Xvfb');
     expect(workflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids');
@@ -705,6 +714,10 @@ Load command 11
     expect(candidateUpload).toContain('release/Chat-On-Steroids-*');
     expect(candidateUpload).toContain('release/SHA256SUMS.txt');
     const planned = releaseTargets('all').files;
+    expect(planned).not.toContain('Chat-On-Steroids-Firefox.zip');
+    expect(checksumStep).not.toContain('Chat-On-Steroids-Firefox.zip');
+    expect(candidateUpload).not.toContain('Chat-On-Steroids-Firefox.zip');
+    expect(publishStep).not.toContain('Chat-On-Steroids-Firefox.zip');
     for (const artifact of artifacts) {
       expect(publishStep).toContain(artifact);
       if (artifact !== 'SHA256SUMS.txt') expect(planned).toContain(artifact);

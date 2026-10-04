@@ -51,6 +51,7 @@
         <button class="is-sel" data-tab="home" type="button">
           <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
+        <button data-tab="general" type="button"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>General</button>
         <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
           <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
@@ -104,10 +105,7 @@
             </button>
             <section class="connection-popover scroll" id="connectionPopover" role="dialog" aria-label="Connection" hidden>
               <div class="connection-popover-head">
-                <div>
-                  <strong id="connectionPopoverTitle">Not connected</strong>
-                  <span id="connectionPopoverVerified" hidden>Connection is off</span>
-                </div>
+                <strong id="connectionPopoverTitle">Not connected</strong>
                 <span class="connection-popover-status-dot" aria-hidden="true"></span>
               </div>
               <div class="connection-popover-card">
@@ -122,39 +120,6 @@
                   <i aria-hidden="true"></i>
                 </div>
               </div>
-              <details class="connection-advanced" id="connectionAdvanced">
-                <summary aria-label="Advanced" title="Advanced">
-                  <i class="ico ph ph-plus" aria-hidden="true"></i>
-                </summary>
-                <div class="connection-advanced-body">
-                  <p class="connection-advanced-alert" id="connectionAdvancedAlert" hidden></p>
-
-                  <div class="connection-advanced-caption"><span>Session capture</span><span id="connectionPopoverExtension">—</span></div>
-                  <div class="connection-advanced-card">
-                    <div class="connection-advanced-row" id="connectionAdvancedTab"><span>ChatGPT tab</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedRecording"><span>Recording this chat</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedChat"><button class="copy" type="button">Chat ID</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedRequest"><button class="copy" type="button">Current request</button><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                    <div class="connection-advanced-row" id="connectionAdvancedApp"><span>Reaching the app</span><span class="meta sr-only">—</span><i aria-hidden="true"></i></div>
-                  </div>
-
-                  <details class="connection-runtime" id="connectionRuntime"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Runtime diagnostics</summary>
-                  <span class="connection-advanced-age" id="connectionAdvancedAge">Runtime diagnostics</span>
-                  <div class="connection-pipeline" id="connectionPipeline">
-                    <div class="connection-pipeline-stage" id="connectionPipelineRead"><i></i><span>Request ID found</span><em></em></div>
-                    <div class="connection-pipeline-stage" id="connectionPipelineSent"><i></i><span>Sent to app</span><em></em></div>
-                    <div class="connection-pipeline-stage" id="connectionPipelineOwner"><i></i><span>Owner confirmed</span><em></em></div>
-                    <p id="connectionPipelineWhy"></p>
-                    <div class="connection-pipeline-calls" id="connectionPipelineCalls"></div>
-                  </div>
-
-                  <dl class="connection-advanced-grid" id="connectionAdvancedGrid"></dl>
-                  <div class="connection-advanced-actions">
-                    <button class="btn" id="connectionAdvancedCopy" type="button">Copy</button>
-                    <button class="btn" id="connectionAdvancedRefresh" type="button">Refresh</button>
-                  </div></details>
-                </div>
-              </details>
               <div class="connection-popover-actions">
                 <button class="btn btn-solid" id="connectionPopoverToggle" type="button">Connect</button>
               </div>
@@ -190,6 +155,12 @@
            state.update plus the extension version the bridge already reports; see
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
+      <!-- A new macOS build asks once for the Keychain password; everything that needs saved keys
+           waits for the answer. See src/renderer/keychain-notice.ts. -->
+      <div class="notice" id="keychainNotice" role="status" hidden>
+        <i class="ico ph ph-lock-key" aria-hidden="true"></i>
+        <span>macOS asks for your password once after each update, so this version can open its saved keys. Enter your Mac login password and choose “Always Allow”. Chats and the browser connection continue as soon as you answer.</span>
+      </div>
       <div class="notice" id="updateNotice" hidden>
         <i class="ico ph ph-lightning" aria-hidden="true"></i>
         <span id="updateText"></span>
@@ -205,6 +176,40 @@
       </div>
 
       <main>
+
+        <!-- ========================================================= General
+             App-wide behavior that is not part of connecting. It used to sit in Setup › Advanced,
+             where nobody looking for "how chats behave" would open it. Shares the Appearance
+             page's layout classes. -->
+        <section class="panel appearance-panel general-panel scroll" data-panel="general" aria-labelledby="generalTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="generalTitle">General</h1><p>How the app behaves day to day. Changes apply immediately.</p></div>
+            </header>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Chats</h2><p>What you see while ChatGPT answers, and what your messages carry.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section" id="privacyScreenshotsSetting">
+              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Privacy screenshots</b><em>Screenshots show the active window by default instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
+              </div>
+            </section>
+          </div>
+        </section>
 
         <section class="panel appearance-panel scroll" data-panel="appearance" id="appearancePanel" aria-labelledby="appearanceTitle">
           <div class="appearance-content settings-page-content">
@@ -224,14 +229,14 @@
               </div>
             </section>
             <section class="appearance-section">
-              <header class="settings-section-head"><div><h2>Colors</h2><p>Tune surfaces and accents for the selected theme.</p></div></header>
+              <header class="settings-section-head"><div><h2>Colors</h2><p>Fine-tune background and accent colors for the selected theme.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
               <label class="setting"><span class="setting-text"><b>Theme</b><em>Light and dark keep their own colors.</em></span><select id="appearanceTheme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
 
               <div class="setting"><label class="setting-text" for="appearance-accent"><b>Accent color</b></label><div class="appearance-color"><input id="appearance-accent" type="color" data-color="accent" aria-label="Accent color" /><input id="appearance-accent-hex" type="text" data-hex="accent" aria-label="Accent color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
               <div class="setting"><label class="setting-text" for="appearance-background"><b>Background color</b></label><div class="appearance-color"><input id="appearance-background" type="color" data-color="background" aria-label="Background color" /><input id="appearance-background-hex" type="text" data-hex="background" aria-label="Background color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
               <div class="setting"><label class="setting-text" for="appearance-sidebar"><b>Sidebar color</b></label><div class="appearance-color"><input id="appearance-sidebar" type="color" data-color="sidebar" aria-label="Sidebar color" /><input id="appearance-sidebar-hex" type="text" data-hex="sidebar" aria-label="Sidebar color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
-              <label class="setting"><span class="setting-text"><b>Contrast</b><em>Adjust the separation between surfaces and text.</em></span><span class="appearance-range"><input id="appearanceContrast" type="range" min="0" max="100" aria-label="Contrast" /><output id="appearanceContrastValue" for="appearanceContrast"></output></span></label>
+              <label class="setting"><span class="setting-text"><b>Contrast</b><em>How strongly text stands out from its background.</em></span><span class="appearance-range"><input id="appearanceContrast" type="range" min="0" max="100" aria-label="Contrast" /><output id="appearanceContrastValue" for="appearanceContrast"></output></span></label>
               <label class="setting"><span class="setting-text"><b>Translucent sidebar</b><em>Blend your sidebar color softly into the background.</em></span><input id="appearanceTranslucent" type="checkbox" /></label>
               </div>
             </section>
@@ -247,7 +252,7 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="de" lang="de">Deutsch</option><option value="en" lang="en">English</option><option value="es" lang="es">Español</option><option value="fr" lang="fr">Français</option><option value="pt-BR" lang="pt-BR">Português (Brasil)</option><option value="pt-PT" lang="pt-PT">Português (Portugal)</option><option value="ru" lang="ru">Русский</option><option value="tr" lang="tr">Türkçe</option><option value="vi" lang="vi">Tiếng Việt</option><option value="ja" lang="ja">日本語</option><option value="ko" lang="ko">한국어</option><option value="zh-CN" lang="zh-CN">简体中文</option><option value="zh-TW" lang="zh-TW">繁體中文</option></select></label>
                 <div class="setting setup-profile-setting">
-                  <span class="setting-text"><b id="setupProfileLabel">Setup profile</b></span>
+                  <span class="setting-text"><b id="setupProfileLabel">Setup profile</b><em>Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.</em></span>
                   <div class="setup-profile-controls">
                     <button class="btn" id="setupProfile" type="button" popovertarget="setupProfileMenu" aria-labelledby="setupProfileLabel setupProfileCurrent"><span id="setupProfileCurrent" translate="no">Default</span><svg class="disclosure-chevron dropdown-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></button>
                     <button class="btn" id="setupProfileAdd" type="button" title="Add profile" aria-label="Add profile"><i class="ico ph ph-plus" aria-hidden="true"></i></button>
@@ -721,12 +726,12 @@
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
-                  <h3>Add the Chrome extension</h3>
+                  <h3>Add the browser extension</h3>
                   <ol class="setup-instructions">
                     <li>Open <code>chrome://extensions</code>.</li>
                     <li>Turn on Developer mode at the top right.</li>
                     <li>Click Open extension folder below and copy the folder path from the file manager’s address bar.</li>
-                    <li>In Chrome, click Load unpacked, paste the copied folder path and select that folder.</li>
+                    <li>In the browser, click Load unpacked, paste the copied folder path and select that folder.</li>
                   </ol>
                   <p>The extension pairs with this app automatically — there is no code to type.</p>
                   <p class="hint is-required">
@@ -782,13 +787,6 @@
                 <label class="inline" id="startAtLoginRow" hidden><input type="checkbox" id="startAtLogin" /> Start Chat On Steroids when I sign in</label>
                 <label class="inline"><input type="checkbox" id="autoConnect" /> Connect automatically at startup</label>
                 <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
-                <label class="inline" id="privacyScreenshotsSetting"><input type="checkbox" id="privacyScreenshots" /> Privacy screenshots: default to the active window instead of the whole monitor</label>
-                <label class="inline"><input type="checkbox" id="developerMode" /> Developer mode: show turn boundaries and recovery events</label>
-                <label class="inline"><input type="checkbox" id="playfulStatus" /> Playful status words: show rotating gym jokes instead of “Working”</label>
-                <label class="inline"><input type="checkbox" id="followOutput" /> Follow new output: stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</label>
-                <label class="inline"><input type="checkbox" id="mentionCore" /> Mention Chat On Steroids Core on my messages: makes sure ChatGPT can use this app in every chat. Turn off if ChatGPT starts plain questions with an unneeded tool call; workers, Goal, Loop and Continue keep the mention.</label>
-                <label class="inline"><input type="checkbox" id="controlApiEnabled" /> Local control API: let agents on this computer read app status and chats</label>
-                <label class="inline"><input type="checkbox" id="controlApiAllowActions" disabled /> Allow actions: let local agents send and cancel messages</label>
               </div>
             </details>
             <div id="toolApprovalSetup"></div>
@@ -857,16 +855,18 @@
                     </span>
                     <input id="autoContinue" type="checkbox" />
                   </label>
-                  <details class="setting-timing"><summary>Recovery timing details</summary><p>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered tickets share reload intervals of 2, 5, 10 and 15 minutes.</p></details>
+                  <details class="setting-timing"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Recovery timing details</summary><p>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered tickets share reload intervals of 2, 5, 10 and 15 minutes.</p></details>
                   <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
                   <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Compact &amp; Resume briefs keep tool calls and their results. Goal and Loop always read only your messages and the assistant's updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
                   </div>
-                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Use account-observed models for sub-agents.</p></div></header>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">ChatGPT models</h2><p>Choose the default model and reasoning for new chats and sub-agents, from what your account offers.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
+                  <div class="setting"><span class="setting-text"><b>Default new-chat model</b><em>Used when you start a new chat. A chat you continue keeps its own model.</em></span><select id="defaultChatModel"><option value="">Automatic</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Default new-chat reasoning</b><em>Used with the ordinary chat model above; workers and helpers keep their own defaults.</em></span><select id="defaultChatReasoning"><option value="">Automatic</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>
@@ -875,18 +875,34 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Sub-agent workers</b>
-                      <em>Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.</em>
+                      <em>Needs the browser extension to be connected. This sets the most worker chats one run may open.</em>
                     </span>
                     <input id="maWorkers" class="num" type="number" min="1" max="8" step="1" />
                     <span class="unit">max</span>
                   </div>
 
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Workers across all chats</b>
+                      <em>The most workers that may run at once over all your chats together. 0 means no extra limit; each chat still keeps the limit above.</em>
+                    </span>
+                    <input id="globalMaWorkers" class="num" type="number" min="0" max="64" step="1" />
+                  </div>
+
                   <label class="setting">
                     <span class="setting-text">
                       <b>Allow unattributed calls</b>
-                      <em>Allow tools, including computer use, file editing and JavaScript, without chat attribution. Sub-agents and other chat-owned actions still need an identified chat. Activity appears as Unattributed.</em>
+                      <em>Lets tools run, including computer use, file editing and JavaScript, even when the app can’t tell which chat called them. Sub-agents and other chat actions still need a known chat. These calls are listed under Unattributed activity.</em>
                     </span>
                     <input id="allowUnattributedCalls" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Trust only selected chats</b>
+                      <em>Only chats you trust can use this computer's tools. Existing chats start untrusted; hover a chat in the sidebar and choose Trust (✓). Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.</em>
+                    </span>
+                    <input id="strictChatAllowlist" type="checkbox" />
                   </label>
 
                   <label class="setting">
@@ -900,7 +916,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Wait for sub-agents</b>
-                      <em>Before Goal or Loop takes its next step, wait until this chat's own workers have finished. Their reports arrive here, so deciding earlier reads a context that is about to change. Messages you type or queue are sent as usual.</em>
+                      <em>Goal and Loop wait until this chat's workers have reported before taking their next step, so they decide with the results. Messages you type or queue are sent as usual.</em>
                     </span>
                     <input id="waitForSubAgents" type="checkbox" />
                   </label>
@@ -915,7 +931,7 @@
 
                   <div id="swarmList"></div>
                   <div class="step-actions">
-                    <button class="btn" id="swarmReset" type="button">Clear swarm</button>
+                    <button class="btn" id="swarmReset" type="button">Clear workers</button>
                   </div>
                 </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Keep the turn open</h2><p>Control plan generation and what happens near the end of a turn.</p></div></header>
@@ -944,6 +960,17 @@
                     <input id="autoCompactTokens" class="num" type="number" min="10000" max="4000000" step="10000" />
                     <span class="unit">tokens</span>
                     <span class="sw"><input type="checkbox" id="autoCompact" /><i></i></span>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Handoff length</b>
+                      <em>How much a Compact &amp; Resume brief keeps. Longer briefs carry more detail into the new chat; shorter ones leave it more room.</em>
+                    </span>
+                    <select id="handoffLength">
+                      <option value="thorough">Thorough · 10k–30k tokens</option>
+                      <option value="standard">Standard · 4k–10k tokens</option>
+                      <option value="short">Short · 2k–6k tokens</option>
+                    </select>
                   </div>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">API provider</h2><p>Set the provider, model, and credentials for API-based decisions.</p></div></header>
@@ -998,6 +1025,10 @@
                   </div>
 
                   <div class="field" id="goalModels" hidden>
+                    <label class="plugin-search goal-model-search">
+                      <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+                      <input id="goalModelSearch" type="search" placeholder="Search models" aria-label="Search models" />
+                    </label>
                     <div id="goalModelList" class="goal-models"></div>
                     <p class="hint" id="goalModelsState"></p>
                     <div class="step-actions">
@@ -1016,7 +1047,7 @@
                   </div>
 
                   </div>
-                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape how Goal and Loop write their next instruction.</p></div></header>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Continuation prompts</h2><p>Shape what Compact &amp; Resume keeps and how Goal and Loop write their next instruction.</p></div></header>
                 <div class="settings-surface pane">
                   <div class="setting">
                     <span class="setting-text">
@@ -1090,7 +1121,7 @@
 
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
+            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
             <form class="composer" id="composer">
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
               <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>

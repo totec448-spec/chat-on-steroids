@@ -84,6 +84,24 @@ const MODEL_SLUG_RE = /^[A-Za-z0-9._-]{1,80}$/;
 export const WORKER_SILENCE_MS = 3 * 60_000;
 
 /**
+ * How recent a page's "my turn is still running" must be to hold off the silence sleep.
+ *
+ * A generating page polls every two seconds at most, but Chrome throttles a long-hidden tab's
+ * timers to about once a minute, and worker tabs are usually hidden. Shorter than
+ * {@link WORKER_SILENCE_MS}, so a page that stops polling never adds more than this to it.
+ */
+export const PAGE_GENERATING_FRESH_MS = 150_000;
+
+/**
+ * The longest an open turn alone keeps a worker awake without a call or new output.
+ *
+ * ChatGPT can think for half an hour between two tool calls (#882: 30m 18s, slept three
+ * times while it worked). The page's own lifecycle already closes a turn that shows no
+ * progress for ten minutes; this is the backstop for one that never closes.
+ */
+export const WORKER_THINKING_MAX_MS = 2 * 60 * 60_000;
+
+/**
  * The context a worker chat may reach before it stops being worth reviving.
  *
  * The same 400k figure the app uses for its own context ceiling, and for the same reason: it
@@ -582,24 +600,52 @@ function familyKey(owner: Family): string {
 }
 
 /**
- * How many earlier run ids a family still answers to when its own prime selects it.
+ * Earlier run ids retained by one family.
  *
  * Every wake of a parked family is a new incarnation with a new id, and that id is a fence for
- * browser commands. But the prime was handed the earlier ids itself, in spawn and status results
- * and on every worker report ("[run_id=…]"). On 2.1.24 (#881, #882) a prime answered a report
- * with the id written on it and was told AGENTS_BUSY, "no agent family belongs to this
- * conversation", about its own family. An earlier id only ever selects among families the
- * caller already belongs to; it never reaches another prime's workers and never moves a fence.
+ * browser commands. But two existing contracts need older opaque ids after that fence rotates:
+ * the family's own prime may answer a worker report carrying one of its recent run ids (#881,
+ * #882), and a foreign prime may hold the source_run_id printed on an unacknowledged cross-prime
+ * message. Keep the latter as one stable family reply alias and preserve the historical eight
+ * recent incarnation selectors beside it. Neither kind can select a foreign worker or move the
+ * current browser-command fence.
  */
-const MAX_FORMER_RUN_IDS = 8;
+const MAX_RECENT_FORMER_RUN_IDS = 8;
+const MAX_FORMER_RUN_IDS = MAX_RECENT_FORMER_RUN_IDS + 1;
+
+function boundedFormerRunIds(ids: readonly string[]): string[] {
+  const unique = [...new Set(ids)];
+  if (unique.length <= MAX_FORMER_RUN_IDS) return unique;
+  const stableReplyAddress = unique[0]!;
+  return [stableReplyAddress, ...unique.slice(-MAX_RECENT_FORMER_RUN_IDS)];
+}
 
 /** Whether a caller's run_id names this family, now or in one of its earlier incarnations. */
 function answersTo(owner: Family, runId: string): boolean {
   return familyKey(owner) === runId || Boolean(owner.formerRunIds?.includes(runId));
 }
 
+/** Opaque cross-prime reply address that remains valid while incarnation fences rotate. */
+function familyReplyAddress(owner: Family): string {
+  return owner.formerRunIds?.[0] ?? familyKey(owner);
+}
+
 function allFamilies(): Family[] {
   return [...runs.values(), ...dormantRuns.values()];
+}
+
+/**
+ * Resolves an explicit prime-family address without changing caller ownership.
+ *
+ * A foreign run id is intentionally usable only by the prime-to-prime message path. Status,
+ * workers and every ordinary message still resolve through familiesForCaller(), so knowing this
+ * opaque address grants no control over the destination family.
+ */
+function familyForAddress(runId: string): Family | null {
+  const matches = allFamilies().filter(
+    owner => !unpublishedRuns.has(owner as Run) && answersTo(owner, runId)
+  );
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 function exactCaller(caller: Caller): Caller {
@@ -831,7 +877,7 @@ function reactivateDormantRun(dormant: DormantRun): Run | null {
   prime.info.lastSeenAt = now;
   const run: Run = {
     runId: randomUUID(),
-    formerRunIds: [...(dormant.formerRunIds ?? []), familyKey(dormant)].slice(-MAX_FORMER_RUN_IDS),
+    formerRunIds: boundedFormerRunIds([...(dormant.formerRunIds ?? []), familyKey(dormant)]),
     primeConversationId: dormant.primeConversationId,
     primeRequestId: dormant.primeRequestId,
     // The browser-command fence gets a new incarnation id, but this is still the same prime's
@@ -1055,7 +1101,7 @@ export interface CallerSwarmStatus {
   state: SwarmState;
   /** Null while this owner's history is parked. */
   runId: string | null;
-  /** Capacity available inside this caller's own worker family. */
+  /** Capacity available inside this caller's own worker family, before any optional global cap. */
   freeWorkerSlots: number;
 }
 
@@ -1274,6 +1320,31 @@ export function freeWorkerSlots(runId?: string): number {
   const run = scopedRun(runId);
   if (!run) return runId === undefined && runs.size === 0 ? getConfig().multiAgent.maxWorkers : 0;
   return Math.max(0, getConfig().multiAgent.maxWorkers - workingWorkers(run).length);
+}
+
+/**
+ * Slot-holding workers across every active prime family, including a staged spawn that has
+ * reserved topology but has not crossed its durable publication barrier yet.
+ *
+ * Public caller status deliberately excludes those staged rows and stays family-scoped. Global
+ * admission cannot: two independent primes may stage concurrently, so ignoring an unpublished
+ * reservation here would let both calls accept the same final global slot.
+ */
+function globalOccupiedWorkerSlots(): number {
+  let occupied = 0;
+  for (const run of runs.values()) {
+    for (const agent of run.agents.values()) {
+      if (agent.info.role === 'worker' && occupiesSlot(agent.info.state)) occupied += 1;
+    }
+  }
+  return occupied;
+}
+
+/** Remaining broker-wide worker admissions, or Infinity while the opt-in cap is disabled. */
+function globalFreeWorkerSlots(): number {
+  const limit = getConfig().multiAgent.globalMaxWorkers ?? 0;
+  if (limit <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, limit - globalOccupiedWorkerSlots());
 }
 
 /**
@@ -1809,6 +1880,17 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     throw new AgentError(`That would make ${total} live workers; the limit set in the app is ${max}.`);
   }
 
+  const globalMax = getConfig().multiAgent.globalMaxWorkers ?? 0;
+  const globalTotal = globalOccupiedWorkerSlots() + planned.length;
+  if (globalMax > 0 && globalTotal > globalMax) {
+    if (resumedDormant) parkRun(run, 'a new spawn was rejected by the global worker admission cap');
+    else if (createdFreshRun) runs.delete(run.runId);
+    throw new AgentError(
+      `GLOBAL_WORKER_LIMIT: that would make ${globalTotal} live workers across all prime families; ` +
+        `the global worker admission limit set in the app is ${globalMax}. Wait for a worker to stop and try again.`
+    );
+  }
+
   const ids: string[] = [];
   // Historical rows are intentionally never reused or deleted merely because the worker is
   // asleep/terminal. The old fixed 64-id scan therefore became a lifetime cap on one prime,
@@ -2005,6 +2087,123 @@ export interface StagedAgentMessages {
   rollback: () => void;
 }
 
+export interface StagedPrimeMessage {
+  /** Address the recipient can use to reply to this prime family. */
+  sourceRunId: string;
+  /** Current canonical address of the destination family. */
+  targetRunId: string;
+  /** Stable copy for the caller to record after acceptance. */
+  message: AgentMessage;
+  /** Publishes the already-durable row. False only if the destination disappeared meanwhile. */
+  commit: () => boolean;
+  /** Removes an unaccepted row and queues a newer safe snapshot. */
+  rollback: () => void;
+}
+
+/**
+ * Queues one message from an existing prime to another existing prime family.
+ *
+ * The destination is an explicit opaque run address, not discovery authority. Only a prime may
+ * use it, only the destination prime receives the row, and workers remain invisible/unreachable
+ * across the family boundary. The source address rides with the durable message so the recipient
+ * can reply even after either family parks and wakes under a newer incarnation id.
+ */
+export function stagePrimeMessage(
+  input: Caller,
+  targetRunId: string,
+  text: string
+): StagedPrimeMessage {
+  requireEnabled();
+  const caller = exactCaller(input);
+  requireFamilySelection(caller);
+  if (!hasCallerIdentity(caller)) throw new IdentityLostError();
+
+  const source = selectedFamily(caller);
+  if (!source) {
+    throw new AgentError(
+      'No prime family belongs to this conversation. Call agents action=spawn before messaging another prime.'
+    );
+  }
+  if (!ownsPrime(caller, source)) {
+    throw new AgentError('Only a prime agent may message another prime family.');
+  }
+  if (source.transfer) {
+    throw new AgentError('PRIME_TRANSFER_IN_PROGRESS: this prime is being compacted/resumed.');
+  }
+
+  const address = targetRunId.trim();
+  const target = address ? familyForAddress(address) : null;
+  if (!target) {
+    throw new AgentError(
+      'TARGET_RUN_UNAVAILABLE: no addressable prime family matches target_run_id. Nothing was sent.'
+    );
+  }
+  if (ownsPrime(caller, target)) {
+    throw new AgentError('A prime cannot message one of its own families through target_run_id.');
+  }
+  const targetPrime = target.agents.get(PRIME_ID);
+  if (!targetPrime) {
+    throw new AgentError(
+      'TARGET_RUN_UNAVAILABLE: the addressed prime family has no reachable prime. Nothing was sent.'
+    );
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) throw new AgentError('The message is empty');
+  if (trimmed.length > MAX_MESSAGE_CHARS) {
+    throw new AgentError(`Message is too long (limit ${MAX_MESSAGE_CHARS} characters)`);
+  }
+  assertRoom(targetPrime, 1);
+
+  const sourceRunId = familyReplyAddress(source);
+  const canonicalTargetRunId = familyKey(target);
+  const message: AgentMessage = {
+    ...newMessage(PRIME_ID, PRIME_ID, trimmed),
+    fromRunId: sourceRunId
+  };
+  unpublishedMessages.add(message);
+  enqueue(targetPrime, message);
+  changed();
+
+  let settled: boolean | null = null;
+  const remove = (): void => {
+    unpublishedMessages.delete(message);
+    const index = targetPrime.queue.indexOf(message);
+    if (index >= 0) targetPrime.queue.splice(index, 1);
+    recount(targetPrime);
+  };
+  const destinationStillOwnsPrime = (): boolean =>
+    allFamilies().some(
+      owner => owner.agents.get(PRIME_ID) === targetPrime && answersTo(owner, address)
+    );
+
+  return {
+    sourceRunId,
+    targetRunId: canonicalTargetRunId,
+    message: { ...message },
+    commit: () => {
+      if (settled !== null) return settled;
+      if (!destinationStillOwnsPrime()) {
+        remove();
+        settled = false;
+        changed();
+        return false;
+      }
+      unpublishedMessages.delete(message);
+      recount(targetPrime);
+      settled = true;
+      changed('telemetry');
+      return true;
+    },
+    rollback: () => {
+      if (settled !== null) return;
+      remove();
+      settled = false;
+      changed();
+    }
+  };
+}
+
 /**
  * Sends several messages from the caller in one operation, all or nothing.
  *
@@ -2132,11 +2331,20 @@ function stageMessagesActive(
       // slot is reserved here, synchronously, so two messages to two sleeping workers cannot
       // both be told the same last slot is theirs. Refused rather than queued: a message that
       // sits unread in a chat nobody is going to open is worse than being told to wait.
-      if (!reserved.has(to) && freeWorkerSlots(run?.runId) - reserved.size <= 0) {
-        throw new AgentError(
-          `NO_FREE_SLOT: ${toId} is asleep and all ${getConfig().multiAgent.maxWorkers} worker slots are busy, so it ` +
-            `cannot be woken right now${where}. Nothing was sent. Wait for a worker to report and try again.`
-        );
+      if (!reserved.has(to)) {
+        if (freeWorkerSlots(run?.runId) - reserved.size <= 0) {
+          throw new AgentError(
+            `NO_FREE_SLOT: ${toId} is asleep and all ${getConfig().multiAgent.maxWorkers} worker slots are busy, so it ` +
+              `cannot be woken right now${where}. Nothing was sent. Wait for a worker to report and try again.`
+          );
+        }
+        const globalMax = getConfig().multiAgent.globalMaxWorkers ?? 0;
+        if (globalMax > 0 && globalFreeWorkerSlots() - reserved.size <= 0) {
+          throw new AgentError(
+            `GLOBAL_WORKER_LIMIT: ${toId} is asleep and all ${globalMax} globally admitted worker slots are busy, so it ` +
+              `cannot be woken right now${where}. Nothing was sent. Wait for a worker to stop and try again.`
+          );
+        }
       }
       reserved.add(to);
     }
@@ -3134,7 +3342,7 @@ export function stageQueuedWorkerRevivals(ids: readonly string[], runId?: string
         message.offeredAt === null &&
         !unpublishedMessages.has(message)
     );
-    if (!hasUnseen || freeWorkerSlots(run.runId) <= 0) continue;
+    if (!hasUnseen || freeWorkerSlots(run.runId) <= 0 || globalFreeWorkerSlots() <= 0) continue;
     const sleptAt = agent.info.sleptAt;
     const assignment = beginRevival(agent);
     reserved.push({ agent, sleptAt, assignment });
@@ -3716,6 +3924,26 @@ export function endedWorkerNotice(conversationId: string | null | undefined): st
 
 /** Sleep an inactive bound worker in its existing chat, independent of attachment.
  * Running tools protect only their exact worker. Invites/wakes retain their delivery deadline. */
+/** When each chat's own page last said its turn is still running. Not work, and never persisted. */
+const pageGenerating = new Map<string, number>();
+
+/**
+ * The page's own word on whether this chat's turn is still running, from its activity poll.
+ *
+ * Deliberately not {@link noteAgentAlive}: it renews no work clock and revives nobody. All it
+ * does is keep the silence sweep from calling a worker asleep while ChatGPT is visibly still
+ * thinking, which it can do for many minutes without a call or a word of output.
+ */
+export function notePageGenerating(conversationId: string, generating: boolean, at = Date.now()): void {
+  if (generating) pageGenerating.set(conversationId, at);
+  else pageGenerating.delete(conversationId);
+}
+
+function pageStillGenerating(conversationId: string, since: number, now: number): boolean {
+  const at = pageGenerating.get(conversationId);
+  return at !== undefined && now - at < PAGE_GENERATING_FRESH_MS && now - since < WORKER_THINKING_MAX_MS;
+}
+
 export function sleepSilentWorkers(
   now = Date.now(),
   runId?: string,
@@ -3729,6 +3957,7 @@ export function sleepSilentWorkers(
     if (isWorking(agent.info.conversationId)) continue;
     const since = Math.max(agent.info.activatedAt ?? 0, agent.info.lastSeenAt ?? 0, livenessFloor);
     if (now - since < WORKER_SILENCE_MS) continue;
+    if (pageStillGenerating(agent.info.conversationId, since, now)) continue;
     const observedRecoveryTurn = unresolvedTurn?.(agent.info.conversationId);
     const observedRequestOriginMax = requestOriginMax?.(agent.info.conversationId);
     // A caller-scoped sweep may know nothing about another worker's durable turn. Unknown is not
@@ -4057,6 +4286,40 @@ export function primeForOwnedConversation(conversationId: string): string | null
   const run = runForConversation(conversationId);
   if (run && agentForConversationId(conversationId)) return run.primeConversationId;
   return dormantAgentForConversation(conversationId)?.owner.primeConversationId ?? null;
+}
+
+export interface WorkerPrimeOwner {
+  /** True only when this exact conversation is durably/presently owned by a worker slot. */
+  owned: boolean;
+  /** Null for ambiguous/provisional ownership: strict authorization must fail closed. */
+  primeConversationId: string | null;
+  /** Current family incarnation, useful for diagnostics only; never an authorization token. */
+  runId: string | null;
+}
+
+/**
+ * Exact worker -> prime provenance across active, terminal and dormant worker history.
+ *
+ * Unlike the presentation helpers above, authorization must not lose a worker merely because it
+ * finished, slept or parked. Inspect the published families directly, exclude unpublished staged
+ * runs, and refuse to guess if corrupted/restored state names the same worker chat twice.
+ */
+export function workerPrimeOwner(conversationId: string): WorkerPrimeOwner {
+  if (!conversationId) return { owned: false, primeConversationId: null, runId: null };
+  const owners = allFamilies().filter((owner) => {
+    if ('runId' in owner && unpublishedRuns.has(owner)) return false;
+    return [...owner.agents.values()].some(
+      (agent) => agent.info.role === 'worker' && agent.info.conversationId === conversationId
+    );
+  });
+  if (owners.length === 0) return { owned: false, primeConversationId: null, runId: null };
+  if (owners.length !== 1) return { owned: true, primeConversationId: null, runId: null };
+  const owner = owners[0]!;
+  return {
+    owned: true,
+    primeConversationId: owner.primeConversationId ?? null,
+    runId: familyKey(owner)
+  };
 }
 
 /** A currently occupied slot; parked history must not grant or refuse browser recovery. */
@@ -4442,12 +4705,17 @@ function snapshotSwarmIncludingUnpublished(): SwarmSnapshot | null {
   return buildSwarmSnapshot(true);
 }
 
-/** Earlier ids from disk: UUIDs only, never the family's own current id, at most the bound. */
+/**
+ * Earlier ids from disk: UUIDs only, never the current id, with one stable plus eight recent.
+ * A legacy snapshot that already discarded an older peer address contains no trustworthy source
+ * family for that opaque UUID, so restore preserves what exists and never reconstructs by guess.
+ */
 function savedFormerRunIds(saved: unknown, current: string): string[] | undefined {
   if (!Array.isArray(saved)) return undefined;
   const ids = saved.filter((id): id is string => typeof id === 'string' && id !== current &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)).slice(-MAX_FORMER_RUN_IDS);
-  return ids.length ? ids : undefined;
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+  const bounded = boundedFormerRunIds(ids);
+  return bounded.length ? bounded : undefined;
 }
 
 function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
@@ -4786,6 +5054,7 @@ export function resetAgentsForTests(): void {
   runs.clear();
   dormantRuns.clear();
   consecutiveWakeFailures.clear();
+  pageGenerating.clear();
   unpublishedRuns.clear();
   activeSpawnStages.clear();
   activeFinishStages.clear();

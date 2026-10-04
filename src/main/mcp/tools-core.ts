@@ -116,6 +116,7 @@ import {
   statusForCaller,
   stageFinishAgent,
   stageMessages,
+  stagePrimeMessage,
   stageSpawn,
   swarmRunning,
   swarmStateForCaller,
@@ -1185,6 +1186,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(40)
           .optional()
           .describe('message: one recipient; messaging a sleeping worker wakes it.'),
+        target_run_id: z
+          .string()
+          .min(1)
+          .max(36)
+          .optional()
+          .describe('message: existing prime run id; prime-only, no worker/status access.'),
         text: z.string().min(1).max(4000).optional().describe('message: what to say.'),
         result: z
           .string()
@@ -1196,7 +1203,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           )
       })
       .superRefine((input, ctx) => {
-        const reject = (field: 'context' | 'workers' | 'messages' | 'to' | 'text' | 'result', message: string): void => {
+        const reject = (field: 'context' | 'workers' | 'messages' | 'to' | 'target_run_id' | 'text' | 'result', message: string): void => {
           if (input[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message });
         };
         if (input.action !== 'spawn') {
@@ -1206,6 +1213,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         if (input.action !== 'message') {
           reject('messages', 'messages is only valid with action=message');
           reject('to', 'to is only valid with action=message');
+          reject('target_run_id', 'target_run_id is only valid with action=message');
           reject('text', 'text is only valid with action=message');
         }
         if (input.action !== 'finish') reject('result', 'result is only valid with action=finish');
@@ -1291,6 +1299,60 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         }
 
         if (input.action === 'message') {
+          if (input.target_run_id) {
+            if (input.messages?.length) {
+              return fail('agents action=message with target_run_id takes one text message, not messages[].');
+            }
+            if (input.to && input.to !== PRIME_ID) {
+              return fail('agents action=message with target_run_id can address only the destination prime.');
+            }
+            if (!input.text) {
+              return fail('agents action=message with target_run_id requires text.');
+            }
+            const caller = await callerNow(startedAt, { runId: input.run_id, member: true });
+            const staged = stagePrimeMessage(caller, input.target_run_id, input.text);
+            let accepted = false;
+            try {
+              let durable = false;
+              try {
+                durable = await persistCriticalSwarmNow();
+              } catch (error) {
+                throw new Error(
+                  `The prime message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request. (${error instanceof Error ? error.message : String(error)})`
+                );
+              }
+              if (!durable) {
+                throw new Error(
+                  'The prime message could not cross its durable acceptance barrier. Nothing was queued; retry the same message request.'
+                );
+              }
+              if (!staged.commit()) {
+                throw new Error(
+                  'TARGET_RUN_UNAVAILABLE: the destination prime family changed before acceptance. Nothing was queued.'
+                );
+              }
+              accepted = true;
+            } catch (error) {
+              if (!accepted) staged.rollback();
+              throw error;
+            }
+            if (currentCall()) currentCall()!.caller.runId = staged.sourceRunId;
+            await recordAgentMessage(staged.message, 'sent', caller.conversationId);
+            return {
+              content: [{
+                type: 'text' as const,
+                text:
+                  `Queued for prime family ${staged.targetRunId}. The recipient can reply with target_run_id=${staged.sourceRunId}.`
+              }],
+              structuredContent: {
+                action: 'message',
+                run_id: staged.sourceRunId,
+                target_run_id: staged.targetRunId,
+                queued: [{ to: PRIME_ID }]
+              }
+            };
+          }
+
           // Two spellings of one operation. A single message is the common case and stays a
           // pair of scalars; `messages` is the same thing in bulk. Both in one call is a
           // request whose intended order nobody can read, so it is refused rather than

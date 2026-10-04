@@ -30,7 +30,7 @@ function sha256(file) {
 
 /**
  * What a user downloads, checked after publishing: every file is there and matches the published
- * checksum, and the standalone extension is the tagged version with its build stamp (#568, #572).
+ * checksum, and the published extension package is the tagged version with its build stamp (#568, #572).
  * Returns the problems in plain sentences; an empty list means the release is sound.
  */
 export async function verifyReleaseAssets({ dir, tag }) {
@@ -45,13 +45,14 @@ export async function verifyReleaseAssets({ dir, tag }) {
     if (!sums.has(name)) { problems.push(`${name} is not listed in SHA256SUMS.txt.`); continue; }
     if (await sha256(file) !== sums.get(name)) problems.push(`${name} does not match its SHA256SUMS.txt checksum.`);
   }
+  const wanted = tag.replace(/^v/, '');
   const extension = path.join(dir, EXTENSION);
   if (existsSync(extension)) {
     const entries = unzipSync(readFileSync(extension));
     const stamp = entries['build-stamp.txt'] ? strFromU8(entries['build-stamp.txt']).trim() : '';
     if (!stamp) problems.push(`${EXTENSION} is missing build-stamp.txt.`);
-    const version = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])).version : null;
-    const wanted = tag.replace(/^v/, '');
+    const manifest = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])) : null;
+    const version = manifest?.version ?? null;
     if (version !== wanted) problems.push(`The extension in ${EXTENSION} is version ${version ?? 'unknown'}, not ${wanted}.`);
   }
   return problems;
@@ -65,7 +66,7 @@ async function main() {
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
-  } else console.log(`${tag}: all ${RELEASE_FILES.length} files match SHA256SUMS.txt and the extension is the tagged build.`);
+  } else console.log(`${tag}: all ${RELEASE_FILES.length} files match SHA256SUMS.txt and the extension package is the tagged build.`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main();
