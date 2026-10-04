@@ -1967,18 +1967,6 @@ async function electronClipboard(): Promise<Pick<Electron.Clipboard, 'readText' 
   }
 }
 
-/** Confirms the helper can run at all, so the UI can say so before ChatGPT tries. */
-export async function checkAvailable(): Promise<string | null> {
-  try {
-    await listWindows();
-    return null;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logWarn(`computer use unavailable: ${message}`);
-    return message;
-  }
-}
-
 /**
  * Starts and initializes the helper off the first tool call's critical path.
  *

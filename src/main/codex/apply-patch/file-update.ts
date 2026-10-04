@@ -216,13 +216,7 @@ function applyReplacements(lines: readonly string[], replacements: readonly Repl
   for (let index = replacements.length - 1; index >= 0; index--) {
     const [startIndex, oldLength, newSegment] = replacements[index] as Replacement;
 
-    // Remove old lines.
-    for (let removed = 0; removed < oldLength; removed++) {
-      if (startIndex < result.length) result.splice(startIndex, 1);
-    }
-
-    // Insert new lines.
-    result.splice(startIndex, 0, ...newSegment);
+    result.splice(startIndex, oldLength, ...newSegment);
   }
 
   return result;

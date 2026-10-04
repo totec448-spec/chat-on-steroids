@@ -116,12 +116,11 @@ import {
   conversationAttachment,
   findSessionByConversation,
   getSession,
-  readOverflowText,
   requestBelongsToActiveTurn,
   requestTurnOwnershipCutoff
 } from '../session/store.js';
 import { sessionFinishDeadline } from '../session/finish.js';
-import type { StoredText, ToolOutcome } from '../../shared/session.js';
+import type { ToolOutcome } from '../../shared/session.js';
 
 /** The page's exact proof of a request id, by which a running call counts for its chat. */
 const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
@@ -1464,17 +1463,6 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
 // ------------------------------------------------------------------ formatters
 
 /**
- * Largest brief a handoff save will accept.
- *
- * Generous on purpose. A brief that hits this is a symptom — the compaction of a very
- * long session — and refusing it there would throw away the one artefact the whole flow
- * exists to produce. The bound is only to keep a runaway generation from being written
- * to disk unbounded; at roughly four characters per token this is comfortably past any
- * single ChatGPT answer.
- */
-export const MAX_HANDOFF_CHARS = 400_000;
-
-/**
  * How long a prime-role `agents` call waits for the calling chat to show its own block.
  *
  * The prime holds no credential, so this window *is* its identity, and it has to be
@@ -1513,26 +1501,6 @@ export const UNATTRIBUTED_DESKTOP_EVIDENCE_MS = evidenceWindow(250);
  * timeout, so a slow proof still comes back as a spawned run rather than as a dead call.
  */
 export const SPAWN_EVIDENCE_MS = evidenceWindow(30_000);
-
-/**
- * Recovers the complete text behind a stored field.
- *
- * A long tool argument or result is bounded inline in the log and written whole beside
- * it; this reads the whole one back so recovery means the exact payload rather than
- * its first eight thousand characters. `complete` is false only when even the overflow
- * copy could not be written, and the caller says so instead of implying otherwise.
- */
-export async function expandStored(
-  sessionId: string,
-  stored: StoredText
-): Promise<{ text: string; complete: boolean }> {
-  if (!stored.truncated) return { text: stored.text, complete: true };
-  if (stored.assetId) {
-    const full = await readOverflowText(sessionId, stored.assetId);
-    if (full !== null) return { text: full, complete: true };
-  }
-  return { text: stored.text, complete: false };
-}
 
 /** Splits on blank lines so a part never ends mid-sentence unless a block is huge. */
 export function chunkText(text: string, size: number): string[] {
