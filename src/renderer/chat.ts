@@ -735,11 +735,15 @@ function paintSessions(): void {
   if (sidebarOrder?.interacting) return;
   document.getElementById('sessionTooltip')?.remove();
   const projectList = $('projectList'), chatList = $('chatList');
-  // Activity replaces sidebar nodes. Keep an actively focused project disclosure
-  // attached to its exact project, without moving focus from the composer or settings.
+  // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure
+  // or one of its buttons) attached to its exact project, without moving focus from the
+  // composer or settings. A keyboard user tabbing to a project's buttons lost focus to the
+  // page on the next repaint, and so did the color button after a pick.
   const focused = document.activeElement;
-  const focusedProject = focused instanceof HTMLElement && projectList.contains(focused) && focused.matches('.project-heading')
-    ? focused.closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
+  const focusedControl = focused instanceof HTMLElement && projectList.contains(focused)
+    ? ['.project-heading', '.project-color', '.project-new', '.project-remove', '.project-show-more'].find(selector => focused.matches(selector))
+    : undefined;
+  const focusedProject = focusedControl ? (focused as HTMLElement).closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
   for (const entry of sessions) {
@@ -962,8 +966,8 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
-  if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
-    ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
+  if (focusedProject && focusedControl) projectSections.find(section => section.dataset.projectId === focusedProject)
+    ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
