@@ -67,6 +67,9 @@ async function publish(next: PetLibraryState): Promise<void> {
   mocks.publish!(next);
   await vi.advanceTimersByTimeAsync(0);
 }
+function publishIdleShape(win: any, regions = [{ x: 24, y: 32, width: 176, height: 184 }]): void {
+  mocks.ipc.get('pet-overlay:interactive')!({ sender: win.webContents }, { interactive: false, regions });
+}
 beforeEach(() => {
   vi.useFakeTimers();
   mocks.read.mockClear(); mocks.cursor.mockClear(); mocks.windows.length = 0;
@@ -98,9 +101,33 @@ it('reads the catalog once; polling, activity, hover and controls use its publis
   expect(win.setIgnoreMouseEvents).toHaveBeenCalledWith(false);
 });
 
+it.runIf(process.platform === 'win32')('keeps the idle Windows native shape bounded to supplied pet regions', async () => {
+  await startPetOverlay(() => null, () => undefined);
+  const win = mocks.windows[0];
+  expect(win.isVisible()).toBe(false);
+  const regions = [{ x: 24, y: 32, width: 176, height: 184 }];
+  const interactive = mocks.ipc.get('pet-overlay:interactive')!;
+  interactive({ sender: win.webContents }, { interactive: false, regions });
+  expect(win.setShape).toHaveBeenLastCalledWith(regions);
+  expect(win.isVisible()).toBe(true);
+  interactive({ sender: win.webContents }, { interactive: true, regions });
+  expect(win.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false);
+  interactive({ sender: win.webContents }, { interactive: false, regions });
+  expect(win.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true);
+  expect(win.setShape).toHaveBeenLastCalledWith(regions);
+  const manyRegions = Array.from({ length: 605 }, (_, index) => ({
+    x: (index % 100) * 8, y: (index % 80) * 8, width: 8, height: 8
+  }));
+  interactive({ sender: win.webContents }, { interactive: false, regions: manyRegions });
+  expect(win.setShape.mock.lastCall?.[0]).toHaveLength(605);
+  interactive({ sender: win.webContents }, { interactive: true, regions: manyRegions });
+  expect(win.setShape.mock.lastCall?.[0]).toHaveLength(605);
+});
+
 it('switches pets and hides/restores the overlay without stale membership or another disk scan', async () => {
   await startPetOverlay(() => null, () => undefined);
   const win = mocks.windows[0];
+  publishIdleShape(win);
   await publish(state());
   expect(win.isVisible()).toBe(false);
   const samples = mocks.cursor.mock.calls.length;
@@ -123,26 +150,24 @@ it('starts empty without an overlay and accepts the first published enabled pet'
   expect(mocks.windows).toHaveLength(0);
   await publish(state('capy'));
   expect(mocks.windows).toHaveLength(1);
+  publishIdleShape(mocks.windows[0]);
   expect(mocks.windows[0].isVisible()).toBe(true);
   await shutdownPetOverlay();
   expect(petOverlayControlState().activeCount).toBe(0);
 });
 
-it('keeps Windows pets when the native focus binding cannot load', async () => {
+it.runIf(process.platform === 'win32')('keeps Windows pets when the native focus binding cannot load', async () => {
   // A quarantined or damaged binding used to destroy the overlay, so no pet appeared at all.
-  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
-  try {
-    vi.mocked(windowsPetFocus).mockRejectedValueOnce(new Error('koffi.node was not found'));
-    await startPetOverlay(() => null, () => undefined);
-    const win = mocks.windows[0];
-    expect(win.isDestroyed()).toBe(false);
-    expect(win.isVisible()).toBe(true);
-    expect(petOverlayControlState().activeCount).toBe(1);
-    expect(() => mocks.ipc.get('pet-overlay:releaseFocus')!({ sender: win.webContents })).not.toThrow();
-  } finally {
-    Object.defineProperty(process, 'platform', platform);
-  }
+  vi.mocked(windowsPetFocus).mockRejectedValueOnce(new Error('koffi.node was not found'));
+  await startPetOverlay(() => null, () => undefined);
+  const win = mocks.windows[0];
+  expect(win.isDestroyed()).toBe(false);
+  expect(petOverlayControlState().ready).toBe(false);
+  publishIdleShape(win);
+  expect(win.isVisible()).toBe(true);
+  expect(petOverlayControlState().ready).toBe(true);
+  expect(petOverlayControlState().activeCount).toBe(1);
+  expect(() => mocks.ipc.get('pet-overlay:releaseFocus')!({ sender: win.webContents })).not.toThrow();
 });
 
 it.runIf(process.platform === 'win32')('only lets the current overlay release native focus', async () => {

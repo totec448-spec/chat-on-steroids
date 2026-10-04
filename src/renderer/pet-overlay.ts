@@ -44,7 +44,12 @@ const INTERACTION_PAD = 42;
 
 let library: PetLibraryState = { pets: [] };
 let snapshot: PetOverlaySnapshot | null = null;
-let bounds: PetOverlayBounds = { width: innerWidth, height: innerHeight, scaleFactor: devicePixelRatio };
+let bounds: PetOverlayBounds = {
+  width: innerWidth,
+  height: innerHeight,
+  scaleFactor: devicePixelRatio,
+  boundedIdleShape: false
+};
 let pointer: PetOverlayPointer = { x: -1000, y: -1000 };
 let interactive = false;
 let interactiveSignature = '';
@@ -512,7 +517,9 @@ function setInteractive(next: boolean): void {
   // Hiding forces native click-through. Reflect that same visibility in our
   // deduplication state so re-showing beneath a stationary pointer re-arms input.
   next = next && snapshot?.visible !== false && !disposed;
-  const regions = next ? interactionRegions() : [];
+  const regions = snapshot?.visible === false || disposed
+    ? []
+    : next || bounds.boundedIdleShape ? interactionRegions() : [];
   const signature = JSON.stringify([next, regions]);
   if (interactive === next && interactiveSignature === signature) return;
   interactive = next;
@@ -521,7 +528,7 @@ function setInteractive(next: boolean): void {
 }
 
 function syncInteractiveRegions(): void {
-  if (interactive) setInteractive(true);
+  if (interactive || bounds.boundedIdleShape) setInteractive(interactive);
 }
 
 function updateInteraction(next: PetOverlayPointer): void {
