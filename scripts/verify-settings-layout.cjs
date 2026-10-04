@@ -141,6 +141,23 @@ app.whenReady().then(async () => {
         if (zoom === 1) {
           await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
           fs.writeFileSync(path.join(output, `${theme}-${width}-${page}.png`), (await win.webContents.capturePage()).toPNG());
+          if (page === 'chat' && width === 1440) {
+            const autoSkill = await js(`(() => {
+              const input = document.getElementById('autoSelectSkills');
+              input.scrollIntoView({ block: 'center' });
+              const row = input.closest('.setting'), rect = row.getBoundingClientRect();
+              return {
+                visible: row.checkVisibility(),
+                inside: rect.top >= 0 && rect.bottom <= innerHeight,
+                label: row.textContent
+              };
+            })()`);
+            assert.equal(autoSkill.visible, true, 'Auto-select Skills must be visible in General settings');
+            assert.equal(autoSkill.inside, true, 'Auto-select Skills must fit inside the visible settings viewport');
+            assert.match(autoSkill.label, /Auto-select Skills/);
+            await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+            fs.writeFileSync(path.join(output, `${theme}-auto-select-skills.png`), (await win.webContents.capturePage()).toPNG());
+          }
           if (page === 'home') {
             const { root: doc } = await win.webContents.debugger.sendCommand('DOM.getDocument');
             for (const [label, selector] of [['first', '.perm:first-child .perm-head'], ['last', '.perm:last-child .perm-head']]) {
