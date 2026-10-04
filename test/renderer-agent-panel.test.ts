@@ -5,6 +5,50 @@ import type { SessionSummary } from '../src/shared/session.js';
 
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
+
+it('keeps inline disclosure and dock selections independent and loads only requested worker history', async () => {
+  dom = new JSDOM('<main><section></section><aside></aside></main>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, load = vi.fn().mockResolvedValue({ events: [] });
+  const options = { host, load, render: () => {
+    const p = document.createElement('p'); p.textContent = 'Recorded worker response'; return [p];
+  }, openMain: vi.fn(), working: () => false };
+  const inline = createAgentPanel({ ...options, mount: document.querySelector('section')!, inline: true });
+  const dock = createAgentPanel({ ...options, mount: document.querySelector('aside')! });
+  const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
+  inline.update('prime', [worker]); dock.update('prime', [worker]);
+  const card = host.querySelector<HTMLDetailsElement>('details')!;
+  expect(card.hidden).toBe(false); expect(card.open).toBe(false);
+  expect(card.querySelector('summary')!.textContent).toContain('Sub-agents · 1');
+  expect(load).not.toHaveBeenCalled();
+  card.open = true; card.dispatchEvent(new dom.window.Event('toggle'));
+  expect(card.querySelectorAll('.agent-panel-row')).toHaveLength(1);
+  await inline.open('worker'); dock.show();
+  expect(card.textContent).toContain('Recorded worker response');
+  expect(document.querySelector('aside .agent-panel-row')).not.toBeNull();
+  expect(options.openMain).not.toHaveBeenCalled();
+  inline.update('another-prime', []);
+  expect(card.hidden).toBe(true); expect(card.open).toBe(false);
+});
+
+it.each(['collapse', 'empty', 'parent'] as const)('retires pending inline history across a %s and return to the same worker', async boundary => {
+  dom = new JSDOM('<main><section></section></main>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!;
+  let resolve!: (value: { events: [] }) => void;
+  const load = vi.fn(() => new Promise<{ events: [] }>(done => { resolve = done; })), render = vi.fn(() => []);
+  const panel = createAgentPanel({ host, mount: document.querySelector('section')!, inline: true, load, render, openMain: vi.fn(), working: () => false });
+  const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
+  panel.update('prime', [worker]);
+  const pending = panel.open('worker');
+  const card = host.querySelector<HTMLDetailsElement>('details')!;
+  if (boundary === 'collapse') { card.open = false; card.dispatchEvent(new dom.window.Event('toggle')); }
+  else panel.update(boundary === 'empty' ? 'prime' : 'another-prime', []);
+  panel.update('prime', [worker]); card.open = true; card.dispatchEvent(new dom.window.Event('toggle'));
+  resolve({ events: [] }); await pending;
+  expect(render).not.toHaveBeenCalled();
+  expect(card.querySelectorAll('.agent-panel-row')).toHaveLength(1);
+});
 it('keeps Prime selection independent and rejects late results after parent navigation', async () => {
   dom = new JSDOM('<main></main><button></button>');
   Object.assign(globalThis, { document: dom.window.document });
