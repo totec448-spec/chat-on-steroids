@@ -2626,13 +2626,16 @@ The browser says writing only with current generation proof for the marked summa
 a sent checkpoint alone means waiting. Bootstrap folds require the app's exact recorded opening
 message id plus current route/epoch. Retired folds unwrap all native children and controls.
 
-Native ChatGPT Project destinations enter through the source chat's exact native Project link.
-The header alone is not readiness: `chatgpt-dom.js::enterProject` waits for the source editor
-to be mounted, empty, idle and attachment-free before its one click. Source readiness and
-replacement-editor navigation each have a bounded 12-second phase using the same observer/timer.
-Destination proof requires the exact Project home, a different connected editor and no source
-turns. User interaction, cancellation or a foreign route revokes the attempt; no extra tab or
-second click compensates for a missing result.
+Native ChatGPT Project destinations enter through the source chat's exact native Project-home
+link. The provider may move that control between top-level shells, so
+`chatgpt-dom.js::enterProject` identifies it by exact same-origin Project target rather than a
+header/banner wrapper, excludes transcript/extension/hidden-kept-page links and requires one
+visible candidate. The link alone is not readiness: the source editor must be mounted, empty,
+idle and attachment-free before the one click. Source readiness has a bounded 60-second phase;
+the native transition then gets its own bounded 12-second phase. Destination proof requires the
+exact Project home, a connected ready editor and no displayed source turns. User interaction,
+cancellation or a foreign route revokes the attempt; no extra tab or second click compensates
+for a missing result.
 
 The brief includes the original task, accepted steering, current result, remaining checks and
 relevant durable ids. Linked project instructions and current executor settings still apply.
@@ -3666,6 +3669,11 @@ this checks matching policy, not live focus/Space transitions or packaged Mac in
 Windows uses source-owned Windows.Graphics.Capture for exact HWND compositor pixels, including
 covered GPU windows, without activation or a visible-screen fallback. Minimized/unavailable
 capture fails explicitly. DWM image bounds and outer window geometry have distinct roles.
+The initial capture item size defines the frame-pool allocation, not the valid image extent.
+Each actual frame's `ContentSize` must equal unchanged DWM bounds and fit the bounded pool;
+the copied surface must still match that pool. Only the top-left content rows are published,
+using the allocation's row stride and excluding undefined right/bottom padding. Unknown or
+clipped content remains `STALE_FRAME`; this never substitutes outer-window coordinates.
 Before starting a window capture, the optional `IGraphicsCaptureSession3` interface disables
 the capture border so individual screenshots do not flash a yellow outline. Older Windows
 without that interface retains its system indicator; permissions and capture failures remain
@@ -3795,6 +3803,9 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+The fail-first workflow selects Windows for changed `test/windows-*` and `test/computer*`
+suites through `scripts/pr-fail-first.mjs`; other changes keep the Linux runner. The selected
+job still runs changed tests against base code: platform-skipped native tests are not proof.
 
 When delegation is authorized, reuse a suitable worker. Give each assignment the project,
 concrete task, evidence, allowed files, ownership boundaries, checks and expected handoff.
