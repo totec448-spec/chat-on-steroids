@@ -117,3 +117,34 @@ describe.runIf(process.platform === 'win32')('Windows Codex runtime launch bound
     expect(result.stdout).toContain('CODEX_NODE_LAUNCH_VERIFIED');
   }, 35_000);
 });
+
+describe('Codex runtime environment', () => {
+  let directory: string;
+  beforeEach(async () => {
+    directory = await mkdtemp(path.join(os.tmpdir(), 'cos-plugin-env-'));
+    const native = path.join(directory, process.platform === 'win32' ? 'codex.exe' : 'codex');
+    await writeFile(native, 'synthetic fixture; never executed', { mode: 0o755 });
+    vi.stubEnv('PATH', directory);
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-must-not-reach-codex');
+    vi.stubEnv('CLOUDFLARED_TUNNEL_TOKEN', 'tunnel-token-must-not-reach-codex');
+    vi.stubEnv('COS_HARMLESS_SETTING', 'kept');
+    vi.mocked(spawn).mockImplementation(() => {
+      const child = Object.assign(new ChildProcess(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn() });
+      queueMicrotask(() => { child.stdout.end('{"installed":[]}'); child.emit('close', 0); });
+      return child;
+    });
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs();
+    if (directory) await rm(directory, { recursive: true, force: true });
+  });
+
+  it('never hands connector or tunnel secrets to whatever codex is first on PATH', async () => {
+    expect(await listInstalledCodexPlugins(directory, directory)).toEqual([]);
+    const [, , options] = vi.mocked(spawn).mock.calls[0] as [string, string[], SpawnOptions];
+    expect(envValue(options.env!, 'OPENAI_API_KEY')).toBeUndefined();
+    expect(envValue(options.env!, 'CLOUDFLARED_TUNNEL_TOKEN')).toBeUndefined();
+    expect(envValue(options.env!, 'COS_HARMLESS_SETTING')).toBe('kept');
+    expect(envValue(options.env!, 'CODEX_HOME')).toBe(directory);
+  });
+});
