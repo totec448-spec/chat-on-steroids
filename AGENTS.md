@@ -3389,6 +3389,14 @@ selection and preserves the sidebar and right dock. Collapsed cards do not fetch
 The input queue remains directly after the transcript so delivery receipts preserve its position.
 Collapse, parent navigation and loss of worker membership retire pending loads, including a return
 to the same id; opening worker history leaves the prime composer selected.
+Its body has a viewport-bounded independent scroll and contains overscroll. Opening it is
+explicit reading: it releases the existing follow-output/send hold; Jump to latest resumes
+following. A refresh of the inspected worker does not release that hold again. Activity-round
+summaries show the participating workers' usual avatars/colors and link to inline history;
+the card links back to their rounds on the currently loaded timeline page. These links derive
+from recorded communication and successful agent messages/structured spawn receipts, never
+status rosters. Only a unique worker identity within the selected parent gets a link; ambiguous
+reused names remain unlinked. Timeline context stays primary, and no full-history scan is added.
 
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.

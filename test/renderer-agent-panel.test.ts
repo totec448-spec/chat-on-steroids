@@ -49,6 +49,32 @@ it.each(['collapse', 'empty', 'parent'] as const)('retires pending inline histor
   expect(render).not.toHaveBeenCalled();
   expect(card.querySelectorAll('.agent-panel-row')).toHaveLength(1);
 });
+
+it('keeps round navigation available during inspection and does not re-enter reading on refresh', async () => {
+  dom = new JSDOM('<main><section></section></main>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
+  const onShow = vi.fn(), openRound = vi.fn(), openMain = vi.fn();
+  const panel = createAgentPanel({ host: document.querySelector('main')!, mount: document.querySelector('section')!, inline: true,
+    load: async () => ({ events: [] }), render: () => [document.createElement('article')], working: () => false,
+    openMain, onShow, rounds: id => id === worker.id ? [{ label: 'Verified the build', open: openRound }] : [] });
+  panel.update('prime', [worker]); await panel.open(worker.id);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const links = document.querySelector<HTMLElement>('.inline-agent-panel > .agent-round-links')!;
+  const round = links.querySelector<HTMLButtonElement>('button')!;
+  round.click(); expect(openRound).toHaveBeenCalledTimes(1);
+  round.focus(); panel.refreshRounds();
+  expect(document.activeElement).toBe(round);
+  onShow.mockClear();
+  panel.update('prime', [{ ...worker, updatedAt: 2 }]);
+  await Promise.resolve(); await Promise.resolve();
+  expect(onShow).not.toHaveBeenCalled();
+  const oldFullChat = [...document.querySelectorAll('button')].find(button => button.textContent === 'Open full chat')!;
+  panel.update('another-prime', []); panel.update('prime', [worker]);
+  round.click(); oldFullChat.click();
+  expect(openRound).toHaveBeenCalledTimes(1);
+  expect(openMain).not.toHaveBeenCalled();
+});
 it('keeps Prime selection independent and rejects late results after parent navigation', async () => {
   dom = new JSDOM('<main></main><button></button>');
   Object.assign(globalThis, { document: dom.window.document });
