@@ -3096,7 +3096,8 @@ Desktop fields are not marked required. Setup assets contain no embedded image m
 The final Setup card uses the supplied `tool-approval.jpg` screenshot at compact width and
 explains ChatGPT's Always allow separately from Plugins' Allow all actions. The existing
 authorized model-discovery browser handoff emits `setup:toolApprovalNotice` only after its
-dispatch succeeds. `renderer/tool-approval.ts` shows the same reminder once until dismissed;
+dispatch succeeds and only once a Core tunnel ID is saved: before that, ChatGPT cannot call a tool,
+so a fresh install no longer sees "One last step" at step 0. `renderer/tool-approval.ts` shows the same reminder once until dismissed;
 only dismissal persists the local acknowledgement. The permanent card remains available.
 This presentation event proves neither a newly opened tab nor provider approval, and grants
 no browser-opening or tool authority. A passive discovery or failed handoff emits no reminder.
