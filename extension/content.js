@@ -914,7 +914,15 @@
         .map(entry => ({ name: entry.name, path: valid(entry.path) }))
       // An observer from before suffixes names only the plain Core.
       : event.data.name === 'Chat On Steroids Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
+    // The same list is the app's proof that this install's plugin exists in this account, so Setup
+    // can call it done without a test message. Told once per app id: the list comes again on every load.
+    const mine = currentCoreMention();
+    if (mine && mine.path !== reportedCorePlugin) {
+      reportedCorePlugin = mine.path;
+      void ask({ type: 'core_plugin', appId: mine.path.slice('app://'.length) }).catch(() => { reportedCorePlugin = null; });
+    }
   });
+  let reportedCorePlugin = null;
   /** This install's Core app as the page lists it, or null when it is missing or ambiguous. */
   function currentCoreMention() {
     const own = CLF_DOM.connectorNames()[0];

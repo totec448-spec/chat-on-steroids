@@ -1,4 +1,5 @@
 import { conversationProgress } from './session/progress.js';
+import { notePluginInstalled } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
@@ -2322,6 +2323,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       },
       origin
     );
+  }
+
+  // ChatGPT's own plugin list names the Core plugin: it is created in this account. The id is only
+  // checked for shape; what it proves is existence, which Setup reads instead of a test message.
+  if (route === '/core-plugin' && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    if (!body || typeof body.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(body.appId)) {
+      return json(res, 400, { error: 'invalid_core_plugin' }, origin);
+    }
+    notePluginInstalled('core');
+    return json(res, 200, { ok: true }, origin);
   }
 
   if (route === '/usage' && req.method === 'POST') {

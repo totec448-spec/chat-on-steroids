@@ -1361,23 +1361,32 @@ function apply(next: AppState): void {
   // Every connector this app is publishing that ChatGPT has never reached. Computed here
   // because it decides three things at once: the summary line, whether step 5 counts as
   // done, and whether the cards stay on screen after the wizard tidies itself away.
-  const unverified = status.surfaces.filter((surface) => surface.available && surface.lastRequestAt === null);
+  // This run's evidence, else the lasting proof kept for the tunnel each connector uses now:
+  // a plugin that worked yesterday is still created in ChatGPT after a restart.
+  const surfaces = status.surfaces.map(withEvidence);
+  const newest = (times: Array<number | null>) => times.reduce<number | null>((best, at) => at !== null && (best === null || at > best) ? at : best, null);
+  const reachedAt = status.lastRequestAt ?? newest(surfaces.map(surface => surface.lastRequestAt));
+  const ranAt = status.lastToolCallAt ?? newest(surfaces.map(surface => surface.lastToolCallAt));
+  // Created is the plugin existing in ChatGPT: ChatGPT reached it, or listed it as installed.
+  const unverified = surfaces.filter((surface) => surface.available && !pluginCreated(surface));
   const chatgptNote = $('wizChatgpt');
   chatgptNote.classList.toggle(
     'is-warn',
-    status.lastRequestAt !== null && (status.lastToolCallAt === null || unverified.length > 0)
+    reachedAt !== null && (ranAt === null || unverified.length > 0)
   );
-  ui(chatgptNote, 'textContent', () => status.lastRequestAt === null
-      ? t("ChatGPT has not called this app yet.")
-      : status.lastToolCallAt === null
-        ? t("ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.", [ago(status.lastRequestAt)])
+  ui(chatgptNote, 'textContent', () => reachedAt === null
+      ? unverified.length < surfaces.filter(surface => surface.available).length
+        ? t("The plugin is in your ChatGPT. It runs the first time a chat asks for it.")
+        : t("ChatGPT has not called this app yet.")
+      : ranAt === null
+        ? t("ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.", [ago(reachedAt)])
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
-            t("ChatGPT ran a tool {0}, but {1} has never been called — create it in ChatGPT to use it.", [ago(status.lastToolCallAt), unverified
+            t("ChatGPT ran a tool {0}, but {1} has never been called — create it in ChatGPT to use it.", [ago(ranAt), unverified
               .map((surface) => `“${surface.connectorName}”`)
               .join(' and ')])
-          : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(status.lastToolCallAt)]));
+          : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
   // A connector the user has switched on but never created in ChatGPT is unfinished setup,
@@ -1399,10 +1408,10 @@ function apply(next: AppState): void {
   // about whether the Desktop connector was ever created. An optional connector never
   // blocks completion — a user may enable clipboard access and still not want a second
   // connector — but it is reported separately below rather than quietly counted as done.
-  const requiredUnverified = status.surfaces.some(
-    (surface) => surface.available && !surface.optional && surface.lastRequestAt === null
+  const requiredUnverified = surfaces.some(
+    (surface) => surface.available && !surface.optional && !pluginCreated(surface)
   );
-  if (status.lastRequestAt !== null && !requiredUnverified) done.add('chatgpt');
+  if (!requiredUnverified && (reachedAt !== null || surfaces.some(surface => surface.available && pluginCreated(surface)))) done.add('chatgpt');
   // Pairing is durable authorization, not liveness. A token surviving an app restart says
   // only that this extension is allowed to connect; setup is complete when a required browser
   // has actually checked in during this process. If no enabled feature needs the browser,
@@ -1542,15 +1551,18 @@ function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[]
     // it says nothing about whether the user ever created it in ChatGPT, and with two
     // connectors a single app-wide "ChatGPT called us" line cannot tell them apart.
     if (surface.state === 'live') {
+      const { lastRequestAt, lastToolCallAt } = withEvidence(surface);
       card.append(
-        surface.lastRequestAt === null
-          ? el('p', 'hint is-warn', () => t("Not created in ChatGPT yet — ChatGPT has never called this connector."))
+        lastRequestAt === null
+          ? pluginCreated(surface)
+            ? el('p', 'hint', () => t("Added in ChatGPT. Its tools have not run yet."))
+            : el('p', 'hint is-warn', () => t("Not created in ChatGPT yet — ChatGPT has never called this connector."))
           : el(
               'p',
               'hint',
-              () => surface.lastToolCallAt === null
-                ? t("ChatGPT connected {0} but has not run one of its tools yet.", [ago(surface.lastRequestAt)])
-                : t("ChatGPT ran one of its tools {0}.", [ago(surface.lastToolCallAt)])
+              () => lastToolCallAt === null
+                ? t("ChatGPT connected {0} but has not run one of its tools yet.", [ago(lastRequestAt)])
+                : t("ChatGPT ran one of its tools {0}.", [ago(lastToolCallAt)])
             )
       );
     }
@@ -2156,3 +2168,16 @@ void (async () => {
   const swarm = await run(api.getSwarm());
   if (swarm) paintAgentFilter(swarm);
 })();
+
+/** This run's evidence for a connector, else the proof kept from earlier runs on the same tunnel. */
+function withEvidence(surface: SurfaceStatus): SurfaceStatus {
+  return {
+    ...surface,
+    lastRequestAt: surface.lastRequestAt ?? surface.proof?.requestAt ?? null,
+    lastToolCallAt: surface.lastToolCallAt ?? surface.proof?.toolCallAt ?? null
+  };
+}
+/** The plugin exists in ChatGPT: ChatGPT reached it, or listed it as installed. */
+function pluginCreated(surface: SurfaceStatus): boolean {
+  return withEvidence(surface).lastRequestAt !== null || (surface.proof?.installedAt ?? null) !== null;
+}

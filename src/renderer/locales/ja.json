@@ -1844,5 +1844,7 @@
   "Loading edit…": "編集を読み込み中…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "プレビューは600行までです。編集全体はレビューで確認してください。",
   "{0} unchanged lines": "{0} 行の変更なし",
-  "More edited files are available in the recording.": "その他の編集済みファイルは記録で確認できます。"
+  "More edited files are available in the recording.": "その他の編集済みファイルは記録で確認できます。",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "プラグインは ChatGPT に追加されています。チャットで初めて必要になったときに動作します。",
+  "Added in ChatGPT. Its tools have not run yet.": "ChatGPT に追加済み。ツールはまだ実行されていません。"
 }

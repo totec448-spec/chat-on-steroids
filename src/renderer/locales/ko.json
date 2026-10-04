@@ -1844,5 +1844,7 @@
   "Loading edit…": "편집 불러오는 중…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "미리보기는 600줄로 제한됩니다. 전체 편집을 보려면 검토를 여세요.",
   "{0} unchanged lines": "변경 없는 줄 {0}개",
-  "More edited files are available in the recording.": "기록에서 더 많은 편집된 파일을 확인할 수 있습니다."
+  "More edited files are available in the recording.": "기록에서 더 많은 편집된 파일을 확인할 수 있습니다.",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "플러그인이 ChatGPT에 있습니다. 채팅에서 처음 필요할 때 실행됩니다.",
+  "Added in ChatGPT. Its tools have not run yet.": "ChatGPT에 추가됨. 아직 도구가 실행되지 않았습니다."
 }

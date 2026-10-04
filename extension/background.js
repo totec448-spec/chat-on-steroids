@@ -3296,6 +3296,10 @@ const HANDLERS = {
     const result = await call('/models', { method: 'POST', body });
     return result;
   },
+  async core_plugin(message, _sender, source) {
+    if (!ownsDocument(source) || typeof message.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(message.appId)) return { ok: false };
+    return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
+  },
   async usage_observation(message, _sender, source) {
     if (!ownsDocument(source) || !Array.isArray(message.rows) || message.rows.length > 80) return { ok: false };
     const body = JSON.stringify({ rows: message.rows, observedAt: message.observedAt });
