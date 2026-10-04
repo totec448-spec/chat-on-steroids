@@ -137,6 +137,7 @@
   margin: 0;
   font-size: calc(13.5px * var(--text-scale, 1));
 }
+.connector-badges { display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .connector .field > .row-inline input {
   font-size: calc(11.5px * var(--text-scale, 1));
 }

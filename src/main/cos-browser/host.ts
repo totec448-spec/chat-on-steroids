@@ -32,6 +32,16 @@ const UI_PARTITION = 'cos-browser-ui';
 const TOOLBAR_HEIGHT = 40;
 const HOME_URL = 'https://chatgpt.com/';
 const LOGIN_URL = 'https://chatgpt.com/auth/login';
+
+/**
+ * What the extension may load into a tab: web pages and the empty page. Only our own extension
+ * reaches tabs.create/update, but file:, javascript: or chrome-like schemes have no use there.
+ */
+function loadable(url: string): boolean {
+  if (url === 'about:blank') return true;
+  try { return ['http:', 'https:'].includes(new URL(url).protocol); } catch { return false; }
+}
+
 /** How long the sign-in card's exit animation runs (cos-browser-sign-in.css `.leaving`). */
 const SIGN_IN_EXIT_MS = 260;
 /** How long the card shows that the sign-in arrived before it leaves. */
@@ -300,6 +310,7 @@ export class CosBrowser {
     this.ses = null;
     this.startPromise = null;
     setCosBrowserSignedIn(null);
+    logInfo('cos browser: stopped');
     this.notify();
   }
 
@@ -902,7 +913,9 @@ export class CosBrowser {
       return id;
     },
 
-    createTab: (windowId, url, options) => {
+    createTab: (windowId, requested, options) => {
+      if (!loadable(requested)) logWarn(`cos browser: refused to open a ${requested.split(':')[0]!.slice(0, 20)}: URL in a tab`);
+      const url = loadable(requested) ? requested : 'about:blank';
       const frame = this.frames.get(windowId);
       if (!frame || !this.ses) throw new Error(`No window with id: ${windowId}.`);
       const view = new WebContentsView({
@@ -922,7 +935,10 @@ export class CosBrowser {
       return id;
     },
 
-    navigate: (tabId, url) => { void this.contentsOf(tabId).loadURL(url).catch(() => undefined); },
+    navigate: (tabId, url) => {
+      if (!loadable(url)) return logWarn(`cos browser: refused to navigate a tab to a ${url.split(':')[0]!.slice(0, 20)}: URL`);
+      void this.contentsOf(tabId).loadURL(url).catch(() => undefined);
+    },
 
     reload: (tabId, bypassCache) => {
       const contents = this.contentsOf(tabId);

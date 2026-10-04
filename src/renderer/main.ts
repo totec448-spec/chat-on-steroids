@@ -1583,11 +1583,13 @@ function connectorCards(next: AppState): HTMLElement[] {
 
     const head = el('div');
     head.className = 'connector-head';
-    head.append(
-      el('h4', '', surface.connectorName),
+    // The tag and the state wrap together, so every card's badges sit the same way under a long name.
+    const badges = el('span', 'connector-badges');
+    badges.append(
       el('span', `tag${surface.optional ? ' is-optional' : ''}`, () => t(surface.optional ? 'optional' : 'required')),
       el('span', `pill is-${surface.state}`, () => t(SURFACE_STATE_TEXT[surface.state]))
     );
+    head.append(el('h4', '', surface.connectorName), badges);
     card.append(head, el('p', 'hint', () => t(surface.cardSummary)));
 
     if (!surface.available) {
