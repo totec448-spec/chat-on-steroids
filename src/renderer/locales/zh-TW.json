@@ -544,11 +544,6 @@
   "Chat list width": "聊天清單寬度",
   "Settings navigation": "設定導覽",
   "Add a project folder": "新增專案資料夾",
-  "Project folders": "專案資料夾",
-  "Primary project folder": "主要專案資料夾",
-  "Add folder": "新增資料夾",
-  "Add folder to project {0}": "將資料夾新增至專案 {0}",
-  "Remove folder {0} from project {1}": "從專案 {1} 移除資料夾 {0}",
   "Switch to dark mode": "切換到深色模式",
   "Search plugins": "搜尋外掛",
   "Add a plugin": "新增外掛",
@@ -662,6 +657,7 @@
   "New chat in this project": "在此專案中新增聊天",
   "Remove project from sidebar; keep conversations and files": "從側欄移除專案，保留對話和檔案",
   "Remove project {0}": "移除專案 {0}",
+  "Change project color": "變更專案顏色",
   "Project removed; conversations kept": "專案已移除，對話已保留",
   "Show more": "顯示更多",
   "Show more tasks in {0}": "顯示 {0} 中的更多任務",
@@ -1817,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "切換已儲存的隧道 ID 與隧道 API 金鑰，例如用於另一個 ChatGPT 帳號。",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT 頁面遺失了這則回答的即時串流。回答可能仍在進行：重新整理會重新連接頁面，而不會停止回答。",
   "Don't reload this answer": "不要重新整理這則回答",
-  "The reload has already started.": "重新整理已經開始。"
+  "The reload has already started.": "重新整理已經開始。",
+  "Background process running · {0}": "背景程序正在執行 · {0}",
+  "{0} background processes running · {1}": "{0} 個背景程序正在執行 · {1}",
+  "Running for {0}": "已執行 {0}",
+  "Stop background process": "停止背景程序",
+  "Stop": "停止",
+  "Background process is no longer running": "背景程序已不再執行",
+  "{0} background processes running": "{0} 個背景程序正在執行"
 }

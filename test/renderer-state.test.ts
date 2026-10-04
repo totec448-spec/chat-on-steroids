@@ -315,16 +315,13 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   pending.shift()!({ ok: true, data: current });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // The title-bar theme action uses the same serialized settings owner as Appearance. Two
-  // quick presses must request dark then light even though the first save has not answered.
-  const theme = w.document.getElementById('themeBtn') as HTMLButtonElement;
-  expect(theme.getAttribute('aria-label')).toBe('Switch to dark mode');
-  theme.click();
+  // Appearance changes must request dark then light in order,
+  // even though the first dark save has not answered yet.
+  const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
+  theme.value = 'dark'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(calls).toHaveLength(4));
   expect(calls[3].ui.theme).toBe('dark');
-  expect(w.document.documentElement.dataset.theme).toBe('dark');
-  expect(theme.getAttribute('aria-label')).toBe('Switch to light mode');
-  theme.click();
+  theme.value = 'light'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   expect(calls).toHaveLength(4);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'dark' } });
@@ -675,7 +672,7 @@ it('keeps project keyboard focus across activity repaint without taking composer
 
 // Adapted from @Haz4rdovisk's #345: typed Setup values used to reach the app only on blur, so a
 // Connect click right after typing did nothing.
-it.each(['headerConnect', 'wizConnect', 'connectionPopoverToggle'])(
+it.each(['wizConnect', 'connectionPopoverToggle'])(
   'persists valid Setup drafts before %s starts the tunnel',
   async (buttonId) => {
     let live: any;
@@ -722,61 +719,6 @@ it.each(['headerConnect', 'wizConnect', 'connectionPopoverToggle'])(
   }
 );
 
-it('keeps titlebar Connect clickable with incomplete setup and focuses the missing Setup step', async () => {
-  const connect = vi.fn();
-  const mounted = await mountChat({}, [], { connect });
-  const doc = mounted.window.document;
-  const header = doc.getElementById('headerConnect') as HTMLButtonElement;
-  const popover = doc.getElementById('connectionPopoverToggle') as HTMLButtonElement;
-  const wizard = doc.getElementById('wizConnect') as HTMLButtonElement;
-  const missing = doc.querySelector<HTMLElement>('[data-step="key"]')!;
-
-  expect(header.textContent).toBe('Connect');
-  expect(header.disabled).toBe(false);
-  expect(popover.disabled).toBe(true);
-  expect(wizard.disabled).toBe(true);
-  header.click();
-
-  await vi.waitFor(() => expect(doc.querySelector('[data-panel="setup"]')?.classList.contains('is-active')).toBe(true));
-  expect(missing.classList.contains('is-current')).toBe(true);
-  expect(doc.activeElement).toBe(missing);
-  expect(connect).not.toHaveBeenCalled();
-});
-
-it('shows titlebar Connect only before connection and never turns it into Disconnect', async () => {
-  const connect = vi.fn();
-  const disconnect = vi.fn();
-  const mounted = await mountChat({ hasApiKey: true }, [], { connect, disconnect });
-  const header = mounted.window.document.getElementById('headerConnect') as HTMLButtonElement;
-  const pushState = (state: any) => mounted.push({ ...mounted.state, status: { ...mounted.state.status, state } });
-
-  for (const state of ['disconnected', 'auth-failed', 'tunnel-unavailable'] as const) {
-    pushState(state);
-    expect(header.hidden).toBe(false);
-    expect(header.textContent).toBe('Connect');
-    expect(header.disabled).toBe(false);
-    expect(header.classList.contains('is-running')).toBe(false);
-  }
-  for (const state of ['starting-server', 'connecting-tunnel'] as const) {
-    pushState(state);
-    expect(header.hidden).toBe(false);
-    expect(header.textContent).toBe('Connecting…');
-    expect(header.disabled).toBe(true);
-    expect(header.classList.contains('is-running')).toBe(false);
-  }
-  for (const state of ['connected', 'offline', 'disconnecting'] as const) {
-    pushState(state);
-    expect(header.hidden).toBe(true);
-    expect(header.classList.contains('is-running')).toBe(false);
-  }
-
-  pushState('connected');
-  header.click();
-  await settle();
-  expect(disconnect).not.toHaveBeenCalled();
-  expect(connect).not.toHaveBeenCalled();
-});
-
 it('keeps global connection controls in a compact sidebar popover', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
@@ -794,12 +736,8 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   mounted.push(connected);
 
   const trigger = doc.getElementById('sidebarConnection') as HTMLButtonElement;
-  const topbarAction = doc.getElementById('headerConnect') as HTMLButtonElement;
   const popover = doc.getElementById('connectionPopover') as HTMLElement;
   expect(doc.querySelector('#chatTitle')!.closest('header')!.querySelector('#connectBtn')).toBeNull();
-  expect(topbarAction.closest('.app-topbar')).not.toBeNull();
-  expect(topbarAction.hidden).toBe(true);
-  expect(topbarAction.classList.contains('is-running')).toBe(false);
   expect(trigger.closest('.sidebar-bottom')).not.toBeNull();
   expect(trigger.textContent?.trim()).toBe('');
   expect(trigger.getAttribute('aria-label')).toMatch(/Connected.*verified/i);

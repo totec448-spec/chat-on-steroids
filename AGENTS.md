@@ -70,7 +70,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | ChatGPT conversation | Replaceable provider frontend; its id is not the durable session id. |
 | Turn | One authored user-message generation and its exact response/work. Interim prose is not a final boundary. |
 | Approved root | Filesystem access the user granted; may be a parent containing several projects. |
-| Local project | One primary folder plus optional additional folder associations and sidebar grouping; grants no new permission. |
+| Local project | Explicit folder association and sidebar grouping; grants no new permission. |
 | Native ChatGPT project | Provider `/g/.../c/...` context; separate from the app's local folder catalog. |
 | Goal objective | The requested finish line for one chat. It persists independently of a provider attempt. |
 | Goal / Loop | Mutually exclusive modes of one driver. Goal can decide no further message is needed; Loop continues within scope. |
@@ -230,7 +230,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
 | Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
 | Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
-| Local files/processes | `src/main/{rawfs,fsops,search,ripgrep,env,toolchain,exec,exec-hints,text-match,diffstat}.ts`, `src/main/codex/*`: bounded filesystem/shell implementation. |
+| Local files/processes | `src/main/{rawfs,fsops,search,ripgrep,env,toolchain,exec,exec-hints,text-match,diffstat}.ts`, `src/main/codex/*`, `src/shared/background-exec.ts`: bounded filesystem/shell implementation and the read-only renderer projection of live exec children. |
 | Terminal custody | `src/main/codex/{manager,ownership,unified-exec,unified-exec-constants,shell,command-batch,head-tail-buffer,truncate,exec-output}.ts`. |
 | Patching/images | `src/main/codex/apply-patch/*`, `codex/{filesystem,read-backend,view-image}.ts`. |
 | Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
@@ -259,6 +259,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
+| Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
@@ -424,7 +425,11 @@ internal length and closing boundary; authored whitespace after the frame remain
 ### Text Skills
 
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
-bounded UTF-8 import/read and metadata catalog. `skill-access.ts` exposes only that canonical
+bounded UTF-8 import/read and metadata catalog. Valid YAML name/description fields use the
+shared bounded parser before publication, including folded/literal multiline descriptions;
+catalog fields are normalized to one bounded line without rewriting the source body. Legacy
+plain Markdown or invalid/incomplete headers keep the existing heading/prose fallback.
+`skill-access.ts` exposes only that canonical
 directory as `/skills` to Core, including nested code-mode calls. Current capability/Read-only
 guards still apply. This root is not saved in config, does not satisfy connection folder setup,
 and never becomes the default or learned project cwd, including native paths through an
@@ -747,35 +752,17 @@ escapes, live revocation during an await, and preserving an unrelated user's new
 **Intent:** a chat consistently works in its selected local folder, and workers/resumed chats
 retain that choice. Sidebar organization must not destroy work or grant access.
 
-`projects.ts` owns a bounded catalog with stable UUIDs. The legacy `path` field remains the
-authoritative primary workspace; optional `additionalPaths` are canonical project members and
-old single-folder rows require no rewrite. Adding either kind uses the native folder
-selection/approved-root flow, resolves the real directory and keeps canonical/native-case folder
-identity unique across the entire catalog. Direct project mutation never approves a root. `projects:addFolder` and
-`projects:removeFolder` are the fixed IPC mutations for additional membership; removing membership
-does not remove its approved root. The sidebar project disclosure lists the primary and additional
-folders, adds through that same independently approved picker flow, and exposes removal only for
-additional membership. Session metadata owns only `projectId`, never a member path.
-
-Catalog restore fails closed on duplicate project ids or duplicate **primary** workspace identity.
-Duplicate optional member identities are compatibility noise instead: primaries take precedence,
-then restore keeps the first additional native identity in stored catalog order and ignores later
-duplicates/case aliases. This cleanup is a read projection; the next catalog mutation persists the
-cleaned shape. Downgrading to an older build that does not understand `additionalPaths` can drop
-those memberships if that build rewrites the project catalog; it does not change the primary path.
-
-Before send/use, `projectWorkspace(id)` and `getSessionProject()` re-resolve the primary under
-current roots and reject moved/unavailable folders. `projectWorkspace(id, folder)` is the explicit
-member lookup: it re-resolves that folder under current roots and accepts it only when its canonical
-identity is the primary or one of `additionalPaths`. Revoking or losing an additional folder makes
-that lookup fail closed and never changes the primary cwd; the stored member can still be detached.
+`projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
+Adding uses the native folder selection/approved-root flow, resolves the real directory and
+deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
+`getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.
 Null means no project; a broken explicit binding is an error, not a reason to infer a new cwd.
-Project Skill scope, Files and default project terminals continue to use the primary only;
-additional folders do not merge their `AGENTS.md` files or become implicit cwd candidates. The
-opening project/worker prompt is the bounded discoverability consumer: it names currently approved
-additional folders by virtual path while still naming the primary as the sole default cwd and
-instruction directory. Unapproved/unavailable additional members are omitted, never treated as
-permission or as a reason to fail an otherwise valid primary project.
+Projects may also store one optional color from the fixed `PROJECT_COLORS` palette. Color is
+sidebar presentation metadata only: changing or removing it never resolves paths, changes the
+project folder, grants permission, rebinds sessions, or changes prompt/workspace
+selection. Legacy rows without color remain unchanged. The sidebar keeps an unset color control
+quiet until hover/focus and opens an explicit keyboard-reachable palette; choosing a swatch (or
+None) calls the same `projects:color` owner rather than cycling through values.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
@@ -2978,10 +2965,9 @@ Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
 
-Dark is the default theme. Appearance settings remain the durable theme owner; the app title bar
-also exposes a compact light/dark shortcut through that same settings-save path. The chat header
-has no theme or connection action. Files and worker-panel controls attach to the chat header
-independently of appearance controls.
+Dark is the default theme. Theme selection belongs in Appearance settings; the main header
+has no light/dark shortcut. Files and worker-panel controls attach to the header independently
+of appearance controls.
 
 ### Renderer and IPC
 
@@ -3278,11 +3264,10 @@ refresh complete or starts a browser action.
 
 ### Project Files workspace
 
-The Files panel projects the current session's LocalProject primary workspace through fixed IPC
-using a project UUID and relative paths; additional project folders never become implicit Files
-roots. It does not change the main composer or grant additional filesystem access. Main re-resolves
-current approved roots and rejects traversal, symbolic links/junctions and project-root mutation.
-The renderer's `workspace-docks.ts` owns the right tool dock and
+The Files panel projects the current session's LocalProject through fixed IPC using a project
+UUID and relative paths. It does not change the main composer or grant additional filesystem
+access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
+and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
@@ -3542,20 +3527,17 @@ Late startup results retire their own handles without publishing them; late tunn
 for the accepted-response drain first. Activity logs record Disconnect admission and the
 accepted-response count.
 
-The app title bar exposes a compact Connect shortcut only before a connection is running: it stays
-visible as disabled `Connecting…` during server/tunnel startup and is hidden once connected,
-offline or disconnecting. The sidebar footer owns the compact connection-status popover outside
-the translucent sidebar stacking context and is the running-state Disconnect surface. The popover's
-sidebar-themed surface is 160 CSS pixels wide, with
+The sidebar footer owns global connection controls in a compact popover outside the translucent
+sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
 single-line labels and status dots. Status text remains accessible to screen readers and in
 tooltips. The header states connection status once; no redundant off/verification subtitle
 appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
 and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
 action is Connect/Disconnect; opening it does not request companion diagnostics.
-Extension-only Overwrite/Timestamps and the redundant settings link are absent. The title-bar
-Connect shortcut briefly highlights the footer status on a newly confirmed connection (respecting
-reduced motion); it never becomes a Disconnect action. Setup stays reachable from Settings and from
-Connect when configuration is incomplete, and that click focuses the exact missing step. The View menu has its own foreground
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
+Connect action remains visible while disconnected and disappears only on confirmed connection,
+briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
+Settings and from Connect when configuration is incomplete. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the

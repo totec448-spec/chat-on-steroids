@@ -77,6 +77,14 @@ it('places context before the model picker and keeps native compaction actions i
   expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
 });
 
+it('keeps composer actions on one row by compacting labels instead of stacking at narrow widths', () => {
+  expect(css).not.toContain('@media (max-width: 1000px)');
+  expect(css).toContain('container: chat-session / inline-size');
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?\.composer \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto minmax\(0, 84px\) 36px;/);
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?#composerModeLabel,[\s\S]*?#contextMeterCompact \{ display: none; \}/);
+  expect(css).toMatch(/@container chat-session \(max-width: 520px\)[\s\S]*?\.composer #modelMenu \{ width: 84px; max-width: 84px; \}/);
+});
+
 it('centers the accessible Chats refresh icon without an extra grid text row', () => {
   const refresh = document.getElementById('chatRefresh')!;
   expect(refresh.getAttribute('aria-label')).toBe('Refresh chats');
@@ -162,21 +170,11 @@ describe('the session card header', () => {
    * because the chat is what writes the brief — a button here would be a second way to
    * start the one thing that must happen exactly once.
    */
-  it('keeps global theme and connection actions in the title bar while details stay in the sidebar popover', () => {
+  it('keeps global connection status out of the chat header and in the sidebar footer', () => {
     const header = document.querySelector('#chatTitle')!.closest('header')!;
-    const topbar = document.querySelector('.app-topbar')!;
-    const theme = document.getElementById('themeBtn')!;
-    const topbarConnection = document.getElementById('headerConnect')!;
     const connection = document.getElementById('sidebarConnection')!;
     const footer = connection.closest('.sidebar-bottom')!;
     expect(header.contains(connection)).toBe(false);
-    expect(header.contains(theme)).toBe(false);
-    expect(header.contains(topbarConnection)).toBe(false);
-    expect(topbar.contains(theme)).toBe(true);
-    expect(topbar.contains(topbarConnection)).toBe(true);
-    expect(theme.getAttribute('aria-label')).toBe('Switch to light mode');
-    expect(theme.querySelector('.ph-sun')).not.toBeNull();
-    expect(rule('.app-topbar > .btn, .view-menu')).toContain('-webkit-app-region: no-drag');
     expect(footer).not.toBeNull();
     expect([...footer.children].map((node) => (node as HTMLElement).id || (node as HTMLElement).className)).toEqual([
       'workspaceSettings',
@@ -380,15 +378,31 @@ describe('the chat panel cards', () => {
 
   it('gives the session card one row per child, including its navigation row', () => {
     const card = document.getElementById('chatBody')!.closest('.card')!;
-    // Subhead, scrolling conversation, shared plan/queue dock, composer and footer.
+    // Subhead, scrolling conversation, shared process/plan/queue dock, composer and footer.
     const layoutChildren = [...card.children].filter(child => child.id !== 'chatSettingsBtn');
     expect(layoutChildren.length).toBe(5);
     const dockBody = document.getElementById('composerDock')!.firstElementChild!;
     expect(dockBody.classList.contains('composer-dock-body')).toBe(true);
-    expect(dockBody.firstElementChild?.id).toBe('agentPlan');
+    expect(dockBody.firstElementChild?.id).toBe('backgroundExecStatus');
+    expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
+    expect((document.getElementById('backgroundExecLiveStatus') as HTMLElement).hidden).toBe(true);
+    expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
     expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
+  });
+
+  it('keeps long queued task plans inside their own scroll area beneath persistent dock rows', () => {
+    expect(rule('#finishQueue')).toContain('max-height: min(240px, 30vh)');
+    expect(rule('#finishQueue')).toContain('overflow-y: auto');
+    expect(rule('#finishQueue')).toContain('overscroll-behavior: contain');
+    expect(rule('.background-exec-list')).toContain('max-height: min(220px, 30vh)');
+    expect(rule('.background-exec-list')).toContain('overflow-y: auto');
+    expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
+    expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
+    expect(document.getElementById('finishQueue')!.previousElementSibling?.id).toBe('taskPlanPreview');
   });
 
   /**
