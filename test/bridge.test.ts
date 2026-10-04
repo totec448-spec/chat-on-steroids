@@ -9541,10 +9541,17 @@ describe('unattributed activity recovery', () => {
     expect(lines('reported failed assistant-error recovery') - failedBefore).toBe(0);
     // A real failure afterwards still says so, with the page's reason.
     expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
-    await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=changed`);
+    await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=changed&detail=changed-progress%3Aapp-progress`);
+    // The exact cause, in words (#1086): ten refusals in a row used to say only "the page changed".
     expect(getLog().some((entry) => entry.message.includes(
-      `reported failed assistant-error recovery for ${PRIME} (reloaded: the page changed before the action)`))).toBe(true);
+      `reported failed assistant-error recovery for ${PRIME} (reloaded: the page changed before the action — ` +
+      'the answer made progress (the app recorded a status note))'))).toBe(true);
     expect(await rows()).toEqual(['Reload failed while recovering an interrupted response; will retry.']);
+    // A detail the app does not know is dropped, never echoed into the log.
+    handout = await maintenance();
+    expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+    await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=changed&detail=%3Cscript%3E`);
+    expect(getLog().at(-1)!.message).toMatch(/\(reloaded: the page changed before the action\)$/);
   });
 
   it('preserves a recovered assistant-error page without spending a later reload on the same question', async () => {

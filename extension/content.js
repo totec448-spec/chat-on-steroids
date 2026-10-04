@@ -588,7 +588,9 @@
   let adoptedProgressRevision = -1;
   let lastChangeAt = 0;
   let turnProgressRevision = 0; // Distinguish work received within the same millisecond.
-  function noteTurnProgress(owner = turnId) {
+  // What last moved turnProgressRevision, so a refused repair can name it (#1086).
+  let turnProgressSource = null;
+  function noteTurnProgress(owner = turnId, source = null) {
     if (stopRequestedAt) return;
     if (owner && turnId && owner !== turnId) return;
     // A failed view is terminal for input, but fresh work in that exact generation
@@ -601,6 +603,7 @@
     }
     lastChangeAt = Date.now();
     turnProgressRevision++;
+    turnProgressSource = source;
     if (stagePanel?.root.dataset.clfStageKind === 'wait') removeStagePanel();
   }
   let stallReported = false;
@@ -1610,7 +1613,7 @@
     priorSections = new WeakSet(baselineSections);
     priorMarks = baselineMarks;
     turnStartedAt = Date.now();
-    noteTurnProgress();
+    noteTurnProgress(turnId, 'adopted');
     adoptedProgressRevision = turnProgressRevision;
     quietSince = 0;
     quietTurn = null;
@@ -2725,7 +2728,7 @@
       priorSections = new WeakSet(submission?.baseline?.sections ?? baselineSections);
       priorMarks = submission?.baseline?.marks ?? baselineMarks;
       turnStartedAt = Date.now();
-      noteTurnProgress();
+      noteTurnProgress(turnId, 'sent');
       // "Wait for this turn to finish" was about a turn that has now been replaced. Keeping
       // it would make the composer explain, after the fact, a refusal that no longer applies.
       localError = '';
@@ -4448,7 +4451,7 @@
         return true;
       });
       if (fresh.length > 0) {
-        if (generating && index === activeTurnIndex) noteTurnProgress();
+        if (generating && index === activeTurnIndex) noteTurnProgress(turnId, 'page-call');
         emit({
           kind: 'tool_evidence',
           ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
@@ -4602,7 +4605,7 @@
           const previous = pageToolsReported.get(activity.messageId);
           if (previous === signature) continue;
           pageToolsReported.set(activity.messageId, signature);
-          if (owner && previous === undefined && freshPublication) noteTurnProgress(owner);
+          if (owner && previous === undefined && freshPublication) noteTurnProgress(owner, 'page-step');
           emit({
             kind: 'page_tool',
             text: activity.label,
@@ -4684,7 +4687,7 @@
           `\u0000${message.references ? JSON.stringify(message.references) : ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
-        if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner);
+        if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner, 'page-text');
         const liveAssistant =
           Boolean(localOwner) ||
           (generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)));
@@ -6643,6 +6646,7 @@
       const freshStream = Array.isArray(data.stream) ? data.stream : [];
       let streamAdded = 0;
       let exactTurnActivity = false;
+      let activityKind = null;
       let resumedStoppedTurn = false;
       // A reload row inside the turn is the app's doing, not the model's: it must not read as
       // the turn still working.
@@ -6685,7 +6689,7 @@
           ) {
             settlePresentation();
           }
-          if (changed && isWork(entry)) exactTurnActivity = true;
+          if (changed && isWork(entry)) { exactTurnActivity = true; activityKind = entry.kind; }
           continue;
         }
         // Commentary and native tool rows arrive again as they change, under the seq they
@@ -6709,7 +6713,7 @@
         }
         streamBySeq.set(seq, entry);
         streamAdded++;
-        if (workChanged && isWork(entry) && (entry.kind !== 'page_tool' || !held)) exactTurnActivity = true;
+        if (workChanged && isWork(entry) && (entry.kind !== 'page_tool' || !held)) { exactTurnActivity = true; activityKind = entry.kind; }
         // The app has re-proven this exact response from a call STARTED after Stop.
         // Old results, history revisions, another turn, and a finish call cannot
         // withdraw intent. The main process still owns the actual reload ticket.
@@ -6722,7 +6726,7 @@
         }
       }
       if (streamAdded > 0) trimStream();
-      if (exactTurnActivity) noteTurnProgress();
+      if (exactTurnActivity) noteTurnProgress(turnId, `app-${activityKind}`);
 
       const fresh = Array.isArray(data.entries) ? data.entries : [];
       for (const entry of fresh) {
@@ -6742,7 +6746,7 @@
       // still restore it through this same feed, even after native completion.
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
       appSettledQuestionId = typeof data.settledQuestionId === 'string' && data.settledQuestionId ? data.settledQuestionId : null;
-      if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
+      if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress(turnId, 'tool-resumed');
       const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
       if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) adoptOpenTurn(turnId, recordedQuestionId);
       const lateAdoption = !generating && !turnId && genCount === 0 && !stopRequestedAt && !commandAttempt &&
@@ -12192,10 +12196,15 @@
     await flush();
     const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;
     const expected = message.expected;
+    // Which part moved since the first check, and for progress what moved it, so a refused
+    // repair can say why instead of only "the page changed" (#1086).
+    const changed = !expected ? null : expected.turnId !== turnId ? 'turn' : expected.questionId !== questionId ? 'question'
+      : expected.revision !== turnProgressRevision ? 'progress' : null;
     return verdict([[!current(), 'page-changed'], [stopRequestedAt, 'stop-requested'], [pendingTools !== 0, 'tool-running'],
       [desktopInputBusy, 'sending'], [nativeBusy, 'page-busy'], [job?.busy, 'compaction'], [draft(), 'draft'],
-      [expected && !(expected.turnId === turnId && expected.questionId === questionId && expected.revision === turnProgressRevision), 'changed']],
-    { revision: turnProgressRevision, turnId, questionId });
+      [changed, 'changed']],
+    { revision: turnProgressRevision, turnId, questionId,
+      ...(changed ? { changed, ...(changed === 'progress' && turnProgressSource ? { progressBy: turnProgressSource } : {}) } : {}) });
   }
 
   async function acceptDesktopInput(message) {
