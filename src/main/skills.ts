@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { approvedManagedSkillLink, sameSkillLink, type ApprovedSkillLink } from './skill-links.js';
+import { parseSkillFrontmatter } from './skill-metadata.js';
 import {
   MAX_SKILL_BYTES,
   MAX_SKILL_CHARS,
@@ -182,6 +183,16 @@ function fallbackMetadata(lines: string[], id: string): { name: string; descript
 }
 
 function metadataFor(text: string, id: string): { name: string; description: string } {
+  // Publish the same bounded YAML metadata that discovered Skills use. The older simple
+  // scalar reader treats valid folded/literal descriptions as absent and substitutes body
+  // prose, so metadata-only consumers see a different Skill from the explicit picker.
+  try {
+    const metadata = parseSkillFrontmatter(text);
+    return {
+      name: oneLine(metadata.name, MAX_SKILL_NAME_CHARS),
+      description: oneLine(metadata.description, MAX_SKILL_DESCRIPTION_CHARS)
+    };
+  } catch { /* Plain Markdown and incomplete/invalid legacy headers keep their existing fallback. */ }
   const parsed = markdownBodyAndMetadata(text);
   const fallback = fallbackMetadata(parsed.lines, id);
   const name = parsed.name === null ? fallback.name : oneLine(parsed.name, MAX_SKILL_NAME_CHARS);

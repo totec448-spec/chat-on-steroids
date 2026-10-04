@@ -349,11 +349,6 @@
   "Chat list width": "Chiều rộng danh sách cuộc trò chuyện",
   "Settings navigation": "Điều hướng Cài đặt",
   "Add a project folder": "Thêm thư mục dự án",
-  "Project folders": "Các thư mục dự án",
-  "Primary project folder": "Thư mục dự án chính",
-  "Add folder": "Thêm thư mục",
-  "Add folder to project {0}": "Thêm thư mục vào dự án {0}",
-  "Remove folder {0} from project {1}": "Xóa thư mục {0} khỏi dự án {1}",
   "Switch to dark mode": "Chuyển sang chế độ tối",
   "Search plugins": "Tìm plugin",
   "Add a plugin": "Thêm plugin",
@@ -467,6 +462,7 @@
   "New chat in this project": "Cuộc trò chuyện mới trong dự án này",
   "Remove project from sidebar; keep conversations and files": "Xóa dự án khỏi thanh bên; giữ cuộc trò chuyện và tệp",
   "Remove project {0}": "Xóa dự án {0}",
+  "Change project color": "Đổi màu dự án",
   "Project removed; conversations kept": "Đã xóa dự án; giữ nguyên cuộc trò chuyện",
   "Show more": "Hiện thêm",
   "Show more tasks in {0}": "Hiện thêm tác vụ trong {0}",
@@ -1817,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Chuyển đổi ID tunnel và khóa API tunnel đã lưu, ví dụ cho một tài khoản ChatGPT khác.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Trang ChatGPT đã mất luồng trực tiếp của câu trả lời này. Câu trả lời có thể vẫn đang chạy: tải lại sẽ kết nối lại trang mà không dừng nó.",
   "Don't reload this answer": "Không tải lại câu trả lời này",
-  "The reload has already started.": "Quá trình tải lại đã bắt đầu."
+  "The reload has already started.": "Quá trình tải lại đã bắt đầu.",
+  "Background process running · {0}": "Tiến trình nền đang chạy · {0}",
+  "{0} background processes running · {1}": "{0} tiến trình nền đang chạy · {1}",
+  "Running for {0}": "Đã chạy {0}",
+  "Stop background process": "Dừng tiến trình nền",
+  "Stop": "Dừng",
+  "Background process is no longer running": "Tiến trình nền không còn chạy",
+  "{0} background processes running": "{0} tiến trình nền đang chạy"
 }

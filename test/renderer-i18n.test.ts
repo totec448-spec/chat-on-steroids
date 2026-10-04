@@ -103,21 +103,6 @@ it('preserves nested translated duration arguments in Turkish', async () => {
   expect(t('{0} for {1}{2}s', [t('Worked'), `${t('{0}m', [1])} `, 5])).toBe('1 dk 5 sn · Çalıştı');
 });
 
-it.each(languages)('localizes project-folder management labels and keeps folder names verbatim in %s', async locale => {
-  window.localStorage.setItem('cos.ui.language', locale);
-  const { t } = await import('../src/renderer/i18n.js');
-  const source = 'Remove folder {0} from project {1}';
-  if (locale !== 'en') {
-    for (const key of [source, 'Primary project folder', 'Add folder to project {0}']) {
-      expect(catalogs[locale], `${locale}: ${key}`).toHaveProperty(key);
-    }
-  }
-  const expected = (catalogs[locale]?.[source] ?? source).replace('{0}', 'C:\\資料\\shared').replace('{1}', 'Workspace');
-  expect(t(source, ['C:\\資料\\shared', 'Workspace'])).toBe(expected);
-  expect(t('Primary project folder')).toBe(catalogs[locale]?.['Primary project folder'] ?? 'Primary project folder');
-  expect(t('Add folder to project {0}', ['Workspace'])).toBe((catalogs[locale]?.['Add folder to project {0}'] ?? 'Add folder to project {0}').replace('{0}', 'Workspace'));
-});
-
 describe('app interface localization', () => {
 
   it('switches both ways without replacing controls, icons, emphasis, drafts or authored content', async () => {

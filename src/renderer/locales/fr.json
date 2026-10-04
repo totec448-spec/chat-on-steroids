@@ -362,11 +362,6 @@
   "Chat list width": "Largeur de la liste des chats",
   "Settings navigation": "Navigation des paramètres",
   "Add a project folder": "Ajouter un dossier de projet",
-  "Project folders": "Dossiers du projet",
-  "Primary project folder": "Dossier principal du projet",
-  "Add folder": "Ajouter un dossier",
-  "Add folder to project {0}": "Ajouter un dossier au projet {0}",
-  "Remove folder {0} from project {1}": "Retirer le dossier {0} du projet {1}",
   "Switch to dark mode": "Passer au thème sombre",
   "Search plugins": "Rechercher des plugins",
   "Add a plugin": "Ajouter un plugin",
@@ -480,6 +475,7 @@
   "New chat in this project": "Nouveau chat dans ce projet",
   "Remove project from sidebar; keep conversations and files": "Retirer le projet de la barre latérale ; conserver les conversations et les fichiers",
   "Remove project {0}": "Retirer le projet {0}",
+  "Change project color": "Changer la couleur du projet",
   "Project removed; conversations kept": "Projet retiré ; conversations conservées",
   "Show more": "Afficher plus",
   "Show more tasks in {0}": "Afficher plus de tâches dans {0}",
@@ -1817,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Change les ID de tunnel et la clé API du tunnel enregistrés, par exemple pour un autre compte ChatGPT.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "La page ChatGPT a perdu le flux en direct de cette réponse. Elle est peut-être toujours en cours : le rechargement reconnecte la page sans l’arrêter.",
   "Don't reload this answer": "Ne pas recharger cette réponse",
-  "The reload has already started.": "Le rechargement a déjà commencé."
+  "The reload has already started.": "Le rechargement a déjà commencé.",
+  "Background process running · {0}": "Processus en arrière-plan en cours · {0}",
+  "{0} background processes running · {1}": "{0} processus en arrière-plan en cours · {1}",
+  "Running for {0}": "En cours depuis {0}",
+  "Stop background process": "Arrêter le processus en arrière-plan",
+  "Stop": "Arrêter",
+  "Background process is no longer running": "Le processus en arrière-plan n’est plus en cours",
+  "{0} background processes running": "{0} processus en arrière-plan en cours"
 }

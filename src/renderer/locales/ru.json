@@ -362,11 +362,6 @@
   "Chat list width": "Ширина списка чатов",
   "Settings navigation": "Навигация по настройкам",
   "Add a project folder": "Добавить папку проекта",
-  "Project folders": "Папки проекта",
-  "Primary project folder": "Основная папка проекта",
-  "Add folder": "Добавить папку",
-  "Add folder to project {0}": "Добавить папку в проект {0}",
-  "Remove folder {0} from project {1}": "Удалить папку {0} из проекта {1}",
   "Switch to dark mode": "Переключиться на тёмную тему",
   "Search plugins": "Искать плагины",
   "Add a plugin": "Добавить плагин",
@@ -480,6 +475,7 @@
   "New chat in this project": "Новый чат в этом проекте",
   "Remove project from sidebar; keep conversations and files": "Убрать проект с боковой панели; сохранить диалоги и файлы",
   "Remove project {0}": "Убрать проект {0}",
+  "Change project color": "Изменить цвет проекта",
   "Project removed; conversations kept": "Проект убран; диалоги сохранены",
   "Show more": "Показать ещё",
   "Show more tasks in {0}": "Показать ещё задач в {0}",
@@ -1817,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Переключает сохранённые ID туннелей и API-ключ туннеля, например для другого аккаунта ChatGPT.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Страница ChatGPT потеряла поток этого ответа. Ответ, возможно, ещё выполняется: перезагрузка переподключит страницу, не останавливая его.",
   "Don't reload this answer": "Не перезагружать этот ответ",
-  "The reload has already started.": "Перезагрузка уже началась."
+  "The reload has already started.": "Перезагрузка уже началась.",
+  "Background process running · {0}": "Фоновый процесс запущен · {0}",
+  "{0} background processes running · {1}": "{0} фоновых процессов запущено · {1}",
+  "Running for {0}": "Работает {0}",
+  "Stop background process": "Остановить фоновый процесс",
+  "Stop": "Остановить",
+  "Background process is no longer running": "Фоновый процесс больше не выполняется",
+  "{0} background processes running": "{0} фоновых процессов запущено"
 }

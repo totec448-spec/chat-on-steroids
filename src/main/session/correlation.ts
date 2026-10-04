@@ -55,6 +55,11 @@ const CORRELATIONS_STATE_VERSION = 6;
 
 const byRequest = new Map<string, RequestCorrelation>();
 const waiters = new Map<string, Set<() => void>>();
+// `ownership.ts` subscribes while the existing correlation -> agents -> kernel -> ownership
+// module cycle is still being instantiated. A top-level `const` is in its TDZ at that moment.
+// `var` is initialized to undefined during module instantiation, so this lazy set is safe to
+// touch from that early subscription without moving correlation ownership into another module.
+var correlationListeners: Set<(owner: RequestCorrelation) => void> | undefined;
 /**
  * Evidence grace belongs to the request, not each tool call in its workflow. All callers
  * measure their allowance from its first wait, so sequential and overlapping calls cannot
@@ -101,6 +106,27 @@ function snapshot(): PersistedCorrelations {
 
 function persist(): void {
   writeDurableSnapshotSoon(CORRELATIONS_STATE, snapshot);
+}
+
+/**
+ * Subscribe to newly proved request ownership.
+ *
+ * Consumers that temporarily key state by request id (for example background exec custody)
+ * can promote that state to the durable local session the instant exact browser evidence lands.
+ * Listeners are synchronous on purpose: the in-memory ownership projection must be coherent
+ * before the renderer or a later tool call rereads it.
+ */
+export function onRequestCorrelation(listener: (owner: RequestCorrelation) => void): () => void {
+  (correlationListeners ??= new Set()).add(listener);
+  return () => { correlationListeners?.delete(listener); };
+}
+
+function publishCorrelation(owner: RequestCorrelation): void {
+  for (const listener of correlationListeners ?? []) {
+    try { listener({ ...owner }); } catch (error) {
+      logWarn(`request correlation listener failed for ${owner.requestId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 /**
@@ -330,6 +356,7 @@ export function observeRequestCorrelations(
     attaching.add(requestId);
     const owner = byRequest.get(requestId);
     if (!owner) continue;
+    if (results[index] === 'stored') publishCorrelation(owner);
     void attachRequestPlan(owner).catch(error => {
       logWarn(`request plan attachment failed for ${requestId}: ${error instanceof Error ? error.message : String(error)}`);
     });

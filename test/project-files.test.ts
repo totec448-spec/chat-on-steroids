@@ -6,7 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { addProject, addProjectFolder } from '../src/main/projects.js';
+import { addProject } from '../src/main/projects.js';
 import {
   createProjectEntry,
   listProjectDirectory,
@@ -76,19 +76,6 @@ it('lists exactly one project level at a time and previews bounded text', async 
   expect(large.text).toBeNull();
   expect(large.truncated).toBe(true);
   expect(large.note).toMatch(/too large/i);
-});
-
-it('keeps Files rooted at the primary workspace when the project has additional folders', async () => {
-  const projectPath = path.join(approved, 'project');
-  const relatedPath = path.join(approved, 'sibling');
-  await fs.writeFile(path.join(projectPath, 'primary.txt'), 'primary');
-  await fs.writeFile(path.join(relatedPath, 'related.txt'), 'related');
-  const project = await addProject(projectPath);
-  await addProjectFolder(project.id, relatedPath);
-  const root = await listProjectDirectory(project.id);
-  expect(root.entries.map(entry => entry.name)).toContain('primary.txt');
-  expect(root.entries.map(entry => entry.name)).not.toContain('related.txt');
-  await expect(previewProjectFile(project.id, 'related.txt')).rejects.toThrow();
 });
 
 it('reports binary files without decoding them into the renderer', async () => {
