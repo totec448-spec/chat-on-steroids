@@ -2220,8 +2220,9 @@ function readTimeline(): void {
 function roundWorkers(ids: string[], button = el('button', 'activity-workers') as HTMLButtonElement): HTMLButtonElement {
   button.type = 'button';
   button.hidden = ids.length === 0;
-  ui(button, 'title', () => t('{0} sub-agents in this round', [ids.length]));
-  ui(button, 'aria-label', () => t('{0} sub-agents in this round', [ids.length]));
+  const label = () => ids.length === 1 ? t('1 sub-agent in this round') : t('{0} sub-agents in this round', [ids.length]);
+  ui(button, 'title', label);
+  ui(button, 'aria-label', label);
   if (!button.childElementCount) button.append(icon('i-agents'), el('span'));
   button.lastElementChild!.textContent = String(ids.length);
   const owner = selectedId, epoch = selectionGeneration;
