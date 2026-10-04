@@ -74,6 +74,12 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
     ]
   };
   const scrub = (text: string) => scrubText(text, context);
+  // Scrub each text value before it is serialized: in JSON a Windows path has doubled backslashes
+  // ("C:\\Users\\Jane\\…"), which the path patterns do not see as a path.
+  const scrubValue = (value: unknown): unknown => typeof value === 'string' ? scrub(value)
+    : Array.isArray(value) ? value.map(scrubValue)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrubValue(item)]))
+        : value;
   const ended = sources.sessions.filter(session => session.endedAt !== null).length;
   const header = [
     '# Chat On Steroids diagnostics report',
@@ -90,13 +96,13 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
       `System: ${sources.app.platform} ${sources.app.osRelease} (${sources.app.arch}), locale ${sources.app.locale}`,
       `Electron ${sources.app.electron}, Chrome ${sources.app.chrome}`
     ]),
-    section('Browser connection', [...json(sources.bridge), ...json(sources.extension)].map(scrub)),
+    section('Browser connection', [...json(scrubValue(sources.bridge)), ...json(scrubValue(sources.extension))]),
     section('Connection self-test', sources.selfTest
       ? [sources.selfTest.summary, ...sources.selfTest.checks.map(check => `- ${check.name}: ${check.status} — ${check.detail}`)].map(scrub)
       : ['(not available)']),
     section('Settings', reportableSettings(getConfig())),
     section('Chats', [`${sources.sessions.length} chat(s), ${ended} ended, ${sources.projects.length} project(s)`]),
-    section('Pending work', [...sources.commands, ...sources.workers].map(row => scrub(JSON.stringify(row)))),
+    section('Pending work', [...sources.commands, ...sources.workers].map(row => JSON.stringify(scrubValue(row)))),
     section('Log (most recent last)', [scrub(sources.log)])
   ];
   return [...header, ...body].join('\n');
