@@ -1593,6 +1593,43 @@ it('lists primary and additional project folders in the sidebar and mutates only
   expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\primary');
 });
 
+it('picks and clears project color without changing project membership', async () => {
+  const project = {
+    id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary',
+    additionalPaths: ['C:\\workspace\\shared'], createdAt: 1
+  };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
+  const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  const color = group.querySelector<HTMLButtonElement>('.project-color')!;
+  expect(color.dataset.color).toBe('');
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  color.click(); await settle();
+  expect(color.getAttribute('aria-expanded')).toBe('true');
+  const none = group.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!;
+  const blue = group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  expect(w.document.activeElement).toBe(none);
+  none.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.activeElement).toBe(blue);
+  blue.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  expect(w.document.activeElement).toBe(color);
+  color.click(); await settle();
+  group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(1, project.id, 'blue');
+  let refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBe('blue');
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('blue');
+  expect(refreshed.querySelector('.project-folder-path')?.textContent).toBe('C:\\workspace\\primary');
+  refreshed.querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
+  refreshed.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(2, project.id, null);
+  refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBeUndefined();
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
+});
+
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;

@@ -480,6 +480,7 @@
   "New chat in this project": "Nouveau chat dans ce projet",
   "Remove project from sidebar; keep conversations and files": "Retirer le projet de la barre latérale ; conserver les conversations et les fichiers",
   "Remove project {0}": "Retirer le projet {0}",
+  "Change project color": "Changer la couleur du projet",
   "Project removed; conversations kept": "Projet retiré ; conversations conservées",
   "Show more": "Afficher plus",
   "Show more tasks in {0}": "Afficher plus de tâches dans {0}",

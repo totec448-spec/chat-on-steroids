@@ -32,7 +32,7 @@ import { answerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { LocalProject } from '../shared/projects.js';
+import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 /**
@@ -791,6 +791,7 @@ function paintSessions(): void {
   for (const { id } of orderedProjects) {
     const project = projects.find(row => row.id === id);
     const section = document.createElement('details'); section.className = 'project-group'; section.dataset.projectId = id;
+    if (project?.color) section.dataset.projectColor = project.color;
     section.dataset.sortId = id; section.dataset.sortScope = SIDEBAR_PROJECT_SCOPE;
     section.open = expandedProjects.has(id);
     const heading = el('summary', 'project-heading');
@@ -809,6 +810,71 @@ function paintSessions(): void {
       section.open = open;
     });
     if (project) {
+      const colorWrap = el('span', 'project-color-wrap');
+      const color = el('button', 'btn project-color') as HTMLButtonElement;
+      color.type = 'button'; color.dataset.color = project.color ?? '';
+      color.setAttribute('aria-haspopup', 'menu'); color.setAttribute('aria-expanded', 'false');
+      ui(color, 'title', () => t('Change project color'));
+      ui(color, 'aria-label', () => t('Change project color'));
+      const menu = el('span', 'project-color-menu'); menu.hidden = true; menu.setAttribute('role', 'menu');
+      ui(menu, 'aria-label', () => t('Change project color'));
+      const closeColorMenu = (restoreFocus = false): void => {
+        menu.hidden = true; color.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) color.focus();
+      };
+      const openColorMenu = (): void => {
+        menu.hidden = false; color.setAttribute('aria-expanded', 'true');
+        const selected = menu.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
+          menu.querySelector<HTMLButtonElement>('.project-color-choice');
+        selected?.focus();
+      };
+      color.addEventListener('click', event => {
+        event.preventDefault(); event.stopPropagation();
+        if (color.disabled) return;
+        if (menu.hidden) openColorMenu(); else closeColorMenu(true);
+      });
+      let savingColor = false;
+      for (const choice of [null, ...PROJECT_COLORS] as const) {
+        const option = el('button', 'project-color-choice') as HTMLButtonElement;
+        option.type = 'button'; option.dataset.projectColorChoice = choice ?? ''; option.dataset.color = choice ?? '';
+        option.setAttribute('role', 'menuitemradio');
+        option.setAttribute('aria-checked', String((project.color ?? null) === choice));
+        const label = choice ? `${t('Change project color')}: ${choice}` : t('None');
+        option.setAttribute('aria-label', label); option.title = label;
+        if (!choice) option.textContent = t('None');
+        option.addEventListener('click', async event => {
+          event.preventDefault(); event.stopPropagation();
+          if (savingColor) return;
+          if ((project.color ?? null) === choice) return closeColorMenu(true);
+          savingColor = true;
+          color.disabled = true;
+          menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = true; });
+          const updated = await run(api.setProjectColor(id, choice as ProjectColor | null));
+          if (!updated) {
+            savingColor = false; color.disabled = false;
+            menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = false; });
+            return openColorMenu();
+          }
+          ++sessionsLoadGeneration;
+          projects = projects.map(row => row.id === id ? updated : row);
+          paintSessions();
+        });
+        menu.append(option);
+      }
+      menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return closeColorMenu(true); }
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        const options = [...menu.querySelectorAll<HTMLButtonElement>('.project-color-choice:not(:disabled)')];
+        if (!options.length) return;
+        const current = options.indexOf(document.activeElement as HTMLButtonElement);
+        const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+        event.preventDefault(); event.stopPropagation();
+        options[(Math.max(0, current) + delta + options.length) % options.length]?.focus();
+      });
+      colorWrap.addEventListener('focusout', () => queueMicrotask(() => {
+        if (!colorWrap.contains(document.activeElement)) closeColorMenu();
+      }));
+      colorWrap.append(color, menu); heading.append(colorWrap);
       const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
       ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);

@@ -479,6 +479,12 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(getConfig().roots).toHaveLength(1);
   const listed = await handlers.get('projects:list')!(null, {}) as any;
   expect(listed.data).toHaveLength(2);
+  const colored = await handlers.get('projects:color')!(null, { id: first.data.id, color: 'blue' }) as any;
+  expect(colored).toMatchObject({ ok: true, data: { id: first.data.id, color: 'blue' } });
+  expect(await handlers.get('projects:color')!(null, { id: first.data.id, color: 'chartreuse' })).toMatchObject({ ok: false });
+  const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
+  expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
+  expect(uncolored.data.color).toBeUndefined();
   const related = path.join(dir, 'picker-related');
   await fs.mkdir(related);
   vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [related] });
