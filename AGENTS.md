@@ -1063,6 +1063,8 @@ plain names. ChatGPT records a connector's calls under the exact name typed (cal
 - `usage.js` reports every Core-like app from the page's system hints; the content script mentions
   the one with this install's exact name, and none when it is missing or ambiguous.
 - Plugin refresh treats any "Chat On Steroids Plugins (…)" as the Plugins kind for its action limits.
+- Every instruction that names a connector for the user to act on (Setup cards, the Plugins page's
+  setup hint, refresh guide and saved-settings message) uses this install's name, never the plain one.
 - Allowed suffix: up to 32 letters, digits, spaces, `.`, `_`, `-`. The settings save refuses
   anything else; a damaged stored value loads as no suffix. Diagnostics reports leave it out.
 

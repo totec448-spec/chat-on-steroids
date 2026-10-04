@@ -50,8 +50,12 @@ async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notif
   const own = ++epoch; const result = await run(work);
   if (!result) return false;
   if (own === epoch) { snapshot = result; renderInstalled(); }
-  if (notify) toast(t("Plugin settings saved. Refresh the Chat On Steroids Plugins connector in ChatGPT to update its tools."));
+  if (notify) toast(t("Plugin settings saved. Refresh the {0} connector in ChatGPT to update its tools.", [pluginsConnectorName()]));
   return true;
+}
+/** This computer's Plugins connector name, which carries its suffix when one is set. */
+function pluginsConnectorName(): string {
+  return appState?.status.surfaces.find(item => item.id === 'plugins')?.connectorName ?? 'Chat On Steroids Plugins';
 }
 export async function refreshPlugins(): Promise<void> { await mutate(window.api.pluginsSnapshot(), false); }
 export function applyPluginsState(next: AppState): void {
@@ -64,8 +68,9 @@ export function applyPluginsState(next: AppState): void {
   ui($('pluginsSetupTitle'), 'textContent', () => configured ? t("Your Plugins connector") : t("Set up plugins before your first use"));
   ui($('pluginsSetupHint'), 'textContent', () => configured
     ? t("Your enabled plugins share one connector in ChatGPT. Manage its connection here.")
-    : t("Add the Chat On Steroids Plugins connector in ChatGPT once so it can use your installed plugins."));
+    : t("Add the {0} connector in ChatGPT once so it can use your installed plugins.", [pluginsConnectorName()]));
   ui($('pluginsSetupLink'), 'textContent', () => configured ? t("Plugin setup") : t("Set up plugins"));
+  ui($('pluginsRefreshName'), 'textContent', pluginsConnectorName);
   $('pluginsSetupLink').classList.toggle('btn-solid', !configured);
   ui(status, 'textContent', () => surface?.state === 'live'
     ? contacted ? t("Connected to ChatGPT") : t("Connector online · waiting for ChatGPT")
