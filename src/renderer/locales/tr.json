@@ -164,6 +164,7 @@
   "verified link": "doğrulanmış bağlantı",
   "last ChatGPT call": "son ChatGPT çağrısı",
   "Copy": "Kopyala",
+  "Copy file": "Dosyayı kopyala",
   "Connect your workspace to ChatGPT.": "Çalışma alanınızı ChatGPT'ye bağlayın.",
   "Developer mode": "Developer mode (Geliştirici modu)",
   "Show all steps": "Tüm adımları göster",
@@ -1831,5 +1832,12 @@
   "{0} background processes running": "{0} arka plan işlemi çalışıyor",
   "Diagnostics report": "Tanılama raporu",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Sürümleri, ayarları, bağlantı durumunu ve günlüğü kişisel bilgiler çıkarılmış olarak tek bir dosyaya kaydeder; hata bildirimine ekleyebilirsiniz.",
-  "Diagnostics report saved as {0}. Read it before you share it.": "Tanılama raporu {0} olarak kaydedildi. Paylaşmadan önce okuyun."
+  "Diagnostics report saved as {0}. Read it before you share it.": "Tanılama raporu {0} olarak kaydedildi. Paylaşmadan önce okuyun.",
+  "Created": "Oluşturuldu",
+  "Edited": "Düzenlendi",
+  "Diff for {0}": "{0} farkı",
+  "Loading edit…": "Düzenleme yükleniyor…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "Önizleme 600 satırla sınırlıdır. Tam düzenleme için İnceleme bölümünü açın.",
+  "{0} unchanged lines": "{0} değişmeyen satır",
+  "More edited files are available in the recording.": "Kaydı inceleyerek diğer düzenlenen dosyalara ulaşabilirsiniz."
 }
