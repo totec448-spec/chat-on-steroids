@@ -600,20 +600,34 @@ function familyKey(owner: Family): string {
 }
 
 /**
- * How many earlier run ids a family still answers to when its own prime selects it.
+ * Earlier run ids retained by one family.
  *
  * Every wake of a parked family is a new incarnation with a new id, and that id is a fence for
- * browser commands. But the prime was handed the earlier ids itself, in spawn and status results
- * and on every worker report ("[run_id=…]"). On 2.1.24 (#881, #882) a prime answered a report
- * with the id written on it and was told AGENTS_BUSY, "no agent family belongs to this
- * conversation", about its own family. An earlier id only ever selects among families the
- * caller already belongs to; it never reaches another prime's workers and never moves a fence.
+ * browser commands. But two existing contracts need older opaque ids after that fence rotates:
+ * the family's own prime may answer a worker report carrying one of its recent run ids (#881,
+ * #882), and a foreign prime may hold the source_run_id printed on an unacknowledged cross-prime
+ * message. Keep the latter as one stable family reply alias and preserve the historical eight
+ * recent incarnation selectors beside it. Neither kind can select a foreign worker or move the
+ * current browser-command fence.
  */
-const MAX_FORMER_RUN_IDS = 8;
+const MAX_RECENT_FORMER_RUN_IDS = 8;
+const MAX_FORMER_RUN_IDS = MAX_RECENT_FORMER_RUN_IDS + 1;
+
+function boundedFormerRunIds(ids: readonly string[]): string[] {
+  const unique = [...new Set(ids)];
+  if (unique.length <= MAX_FORMER_RUN_IDS) return unique;
+  const stableReplyAddress = unique[0]!;
+  return [stableReplyAddress, ...unique.slice(-MAX_RECENT_FORMER_RUN_IDS)];
+}
 
 /** Whether a caller's run_id names this family, now or in one of its earlier incarnations. */
 function answersTo(owner: Family, runId: string): boolean {
   return familyKey(owner) === runId || Boolean(owner.formerRunIds?.includes(runId));
+}
+
+/** Opaque cross-prime reply address that remains valid while incarnation fences rotate. */
+function familyReplyAddress(owner: Family): string {
+  return owner.formerRunIds?.[0] ?? familyKey(owner);
 }
 
 function allFamilies(): Family[] {
@@ -863,7 +877,7 @@ function reactivateDormantRun(dormant: DormantRun): Run | null {
   prime.info.lastSeenAt = now;
   const run: Run = {
     runId: randomUUID(),
-    formerRunIds: [...(dormant.formerRunIds ?? []), familyKey(dormant)].slice(-MAX_FORMER_RUN_IDS),
+    formerRunIds: boundedFormerRunIds([...(dormant.formerRunIds ?? []), familyKey(dormant)]),
     primeConversationId: dormant.primeConversationId,
     primeRequestId: dormant.primeRequestId,
     // The browser-command fence gets a new incarnation id, but this is still the same prime's
@@ -2141,7 +2155,7 @@ export function stagePrimeMessage(
   }
   assertRoom(targetPrime, 1);
 
-  const sourceRunId = familyKey(source);
+  const sourceRunId = familyReplyAddress(source);
   const canonicalTargetRunId = familyKey(target);
   const message: AgentMessage = {
     ...newMessage(PRIME_ID, PRIME_ID, trimmed),
@@ -4691,12 +4705,17 @@ function snapshotSwarmIncludingUnpublished(): SwarmSnapshot | null {
   return buildSwarmSnapshot(true);
 }
 
-/** Earlier ids from disk: UUIDs only, never the family's own current id, at most the bound. */
+/**
+ * Earlier ids from disk: UUIDs only, never the current id, with one stable plus eight recent.
+ * A legacy snapshot that already discarded an older peer address contains no trustworthy source
+ * family for that opaque UUID, so restore preserves what exists and never reconstructs by guess.
+ */
 function savedFormerRunIds(saved: unknown, current: string): string[] | undefined {
   if (!Array.isArray(saved)) return undefined;
   const ids = saved.filter((id): id is string => typeof id === 'string' && id !== current &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)).slice(-MAX_FORMER_RUN_IDS);
-  return ids.length ? ids : undefined;
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+  const bounded = boundedFormerRunIds(ids);
+  return bounded.length ? bounded : undefined;
 }
 
 function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {

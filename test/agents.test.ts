@@ -4048,6 +4048,49 @@ describe('through the MCP endpoint', () => {
     expect(foreignWorker).toMatch(/destination prime/i);
   });
 
+  it('keeps an unacknowledged cross-prime reply address valid across more than eight source incarnations', async () => {
+    const primeB: Caller = { conversationId: 'mcp-peer-reply-prime-b' };
+    const a = spawn({ caller: prime, workers: [{ task: 'A worker' }] });
+    const b = spawn({ caller: primeB, workers: [{ task: 'B worker' }] });
+    expect(bindConversation('worker-1', 'mcp-peer-reply-worker-a', a.runId)).toBe(true);
+
+    const sent = await asChat(PRIME_CHAT, 'message', {
+      target_run_id: b.runId,
+      text: 'B, hold this reply route while A sleeps'
+    });
+    expect(sent).toContain(`target_run_id=${a.runId}`);
+
+    // B has seen A's source_run_id, but has not made the next authenticated call that ACKs
+    // this result yet. A can legitimately sleep and wake repeatedly in the meantime.
+    const received = await asChat(primeB.conversationId!, 'status');
+    expect(received).toContain(`source_run_id=${a.runId}`);
+    finishAgent({ conversationId: 'mcp-peer-reply-worker-a' }, 'A sleeps');
+    expect(releaseQuiescentRun({}, a.runId)).toBe(true);
+
+    let currentA = a.runId;
+    for (let incarnation = 0; incarnation < 12; incarnation += 1) {
+      expect(reactivateDormantRunForConversation('mcp-peer-reply-worker-a')).toBe(true);
+      const nextA = currentRunId(PRIME_CHAT)!;
+      expect(nextA).not.toBe(currentA);
+      expect(releaseQuiescentRun({}, nextA)).toBe(true);
+      currentA = nextA;
+    }
+    const parkedA = snapshotSwarm()!.dormantRuns!.find(run => run.primeConversationId === PRIME_CHAT)!;
+    expect(parkedA.formerRunIds).toHaveLength(9);
+    expect(parkedA.formerRunIds?.[0]).toBe(a.runId);
+
+    // This is B's next authenticated call, so the kernel ACKs the previously offered row before
+    // dispatching the reply. The source_run_id printed in that row must still be a valid address.
+    const reply = await asChat(primeB.conversationId!, 'message', {
+      target_run_id: a.runId,
+      text: 'A, the delayed peer reply still routes'
+    });
+    expect(reply).toContain('Queued for prime family');
+
+    const returned = await asChat(PRIME_CHAT, 'status');
+    expect(returned).toContain('A, the delayed peer reply still routes');
+  });
+
   it('carries the run and every agent in machine-readable form beside the prose', async () => {
     startSwarm(1);
     bindConversation('worker-1', 'c-worker-1');
@@ -4305,6 +4348,50 @@ describe('simultaneous independent prime families', () => {
     ]);
     expect(statusForCaller(prime).state.agents.map(agent => agent.runId)).toEqual([a.runId, a.runId]);
     expect(statusForCaller(primeB).state.agents.map(agent => agent.runId)).toEqual([b.runId, b.runId]);
+  });
+
+  it('keeps the peer reply alias bounded and restorable after more than eight source incarnations', () => {
+    const a = recruit(prime, 1), b = recruit(primeB, 1);
+    expect(bindConversation('worker-1', 'parallel-peer-reply-worker-a', a.runId)).toBe(true);
+    const staged = stagePrimeMessage({ ...prime, runId: a.runId }, b.runId, 'B keeps A reply address');
+    expect(staged.commit()).toBe(true);
+    expect(offerMessagesForConversation(primeB.conversationId)?.messages).toEqual([
+      expect.objectContaining({ fromRunId: a.runId, text: 'B keeps A reply address' })
+    ]);
+
+    finishAgent({ conversationId: 'parallel-peer-reply-worker-a' }, 'A sleeps');
+    expect(releaseQuiescentRun({}, a.runId)).toBe(true);
+    for (let incarnation = 0; incarnation < 12; incarnation += 1) {
+      expect(reactivateDormantRunForConversation('parallel-peer-reply-worker-a')).toBe(true);
+      const nextA = currentRunId(PRIME_CHAT)!;
+      expect(releaseQuiescentRun({}, nextA)).toBe(true);
+    }
+
+    const laterMessage = stagePrimeMessage(
+      { ...prime, runId: a.runId },
+      b.runId,
+      'A still publishes the same peer reply address'
+    );
+    expect(laterMessage.sourceRunId).toBe(a.runId);
+    laterMessage.rollback();
+
+    const beforeRestart = snapshotSwarm()!;
+    const parkedBefore = beforeRestart.dormantRuns!.find(run => run.primeConversationId === PRIME_CHAT)!;
+    expect(parkedBefore.formerRunIds).toHaveLength(9);
+    expect(parkedBefore.formerRunIds?.[0]).toBe(a.runId);
+
+    resetAgentsForTests();
+    restoreSwarm(JSON.parse(JSON.stringify(beforeRestart)));
+    const parkedAfter = snapshotSwarm()!.dormantRuns!.find(run => run.primeConversationId === PRIME_CHAT)!;
+    expect(parkedAfter.formerRunIds).toHaveLength(9);
+    expect(parkedAfter.formerRunIds?.[0]).toBe(a.runId);
+
+    const reply = stagePrimeMessage({ ...primeB, runId: b.runId }, a.runId, 'A receives reply after restore');
+    expect(reply.targetRunId).toBe(parkedAfter.agents.find(agent => agent.info.id === PRIME_ID)!.info.runId);
+    expect(reply.commit()).toBe(true);
+    expect(offerMessagesForConversation(PRIME_CHAT)?.messages.map(message => message.text)).toContain(
+      'A receives reply after restore'
+    );
   });
 
   it('keeps a cross-prime row unpublished until its critical snapshot is durable', async () => {
