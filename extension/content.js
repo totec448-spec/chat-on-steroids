@@ -914,15 +914,25 @@
         .map(entry => ({ name: entry.name, path: valid(entry.path) }))
       // An observer from before suffixes names only the plain Core.
       : event.data.name === 'Chat On Steroids Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
-    // The same list is the app's proof that this install's plugin exists in this account, so Setup
-    // can call it done without a test message. Told once per app id: the list comes again on every load.
-    const mine = currentCoreMention();
-    if (mine && mine.path !== reportedCorePlugin) {
-      reportedCorePlugin = mine.path;
-      void ask({ type: 'core_plugin', appId: mine.path.slice('app://'.length) }).catch(() => { reportedCorePlugin = null; });
-    }
+    corePluginList = event.data.pluginList === true;
+    reportCorePlugin();
   });
+  // The same list is the app's proof that this install's plugin exists in this account, so Setup
+  // can call it done without a test message. Told once per state: the list comes again on every
+  // load. Also asked once the app's names arrive, which can be after the list (checkStatus).
+  // The complete plugins list without this install's Core takes that proof back, but only once the
+  // names are known: until then a suffixed Core would look missing.
   let reportedCorePlugin = null;
+  let corePluginList = false;
+  let ownNamesKnown = false;
+  function reportCorePlugin() {
+    const core = currentCoreMention();
+    const report = core ? core.path : corePluginList && ownNamesKnown && !coreCandidates.some(entry => entry.name === CLF_DOM.connectorNames()[0]) ? 'missing' : null;
+    if (!report || report === reportedCorePlugin) return;
+    reportedCorePlugin = report;
+    const message = report === 'missing' ? { type: 'core_plugin', missing: true } : { type: 'core_plugin', appId: report.slice('app://'.length) };
+    void ask(message).catch(() => { reportedCorePlugin = null; });
+  }
   /** This install's Core app as the page lists it, or null when it is missing or ambiguous. */
   function currentCoreMention() {
     const own = CLF_DOM.connectorNames()[0];
@@ -10786,7 +10796,7 @@
 
   async function checkStatus() {
     const reply = await ask({ type: 'status' });
-    if (reply?.connectorNames) CLF_DOM.setConnectorNames(reply.connectorNames);
+    if (reply?.connectorNames && CLF_DOM.setConnectorNames(reply.connectorNames)) { ownNamesKnown = true; reportCorePlugin(); }
     if (reply) {
       status = {
         connected: reply.connected === true,

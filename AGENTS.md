@@ -3544,7 +3544,11 @@ Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
 Chat On Steroids Core; POST `/core-plugin` with its `asdk_app_` id). `SurfaceStatus.proof`
-carries it; cloudflared/manual tunnels change address per run and keep none.
+carries it; cloudflared/manual tunnels change address per run and keep none. The OpenAI
+tunnel keeps it across restarts because ChatGPT's plugin names the tunnel id, not a URL: each
+run hands tunnel-client its own local URL, per-start token included. ChatGPT's complete plugins
+list (`mode=plugins`) without this install's Core takes the proof back (POST `/core-plugin`
+`{ missing: true }`); other lists without Core say nothing.
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
 waking browser work; ordinary status polling and a closed helper do not grant another attempt.
