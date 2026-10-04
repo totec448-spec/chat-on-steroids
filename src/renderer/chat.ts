@@ -184,6 +184,7 @@ function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
 function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+let inlineAgents: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
@@ -940,7 +941,9 @@ function paintSessions(): void {
   chatList.replaceChildren(...rows);
   if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
-  agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
+  const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
+  agentPanel?.update(selectedId, workers);
+  inlineAgents?.update(selectedId, workers);
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
   workspaceDocks?.sync();
@@ -5378,27 +5381,31 @@ export function initChat(next: Deps): void {
   const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
   const docks = createWorkspaceDocks(chatHost);
   workspaceDocks = docks;
-  const agentToolGroups = new Map<string, HTMLDetailsElement>();
-  agentPanel = createAgentPanel({
-    host: chatHost, mount: docks.body,
-    onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
-    onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
-    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
-    agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
-      !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
-    render: (source, id, current) => {
-      let boundary = '';
-      const rows = foldAgentCommunication(source).flatMap(event => {
-        if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
-        if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
-        const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
-        tagImageRow(row, event);
-        row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
-        body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
-      });
-      return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
-    }
-  });
+  const makeAgentPanel = (mount: HTMLElement, inline = false) => {
+    const agentToolGroups = new Map<string, HTMLDetailsElement>();
+    return createAgentPanel({
+      host: chatHost, mount, inline,
+      onShow: inline ? undefined : () => { filePanel?.hide(); docks.adopt('agents'); },
+      onEscape: inline ? () => $<HTMLTextAreaElement>('chatInput').focus() : () => { docks.setOpen(false); docks.rightToggle.focus(); },
+      load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+      agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
+        !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
+      render: (source, id, current) => {
+        let boundary = '';
+        const rows = foldAgentCommunication(source).flatMap(event => {
+          if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
+          if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
+          const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
+          tagImageRow(row, event);
+          row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
+          body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
+        });
+        return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
+      }
+    });
+  };
+  agentPanel = makeAgentPanel(docks.body);
+  inlineAgents = makeAgentPanel($('inlineAgents'), true);
   initChatModels(() => {
     paintLoopDelivery();
     const config = deps.state()?.config;

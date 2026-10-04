@@ -2,13 +2,14 @@ import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
-import { compactNumber, el, icon } from './dom.js';
+import { compactNumber, disclosureChevron, el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 
 /** A read-only second pane. Its selection never changes the main chat's composer. */
 export function createAgentPanel(options: {
   host: HTMLElement;
   mount?: HTMLElement;
+  inline?: boolean;
   toggle?: HTMLButtonElement;
   onShow?: () => void;
   onEscape?: () => void;
@@ -18,9 +19,16 @@ export function createAgentPanel(options: {
   working: (summary: SessionSummary) => boolean;
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
 }) {
-  const pane = el('aside', 'agent-panel'); pane.hidden = true;
+  const pane = el(options.inline ? 'details' : 'aside', options.inline ? 'agent-panel inline-agent-panel' : 'agent-panel'); pane.hidden = true;
+  const disclosure = options.inline ? pane as HTMLDetailsElement : null;
+  const caption = el('span');
+  if (disclosure) {
+    const summary = el('summary', 'inline-agent-summary');
+    summary.append(icon('i-agents'), caption, disclosureChevron('inline-agent-chevron'));
+    disclosure.append(summary);
+  }
   ui(pane, 'aria-label', () => t("Sub-agents"));
-  if (!options.mount) attachWorkPanelResize(options.host, pane);
+  if (!options.mount && !options.inline) attachWorkPanelResize(options.host, pane);
   const head = el('div', 'agent-panel-header'); head.hidden = true;
   const back = el('button', 'btn btn-icon agent-back'); back.append(icon('i-back'));
   ui(back, 'title', () => t("Back to sub-agents")); back.setAttribute('type', 'button');
@@ -31,13 +39,16 @@ export function createAgentPanel(options: {
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
   let generation = 0;
   function hide(): void {
-    generation++; pane.hidden = true; selected = null;
+    generation++; selected = null;
+    if (disclosure) { disclosure.open = false; pane.hidden = parent === null || workers.length === 0; }
+    else pane.hidden = true;
     if (!options.mount) options.host.classList.remove('has-agent-panel');
     options.toggle?.setAttribute('aria-expanded', 'false');
   }
   function show(): void {
     options.onShow?.();
     pane.hidden = false;
+    if (disclosure) disclosure.open = true;
     if (!options.mount) options.host.classList.add('has-agent-panel');
     options.toggle?.setAttribute('aria-expanded', 'true');
   }
@@ -113,7 +124,7 @@ export function createAgentPanel(options: {
     show(); selected = id; const request = ++generation;
     head.hidden = false; title.textContent = worker.title;
     if (!preserve) body.replaceChildren(el('p', 'meta', () => t("Loading conversation…")));
-    const current = () => request === generation && selected === id && !pane.hidden;
+    const current = () => request === generation && selected === id && !pane.hidden && (!disclosure || disclosure.open);
     const detail = await options.load(id);
     if (!current()) return;
     if (!detail) { body.replaceChildren(el('p', 'meta', () => t("Conversation unavailable"))); return; }
@@ -124,6 +135,10 @@ export function createAgentPanel(options: {
     body.replaceChildren(openMain, ...options.render(detail.events, id, current));
     body.scrollTop = follow ? body.scrollHeight : position;
   }
+  if (disclosure) disclosure.addEventListener('toggle', () => {
+    if (disclosure.open) { if (!selected) list(); }
+    else { generation++; selected = null; head.hidden = true; body.replaceChildren(); }
+  });
   back.onclick = list;
   pane.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
@@ -139,6 +154,12 @@ export function createAgentPanel(options: {
       if (parent !== id) { hide(); parent = id; }
       const previous = workers.find(worker => worker.id === selected);
       workers = next;
+      if (disclosure) {
+        pane.hidden = id === null || workers.length === 0;
+        ui(caption, 'textContent', () => `${t('Sub-agents')} · ${workers.length}`);
+        if (pane.hidden) { hide(); return; }
+        if (!disclosure.open) return;
+      }
       if (options.toggle) {
         options.toggle.hidden = id === null;
         ui(options.toggle, 'title', () => t("Sub-agents · {0} recorded", [workers.length]));

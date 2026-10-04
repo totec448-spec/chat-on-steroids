@@ -3861,3 +3861,15 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   [data-panel='chat'].has-work-dock { grid-template-columns: 0 minmax(0, 1fr); }
   .has-work-dock > .is-session { display: none; }
 }
+
+/* Same worker projections as the dock, disclosed within the prime timeline. */
+#inlineAgents { margin-top: 12px; }
+#inlineAgents:has(> [hidden]) { display: none; }
+.inline-agent-panel { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.inline-agent-summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; list-style: none; }
+.inline-agent-summary::-webkit-details-marker { display: none; }
+.inline-agent-summary > span { flex: 1; }
+.inline-agent-chevron { width: 14px; height: 14px; }
+.inline-agent-panel[open] > summary .inline-agent-chevron { transform: rotate(90deg); }
+.inline-agent-panel .agent-panel-body { max-height: 480px; }
+.inline-agent-panel .agent-panel-header { padding-block: 8px; }

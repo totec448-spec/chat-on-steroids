@@ -3363,6 +3363,12 @@ event-time order when late attribution repairs append older calls, so the overvi
 every worker transcript just to paint one line. These fields are read-only telemetry; lifecycle,
 scheduling, messaging and execution authority remain with the existing broker/tool owners.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
+A collapsed Sub-agents card below the selected prime's timeline projects the same exact-family
+worker summaries as the existing overview. It reuses createAgentPanel with an independent reading
+selection and preserves the sidebar and right dock. Collapsed cards do not fetch worker history.
+Collapse, parent navigation and loss of worker membership retire pending loads, including a return
+to the same id; opening worker history leaves the prime composer selected.
+
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
 Files uses one action toolbar with Refresh; its tab close hides the panel. Its shared
