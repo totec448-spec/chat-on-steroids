@@ -576,10 +576,14 @@ function withInbox(
   const messages = scoped?.messages ?? [];
   if (messages.length === 0) return result;
   const lines = messages
-    .map(
-      (message) =>
-        `• ${message.from}${message.runId ? ` [run_id=${message.runId}]` : ''}${message.offers > 1 ? ' (delivery retry)' : ''}: ${message.text}`
-    )
+    .map((message) => {
+      const route = message.fromRunId
+        ? ` [source_run_id=${message.fromRunId}]${message.runId ? ` [received_on_run_id=${message.runId}]` : ''}`
+        : message.runId
+          ? ` [run_id=${message.runId}]`
+          : '';
+      return `• ${message.from}${route}${message.offers > 1 ? ' (delivery retry)' : ''}: ${message.text}`;
+    })
     .join('\n');
   return {
     ...result,
