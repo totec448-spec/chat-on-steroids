@@ -140,16 +140,28 @@ app.whenReady().then(async () => {
     assert.equal(geometry.color,'rgb(255, 255, 255)'); assert.equal(geometry.icon,'ph-pencil-simple');
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     await new Promise(r=>setTimeout(r,200));
+    await js(`(() => {
+      window.nativeDragTrace=[];
+      for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture']) document.addEventListener(type,event=>{
+        if(window.nativeDragTrace.length<10)window.nativeDragTrace.push({type,button:event.button,buttons:event.buttons,primary:event.isPrimary,trusted:event.isTrusted,id:event.target.closest?.('[data-sort-scope]')?.dataset.id,x:event.clientX,y:event.clientY});
+      },true);
+    })()`);
+    const dragFocus={window:win.isFocused(),contents:win.webContents.isFocused(),visible:win.isVisible(),document:await js('document.hasFocus()')};
     const points=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>{const r=row.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...points[0]});
     await new Promise(r=>setTimeout(r,25));
-    win.webContents.sendInputEvent({type:'mouseMove',...points[2],y:points[2].y+12});
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],...points[2],y:points[2].y+12});
     await new Promise(r=>setTimeout(r,40));
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...points[2],y:points[2].y+12});
     await new Promise(r=>setTimeout(r,40));
+    const dragTrace=await js('window.nativeDragTrace');
+    assert.ok(dragTrace.some(event=>event.type==='pointerdown' && event.buttons===1 && event.id==='task-0' && event.trusted),
+      'Native drag must press the first row: '+JSON.stringify({dragTrace,dragFocus}));
+    assert.ok(dragTrace.some(event=>event.type==='pointermove' && event.buttons===1 && event.trusted),
+      'Native drag must keep its button pressed while moving: '+JSON.stringify({dragTrace,dragFocus}));
     const moved=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>row.dataset.id)`);
     assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4'],
-      'Native chat drag: '+JSON.stringify({moved,points,geometry}));
+      'Native chat drag: '+JSON.stringify({moved,points,dragTrace,dragFocus}));
     assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
     await new Promise(r=>setTimeout(r,200));
     await screenshot('sidebar.png');
@@ -297,7 +309,7 @@ app.whenReady().then(async () => {
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     const projectPoints = await js(`[...document.querySelectorAll('.project-heading')].map(heading=>{const r=heading.getBoundingClientRect();return {x:Math.round(r.left+35),y:Math.round(r.top+r.height/2)}})`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...projectPoints[1]});
-    win.webContents.sendInputEvent({type:'mouseMove',...projectPoints[0],y:projectPoints[0].y-8});
+    win.webContents.sendInputEvent({type:'mouseMove',modifiers:['leftbuttondown'],...projectPoints[0],y:projectPoints[0].y-8});
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...projectPoints[0],y:projectPoints[0].y-8});
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     const projectOrder = `[...document.querySelectorAll('.project-group')].map(group=>group.dataset.projectId)`;
