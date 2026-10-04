@@ -1596,6 +1596,65 @@ it('picks and clears project color without changing project membership', async (
   expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
 });
 
+it.each([[false, true], [true, true], [true, false]])('preserves the keyboard color-save focus owner (focus moved: %s, focusin: %s)', async (moved, propagates) => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  let finish!: (value: unknown) => void;
+  (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  color.focus(); color.click(); await settle();
+  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  blue.focus(); blue.click();
+  const other = w.document.createElement('button'); other.textContent = 'Other control'; w.document.body.append(other);
+  if (moved) {
+    // An inactive Electron document can update activeElement without delivering focusin.
+    // Suppress that notification only; the real DOM still owns the current focused element.
+    if (!propagates) w.document.addEventListener('focusin', event => event.stopImmediatePropagation(), { capture: true, once: true });
+    other.focus();
+  }
+  finish({ ok: true, data: { ...project, color: 'blue' } }); await settle();
+  const currentColor = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  expect(currentColor.dataset.color).toBe('blue');
+  expect(w.document.activeElement === (moved ? other : currentColor)).toBe(true);
+});
+
+it.each([false, true])('a rejected color-save preserves the current focus owner (focus moved: %s)', async moved => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  let finish!: (value: unknown) => void;
+  (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  color.focus(); color.click(); await settle();
+  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  blue.focus(); blue.click();
+  const other = w.document.getElementById('chatInput')!;
+  if (moved) other.focus();
+  finish({ ok: false, error: 'Synthetic save refusal' }); await settle();
+  expect(color.disabled).toBe(false);
+  expect(color.dataset.color).toBe('');
+  const selected = w.document.querySelector('[data-project-color-choice=""]');
+  expect(w.document.activeElement === (moved ? other : selected)).toBe(true);
+});
+
+it.each([false, true])('does not restore an old color-save focus after selecting another chat and returning (rejected: %s)', async rejected => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const a = { ...summary([]), id: 'color-chat-a', projectId: project.id };
+  const b = { ...summary([]), id: 'color-chat-b', projectId: project.id };
+  const { w } = await boot([], true, [], [project], { sessions: [a, b] });
+  let finish!: (value: unknown) => void;
+  (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  color.focus(); color.click(); await settle();
+  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  blue.focus(); blue.click();
+  w.document.querySelector<HTMLElement>('[data-id="color-chat-b"] [data-session-select]')!.click(); await settle();
+  w.document.querySelector<HTMLElement>('[data-id="color-chat-a"] [data-session-select]')!.click(); await settle();
+  const focused = w.document.activeElement;
+  finish(rejected ? { ok: false, error: 'Synthetic save refusal' } : { ok: true, data: { ...project, color: 'blue' } }); await settle();
+  expect(w.document.querySelector<HTMLButtonElement>('.project-color')!.dataset.color).toBe(rejected ? '' : 'blue');
+  expect(w.document.activeElement === focused).toBe(true);
+});
+
 it('names project colors in the interface language and keeps focus on the color button after a pick', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
