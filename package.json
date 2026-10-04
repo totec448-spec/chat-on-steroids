@@ -82,6 +82,7 @@
     "@types/jsdom": "^30.0.0",
     "@types/node": "^24.19.0",
     "@types/ws": "8.18.1",
+    "axe-core": "4.13.0",
     "electron": "44.3.0",
     "electron-builder": "^26.17.0",
     "electron-vite": "^5.0.0",
