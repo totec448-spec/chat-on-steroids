@@ -1,4 +1,5 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { setMainTextTranslations } from './main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
@@ -155,6 +156,10 @@ const capabilityPatch = z.object(
 );
 
 const settingsPatch = z.object({
+  // This computer's connector name suffix; see shared/connector-names.ts. Spaces are collapsed.
+  connectorSuffix: z.string().max(64).transform(value => value.trim().replace(/\s+/g, ' '))
+    .refine(value => value.length <= CONNECTOR_SUFFIX_MAX && CONNECTOR_SUFFIX_PATTERN.test(value),
+      'Use up to 32 letters, digits, spaces, dots, dashes or underscores').optional(),
   capabilities: capabilityPatch,
   readOnly: z.boolean(),
   commandAllowlist: z.object({
@@ -320,6 +325,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     controlApi = { enabled, allowActions: enabled && allowActions === true };
   }
   return {
+    ...(wanted.connectorSuffix === undefined ? {} : {
+      connectorSuffix: pick(current.connectorSuffix ?? '', base.connectorSuffix ?? '', wanted.connectorSuffix)
+    }),
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions) } : current.mcp,
     controlApi,
     capabilities,

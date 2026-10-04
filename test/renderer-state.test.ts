@@ -2158,3 +2158,41 @@ it.each(['.project-color', '.project-new'])('keeps keyboard focus on a project r
   expect(control()).not.toBe(before); // the repaint really replaced the row
   expect(doc.activeElement).toBe(control());
 });
+
+it('saves this computer\'s connector name, and keeps the saved one while the typed one is invalid', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window, doc = w.document;
+  const field = doc.getElementById('connectorSuffix') as HTMLInputElement;
+  const error = doc.getElementById('connectorSuffixError')!;
+  const details = doc.getElementById('connectorSuffixField') as HTMLDetailsElement;
+  expect(field.value).toBe('');
+  expect(details.open).toBe(false);
+  expect(error.hidden).toBe(true);
+
+  field.value = '  Windows   VM ';
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.connectorSuffix).toBe('Windows VM'));
+
+  // An invalid name says why at once, and a save it rides in keeps the saved name.
+  field.value = 'Win/VM';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  expect(error.hidden).toBe(false);
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  const saves = mounted.calls.length;
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.length).toBe(saves + 1));
+  expect(mounted.calls.at(-1)?.connectorSuffix).toBe('Windows VM');
+  field.value = 'Mac';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  expect(error.hidden).toBe(true);
+  expect(field.getAttribute('aria-invalid')).toBe('false');
+});
+
+it('shows a computer name set elsewhere and opens its section, so the suffixed card names are explained', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, connectorSuffix: 'Windows' } });
+  await settle();
+  expect((doc.getElementById('connectorSuffix') as HTMLInputElement).value).toBe('Windows');
+  expect((doc.getElementById('connectorSuffixField') as HTMLDetailsElement).open).toBe(true);
+});
