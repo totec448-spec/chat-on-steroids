@@ -39,6 +39,7 @@ const bridgeModule = await import('../src/main/bridge.js');
 const inputModule = await import('../src/main/session/input.js');
 const readModelModule = await import('../src/main/session/read-model.js');
 const reads = await import('../src/main/control-reads.js');
+const agentsModule = await import('../src/main/agents.js');
 
 let dir: string;
 let port = 0;
@@ -740,7 +741,59 @@ describe('delivery proof', () => {
 
 describe('agents', () => {
   it('serves the swarm as the broker holds it', async () => {
-    expect((await call('/v1/agents')).body).toEqual({ enabled: expect.any(Boolean), running: false, agents: [] });
+    expect((await call('/v1/agents')).body).toEqual({
+      enabled: expect.any(Boolean),
+      running: false,
+      retainedHistory: false,
+      agents: []
+    });
+  });
+
+  it('reports broker-retained history without publishing dormant family identities', async () => {
+    agentsModule.resetAgentsForTests();
+    agentsModule.onSpawnRequest(() => undefined);
+    try {
+      const first = agentsModule.spawn({
+        caller: { conversationId: 'control-prime-a' },
+        workers: [{ task: 'park this worker' }]
+      });
+      expect(agentsModule.bindConversation('worker-1', 'control-worker-a', first.runId)).toBe(true);
+      expect((await call('/v1/agents')).body).toMatchObject({
+        running: true,
+        retainedHistory: false
+      });
+
+      agentsModule.finishAgent({ conversationId: 'control-worker-a' }, 'done for now');
+      expect(agentsModule.releaseQuiescentRun({}, first.runId)).toBe(true);
+      expect(agentsModule.swarmState()).toMatchObject({
+        running: false,
+        retainedHistory: true,
+        agents: []
+      });
+      expect((await call('/v1/agents')).body).toEqual({
+        enabled: true,
+        running: false,
+        retainedHistory: true,
+        agents: []
+      });
+
+      const second = agentsModule.spawn({
+        caller: { conversationId: 'control-prime-b' },
+        workers: [{ task: 'keep this worker active' }]
+      });
+      expect(agentsModule.bindConversation('worker-1', 'control-worker-b', second.runId)).toBe(true);
+      const activeAndParked = (await call('/v1/agents')).body;
+      expect(activeAndParked).toMatchObject({
+        enabled: true,
+        running: true,
+        retainedHistory: true
+      });
+      expect(activeAndParked.agents).not.toHaveLength(0);
+      expect(JSON.stringify(activeAndParked)).not.toContain('control-prime-a');
+      expect(JSON.stringify(activeAndParked)).not.toContain('control-worker-a');
+    } finally {
+      agentsModule.resetAgentsForTests();
+    }
   });
 
   it('publishes an agent without its recovery bookkeeping', () => {

@@ -1,7 +1,8 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { normalizeEnvironment, pathEntries, setEnvValue } from './env.js';
+import { pathEntries, setEnvValue } from './env.js';
+import { childEnv } from './exec.js';
 import type { CodexPluginRuntimeEntry, CodexPluginSource } from '../shared/skills.js';
 
 const MAX_RUNTIME_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -130,7 +131,9 @@ export function locateCodexRuntime(): RuntimeCommand | null {
 export async function listInstalledCodexPlugins(codexHome: string, cwd: string): Promise<CodexPluginRuntimeEntry[]> {
   const command = locateCodexRuntime();
   if (!command) throw new Error('Codex CLI was not found on the inherited PATH');
-  const environment = normalizeEnvironment();
+  // Whatever `codex` comes first on PATH runs here, so it gets the same environment as any child
+  // process: without the connector, tunnel and control-plane secrets (see exec.ts SECRET_ENV_KEYS).
+  const environment: Record<string, string | undefined> = { ...childEnv() };
   setEnvValue(environment, 'CODEX_HOME', codexHome);
   if (command.runAsNode) setEnvValue(environment, 'ELECTRON_RUN_AS_NODE', '1');
   return new Promise((resolve, reject) => {

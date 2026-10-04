@@ -30,3 +30,13 @@ export function setMainTextTranslations(texts: Readonly<Record<string, string>>)
     try { listener(); } catch { /* One surface cannot keep the others in the old language. */ }
   }
 }
+
+/** The current set, saved so a launch to the tray, which opens no window, starts in the last language. */
+export function mainTextTranslations(): Record<string, string> {
+  return Object.fromEntries(translations);
+}
+
+/** Takes a saved set back at startup. A missing or damaged one leaves the texts as written. */
+export function restoreMainTextTranslations(saved: unknown): void {
+  if (saved && typeof saved === 'object' && !Array.isArray(saved)) setMainTextTranslations(saved as Record<string, string>);
+}

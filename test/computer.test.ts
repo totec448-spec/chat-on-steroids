@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { makeTempDir, removeTempDir } from './helpers.js';
 import {
   act,
   actAndCapture,
@@ -13,17 +20,54 @@ import {
 import { IS_WINDOWS } from './helpers.js';
 
 describe.runIf(IS_WINDOWS)('desktop helper', () => {
-  // A hosted runner can have no visible desktop window at all, and getWindowState is right
-  // to answer that with WINDOW_NOT_FOUND — that is the production semantic, not a bug to
-  // work around here. The tests below are about what a window state *says* once there is a
-  // window, so they find one first and skip when the desktop has none, the way the window
-  // tests above already do. Naming the window also removes a race the foreground introduces:
-  // between probing and asking, whatever happened to be in front may no longer be.
+  let fixture: ChildProcessWithoutNullStreams | undefined;
+  let fixtureRoot = '';
+  let fixtureWindows: number[] = [];
+  beforeAll(async () => {
+    fixtureRoot = await makeTempDir('cos-owned-desktop-');
+    const env: NodeJS.ProcessEnv = { ...process.env, COS_DESKTOP_FIXTURE_DIR: fixtureRoot };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const electron = createRequire(import.meta.url)('electron') as string;
+    fixture = spawn(electron, [fileURLToPath(new URL('./fixtures/desktop-capture-window.cjs', import.meta.url))],
+      { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    fixtureWindows = await new Promise<number[]>((resolve, reject) => {
+      let output = '', errors = '';
+      const timeout = setTimeout(() => reject(new Error('Owned Desktop fixture did not become ready: ' + errors)), 25_000);
+      fixture!.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-2_000); });
+      fixture!.stdout.on('data', chunk => {
+        output = (output + String(chunk)).slice(-8_000);
+        const match = /COS_DESKTOP_FIXTURE:(\[[^\r\n]*\])/.exec(output);
+        if (!match) return;
+        clearTimeout(timeout);
+        try {
+          const ids = JSON.parse(match[1]!) as unknown;
+          if (!Array.isArray(ids) || ids.length !== 2 || !ids.every(id => Number.isSafeInteger(id) && id > 0)) {
+            throw new Error('Invalid owned Desktop fixture handles');
+          }
+          resolve(ids);
+        } catch (error) { reject(error); }
+      });
+      fixture!.once('error', error => { clearTimeout(timeout); reject(error); });
+      fixture!.once('exit', code => { clearTimeout(timeout); reject(new Error(`Owned Desktop fixture exited ${code}: ${errors}`)); });
+    });
+  });
+  afterAll(async () => {
+    if (fixture && fixture.exitCode === null) {
+      const closed = new Promise<void>(resolve => {
+        const timeout = setTimeout(() => { fixture!.kill(); }, 5_000);
+        fixture!.once('close', () => { clearTimeout(timeout); resolve(); });
+      });
+      await fs.writeFile(path.join(fixtureRoot, 'close'), '');
+      await closed;
+    }
+    if (fixtureRoot) await removeTempDir(fixtureRoot);
+  });
+
+  // Test the owned fixture, not whichever personal/maximized/transitioning window happens
+  // to head the OS list. Stable capture and UIA contracts must not depend on a user's desktop.
   const visibleWindow = async (): Promise<number | null> => {
-    const active = (await activeWindow()).window;
-    if (active) return active.id;
-    const { windows } = await listWindows();
-    return windows.find((w) => w.state !== 'minimized')?.id ?? null;
+    if (!fixtureWindows[0]) throw new Error('Owned Desktop fixture has no window');
+    return fixtureWindows[0];
   };
 
   it('starts once and serves repeated window queries', async () => {
@@ -57,10 +101,7 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     await expect(screenshot({ window: 999_999_999, maxWidth: 320 })).rejects.toThrow(
       /WINDOW_NOT_FOUND: window 999999999 is no longer open/
     );
-    const { windows } = await listWindows();
-    const background = windows.find((w) => w.state !== 'minimized');
-    if (!background) return;
-    const shot = await screenshot({ window: background.id, maxWidth: 320 });
+    const shot = await screenshot({ window: fixtureWindows[0]!, maxWidth: 320 });
     expect(shot.width).toBeGreaterThan(0);
     expect(typeof shot.focused).toBe('boolean');
   });
@@ -68,13 +109,57 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
   it('does not move foreground focus while observing a background window', async () => {
     const before = (await activeWindow()).window;
     if (!before) return;
-    const { windows } = await listWindows();
-    const background = windows.find((window) => window.id !== before.id && window.state !== 'minimized');
-    if (!background) return;
-
-    const shot = await screenshot({ window: background.id, maxWidth: 320 });
-    expect(['window', 'screen_fallback']).toContain(shot.captureMode);
+    const background = fixtureWindows.find(id => id !== before.id)!;
+    const shot = await screenshot({ window: background, maxWidth: 320 });
+    expect(shot.captureMode).toBe('window');
     expect((await activeWindow()).window?.id).toBe(before.id);
+  });
+
+  it.each([0, 1])('aligns actual PNG pixels with independent UIA bounds at both corners of owned window %i', async index => {
+    const state = await getWindowState({ window: fixtureWindows[index]!, includeScreenshot: true, maxWidth: 2560, maxElements: 30 });
+    const shot = state.screenshot!;
+    expect(shot).not.toBeNull();
+    expect(shot.captureMode).toBe('window');
+    expect(shot.width).toBe(shot.region.width);
+    expect(shot.height).toBe(shot.region.height);
+    const points: Array<{ x: number; y: number; r: number; g: number; b: number }> = [];
+    for (const [name, color] of [
+      ['Fixture origin red', [240, 30, 50]], ['Fixture corner green', [20, 180, 70]]
+    ] as const) {
+      const marker = state.elements.find(element => element.name === name && element.role === 'Button');
+      expect(marker, `UIA must expose the owned marker ${name}`).toBeDefined();
+      const bounds = marker!.bounds;
+      for (const [x, y] of [
+        [bounds.x + 2, bounds.y + 2],
+        [bounds.x + bounds.width - 3, bounds.y + 2],
+        [bounds.x + 2, bounds.y + bounds.height - 3],
+        [bounds.x + bounds.width - 3, bounds.y + bounds.height - 3]
+      ]) points.push({ x: Math.round(x! - shot.region.x), y: Math.round(y! - shot.region.y), r: color[0], g: color[1], b: color[2] });
+    }
+    const picture = path.join(fixtureRoot, 'owned-pixels.png');
+    const samples = path.join(fixtureRoot, 'owned-points.json');
+    const probe = path.join(fixtureRoot, 'owned-pixels.ps1');
+    await fs.writeFile(picture, Buffer.from(shot.data, 'base64'));
+    await fs.writeFile(samples, JSON.stringify(points));
+    await fs.writeFile(probe, `param([string]$Picture,[string]$Points)
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.Drawing
+$bitmap=[System.Drawing.Bitmap]::FromFile($Picture)
+try {
+  $result=@(foreach($point in (Get-Content -LiteralPath $Points -Raw | ConvertFrom-Json)) {
+    $pixel=$bitmap.GetPixel($point.x,$point.y)
+    @{r=$pixel.R;g=$pixel.G;b=$pixel.B}
+  })
+  ConvertTo-Json -InputObject $result -Compress
+} finally { $bitmap.Dispose() }
+`);
+    const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', probe, picture, samples],
+      { windowsHide: true, timeout: 15_000, maxBuffer: 8_192 });
+    const colors = JSON.parse(stdout.trim()) as Array<{ r: number; g: number; b: number }>;
+    expect(colors).toHaveLength(points.length);
+    colors.forEach((color, index) => {
+      for (const channel of ['r', 'g', 'b'] as const) expect(Math.abs(color[channel] - points[index]![channel])).toBeLessThanOrEqual(1);
+    });
   });
 
   it('crops using coordinates from the most recent returned frame', async () => {
@@ -97,7 +182,7 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
   });
 
   it('queries Windows UI Automation without requiring a screenshot', async () => {
-    const result = await findUi({ role: 'Button', maxResults: 5 });
+    const result = await findUi({ window: fixtureWindows[0]!, role: 'Button', maxResults: 5 });
     expect(result.window).toBeGreaterThan(0);
     expect(Array.isArray(result.elements)).toBe(true);
     expect(result.elements.length).toBeLessThanOrEqual(5);

@@ -152,6 +152,10 @@ const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
+/** A project color as people say it, in the interface language. */
+function projectColorName(color: ProjectColor): string {
+  return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
+}
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
@@ -732,11 +736,15 @@ function paintSessions(): void {
   if (sidebarOrder?.interacting) return;
   document.getElementById('sessionTooltip')?.remove();
   const projectList = $('projectList'), chatList = $('chatList');
-  // Activity replaces sidebar nodes. Keep an actively focused project disclosure
-  // attached to its exact project, without moving focus from the composer or settings.
+  // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure
+  // or one of its buttons) attached to its exact project, without moving focus from the
+  // composer or settings. A keyboard user tabbing to a project's buttons lost focus to the
+  // page on the next repaint, and so did the color button after a pick.
   const focused = document.activeElement;
-  const focusedProject = focused instanceof HTMLElement && projectList.contains(focused) && focused.matches('.project-heading')
-    ? focused.closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
+  const focusedControl = focused instanceof HTMLElement && projectList.contains(focused)
+    ? ['.project-heading', '.project-color', '.project-new', '.project-remove', '.project-show-more'].find(selector => focused.matches(selector))
+    : undefined;
+  const focusedProject = focusedControl ? (focused as HTMLElement).closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
   for (const entry of sessions) {
@@ -840,25 +848,45 @@ function paintSessions(): void {
         option.type = 'button'; option.dataset.projectColorChoice = choice ?? ''; option.dataset.color = choice ?? '';
         option.setAttribute('role', 'menuitemradio');
         option.setAttribute('aria-checked', String((project.color ?? null) === choice));
-        const label = choice ? `${t('Change project color')}: ${choice}` : t('None');
-        option.setAttribute('aria-label', label); option.title = label;
+        // The menu is named "Change project color"; each choice says the color itself.
+        const label = (): string => choice ? projectColorName(choice) : t('None');
+        ui(option, 'aria-label', label); ui(option, 'title', label);
         if (!choice) option.textContent = t('None');
         option.addEventListener('click', async event => {
           event.preventDefault(); event.stopPropagation();
           if (savingColor) return;
           if ((project.color ?? null) === choice) return closeColorMenu(true);
           savingColor = true;
+          const selectionAtSave = selectedId;
+          const generationAtSave = selectionGeneration;
+          let restoreColorFocus = colorWrap.contains(document.activeElement);
+          // Disabling a focused choice can move focus to body. A later deliberate focus
+          // change belongs to the user, not to the pending save's repaint.
+          const noticeFocus = (event: FocusEvent): void => {
+            if (event.target !== document.body && !colorWrap.contains(event.target as Node)) restoreColorFocus = false;
+          };
+          document.addEventListener('focusin', noticeFocus);
           color.disabled = true;
           menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = true; });
-          const updated = await run(api.setProjectColor(id, choice as ProjectColor | null));
+          let updated: LocalProject | null | undefined;
+          try { updated = await run(api.setProjectColor(id, choice as ProjectColor | null)); }
+          finally { document.removeEventListener('focusin', noticeFocus); }
+          // In an inactive document, activeElement can change without a focusin notification.
+          // Check its current owner as well before replacing the palette or restoring focus.
+          restoreColorFocus = restoreColorFocus &&
+            (document.activeElement === document.body || colorWrap.contains(document.activeElement));
           if (!updated) {
             savingColor = false; color.disabled = false;
             menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = false; });
-            return openColorMenu();
+            if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) openColorMenu();
+            return;
           }
           ++sessionsLoadGeneration;
           projects = projects.map(row => row.id === id ? updated : row);
           paintSessions();
+          if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) {
+            $('projectList').querySelector<HTMLElement>(`.project-group[data-project-id="${id}"] .project-color`)?.focus({ preventScroll: true });
+          }
         });
         menu.append(option);
       }
@@ -939,8 +967,8 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
-  if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
-    ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
+  if (focusedProject && focusedControl) projectSections.find(section => section.dataset.projectId === focusedProject)
+    ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
@@ -2705,6 +2733,8 @@ function answerActions(turnId: string): HTMLElement {
 
 function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
+  // A note the app filed about its own work (a recovery reload), not ChatGPT's phase caption.
+  if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
   const time = document.createElement('time');
@@ -3238,7 +3268,8 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     }
     const latest = recap ?? [...members].reverse().find(row => row.matches('.ev-tool_call, .ev-agent_message')) ?? rows[end - 1]!;
     const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
-    const observedPhase = rows[i - 1]?.matches('.ev-progress')
+    // Only ChatGPT's own caption names the phase; the app's recovery notes never title a group.
+    const observedPhase = rows[i - 1]?.matches('.ev-progress:not([data-app-note])')
       ? rows[i - 1]!.querySelector('.is-progress')?.textContent?.trim() : '';
     const label = observedPhase || latestHead?.querySelector('b')?.textContent
       || latestHead?.querySelector('span:not(.agent-avatar)')?.textContent || t("Activity");
@@ -4889,7 +4920,8 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
     };
     row.append(cancel);
   }
-  if (entry.state === 'queued' && (entry.error?.startsWith('Message queued. Browser startup failed:') || entry.error?.startsWith('Local chat setup failed:'))) {
+  if (entry.state === 'queued' && (entry.error?.startsWith('Message queued. Browser startup failed:') ||
+      entry.error?.startsWith('Message queued. Finish Setup to send:') || entry.error?.startsWith('Local chat setup failed:'))) {
     const retry = dockAction(() => t("Retry browser"), 'i-retry', () => {});
     retry.classList.add('delivery-retry');
     retry.onclick = async () => { retry.setAttribute('disabled', ''); await run(api.retryInputBrowser(entry.id)); void refreshInputQueue(); };

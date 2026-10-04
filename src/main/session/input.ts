@@ -476,8 +476,12 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     // Only an ordinary browser attempt has an unclaimed startup deadline. Tool
     // intent survives a later terminal observation/restart; legacy bound-chat
     // rows are ambiguous and cannot safely be reclassified from today's activity.
+    // A message the app itself holds ("Message queued. Finish Setup to send: …", or after a failed
+    // browser start) was never offered to a browser. It stays queued with its reason and Retry;
+    // failing it here lost it and blamed the browser instead.
     if (row.state === 'queued' && row.mode === 'auto' && !row.opening && !row.finishOwner && !row.silenceBoundary &&
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
+        !row.error?.startsWith('Message queued. ') &&
         Date.now() - Math.max(row.createdAt, row.dueAt) >= 60_000)
       return { ...row, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
@@ -956,7 +960,10 @@ export function noteInputStartupError(id: string, error: string | null): Promise
     // browser delivery. A failed project write must not be hidden by a wake result.
     try { await materializeOpening(row); }
     catch (failure) { error = 'Local chat setup failed: ' + (failure as Error).message; }
-    const next = { ...row, error: error ? error.slice(0, 200) : undefined };
+    // Releasing the app's own hold makes the message due now: the browser's 60-second pickup
+    // window starts here, not when the message was first sent and held.
+    const released = !error && !!row.error?.startsWith('Message queued. ');
+    const next = { ...row, error: error ? error.slice(0, 200) : undefined, ...(released ? { dueAt: Math.max(row.dueAt, Date.now()) } : {}) };
     await commit(current.map(entry => entry === row ? next : entry));
     return { ...next };
   });

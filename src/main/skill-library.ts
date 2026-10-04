@@ -16,6 +16,11 @@ export interface SkillLibraryScope {
   projectPath?: string | null;
   /** Only explicit library inspection may refresh the CLI snapshot; prompt preparation never does. */
   refreshCodexPlugins?: boolean;
+  /**
+   * Take the app's own Skills from the catalog published at import or update instead of reading
+   * their files again. A routed send uses it: its selection was frozen from that catalog.
+   */
+  managedFromCatalog?: boolean;
 }
 type CodexPluginCandidate = Omit<CodexPluginSkillProvenance, 'skillPath'>;
 type Candidate = { file: string; scope: SkillScope; source: SkillSource; codexPlugin?: CodexPluginCandidate };
@@ -270,27 +275,10 @@ async function codexPluginCandidates(codexHome: string, plugins: CodexPluginRunt
   return result;
 }
 
-/** Managed metadata-only catalog for auto-routed prompt framing; no SKILL.md body is read here. */
-export async function managedSkillMetadataLibrary(scope: SkillLibraryScope = {}): Promise<SkillLibrary> {
-  const root = skillsDirectory();
-  const empty: SkillLibrary = { skills: [], roots: root ? [{ path: '/skills', scope: 'managed', source: 'managed' }] : [], errors: [], includeInstructions: true };
-  if (!root) return empty;
-  const configured = await routingRules(scope);
-  if (!configured.valid) return { ...empty, includeInstructions: false };
-  const metadata = await managedSkillRoutingMetadata(scope);
-  return {
-    skills: metadata.map(({ revision: _revision, ...skill }) => ({
-      ...skill, path: `/skills/${skill.id}/SKILL.md`, scope: 'managed' as const, source: 'managed' as const, managed: true
-    })),
-    roots: empty.roots,
-    errors: [],
-    includeInstructions: configured.includeInstructions,
-    ...(configured.maxContextTokens === undefined ? {} : { maxContextTokens: configured.maxContextTokens })
-  };
-}
-
 export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: SkillLibraryRuntime = DEFAULT_RUNTIME): Promise<SkillLibrary> {
-  const managed = await listSkills();
+  const managed = scope.managedFromCatalog
+    ? skillCatalogSnapshot().map(({ revision: _revision, ...summary }) => summary)
+    : await listSkills();
   const library: SkillLibrary = { skills: [], roots: [], errors: [], includeInstructions: true };
   const root = skillsDirectory();
   if (!root) return library;
@@ -362,7 +350,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
   const seen = new Set<string>();
   for (const summary of managed) {
     const directory = path.join(root, summary.id), file = path.join(directory, 'SKILL.md');
-    const document = await readSkill(summary.id);
+    const document = scope.managedFromCatalog ? null : await readSkill(summary.id);
     let seenFile = file;
     try {
       const directoryStat = await fs.lstat(directory);
@@ -375,7 +363,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
       }
     } catch { /* readSkill already owns validity; dedupe must not widen filesystem authority. */ }
     let metadata = { name: summary.name, description: summary.description };
-    try { metadata = { ...metadata, ...parseSkillFrontmatter(document.text) }; } catch { /* Existing plain Markdown remains supported. */ }
+    if (document) try { metadata = { ...metadata, ...parseSkillFrontmatter(document.text) }; } catch { /* Existing plain Markdown remains supported. */ }
     if (!enabled(metadata.name, file)) continue;
     const extra = await interfaceFor(directory, true, library.errors, summary.id);
     library.skills.push({ ...summary, ...metadata, ...extra, scope: 'managed', source: 'managed', managed: true });
