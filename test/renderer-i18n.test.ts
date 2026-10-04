@@ -70,6 +70,24 @@ it('defaults to English, rejects unsupported variants and switches even when sto
   expect(t('unknown /Save/<img src=x>')).toBe('unknown /Save/<img src=x>');
 });
 
+it.each([
+  ['fr', /compétences?/iu], ['ja', /スキル/u], ['ko', /스킬/u], ['tr', /beceri/iu],
+  ['vi', /kỹ năng/iu], ['zh-CN', /技能/u], ['zh-TW', /技能/u]
+] as const)('uses the Skills page terminology in all four routing strings for %s', (locale, term) => {
+  const catalog = catalogs[locale];
+  if (!catalog) throw new Error(`Missing routing locale: ${locale}`);
+  expect(catalog.Skills).toMatch(term);
+  for (const key of [
+    'Choose whether imported Skills can be matched to ordinary messages.',
+    'Auto-select Skills',
+    'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.',
+    'Auto-selected Skill: /{0}'
+  ]) {
+    expect(catalog[key], `${locale}: ${key}`).toMatch(term);
+    expect(catalog[key], `${locale}: ${key}`).not.toMatch(/\bskills?\b/iu);
+  }
+});
+
 it.each(languages)('explains exact-name Skill routing rather than topic matching in %s', async locale => {
   const source = 'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.';
   const input = document.getElementById('autoSelectSkills') as HTMLInputElement;
