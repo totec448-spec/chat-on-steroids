@@ -458,6 +458,31 @@ canonical paths and remain stable when similarly named packages appear. `skill-m
 bounded YAML/TOML parsing and layered configuration. Invalid policy never enables implicit use.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+When `CODEX_HOME` is already inside an approved root and has a plugin cache, that same read-only
+catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
+Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
+prompt preparation, follow-up selection and MCP instructions never start or await the CLI.
+A missing or invalidated snapshot means no plugin Skills yet, including while a refresh is
+pending. The in-memory cache is bounded to eight home/cwd contexts, coalesces a context's
+in-flight refresh, and invalidates on the approved cache directory identity/mtime or any read
+Skills configuration bytes changing. An unchanged successful snapshot is reused; a failed
+refresh may be retried by another explicit inspection. After a CLI wait, publication performs
+one cache-only library read under the current home, configuration and permissions; a changed
+context cannot publish the old selection and this read never starts a second CLI. No timer, directory watcher, disk store
+or new renderer authority is added. Every use still rechecks current approved paths, package
+identity and ordinary read permission. This is last-observed runtime metadata, not continuous
+proof of the external CLI's current state. CoS does not infer state by enumerating cached versions: the runtime-provided plugin,
+marketplace and installed version select exactly
+`plugins/cache/<marketplace>/<plugin>/<version>`. That package must still pass the normal sandbox
+checks plus `plugin.json` (or compatibility `.codex-plugin/plugin.json`) identity validation before
+only its `skills/` root is scanned. Disabled plugins, unlisted stale cache entries, marketplace
+source checkouts and unapproved Codex homes remain invisible. The catalog carries the runtime's
+plugin/package source provenance. Plugin skill command identity is based on marketplace + plugin
+and package-relative Skill path so an installed version upgrade does not rename the command.
+The Windows npm shim is not executed through a shell: its JavaScript entry runs through the
+current executable with child-only `ELECTRON_RUN_AS_NODE=1`. A native Codex executable keeps its
+existing environment. This distinction prevents a packaged Electron executable from reopening
+the app instead of running the npm entry; it changes neither installed Electron fuses nor roots.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
@@ -2610,8 +2635,9 @@ it must not guess a new rebind, delete history or become the path for new contin
 ## 16. Multiple prime families and reusable workers
 
 **Intent:** each prime can delegate bounded work to its own reusable workers while several
-independent user tasks run at once. Inside a family the topology is a star: workers report to
-their prime and cannot create worker descendants.
+independent user tasks run at once. Inside a family the worker topology is a star: workers report
+to their prime and cannot create worker descendants. Existing primes may also exchange a message
+across families when the sender already has the destination's explicit run address.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
@@ -2633,9 +2659,16 @@ and task text remain intact. The recorder notifies its consumers after this orig
 Several recovered fleets may belong to the same real prime. Keep each run, worker conversation
 and inbox intact; parked histories are keyed by their last run incarnation, not just the prime.
 `agents status` returns `available_runs`; `run_id` selects an already-owned family for ambiguous
-operations. Naming a foreign run grants no authority. Ordinary prime results collect all its
-inboxes under one shared output budget, label repeated worker names by run, and acknowledge
-only messages actually offered. A wake returns its fresh incarnation ID.
+operations and still never selects a foreign family. `target_run_id` is the one narrow exception:
+on `agents action=message`, an existing prime may use that opaque address to queue text only to
+the other family's prime. It grants no status/discovery or worker access. Cross-prime inbox rows
+carry `source_run_id` so replies do not need global family discovery. That reply address stays
+stable while wake creates fresh incarnation IDs: the family retains one opaque reply alias plus
+the eight most recent former incarnation selectors, while browser-command fences still require
+the current incarnation. Restore preserves an alias that was actually saved; it does not infer a
+legacy reply address that an older build had already evicted from its bounded history. Ordinary prime results
+collect all its inboxes under one shared output budget, label repeated worker names by run, and
+acknowledge only messages actually offered. A wake returns its fresh incarnation ID.
 If late proof identifies a provisional prime as an existing worker, its accepted fleet is
 attached to that worker's real root prime; the worker cannot control descendants or spawn more.
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
@@ -2665,7 +2698,9 @@ constraints; it does not turn arbitrary tool-result text into higher-priority in
 sleeping worker with `agents action=message` before spawning a replacement. Messaging, inbox
 delivery and report receipts are at-least-once transports with durable message identities;
 acknowledgement belongs to the exact recipient/run, not a UI read. Pending reports remain
-available when the last worker sleeps and the family parks.
+available when the last worker sleeps and the family parks. Prime-to-prime messages use that
+same staged durability barrier; the sender's run address is durable routing metadata, and a
+foreign `target_run_id` never widens the recipient to its workers.
 
 Attached and detached workers share `WORKER_SILENCE_MS` (three minutes). Only accepted new
 assistant output, native work or exactly attributed tool activity renews this clock. Page
@@ -2718,6 +2753,12 @@ raising the user's worker cap is not a substitute for lifecycle correctness.
 most 16) beside the legacy single `revival`; the extension remembers each one and routes or opens
 them in one pass. Handing out only the oldest held every later wake behind a slow one until the
 revival deadline (#882). Redeem stays the one ownership boundary per wake.
+A wake still waits for an empty editor (`composerSubmitReady`), but ChatGPT keeps unsent editor
+text as the chat's draft and restores it when the chat opens again; a wake whose Send never
+landed then blocked every later wake into that chat until its deadline. While all other
+readiness holds, the page reclaims an editor whose whole text ends with the wake's own closing
+sentence (`clearRevivalResidue`, matching `planRevivalText`); anything added after it, an
+attachment or a busy page keeps the draft.
 
 Detached means browser attachment is missing, not necessarily that tool execution died. An
 exact call can prove the worker server-side alive; a new page can reattach it. During waking,
@@ -3756,6 +3797,16 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
+`stage-firefox-extension.mjs` can manually derive a Firefox test tree from that same canonical
+extension: it changes only the Gecko manifest packaging shape and carries the shared runtime bytes.
+`npm run extension:firefox:stage` is developer/testing tooling only. Stable release planning,
+checksums, candidate assembly, publishing and post-publish verification intentionally omit a
+Firefox ZIP until live Gecko validation proves the background lifecycle, tabs/windows and bridge.
+A valid staged tree is packaging evidence only and does not establish Firefox runtime support.
+Before replacing staged files, the stager rejects a destination outside `release` and any
+existing symbolic link or junction in the release/destination path. This preflight keeps a
+linked output ancestor from redirecting recursive replacement into another folder; it is not
+an OS-level guarantee against a concurrent filesystem actor swapping paths after validation.
 The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
 privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
@@ -3791,7 +3842,7 @@ path, development does not stage. Explicit install may relaunch; ordinary quit d
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
-assembles installers, extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
+assembles installers, the Chromium extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
 is dispatched **at the reviewed version tag**, calls that reusable build in the same run,
 requires `docs/release-notes/vX.Y.Z.md`, rechecks versions/privacy/hashes and refuses an existing
 release. A tag alone does not build/publish. An unpublished candidate can be built separately,

@@ -2594,6 +2594,7 @@ export async function recordAgentMessage(
       messageId: message.id,
       from: message.from,
       to: message.to,
+      ...(message.fromRunId ? { fromRunId: message.fromRunId } : {}),
       message: await storeText(sessionId, message.text, MAX_MESSAGE_CHARS),
       delivery
     });
