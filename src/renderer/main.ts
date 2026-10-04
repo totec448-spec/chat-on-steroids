@@ -726,15 +726,6 @@ function isRunning(value: AppState['status']['state']): boolean {
   );
 }
 
-function isConnecting(value: AppState['status']['state']): boolean {
-  return value === 'starting-server' || value === 'connecting-tunnel';
-}
-
-/** The title bar can only start a connection; running and teardown states belong to the sidebar. */
-function canHeaderConnect(value: AppState['status']['state']): boolean {
-  return value === 'disconnected' || value === 'auth-failed' || value === 'tunnel-unavailable';
-}
-
 interface SetupConnectionValues { tunnelId: string; hasApiKey: boolean }
 
 /** What still has to happen before connecting can work, in the order of the wizard. */
@@ -1131,27 +1122,15 @@ function paintSetupFields(): void {
   if (state) paintConnectButtons(state);
 }
 
-/** Setup Connect buttons require readiness; the title-bar action stays available to reach Setup. */
+/** Connect is enabled from the persisted state or from valid drafts still in the fields. */
 function paintConnectButtons(next: AppState): void {
   const running = isRunning(next.status.state), disconnecting = next.status.state === 'disconnecting';
-  const connecting = isConnecting(next.status.state);
   const missing = currentSetupMissingStep(next);
-  const header = $<HTMLButtonElement>('headerConnect');
-  header.hidden = !(connecting || canHeaderConnect(next.status.state));
-  header.disabled = connecting;
-  header.title = canHeaderConnect(next.status.state) && missing ? missing.text : '';
   for (const id of ['connectionPopoverToggle', 'wizConnect']) {
     const button = $<HTMLButtonElement>(id);
     button.disabled = disconnecting || (!running && missing !== null);
     button.title = !running && missing ? missing.text : '';
   }
-}
-
-/** The title-bar shortcut is only another ingress to the persisted Appearance theme owner. */
-function paintThemeButton(theme: 'light' | 'dark'): void {
-  const dark = theme === 'dark';
-  ui($('themeBtn'), 'aria-label', () => t(dark ? 'Switch to light mode' : 'Switch to dark mode'));
-  ui($('themeBtn'), 'title', () => t(dark ? 'Switch to light mode' : 'Switch to dark mode'));
 }
 
 function apply(next: AppState): void {
@@ -1166,8 +1145,7 @@ function apply(next: AppState): void {
   const connected = status.state === 'connected';
   const offline = status.state === 'offline';
   const disconnecting = status.state === 'disconnecting';
-  const connecting = isConnecting(status.state);
-  const busy = disconnecting || connecting;
+  const busy = disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
   const failed = status.state === 'auth-failed' || status.state === 'tunnel-unavailable';
   const running = isRunning(status.state);
   const missing = currentSetupMissingStep(next);
@@ -1175,14 +1153,13 @@ function apply(next: AppState): void {
   // ---- theme
   const appearanceUi = requestedSettings?.ui ?? config.ui;
   appearance.apply(appearanceUi);
-  paintThemeButton(appearanceUi.theme);
 
   const headerConnect = $<HTMLButtonElement>('headerConnect');
-  headerConnect.hidden = !(connecting || canHeaderConnect(status.state));
-  headerConnect.disabled = connecting;
-  headerConnect.title = canHeaderConnect(status.state) && missing ? missing.text : '';
-  ui(headerConnect, 'textContent', () => connecting ? t('Connecting…') : t('Connect'));
-  if (connected && previousState && previousState.status.state !== 'connected' && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
+  const wasVisible = !headerConnect.hidden;
+  headerConnect.hidden = connected;
+  headerConnect.disabled = busy;
+  ui(headerConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…') : t('Connect'));
+  if (connected && wasVisible && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
     { boxShadow: '0 0 0 0 var(--green)' }, { boxShadow: '0 0 0 12px transparent' }
   ], { duration: 850, iterations: 2 });
 
@@ -1858,22 +1835,14 @@ async function dropFolders(event: DragEvent): Promise<void> {
   }
 }
 
-async function toggleConnection(allowDisconnect = true): Promise<void> {
+async function toggleConnection(): Promise<void> {
   if (!state || state.status.state === 'disconnecting') return;
-  if (!allowDisconnect && !canHeaderConnect(state.status.state)) return;
   if (!isRunning(state.status.state) && !(await persistSetupDraftsForConnection())) {
     const missing = state ? missingStep(state) : null;
-    if (missing) {
-      showTab('setup');
-      const target = step(missing.step);
-      target.tabIndex = -1;
-      target.focus();
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
+    if (missing) { showTab('setup'); step(missing.step).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
     return;
   }
   if (!state) return;
-  if (!allowDisconnect && !canHeaderConnect(state.status.state)) return;
   // Mirrors the button label exactly, so a click always does what it says.
   const next = await run(isRunning(state.status.state) ? api.disconnect() : api.connect());
   if (next) apply(next);
@@ -1989,17 +1958,14 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('themeBtn').addEventListener('click', () => {
+$('headerConnect').addEventListener('click', async () => {
   if (!state) return;
-  // Derive from the latest requested value so two quick presses remain two distinct choices
-  // while the first settings save is still in flight.
-  const currentUi = requestedSettings?.ui ?? state.config.ui;
-  const next = currentUi.theme === 'dark' ? 'light' : 'dark';
-  appearance.apply({ ...currentUi, theme: next });
-  paintThemeButton(next);
-  void save({ theme: next });
+  if (missingStep(state)) { showTab('setup'); return; }
+  if (isRunning(state.status.state)) {
+    const disconnected = await run(api.disconnect()); if (!disconnected) return; apply(disconnected);
+  }
+  const connected = await run(api.connect()); if (connected) apply(connected);
 });
-$('headerConnect').addEventListener('click', () => void toggleConnection(false));
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 
