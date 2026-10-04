@@ -1845,5 +1845,6 @@
   "More edited files are available in the recording.": "更多已编辑文件可在记录中查看。",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "插件已在你的 ChatGPT 中。聊天首次需要它时就会运行。",
   "Added in ChatGPT. Its tools have not run yet.": "已在 ChatGPT 中添加。其工具尚未运行。",
+  "1 sub-agent in this round": "本轮有 1 个子智能体",
   "{0} sub-agents in this round": "本轮有 {0} 个子智能体"
 }

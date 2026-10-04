@@ -1845,5 +1845,6 @@
   "More edited files are available in the recording.": "Kaydı inceleyerek diğer düzenlenen dosyalara ulaşabilirsiniz.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Eklenti ChatGPT'nizde. Bir sohbet ilk kez ihtiyaç duyduğunda çalışır.",
   "Added in ChatGPT. Its tools have not run yet.": "ChatGPT'ye eklendi. Araçları henüz çalışmadı.",
+  "1 sub-agent in this round": "Bu turda 1 alt ajan",
   "{0} sub-agents in this round": "Bu turda {0} alt ajan"
 }

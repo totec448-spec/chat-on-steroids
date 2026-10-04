@@ -1845,5 +1845,6 @@
   "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "外掛程式已在你的 ChatGPT 中。聊天第一次需要時就會執行。",
   "Added in ChatGPT. Its tools have not run yet.": "已在 ChatGPT 中新增。其工具尚未執行。",
+  "1 sub-agent in this round": "本輪有 1 個子代理",
   "{0} sub-agents in this round": "本輪有 {0} 個子代理"
 }
