@@ -2,7 +2,7 @@
 // settings page and the chat screen, both themes, with stateful controls off and on. Our own
 // layout checks only measured the default state, so the Read-only button could ship as an empty
 // pill whenever it was on (#1039). Isolated fixture: no runtime, tunnel, credentials or user data.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -30,8 +30,13 @@ const STATES = [{ name: 'default', on: [] }, { name: 'toggled', on: ['readOnlyBt
 
 app.whenReady().then(async () => {
   fs.mkdirSync(output, { recursive: true });
+  // Markup and styles only: the app's own scripts are refused at load, so no runtime starts.
+  let refusedScripts = 0;
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['file://*/*'] }, (details, callback) => {
+    if (details.resourceType === 'script') refusedScripts++;
+    callback({ cancel: details.resourceType === 'script' });
+  });
   const html = fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
   const file = path.join(output, 'fixture.html'); fs.writeFileSync(file, html);
   const axe = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
@@ -39,6 +44,7 @@ app.whenReady().then(async () => {
   const report = [];
   try {
     await win.loadFile(file);
+    if (!refusedScripts) throw new Error('The app script was not refused; the fixture would run the real renderer');
     const js = script => win.webContents.executeJavaScript(script);
     await js(axe);
     for (const theme of ['dark', 'light']) for (const state of STATES) for (const page of PAGES) {
