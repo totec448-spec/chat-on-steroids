@@ -7,12 +7,13 @@ import type { SessionControlsView } from '../main/bridge.js';
 import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { LocalProject } from '../shared/projects.js';
+import type { LocalProject, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, ToolEditReview } from '../shared/session.js';
+import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
  * The entire renderer-facing API.
@@ -234,8 +235,7 @@ const api = {
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
-  addProjectFolder: (id: string) => call<LocalProject | null>('projects:addFolder', { id }),
-  removeProjectFolder: (id: string, path: string) => call<LocalProject>('projects:removeFolder', { id, path }),
+  setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {
@@ -297,6 +297,14 @@ const api = {
   listInputs: () => call<InputEntry[]>('sessions:outbox'),
   listPausedHelpers: () => call<Array<{ id: string; sourceSessionId: string }>>('sessions:pausedHelpers'),
   runningTools: (conversationIds: string[]) => call<RunningToolActivity[]>('sessions:runningTools', { conversationIds }),
+  runningProcesses: (sessionId: string) => call<RunningExecProcess[]>('sessions:runningProcesses', { sessionId }),
+  stopProcess: (sessionId: string, processId: number, incarnation: number) =>
+    call<boolean>('sessions:stopProcess', { sessionId, processId, incarnation }),
+  onBackgroundProcessesChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('sessions:backgroundExecChanged', wrapped);
+    return () => ipcRenderer.removeListener('sessions:backgroundExecChanged', wrapped);
+  },
   livePreview: (conversationIds: string[]) => call<string | null>('sessions:livePreview', { conversationIds }),
   retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
   editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),

@@ -62,16 +62,18 @@ import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } fro
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
+import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
+import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
 import { livePreview } from './live-preview.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addProjectFolder, getProject, getSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from './projects.js';
+import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -822,27 +824,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     push('session:changed');
     return project;
   });
-  handle('projects:addFolder', async payload => {
-    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
-    if (!(await getProject(id))) throw new Error('Project not found');
-    const window = getWindow();
-    if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { title: 'Choose an additional project folder', properties: ['openDirectory'] });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const folder = result.filePaths[0];
-    try { await resolvePath(getConfig().roots, folder); }
-    catch (error) {
-      if (!(error instanceof SandboxError)) throw error;
-      const state = await approveRoot(folder);
-      push('state:changed', state);
-    }
-    const project = await addProjectFolder(id, folder);
-    push('session:changed');
-    return project;
-  });
-  handle('projects:removeFolder', async payload => {
-    const { id, path: folder } = z.object({ id: z.string().uuid(), path: z.string().min(1).max(32768) }).strict().parse(payload);
-    const project = await removeProjectFolder(id, folder);
+  handle('projects:color', async payload => {
+    const { id, color } = z.object({ id: z.string().uuid(), color: z.enum(PROJECT_COLORS).nullable() }).strict().parse(payload);
+    const project = await setProjectColor(id, color);
     push('session:changed');
     return project;
   });
@@ -1220,6 +1204,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
     return runningToolActivity(conversationIds);
   });
+  handle('sessions:runningProcesses', async (payload) => {
+    const { sessionId } = z.object({
+      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i)
+    }).parse(payload);
+    return runningExecProcesses(sessionId);
+  });
+  handle('sessions:stopProcess', async (payload) => {
+    const { sessionId, processId, incarnation } = z.object({
+      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+      processId: z.number().int().min(1_000).max(99_999),
+      incarnation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
+    }).parse(payload);
+    return stopExecProcess(sessionId, processId, incarnation);
+  });
   // The newest sentence a working chat shows before ChatGPT publishes it (#942).
   // The window armed its Keychain notice; the first Keychain read may start.
   handle('keychain:noticeReady', async () => keychainNoticeReady());
@@ -1585,5 +1583,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onLog((entry) => push('log:entry', entry));
   // Recorder pushes name their exact transcript owners; payload-less pushes are catalog/control only.
   onSessionChange(change => push('session:changed', change));
+  onBackgroundExecChange(() => push('sessions:backgroundExecChanged'));
   onSwarmChange(() => push('swarm:changed', swarmState()));
 }

@@ -371,11 +371,6 @@
   "Chat list width": "チャット一覧の幅",
   "Settings navigation": "設定のナビゲーション",
   "Add a project folder": "プロジェクトフォルダーを追加",
-  "Project folders": "プロジェクトフォルダー",
-  "Primary project folder": "メインのプロジェクトフォルダー",
-  "Add folder": "フォルダーを追加",
-  "Add folder to project {0}": "プロジェクト {0} にフォルダーを追加",
-  "Remove folder {0} from project {1}": "プロジェクト {1} からフォルダー {0} を削除",
   "Switch to dark mode": "ダークモードに切り替え",
   "Search plugins": "プラグインを検索",
   "Add a plugin": "プラグインを追加",
@@ -489,6 +484,7 @@
   "New chat in this project": "このプロジェクトで新しいチャット",
   "Remove project from sidebar; keep conversations and files": "サイドバーからプロジェクトを取り除き、会話とファイルは残す",
   "Remove project {0}": "プロジェクト {0}を取り除く",
+  "Change project color": "プロジェクトの色を変更",
   "Project removed; conversations kept": "プロジェクトを取り除きました。会話は残っています",
   "Show more": "さらに表示",
   "Show more tasks in {0}": "{0}のタスクをさらに表示",
@@ -1813,5 +1809,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "保存したトンネル ID とトンネル API キーを切り替えます。別の ChatGPT アカウントを使うときなどに。",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "ChatGPT のページがこの回答のライブストリームを失いました。回答はまだ続いている可能性があります。再読み込みは回答を止めずにページを再接続します。",
   "Don't reload this answer": "この回答を再読み込みしない",
-  "The reload has already started.": "再読み込みはすでに始まっています。"
+  "The reload has already started.": "再読み込みはすでに始まっています。",
+  "Background process running · {0}": "バックグラウンドプロセスを実行中 · {0}",
+  "{0} background processes running · {1}": "{0} 個のバックグラウンドプロセスを実行中 · {1}",
+  "Running for {0}": "実行時間 {0}",
+  "Stop background process": "バックグラウンドプロセスを停止",
+  "Stop": "停止",
+  "Background process is no longer running": "バックグラウンドプロセスはすでに停止しています",
+  "{0} background processes running": "{0} 個のバックグラウンドプロセスを実行中"
 }
