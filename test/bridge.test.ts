@@ -84,7 +84,8 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
-  unpair
+  unpair,
+  workerBriefForTests
 } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
@@ -14576,5 +14577,20 @@ describe('opening a chat in the browser that runs the extension (#882)', () => {
       // Withdrawn, so a late poll cannot open the chat a second time beside the OS's copy.
       expect((await poll(BROWSER_A)).reveals).toEqual([]);
     } finally { vi.useRealTimers(); await close(socket); }
+  });
+});
+
+describe('worker brief on a computer with its own connector names', () => {
+  it('names this computer\'s Core for reports, and keeps the plain brief otherwise', async () => {
+    // One ChatGPT account on several computers: "the agents tool" alone let a worker report through
+    // the other computer's Core, which had no such run (seen live, 2026-10-04).
+    const previous = getConfig();
+    await saveConfig({ ...previous, connectorSuffix: '' });
+    expect(workerBriefForTests('worker-1', 'Check the tests')).toContain('Report to prime through the agents tool — ');
+    await saveConfig({ ...previous, connectorSuffix: 'Windows VM' });
+    try {
+      expect(workerBriefForTests('worker-1', 'Check the tests'))
+        .toContain('Report to prime through the agents tool of Chat On Steroids Core (Windows VM) — ');
+    } finally { await saveConfig(previous); }
   });
 });
