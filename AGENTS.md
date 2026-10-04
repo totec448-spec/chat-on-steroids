@@ -2192,6 +2192,9 @@ be resent or receive an ACK. A generic timeout or missing receipt cannot grant t
 Stop and Send permission are checked again after their durable claim writes. A stale result
 does not issue permission and cannot replay the spent claim. Native page checks fence the
 same question, turn, work revision and document immediately before the actual input.
+A pre-Send withdrawal reports which fence ended it (`left-chat`, `stop-requested`,
+`new-user-message`, `turn-changed`, `turn-progressed`, `page-final`, `page-unreadable`,
+`journal-pending`, `app-refused` or `lease-lost`), so the log can tell a moving page from a lost claim.
 
 Continue also refreshes the current native assistant response before recovery Stop and
 before and after asynchronous Send authorization. Its exact final message vetoes Continue
