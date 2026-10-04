@@ -2389,13 +2389,12 @@ it('colors removed lines separately from added lines without changing other tool
 
   rows[0]!.open = true;
   rows[0]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[0]!.querySelector('.changes .metric')?.textContent).toBe('+28 −11');
-  expect(rows[0]!.querySelector('.changes .metric-added')?.textContent).toBe('+28');
-  expect(rows[0]!.querySelector('.changes .metric-removed')?.textContent).toBe('−11');
+  expect(rows[0]!.querySelector('.edit-card .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−11');
   rows[1]!.open = true;
   rows[1]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[1]!.querySelector('.changes .metric')?.textContent).toBe('+0 −7 (approx.)');
-  expect(rows[1]!.querySelector('.changes .metric-removed')?.textContent).toBe('−7');
+  expect(rows[1]!.querySelector('.edit-card summary')?.textContent).toContain('(approx.)');
+  expect(rows[1]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−7');
 });
 
 it('keeps mixed tool and agent activity in one latest-action disclosure between authored messages', async () => {

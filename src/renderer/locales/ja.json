@@ -1825,5 +1825,12 @@
   "{0} background processes running": "{0} 個のバックグラウンドプロセスを実行中",
   "Diagnostics report": "診断レポート",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "バージョン、設定、接続状態、ログを個人情報を除いて1つのファイルに保存します。不具合報告に添付できます。",
-  "Diagnostics report saved as {0}. Read it before you share it.": "診断レポートを {0} として保存しました。共有する前に内容を確認してください。"
+  "Diagnostics report saved as {0}. Read it before you share it.": "診断レポートを {0} として保存しました。共有する前に内容を確認してください。",
+  "Created": "作成",
+  "Edited": "編集",
+  "Diff for {0}": "{0} の差分",
+  "Loading edit…": "編集を読み込み中…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "プレビューは600行までです。編集全体はレビューで確認してください。",
+  "{0} unchanged lines": "{0} 行の変更なし",
+  "More edited files are available in the recording.": "その他の編集済みファイルは記録で確認できます。"
 }

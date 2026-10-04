@@ -19,6 +19,7 @@ import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
+import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
@@ -2365,7 +2366,11 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
   raw.append(facts);
 
-  if (call.changes && call.changes.length > 0) {
+  const ownerId = context?.id ?? selectedId, generation = selectionGeneration;
+  const current = () => context ? context.current() : ownerId === selectedId && generation === selectionGeneration;
+  if (call.outcome === 'ok' && call.changes?.length && ownerId) {
+    raw.append(renderEditCards(call, ownerId, current));
+  } else if (call.changes && call.changes.length > 0) {
     const changes = el('ul', 'changes');
     for (const change of call.changes) {
       const li = el('li');

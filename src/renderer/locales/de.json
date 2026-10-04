@@ -1825,5 +1825,12 @@
   "{0} background processes running": "{0} Hintergrundprozesse laufen",
   "Diagnostics report": "Diagnosebericht",
   "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Speichert eine Datei mit Versionen, Einstellungen, Verbindungsstatus und Protokoll – ohne persönliche Angaben –, die du einem Fehlerbericht anhängen kannst.",
-  "Diagnostics report saved as {0}. Read it before you share it.": "Diagnosebericht als {0} gespeichert. Lies ihn, bevor du ihn teilst."
+  "Diagnostics report saved as {0}. Read it before you share it.": "Diagnosebericht als {0} gespeichert. Lies ihn, bevor du ihn teilst.",
+  "Created": "Erstellt",
+  "Edited": "Bearbeitet",
+  "Diff for {0}": "Diff für {0}",
+  "Loading edit…": "Änderung wird geladen…",
+  "Preview limited to 600 lines. Open Review for the complete edit.": "Vorschau auf 600 Zeilen begrenzt. Für die vollständige Änderung Review öffnen.",
+  "{0} unchanged lines": "{0} unveränderte Zeilen",
+  "More edited files are available in the recording.": "Weitere geänderte Dateien sind in der Aufzeichnung verfügbar."
 }

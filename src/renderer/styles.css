@@ -3397,7 +3397,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-body :is(.ev-tool_call, .ev-page_tool, .ev-agent_message) { margin: 0; }
 .agent-panel-body .ev-body { min-width: 0; }
 .agent-panel-body .said > b { display: none; }
-.file-panel {
+.file-panel, .unified-diff {
   --syntax-keyword: #6d28d9;
   --syntax-string: #047857;
   --syntax-number: #b45309;
@@ -3409,9 +3409,11 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   --syntax-label: #7c3aed;
   --syntax-search: #fef08a;
   --syntax-search-selected: #fde68a;
+}
+.file-panel {
   position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--page);
 }
-:root[data-theme='dark'] .file-panel {
+:root[data-theme='dark'] .file-panel, .unified-diff {
   --syntax-keyword: #c792ea;
   --syntax-string: #c3e88d;
   --syntax-number: #f78c6c;
@@ -3861,3 +3863,32 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   [data-panel='chat'].has-work-dock { grid-template-columns: 0 minmax(0, 1fr); }
   .has-work-dock > .is-session { display: none; }
 }
+
+/* Recorded edit previews, bounded within their owning tool call. */
+.edit-cards { display: grid; gap: 8px; min-width: 0; }
+.edit-card { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--page); }
+.edit-card-header { display: flex; align-items: center; gap: 7px; padding: 8px 10px; cursor: pointer; list-style: none; font: calc(11px * var(--text-scale, 1)) var(--mono); }
+.edit-card-header::-webkit-details-marker { display: none; }
+.edit-card-header .ico { --ico: 14px; flex: none; }
+.edit-card-header b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.edit-chevron { width: 12px; height: 12px; flex: none; }
+.edit-card[open] > summary .edit-chevron { transform: rotate(90deg); }
+.edit-card-path { padding: 0 10px 8px; color: var(--faint); font: calc(10px * var(--text-scale, 1)) var(--mono); overflow-wrap: anywhere; }
+.edit-card-controls { display: flex; justify-content: flex-end; gap: 8px; position: sticky; top: 0; padding: 4px 8px; background: var(--card); border-block: 1px solid var(--line); }
+.tool .edit-card-controls .tool-copy { margin: 0; opacity: 1; }
+.tool .edit-card-controls .tool-copy:disabled { display: inline-block; opacity: .5; }
+.unified-diff { max-height: 320px; overflow: auto; overscroll-behavior: contain; font: calc(11px * var(--text-scale, 1)) / 1.7 var(--mono); direction: ltr; }
+.edit-card.is-expanded .unified-diff { max-height: min(640px, 65vh); }
+.diff-line { display: grid; grid-template-columns: 4ch 4ch 2ch minmax(0, 1fr); min-width: 0; }
+.diff-line.is-added { background: var(--green-wash); }
+.diff-line.is-removed { background: var(--red-wash); }
+.diff-line.is-gap { background: var(--sunk); color: var(--faint); }
+.diff-gutter { padding-right: 5px; text-align: right; color: var(--faint); user-select: none; border-right: 1px solid var(--line); }
+.diff-sign { text-align: center; user-select: none; color: var(--faint); }
+.diff-line.is-added .diff-sign, .metric-added { color: var(--green); }
+.diff-line.is-removed .diff-sign, .metric-removed { color: var(--red); }
+.diff-code { white-space: pre-wrap; overflow-wrap: anywhere; padding-inline: 6px; font: inherit; }
+.diff-code .tok-keyword { color: var(--syntax-keyword); }
+.diff-code .tok-string { color: var(--syntax-string); }
+.diff-code .tok-number, .diff-code .tok-bool { color: var(--syntax-number); }
+.diff-code .tok-comment { color: var(--syntax-comment); }
