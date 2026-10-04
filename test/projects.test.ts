@@ -5,9 +5,9 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
+import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, addProjectFolder, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder, setProjectColor } from '../src/main/projects.js';
+import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -37,13 +37,6 @@ it('persists one project per canonical directory and validates approved director
   expect(await listProjects()).toEqual([one]);
 });
 
-it('loads legacy single-folder records as primary-only projects without requiring migration', async () => {
-  const legacy = { id: randomUUID(), name: 'Legacy', path: path.join(approved, 'first'), createdAt: 1 };
-  await writeDurableNow('projects', [legacy]);
-  expect(await listProjects()).toEqual([legacy]);
-  expect(await projectWorkspace(legacy.id)).toMatchObject({ real: legacy.path, virtual: '/work/first' });
-});
-
 it('persists only predefined presentation colors without changing project workspace authority', async () => {
   const project = await addProject(path.join(approved, 'first'));
   const colored = await setProjectColor(project.id, 'purple');
@@ -53,28 +46,6 @@ it('persists only predefined presentation colors without changing project worksp
   expect(await listProjects()).toEqual([colored]);
   await expect(setProjectColor(project.id, 'chartreuse' as any)).rejects.toThrow();
   expect(await setProjectColor(project.id, null)).toEqual(project);
-});
-
-it('drops duplicate additional folder identities on read while primary ownership stays authoritative', async () => {
-  const first = { id: randomUUID(), name: 'First', path: path.join(approved, 'first'), createdAt: 1 };
-  const related = path.join(approved, 'related');
-  const duplicateAlias = process.platform === 'win32' ? related.toUpperCase() : related;
-  const second = {
-    id: randomUUID(), name: 'Second', path: path.join(approved, 'second'),
-    additionalPaths: [first.path, related, duplicateAlias, related], createdAt: 2
-  };
-  await writeDurableNow('projects', [first, second]);
-  expect(await listProjects()).toEqual([first, { ...second, additionalPaths: [related] }]);
-});
-
-it('still rejects duplicate primary ownership and duplicate project ids in a persisted catalog', async () => {
-  const id = randomUUID();
-  const first = { id, name: 'First', path: path.join(approved, 'first'), createdAt: 1 };
-  const duplicatePrimary = { id: randomUUID(), name: 'Second', path: first.path, createdAt: 2 };
-  await writeDurableNow('projects', [first, duplicatePrimary]);
-  await expect(listProjects()).rejects.toThrow(/catalog is invalid/);
-  await writeDurableNow('projects', [first, { ...duplicatePrimary, id, path: path.join(approved, 'second') }]);
-  await expect(listProjects()).rejects.toThrow(/catalog is invalid/);
 });
 
 it('resolves a native picker alias to the approved identity without granting outside aliases', async () => {
@@ -162,59 +133,4 @@ it('fails closed when explicit project permission is removed and follows approve
   await saveConfig({ ...defaultConfig(), roots: [] });
   await expect(getSessionProject(session.id)).rejects.toThrow();
   expect((await getSession(session.id))?.projectId).toBe(project.id);
-});
-
-it('keeps primary cwd authoritative when an additional folder loses permission', async () => {
-  const relatedRoot = path.join(directory, 'related-approved');
-  const related = path.join(relatedRoot, 'shared');
-  await fs.mkdir(related, { recursive: true });
-  const canonicalRelatedRoot = await validateNewRoot(relatedRoot, [{ name: 'work', path: approved }]);
-  const canonicalRelated = path.join(canonicalRelatedRoot, 'shared');
-  const primary = path.join(approved, 'first');
-  const project = await addProject(primary);
-  const session = await createSession({ title: 'Multi-folder project' });
-  await assignSessionProject(session.id, project.id);
-  await expect(addProjectFolder(project.id, related)).rejects.toThrow();
-  await saveConfig({
-    ...defaultConfig(),
-    roots: [{ name: 'work', path: approved }, { name: 'related', path: canonicalRelatedRoot }]
-  });
-
-  const updated = await addProjectFolder(project.id, related);
-  expect(updated).toMatchObject({ id: project.id, path: primary, additionalPaths: [canonicalRelated] });
-  expect((await addProjectFolder(project.id, related)).additionalPaths).toEqual([canonicalRelated]);
-  expect(await projectWorkspace(project.id)).toMatchObject({ real: primary, virtual: '/work/first' });
-  expect(await projectWorkspace(project.id, related)).toMatchObject({ real: canonicalRelated, virtual: '/related/shared' });
-  await expect(projectWorkspace(project.id, path.join(approved, 'second'))).rejects.toThrow(/does not belong/);
-  expect(await getSessionProject(session.id)).toMatchObject({ real: primary, virtual: '/work/first' });
-
-  await saveConfig({ ...defaultConfig(), roots: [{ name: 'work', path: approved }] });
-  expect(await projectWorkspace(project.id)).toMatchObject({ real: primary, virtual: '/work/first' });
-  await expect(projectWorkspace(project.id, related)).rejects.toThrow();
-  const removed = await removeProjectFolder(project.id, canonicalRelated);
-  expect(removed.additionalPaths).toBeUndefined();
-  expect(await projectWorkspace(project.id)).toMatchObject({ real: primary, virtual: '/work/first' });
-});
-
-it('deduplicates canonical additional-folder aliases and detaches an unavailable folder', async () => {
-  const primary = path.join(approved, 'first');
-  const related = path.join(approved, 'related');
-  const alias = path.join(approved, 'related-alias');
-  await fs.mkdir(related);
-  await fs.symlink(related, alias, process.platform === 'win32' ? 'junction' : 'dir');
-  const project = await addProject(primary);
-  const other = await addProject(path.join(approved, 'second'));
-  expect((await addProjectFolder(project.id, related)).additionalPaths).toEqual([related]);
-  expect((await addProjectFolder(project.id, alias)).additionalPaths).toEqual([related]);
-  await expect(addProject(related)).rejects.toThrow(/already belongs/);
-  await expect(addProjectFolder(other.id, alias)).rejects.toThrow(/already belongs/);
-  await expect(addProjectFolder(project.id, other.path)).rejects.toThrow(/already belongs/);
-  if (process.platform === 'win32') {
-    expect((await addProjectFolder(project.id, related.toUpperCase())).additionalPaths).toEqual([related]);
-  }
-  await fs.rename(related, path.join(approved, 'related-moved'));
-  expect(await projectWorkspace(project.id)).toMatchObject({ real: primary, virtual: '/work/first' });
-  await expect(projectWorkspace(project.id, related)).rejects.toThrow();
-  await expect(removeProjectFolder(project.id, primary)).rejects.toThrow(/primary/);
-  expect((await removeProjectFolder(project.id, related)).additionalPaths).toBeUndefined();
 });

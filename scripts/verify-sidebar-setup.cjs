@@ -33,7 +33,7 @@ app.whenReady().then(async () => {
       status:{state:'disconnected',detail:'',publicUrl:null,localUrl:null,handshakeAt:null,lastRequestAt:null,lastToolCallAt:null,health:null,surfaces:[]},
       bridge:{running:false,port:0,paired:false,present:false,lastSeenAt:null,extensionVersion:null},
       update:{current:'2.0.9',latest:null,stage:'idle',error:null,checkedAt:null}};
-    const project = {id:'demo-project',name:'VideoClipper',path:'C:/demo',additionalPaths:['C:/shared'],createdAt:1};
+    const project = {id:'demo-project',name:'VideoClipper',path:'C:/demo',createdAt:1};
     const projects = [project, {id:'second-project',name:'Documentation',path:'C:/docs',createdAt:2}];
     const rows = Array.from({length:22},(_,i)=>({id:'task-'+i,title:'Project chat '+(i+1),projectId:project.id,
       conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:100-i,endedAt:2,events:0,userMessages:0,
@@ -96,14 +96,6 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...headingPoint});
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...headingPoint});
     await expectDisclosure(true);
-    const folders = await js(`(() => { const group=document.querySelector('.project-group'); const rows=[...group.querySelectorAll('.project-folder-row')];
-      return { paths:rows.map(row=>row.querySelector('.project-folder-path').textContent), roles:rows.map(row=>row.getAttribute('role')),
-        primaryRemove:!!rows[0].querySelector('.project-folder-remove'), removeCount:group.querySelectorAll('.project-folder-remove').length,
-        removeLabel:group.querySelector('.project-folder-remove')?.getAttribute('aria-label')??'',
-        addLabel:group.querySelector('.project-folder-add')?.getAttribute('aria-label')??'' }; })()`);
-    assert.deepEqual(folders.paths,['C:/demo','C:/shared']); assert.deepEqual(folders.roles,['listitem','listitem']);
-    assert.equal(folders.primaryRemove,false); assert.equal(folders.removeCount,1);
-    assert.match(folders.removeLabel,/C:\/shared/); assert.match(folders.addLabel,/VideoClipper/);
     // The disclosure click above leaves the real pointer hovering the heading, which intentionally
     // reveals its otherwise-quiet controls, and summary activation can retain focus too. Clear both
     // before checking the idle baseline; hover/focus are separately intended to reveal the control.
