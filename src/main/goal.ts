@@ -1216,6 +1216,16 @@ export function goalViewFor(conversationId: string, clientId?: string): GoalDraf
   return view(draft);
 }
 
+/**
+ * The run's outcome for the app window: an acknowledged "goal met" decision, until a newer turn
+ * replaces it. goalViewFor() hides it from the page once acted on, but the window must not fall
+ * back to "Pursuing goal" for a run that ended (found on Windows, 2026-10-04).
+ */
+export function goalOutcomeFor(conversationId: string): GoalDraftView | null {
+  const draft = drafts.get(conversationId);
+  return draft?.acknowledged && draft.stage === 'no-reply' ? view(draft) : null;
+}
+
 export async function retryGoalBrowserHelper(sourceSessionId: string, inputId: string): Promise<boolean> {
   const session = await getSession(sourceSessionId);
   if (!session?.conversationId) return false;
