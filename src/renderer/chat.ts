@@ -5761,17 +5761,70 @@ export function initChat(next: Deps): void {
     // nor does a key that acts on a focused control (Space toggling a disclosure), nor
     // programmatic scrolling.
     const pane = $('chatBody');
-    let intent = 0;
+    let intent: { generation: number; scrolled: boolean } | null = null;
+    let heldPointer: { id: number; generation: number; middle: boolean; released: boolean } | null = null;
+    let intentFrame: number | null = null;
+    const clearIntent = (): void => {
+      intent = null;
+      heldPointer = null;
+      if (intentFrame !== null) window.cancelAnimationFrame(intentFrame);
+      intentFrame = null;
+    };
+    const noteIntent = (): void => {
+      if (heldPointer && heldPointer.generation !== selectionGeneration) heldPointer = null;
+      const owner = intent?.generation === selectionGeneration ? intent : { generation: selectionGeneration, scrolled: false };
+      intent = owner;
+      if (intentFrame !== null) window.cancelAnimationFrame(intentFrame);
+      // Scroll events precede animation-frame callbacks. A slow/hidden rendering opportunity
+      // must not age out real input; input that did not move anything expires at that frame.
+      intentFrame = window.requestAnimationFrame(() => {
+        intentFrame = null;
+        if (intent === owner && !owner.scrolled && heldPointer?.generation !== owner.generation) intent = null;
+      });
+    };
     const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
-    pane.addEventListener('wheel', () => { intent = Date.now(); }, { passive: true });
-    pane.addEventListener('touchmove', () => { intent = Date.now(); }, { passive: true });
+    pane.addEventListener('wheel', noteIntent, { passive: true });
+    pane.addEventListener('touchmove', noteIntent, { passive: true });
     pane.addEventListener('keydown', event => {
-      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) intent = Date.now();
+      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) noteIntent();
     });
     // The scrollbar itself, and middle-button autoscroll, which starts anywhere over the content.
-    pane.addEventListener('pointerdown', event => { if (event.target === pane || event.button === 1) intent = Date.now(); }, { passive: true });
+    pane.addEventListener('pointerdown', event => {
+      // A second middle click only cancels the toggle. A new scrollbar press may itself
+      // move the viewport, so retire the old owner before classifying that new input.
+      if (heldPointer?.released && heldPointer.generation === selectionGeneration) {
+        clearIntent();
+        if (event.button === 1) return;
+      }
+      if (event.target !== pane && event.button !== 1) return;
+      const middle = event.button === 1 && pane.scrollHeight > pane.clientHeight &&
+        !(event.target as Element).closest('a, button, input, textarea, select, [contenteditable]');
+      heldPointer = { id: event.pointerId, generation: selectionGeneration, middle, released: false };
+      noteIntent();
+    }, { passive: true, capture: true });
+    const releasePointer = (event: PointerEvent): void => {
+      if (heldPointer?.id !== event.pointerId) return;
+      const generation = heldPointer.generation;
+      // Chromium's middle-click toggle starts moving after the button was released in its
+      // deadzone. Keep that pending input until its first scroll, or an explicit cancellation.
+      if (heldPointer.middle && !intent?.scrolled && event.type === 'pointerup') {
+        heldPointer.released = true;
+        return;
+      }
+      heldPointer = null;
+      if (intent?.generation === generation && (!intent.scrolled || event.type === 'pointercancel')) clearIntent();
+    };
+    window.addEventListener('pointerup', releasePointer, { passive: true });
+    window.addEventListener('pointercancel', releasePointer, { passive: true });
+    window.addEventListener('blur', () => { if (heldPointer) clearIntent(); });
+    window.addEventListener('pointerdown', event => {
+      if (heldPointer?.released && !pane.contains(event.target as Node)) clearIntent();
+    }, { passive: true, capture: true });
+    window.addEventListener('keydown', event => { if (event.key === 'Escape' && heldPointer?.released) clearIntent(); }, { capture: true });
     pane.addEventListener('scroll', () => {
-      if (Date.now() - intent < 300) {
+      if (intent?.generation === selectionGeneration) {
+        intent.scrolled = true;
+        if (heldPointer?.released) heldPointer = null;
         // The absolute end, reserve included: scrolling up out of an underfilled page's blank
         // space is reading too, and must not be pulled back down by the next delivery.
         readerAtEnd = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2;
@@ -5779,6 +5832,11 @@ export function initChat(next: Deps): void {
         if (readingAfterSend && distanceFromTail() <= 1) readingAfterSend = false;
       }
       paintJumpLatest();
+    }, { passive: true });
+    // Keep a smooth/inertial gesture through its final position, then retire its authority.
+    pane.addEventListener('scrollend', () => {
+      if (intent && heldPointer?.generation === intent.generation) intent.scrolled = false;
+      else clearIntent();
     }, { passive: true });
     const dock = el('div', 'jump-latest-dock');
     const jump = el('button', 'jump-latest') as HTMLButtonElement;
