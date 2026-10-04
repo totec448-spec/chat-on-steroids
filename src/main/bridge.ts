@@ -441,7 +441,25 @@ interface Command {
    * Memory only: a command restored from a previous run has no page waiting for it.
    */
   owner: string | null;
+  /**
+   * How far opening this chat got, for the message when it runs out of time. Memory only, and
+   * only step names and times: never text, titles or addresses. `opened` says who was asked to
+   * open the tab; `step` is the last stage the page reported after it picked up the command.
+   */
+  progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number };
 }
+
+/** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
+const COMMAND_STEPS = ['revival-waiting', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
+type CommandStep = typeof COMMAND_STEPS[number];
+const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
+  'revival-waiting': 'its chat was still answering or its message box was not empty',
+  composer: 'waiting for ChatGPT\'s message box',
+  model: 'choosing the model and reasoning',
+  'composer-after-model': 'waiting for the message box after choosing the model',
+  inserting: 'putting the task into the message box',
+  sending: 'sending the task'
+};
 
 type CommandPhase = 'queued' | 'leased';
 type CommandReceiptOutcome = 'committed' | 'terminal-failure';
@@ -4166,6 +4184,24 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { command: described }, origin);
   }
 
+  // A page that redeemed a command saying how far it got. Step names only; see `commandProgress`.
+  // Advisory: it changes no lease, deadline or outcome, and a stale or foreign report is ignored.
+  if (route === '/commands/step' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const step = COMMAND_STEPS.find(candidate => candidate === body['step']);
+    const command = commands.find(entry => entry.id === body['id']);
+    // A wake reports its wait before it redeems, so it has no owner yet; every later step needs one.
+    const allowed = step === 'revival-waiting' ? command?.owner === null : command?.owner != null && command.owner === body['client'];
+    if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
+    command.progress = { ...command.progress, step, stepAt: Date.now() };
+    return json(res, 200, { ok: true }, origin);
+  }
   if (route === '/commands/ack' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -6150,6 +6186,7 @@ function pendingBrowserPlacement(conversationId: string | null, browser: string 
   if (!command?.placement) return null;
   const placement = command.placement;
   delete command.placement;
+  command.progress = { ...command.progress, opened: 'browser' };
   const spec = command.spec;
   const worker = spec.type === 'worker';
   const selection = spec.type === 'resume' ? continuationByToken(spec.token)?.requestedModel : null;
@@ -9174,6 +9211,7 @@ async function openFreshChatInBrowser(command: Command): Promise<void> {
     // Stamped whether or not a browser was already running: this process cannot tell the
     // difference, and the window it opens is only ever spent by a browser failing to appear.
     if (!browserPresent()) lastBrowserLaunchAt = Date.now();
+    command.progress = { ...command.progress, opened: 'os' };
     await openInBrowser(
       command.spec.type === 'worker'
         ? commandUrl(command.id, command.spec.model, command.spec.reasoningEffort)
@@ -9344,9 +9382,28 @@ function expire(command: Command): void {
 
 /** Timer and sweep describe the same delivery evidence, preserving a recorded failure. */
 function commandExpiryReason(command: Command): string {
-  return command.lastError ?? (command.claimedAt === null
-    ? 'the browser did not claim this command before its deadline'
-    : 'the chat this app opened did not report back in time');
+  if (command.lastError) return command.lastError;
+  if (command.claimedAt !== null) return `the chat this app opened did not report back in time (${commandProgress(command)})`;
+  return command.progress?.step === 'revival-waiting'
+    ? `the browser did not claim this command before its deadline (${COMMAND_STEP_TEXT['revival-waiting']})`
+    : 'the browser did not claim this command before its deadline';
+}
+
+/**
+ * Where a claimed command stopped, in words a bug report can carry. Before this, a worker that
+ * hung while choosing its model and one whose tab never loaded both read "did not report back
+ * in time", and #882's worker-11 (2026-10-04) could not be told apart from either.
+ */
+function commandProgress(command: Command, now = Date.now()): string {
+  const progress = command.progress ?? {};
+  if (command.owner === null) {
+    if (progress.opened === 'browser') return 'the browser opened it, but the page never picked up its task';
+    if (progress.opened === 'os') return 'it was opened through the operating system, and no page with the extension picked up its task';
+    return 'no browser opened it';
+  }
+  if (!progress.step || progress.step === 'revival-waiting' || progress.stepAt === undefined) return 'the page picked up its task, then reported nothing more';
+  const seconds = Math.max(0, Math.round((now - progress.stepAt) / 1000));
+  return `last step: ${COMMAND_STEP_TEXT[progress.step]}, reported ${seconds} s before the app gave up`;
 }
 
 /** Finishes a command that has nothing left to do, timer and all. */

@@ -11212,6 +11212,10 @@
       // can put the same marker back in front of this exact chat. The prime's text stays solely in
       // the app-side command until the later redeem succeeds.
       if (!(await waitForDeferredRevivalCustody(id, openedConversation, attempt))) return;
+      // Told to the app so a wake that never gets here can say why (#882: a restored draft).
+      if (!revivalSubmitReady(openedConversation)) {
+        void ask({ type: 'command_step', id, client: RUN_ID, step: 'revival-waiting' }).catch(() => undefined);
+      }
       if (!(await waitForRevivalSubmitReady(openedConversation, attempt))) return;
     }
     if (attempt?.cancelled) return;
@@ -11291,6 +11295,9 @@
       if (attempt) attempt.phase = 'failed';
       return ask({ type: 'ack', id: boot.id, status: 'failed', error: why, client: RUN_ID });
     };
+    // Where this page is, so a command that runs out of time can say where it stopped. Never
+    // awaited: a report must not slow or block the bootstrap, and older apps ignore it.
+    const step = (name) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name }).catch(() => undefined); };
     // What this command is for, as the app states it. A revival names the conversation and
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.
@@ -11380,6 +11387,7 @@
     // The composer is the readiness signal. Page-level `readyState` says whether every
     // resource finished loading, not whether this editing host is usable, and waiting on it
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
+    step('composer');
     const readyComposer = await waitForComposer();
     if (!readyComposer) return void (await fail(t(
       'content_bootstrap_composer_unavailable',
@@ -11387,6 +11395,7 @@
     )));
     if (await failIfRetargeted()) return;
 
+    if (boot.model || boot.reasoningEffort) step('model');
     if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget))) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
@@ -11398,6 +11407,7 @@
     // transient unmount as a failed bootstrap: reacquire the editing host under the
     // same route/command fence before inserting authored text. This is deliberately
     // after selection, because the pre-selection composer is no longer authoritative.
+    if (boot.model || boot.reasoningEffort) step('composer-after-model');
     if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget))) {
       if (await failIfRetargeted()) return;
       return void (await fail(t(
@@ -11449,6 +11459,7 @@
     };
     if (await failIfRetargeted()) return;
     let insertionFailure = '';
+    step('inserting');
     if (!CLF_DOM.insertPrompt(boot.text, true, reason => { insertionFailure = reason; })) {
       return void (await fail(t(
         'content_bootstrap_insert_refused',
@@ -11580,6 +11591,7 @@
     // Why Send ended without acceptance (#882): one short code from CLF_DOM.send, so a failed worker
     // start or wake says which step it reached instead of only that it failed.
     let sendRefusal = null;
+    step('sending');
     if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, authorizeBootstrapSend, null,
                                   matchesSubmittedBootstrap, null, why => { sendRefusal = why; }))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click

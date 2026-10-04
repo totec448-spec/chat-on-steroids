@@ -2698,6 +2698,13 @@ Invited workers retain the existing bootstrap deadlines. A waking worker has one
 three-minute delivery attempt; only proven delivery grants the existing additional silence
 budget. Redeeming does not renew the deadline, and expiry never authorizes another send.
 Timer and maintenance expiry share the same claim-based diagnostic and retain specific errors.
+The page reports how far it got with `/commands/step` (`{ id, client, step }`), step names only:
+`revival-waiting` before redeem (a wake held by a busy chat or a non-empty editor), then
+`composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
+Reports are fire-and-forget and advisory: they change no lease, deadline or outcome, a report
+from a page that does not own the command is ignored, and they never carry text, titles or
+addresses. Expiry names the last one, or whether the browser or the OS opened the chat and no
+page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,

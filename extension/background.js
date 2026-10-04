@@ -3932,6 +3932,18 @@ const HANDLERS = {
     return ackCommand(String(message.id || ''), message.status === 'sent' ? 'sent' : 'failed', message.error,
       message.conversationId, null, message.client, source, message.turnId);
   },
+  /**
+   * How far a redeemed command's page got: a step name only, never its text. The app keeps the
+   * last one so a command that runs out of time can say where it stopped. Best effort.
+   */
+  async command_step(message) {
+    const id = typeof message.id === 'string' ? message.id.slice(0, 128) : '';
+    const step = typeof message.step === 'string' ? message.step.slice(0, 32) : '';
+    if (!id || !step) return { ok: false };
+    const result = await call('/commands/step', { method: 'POST',
+      body: JSON.stringify({ id, client: String(message.client || '').slice(0, 64), step }) });
+    return { ok: result.ok === true };
+  },
   /** The marked page asking for the one command it was opened for. */
   async redeem(message) {
     return redeemCommand(
@@ -4058,6 +4070,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'settings_get',
     'repair_fiber',
     'redeem',
+    'command_step',
     'defer_revival',
     'forget_revival',
     'ack'
