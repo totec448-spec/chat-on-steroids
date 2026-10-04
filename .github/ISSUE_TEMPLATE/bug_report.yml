@@ -93,6 +93,15 @@ body:
         3.
 
   - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: >
+        In the app, open Activity and click Diagnostics report, then drag the saved file into this box.
+        Your user name, folder and file names, chat titles, tasks, email addresses and keys are already
+        replaced in it. Please read it before you attach it.
+
+  - type: textarea
     id: extra
     attributes:
       label: Anything else

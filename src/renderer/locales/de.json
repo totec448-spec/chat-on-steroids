@@ -1816,5 +1816,8 @@
   "Stop background process": "Hintergrundprozess stoppen",
   "Stop": "Stoppen",
   "Background process is no longer running": "Der Hintergrundprozess läuft nicht mehr",
-  "{0} background processes running": "{0} Hintergrundprozesse laufen"
+  "{0} background processes running": "{0} Hintergrundprozesse laufen",
+  "Diagnostics report": "Diagnosebericht",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Speichert eine Datei mit Versionen, Einstellungen, Verbindungsstatus und Protokoll – ohne persönliche Angaben –, die du einem Fehlerbericht anhängen kannst.",
+  "Diagnostics report saved as {0}. Read it before you share it.": "Diagnosebericht als {0} gespeichert. Lies ihn, bevor du ihn teilst."
 }

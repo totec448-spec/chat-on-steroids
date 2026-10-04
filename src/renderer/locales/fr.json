@@ -1816,5 +1816,8 @@
   "Stop background process": "Arrêter le processus en arrière-plan",
   "Stop": "Arrêter",
   "Background process is no longer running": "Le processus en arrière-plan n’est plus en cours",
-  "{0} background processes running": "{0} processus en arrière-plan en cours"
+  "{0} background processes running": "{0} processus en arrière-plan en cours",
+  "Diagnostics report": "Rapport de diagnostic",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Enregistre un fichier avec les versions, les paramètres, l’état de la connexion et le journal, sans données personnelles, à joindre à un rapport de bug.",
+  "Diagnostics report saved as {0}. Read it before you share it.": "Rapport de diagnostic enregistré sous {0}. Relisez-le avant de le partager."
 }

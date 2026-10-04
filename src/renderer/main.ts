@@ -1984,6 +1984,18 @@ for (const id of ['copyLog', 'copyLogText']) {
   });
 }
 
+// One file for a bug report; the main process removes personal details and shows the saved file.
+$('saveDiagnosticsReport').addEventListener('click', async () => {
+  const button = $<HTMLButtonElement>('saveDiagnosticsReport');
+  button.disabled = true;
+  try {
+    const result = await run(api.saveDiagnosticsReport());
+    if (result?.saved) toast(t('Diagnostics report saved as {0}. Read it before you share it.', [result.name]));
+  } finally {
+    button.disabled = false;
+  }
+});
+
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());
   if (text === null) return;

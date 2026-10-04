@@ -1816,5 +1816,8 @@
   "Stop background process": "Dừng tiến trình nền",
   "Stop": "Dừng",
   "Background process is no longer running": "Tiến trình nền không còn chạy",
-  "{0} background processes running": "{0} tiến trình nền đang chạy"
+  "{0} background processes running": "{0} tiến trình nền đang chạy",
+  "Diagnostics report": "Báo cáo chẩn đoán",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Lưu một tệp gồm phiên bản, cài đặt, trạng thái kết nối và nhật ký, đã loại bỏ thông tin cá nhân, để đính kèm vào báo cáo lỗi.",
+  "Diagnostics report saved as {0}. Read it before you share it.": "Đã lưu báo cáo chẩn đoán thành {0}. Hãy đọc trước khi chia sẻ."
 }
