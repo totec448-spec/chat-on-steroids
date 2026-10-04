@@ -349,11 +349,6 @@
   "Chat list width": "Breite der Chatliste",
   "Settings navigation": "Navigation der Einstellungen",
   "Add a project folder": "Projektordner hinzufügen",
-  "Project folders": "Projektordner",
-  "Primary project folder": "Primärer Projektordner",
-  "Add folder": "Ordner hinzufügen",
-  "Add folder to project {0}": "Ordner zu Projekt {0} hinzufügen",
-  "Remove folder {0} from project {1}": "Ordner {0} aus Projekt {1} entfernen",
   "Switch to dark mode": "Zum dunklen Modus wechseln",
   "Search plugins": "Plugins durchsuchen",
   "Add a plugin": "Plugin hinzufügen",
@@ -467,6 +462,7 @@
   "New chat in this project": "Neuer Chat in diesem Projekt",
   "Remove project from sidebar; keep conversations and files": "Projekt aus der Seitenleiste entfernen; Unterhaltungen und Dateien bleiben erhalten",
   "Remove project {0}": "Projekt {0} entfernen",
+  "Change project color": "Projektfarbe ändern",
   "Project removed; conversations kept": "Projekt entfernt; Unterhaltungen bleiben erhalten",
   "Show more": "Mehr anzeigen",
   "Show more tasks in {0}": "Mehr Aufgaben in {0} anzeigen",
@@ -1813,5 +1809,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Wechselt die gespeicherten Tunnel-IDs und den Tunnel-API-Schlüssel, zum Beispiel für ein anderes ChatGPT-Konto.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Die ChatGPT-Seite hat den Live-Stream dieser Antwort verloren. Die Antwort läuft vielleicht noch: Das Neuladen verbindet die Seite neu, ohne sie zu stoppen.",
   "Don't reload this answer": "Diese Antwort nicht neu laden",
-  "The reload has already started.": "Das Neuladen hat schon begonnen."
+  "The reload has already started.": "Das Neuladen hat schon begonnen.",
+  "Background process running · {0}": "Hintergrundprozess läuft · {0}",
+  "{0} background processes running · {1}": "{0} Hintergrundprozesse laufen · {1}",
+  "Running for {0}": "Läuft seit {0}",
+  "Stop background process": "Hintergrundprozess stoppen",
+  "Stop": "Stoppen",
+  "Background process is no longer running": "Der Hintergrundprozess läuft nicht mehr",
+  "{0} background processes running": "{0} Hintergrundprozesse laufen"
 }

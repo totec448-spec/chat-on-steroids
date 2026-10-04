@@ -343,11 +343,6 @@
   "Chat list width": "Largura da lista de chats",
   "Settings navigation": "Navegação pelas configurações",
   "Add a project folder": "Adicionar uma pasta de projeto",
-  "Project folders": "Pastas do projeto",
-  "Primary project folder": "Pasta principal do projeto",
-  "Add folder": "Adicionar pasta",
-  "Add folder to project {0}": "Adicionar pasta ao projeto {0}",
-  "Remove folder {0} from project {1}": "Remover a pasta {0} do projeto {1}",
   "Switch to dark mode": "Ativar o modo escuro",
   "Search plugins": "Buscar plugins",
   "Add a plugin": "Adicionar um plugin",
@@ -461,6 +456,7 @@
   "New chat in this project": "Novo chat neste projeto",
   "Remove project from sidebar; keep conversations and files": "Remover o projeto da barra lateral, mantendo as conversas e os arquivos",
   "Remove project {0}": "Remover projeto {0}",
+  "Change project color": "Alterar a cor do projeto",
   "Project removed; conversations kept": "Projeto removido; conversas mantidas",
   "Show more": "Mostrar mais",
   "Show more tasks in {0}": "Mostrar mais tarefas em {0}",
@@ -1813,5 +1809,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Alterna os IDs de túnel e a chave de API do túnel salvos, por exemplo para outra conta do ChatGPT.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "A página do ChatGPT perdeu a transmissão ao vivo desta resposta. Ela pode continuar em andamento: o recarregamento reconecta a página sem interrompê-la.",
   "Don't reload this answer": "Não recarregar esta resposta",
-  "The reload has already started.": "O recarregamento já começou."
+  "The reload has already started.": "O recarregamento já começou.",
+  "Background process running · {0}": "Processo em segundo plano em execução · {0}",
+  "{0} background processes running · {1}": "{0} processos em segundo plano em execução · {1}",
+  "Running for {0}": "Em execução há {0}",
+  "Stop background process": "Parar processo em segundo plano",
+  "Stop": "Parar",
+  "Background process is no longer running": "O processo em segundo plano não está mais em execução",
+  "{0} background processes running": "{0} processos em segundo plano em execução"
 }
