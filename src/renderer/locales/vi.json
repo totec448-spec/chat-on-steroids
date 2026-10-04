@@ -1813,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Chuyển đổi ID tunnel và khóa API tunnel đã lưu, ví dụ cho một tài khoản ChatGPT khác.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "Trang ChatGPT đã mất luồng trực tiếp của câu trả lời này. Câu trả lời có thể vẫn đang chạy: tải lại sẽ kết nối lại trang mà không dừng nó.",
   "Don't reload this answer": "Không tải lại câu trả lời này",
-  "The reload has already started.": "Quá trình tải lại đã bắt đầu."
+  "The reload has already started.": "Quá trình tải lại đã bắt đầu.",
+  "Background process running · {0}": "Tiến trình nền đang chạy · {0}",
+  "{0} background processes running · {1}": "{0} tiến trình nền đang chạy · {1}",
+  "Running for {0}": "Đã chạy {0}",
+  "Stop background process": "Dừng tiến trình nền",
+  "Stop": "Dừng",
+  "Background process is no longer running": "Tiến trình nền không còn chạy",
+  "{0} background processes running": "{0} tiến trình nền đang chạy"
 }
