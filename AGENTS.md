@@ -2726,7 +2726,9 @@ three-minute delivery attempt; only proven delivery grants the existing addition
 budget. Redeeming does not renew the deadline, and expiry never authorizes another send.
 Timer and maintenance expiry share the same claim-based diagnostic and retain specific errors.
 The page reports how far it got with `/commands/step` (`{ id, client, step }`), step names only:
-`revival-waiting` before redeem (a wake held by a busy chat or a non-empty editor), then
+`revival-busy`, `revival-draft` or `revival-editor` before redeem (a wake held by a chat still
+answering, a non-empty editor, or no usable editor yet; re-reported when the reason changes;
+older pages send `revival-waiting`), then
 `composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
 Reports are fire-and-forget and advisory: they change no lease, deadline or outcome, a report
 from a page that does not own the command is ignored, and they never carry text, titles or
