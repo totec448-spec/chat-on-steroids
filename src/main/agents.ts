@@ -244,6 +244,8 @@ interface Run {
   runId: string;
   /** Earlier incarnations of this family; see {@link MAX_FORMER_RUN_IDS}. */
   formerRunIds?: string[];
+  /** Setup profile of the exact MCP endpoint generation that created this family. */
+  setupProfileId?: string;
   primeConversationId: string | null;
   /** Inbound HTTP request that created this family before its chat was known. */
   primeRequestId?: string;
@@ -314,6 +316,8 @@ export function activeRunIds(): string[] { return [...runs.values()].filter(r =>
 interface DormantRun {
   /** Earlier incarnations of this family; see {@link MAX_FORMER_RUN_IDS}. */
   formerRunIds?: string[];
+  /** Preserved connection provenance; absent only for legacy/unproven histories. */
+  setupProfileId?: string;
   primeConversationId: string | null;
   primeRequestId?: string;
   startedAt: number;
@@ -586,12 +590,14 @@ export interface Caller {
   /** Transport-provided request ID, never a model argument. */
   requestId?: string | null;
   sessionId?: string | null;
+  /** Setup profile of the MCP endpoint generation that accepted this call. */
+  setupProfileId?: string | null;
   /** Optional family selection; ownership is checked independently. */
   runId?: string;
 }
 
 type Family = Run | DormantRun;
-type FamilyOwner = Pick<Run, 'primeConversationId' | 'primeRequestId'>;
+type FamilyOwner = Pick<Run, 'primeConversationId' | 'primeRequestId' | 'setupProfileId'>;
 
 /** Parked fleets keep their last incarnation, even when several have the same prime. */
 function familyKey(owner: Family): string {
@@ -633,6 +639,20 @@ function allFamilies(): Family[] {
   return [...runs.values(), ...dormantRuns.values()];
 }
 
+/** Setup-profile ids come from validated config/endpoint state, never model arguments. */
+function setupProfileId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 64 ? value : undefined;
+}
+
+/**
+ * A legacy family with no recorded profile stays unclaimed rather than being guessed later.
+ * When both sides have provenance, however, a different endpoint profile cannot acquire it.
+ */
+function setupProfileMatches(caller: Caller, owner: FamilyOwner): boolean {
+  const current = setupProfileId(caller.setupProfileId);
+  return !current || !owner.setupProfileId || current === owner.setupProfileId;
+}
+
 /**
  * Resolves an explicit prime-family address without changing caller ownership.
  *
@@ -666,9 +686,29 @@ function ownsPrime(caller: Caller, owner: FamilyOwner): boolean {
     !caller.conversationId && getConfig().multiAgent.allowUnattributedCalls && caller.requestId === owner.primeRequestId);
 }
 
-function belongsToFamily(caller: Caller, owner: Family): boolean {
+function belongsToFamilyIdentity(caller: Caller, owner: Family): boolean {
   return ownsPrime(caller, owner) || Boolean(caller.conversationId && [...owner.agents.values()]
     .some(agent => agent.info.role === 'worker' && agent.info.conversationId === caller.conversationId));
+}
+
+function mismatchedSetupProfile(input: Caller): Family | null {
+  const caller = exactCaller(input);
+  const current = setupProfileId(caller.setupProfileId);
+  if (!current) return null;
+  return allFamilies().find(owner =>
+    belongsToFamilyIdentity(caller, owner) &&
+    Boolean(owner.setupProfileId) && owner.setupProfileId !== current
+  ) ?? null;
+}
+
+function requireMatchingSetupProfile(caller: Caller): void {
+  const mismatch = mismatchedSetupProfile(caller);
+  if (!mismatch) return;
+  throw new AgentError(
+    'CONNECTION_PROFILE_MISMATCH: this worker family belongs to a different Setup profile. ' +
+      'No agent operation was performed. Switch back to the connection that created this family; ' +
+      'cross-profile worker routing is not automatic.'
+  );
 }
 
 function familiesForCaller(input: Caller, includeUnpublished = false): Family[] {
@@ -681,7 +721,7 @@ function familiesForCaller(input: Caller, includeUnpublished = false): Family[] 
     const stagedRequest = includeUnpublished && unpublished && owner.primeRequestId &&
       (owner.primeRequestId === caller.requestId || Boolean(caller.conversationId &&
         requestCorrelation(owner.primeRequestId)?.conversationId === caller.conversationId));
-    return stagedRequest || belongsToFamily(caller, owner);
+    return setupProfileMatches(caller, owner) && (stagedRequest || belongsToFamilyIdentity(caller, owner));
   });
 }
 
@@ -692,6 +732,7 @@ function selectedFamily(input: Caller, includeUnpublished = false): Family | nul
 }
 
 function requireFamilySelection(caller: Caller): void {
+  requireMatchingSetupProfile(caller);
   const owned = familiesForCaller(caller, true);
   if (caller.runId && !owned.some(owner => answersTo(owner, caller.runId!))) throw new AgentsBusyError();
   if (!caller.runId && owned.length > 1) {
@@ -877,6 +918,7 @@ function reactivateDormantRun(dormant: DormantRun): Run | null {
   const run: Run = {
     runId: randomUUID(),
     formerRunIds: boundedFormerRunIds([...(dormant.formerRunIds ?? []), familyKey(dormant)]),
+    setupProfileId: dormant.setupProfileId,
     primeConversationId: dormant.primeConversationId,
     primeRequestId: dormant.primeRequestId,
     // The browser-command fence gets a new incarnation id, but this is still the same prime's
@@ -1089,6 +1131,7 @@ export function swarmStateForCaller(caller: Caller): SwarmState {
   caller = exactCaller(caller);
   requireEnabled();
   if (!hasCallerIdentity(caller)) throw new IdentityLostError();
+  requireMatchingSetupProfile(caller);
   const owned = familiesForCaller(caller).filter(owner => !caller.runId || answersTo(owner, caller.runId));
   return { enabled: true, running: owned.some(owner => 'runId' in owner),
     retainedHistory: owned.some(owner => !('runId' in owner)),
@@ -1110,6 +1153,7 @@ export function statusForCaller(caller: Caller): CallerSwarmStatus {
   const run = runForCaller(caller);
   requireEnabled();
   if (!hasCallerIdentity(caller)) throw new IdentityLostError();
+  requireMatchingSetupProfile(caller);
   if (caller.runId && !selectedFamily(caller)) throw new AgentsBusyError();
   if (run) {
     const member = resolve(caller);
@@ -1437,6 +1481,7 @@ function parkRun(run: Run | null, reason: string): boolean {
   releasePrimeWorkspace(current.primeConversationId, current.runId);
   dormantRuns.set(familyKey(current), {
     formerRunIds: current.formerRunIds,
+    setupProfileId: current.setupProfileId,
     primeConversationId: current.primeConversationId,
     primeRequestId: current.primeRequestId,
     startedAt: current.startedAt,
@@ -1835,6 +1880,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
         // in run B. Truncating a UUID to eight hex characters made that safety boundary only
         // 32 bits wide; keep the full UUID and shorten it only where a UI chooses to render it.
         runId: randomUUID(),
+        setupProfileId: setupProfileId(input.caller.setupProfileId),
         primeConversationId: conversationId,
         primeRequestId: conversationId ? undefined : input.caller.requestId!,
         startedAt: Date.now(),
@@ -4276,6 +4322,8 @@ export interface WorkerPrimeOwner {
   primeConversationId: string | null;
   /** Current family incarnation, useful for diagnostics only; never an authorization token. */
   runId: string | null;
+  /** Connection provenance when this family was created; absent/null for legacy histories. */
+  setupProfileId?: string | null;
 }
 
 /**
@@ -4299,7 +4347,8 @@ export function workerPrimeOwner(conversationId: string): WorkerPrimeOwner {
   return {
     owned: true,
     primeConversationId: owner.primeConversationId ?? null,
-    runId: familyKey(owner)
+    runId: familyKey(owner),
+    setupProfileId: owner.setupProfileId ?? null
   };
 }
 
@@ -4642,6 +4691,7 @@ interface SerializedAgent {
 
 interface DormantRunSnapshot {
   formerRunIds?: string[];
+  setupProfileId?: string;
   primeConversationId: string | null;
   primeRequestId?: string;
   startedAt: number;
@@ -4659,10 +4709,11 @@ export interface SwarmSnapshot {
    * cannot honour.
    */
   version: 4 | 5 | 6 | 7;
-  activeRuns?: Array<{ runId: string; formerRunIds?: string[]; primeConversationId: string | null; primeRequestId?: string; startedAt: number; agents: SerializedAgent[] }>;
+  activeRuns?: Array<{ runId: string; formerRunIds?: string[]; setupProfileId?: string; primeConversationId: string | null; primeRequestId?: string; startedAt: number; agents: SerializedAgent[] }>;
   savedAt: number;
   /** Top-level fields are the active incarnation; all are null/empty while only history remains. */
   runId: string | null;
+  setupProfileId?: string;
   primeConversationId: string | null;
   startedAt: number | null;
   agents: SerializedAgent[];
@@ -4707,12 +4758,15 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
   // use activeRuns exclusively; retaining a sole-owner projection keeps older diagnostic readers useful.
   const sole = active.length === 1 ? active[0] : null;
   return { version: 7, savedAt: Date.now(), runId: sole?.runId ?? null,
+    ...(sole?.setupProfileId ? { setupProfileId: sole.setupProfileId } : {}),
     primeConversationId: sole?.primeConversationId ?? null, startedAt: sole?.startedAt ?? null,
     agents: sole ? serializeAgents(sole.agents, includeUnpublished) : [],
-    activeRuns: active.map(r => ({ runId: r.runId, ...(r.formerRunIds?.length ? { formerRunIds: r.formerRunIds } : {}), primeConversationId: r.primeConversationId,
+    activeRuns: active.map(r => ({ runId: r.runId, ...(r.formerRunIds?.length ? { formerRunIds: r.formerRunIds } : {}),
+      ...(r.setupProfileId ? { setupProfileId: r.setupProfileId } : {}), primeConversationId: r.primeConversationId,
       primeRequestId: r.primeRequestId,
       startedAt: r.startedAt, agents: serializeAgents(r.agents, includeUnpublished) })),
-    dormantRuns: dormant.map(h => ({ ...(h.formerRunIds?.length ? { formerRunIds: h.formerRunIds } : {}), primeConversationId: h.primeConversationId, startedAt: h.startedAt,
+    dormantRuns: dormant.map(h => ({ ...(h.formerRunIds?.length ? { formerRunIds: h.formerRunIds } : {}),
+      ...(h.setupProfileId ? { setupProfileId: h.setupProfileId } : {}), primeConversationId: h.primeConversationId, startedAt: h.startedAt,
       primeRequestId: h.primeRequestId,
       parkedAt: h.parkedAt, agents: serializeAgents(h.agents, includeUnpublished) })) };
 }
@@ -4847,6 +4901,8 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
       const previousRunId = restored.agents.get(PRIME_ID)?.info.runId;
       const runId = typeof previousRunId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previousRunId)
         ? previousRunId : randomUUID();
+      const restoredSetupProfileId = setupProfileId(saved.setupProfileId);
+      if (saved.setupProfileId !== undefined && !restoredSetupProfileId) repaired = true;
       if (dormantRuns.has(runId) || !acceptOwner(saved.primeConversationId, restored.agents, snapshot.version === 7 ? saved.primeRequestId : undefined)) {
         repaired = true;
         logWarn(`multi-agent: discarded conflicting dormant history for ${saved.primeConversationId}`);
@@ -4859,6 +4915,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
       }
       dormantRuns.set(runId, {
         formerRunIds: savedFormerRunIds(saved.formerRunIds, runId),
+        ...(restoredSetupProfileId ? { setupProfileId: restoredSetupProfileId } : {}),
         primeConversationId: saved.primeConversationId,
         primeRequestId: snapshot.version === 7 ? saved.primeRequestId : undefined,
         startedAt: Number.isFinite(saved.startedAt) ? saved.startedAt : snapshot.savedAt || Date.now(),
@@ -4894,6 +4951,8 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
         logWarn(`multi-agent: discarded active run for ${primeConversationId} because its conversation ownership conflicted`);
         repaired = true;
       } else {
+        const restoredSetupProfileId = setupProfileId(saved.setupProfileId);
+        if (saved.setupProfileId !== undefined && !restoredSetupProfileId) repaired = true;
         const restoredRunId =
           typeof saved.runId === 'string' &&
           /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(saved.runId)
@@ -4907,6 +4966,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
         const run: Run = {
           runId: restoredRunId,
           ...(formerRunIds ? { formerRunIds } : {}),
+          ...(restoredSetupProfileId ? { setupProfileId: restoredSetupProfileId } : {}),
           primeConversationId,
           primeRequestId,
           startedAt: Number.isFinite(saved.startedAt) ? (saved.startedAt as number) : snapshot.savedAt || Date.now(),
