@@ -519,6 +519,8 @@ matches all fail to no selection. A routed choice is frozen in the durable input
 Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
 Retries/restarts reuse that record instead of rerouting. Prompt preparation reads only the chosen
 managed body through the existing selected-Skill path and rejects it if its revision changed.
+The Skill list in that prompt stays complete: managed Skills come from the published catalog
+(no body re-read), while personal, project and Codex plugin Skills are discovered as without routing.
 An explicit queued-message edit clears the automatic record rather than silently rerouting changed
 text; a new explicit Skill directive in that edited text is still authoritative at preparation.
 Explicit slash/picker selection never combines with the automatic record. Routing grants no root,
