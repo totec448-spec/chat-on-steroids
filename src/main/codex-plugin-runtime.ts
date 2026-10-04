@@ -97,7 +97,7 @@ export function parseCodexPluginList(text: string): CodexPluginRuntimeEntry[] {
   return result;
 }
 
-type RuntimeCommand = { file: string; prefix: string[] };
+type RuntimeCommand = { file: string; prefix: string[]; runAsNode?: true };
 
 function executableFile(candidate: string): boolean {
   try {
@@ -118,9 +118,10 @@ export function locateCodexRuntime(): RuntimeCommand | null {
     }
     if (process.platform === 'win32' && executableFile(path.join(directory, 'codex.cmd'))) {
       // npm's Windows shim is a batch file. Execute the package's JS entry directly through the
-      // already-running Node executable so cmd.exe expansion never participates in path handling.
+      // already-running executable in Node mode so a packaged Electron app cannot relaunch its
+      // main entrypoint and cmd.exe expansion never participates in path handling.
       const script = path.join(directory, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
-      if (executableFile(script)) return { file: process.execPath, prefix: [script] };
+      if (executableFile(script)) return { file: process.execPath, prefix: [script], runAsNode: true };
     }
   }
   return null;
@@ -131,6 +132,7 @@ export async function listInstalledCodexPlugins(codexHome: string, cwd: string):
   if (!command) throw new Error('Codex CLI was not found on the inherited PATH');
   const environment = normalizeEnvironment();
   setEnvValue(environment, 'CODEX_HOME', codexHome);
+  if (command.runAsNode) setEnvValue(environment, 'ELECTRON_RUN_AS_NODE', '1');
   return new Promise((resolve, reject) => {
     const child = spawn(command.file, [...command.prefix, 'plugin', 'list', '--json'], {
       cwd, env: environment as NodeJS.ProcessEnv, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
