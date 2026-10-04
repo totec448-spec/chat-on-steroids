@@ -2,8 +2,8 @@ import { pathToFileURL } from 'node:url';
 
 const API = 'https://api.github.com';
 const DAY = 86_400_000;
-export const REMIND_AFTER_DAYS = 10;
-export const CLOSE_AFTER_REMINDER_DAYS = 7;
+export const REMIND_AFTER_DAYS = 3;
+export const CLOSE_AFTER_REMINDER_DAYS = 3;
 export const MARK = '<!-- waiting-on-author -->';
 const MAINTAINER = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
