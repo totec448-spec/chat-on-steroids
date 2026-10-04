@@ -104,41 +104,40 @@ app.whenReady().then(async () => {
         });
       })()`);
       assert.equal(emptyFields, true, 'Empty required fields must have a distinct tint');
-      for (const [group, count] of [['tunnel', 1], ['key', 1], ['developer', 1], ['plugin', 2]]) {
+      // Each step's pictures sit in a carousel inside that step; only the open step is on screen.
+      const groups = await win.webContents.executeJavaScript(`[...document.querySelectorAll('[data-setup-guide]')]
+        .map(host => [host.dataset.setupGuide, host.querySelectorAll('.guide-frame').length]).filter(([, count]) => count > 0)`);
+      assert.ok(groups.length >= 6, 'Setup has its picture guides: ' + JSON.stringify(groups));
+      for (const [group, count] of groups) {
         for (let index = 0; index < count; index++) {
           const selector = `[data-setup-guide="${group}"]`;
           const measured = await win.webContents.executeJavaScript(`(async () => {
             const host = document.querySelector('${selector}');
-            const figures = host.querySelectorAll('.setup-figure');
+            const step = host.closest('.step');
+            for (const other of document.querySelectorAll('.wizard > .step')) other.classList.toggle('is-open', other === step);
+            for (let node = host; node && node !== step; node = node.parentElement) node.hidden = false;
+            const frames = [...host.querySelectorAll('.guide-frame')];
+            host.querySelectorAll('.guide-dot')[${index}]?.click();
             await Promise.all([...host.querySelectorAll('img')].map(img => img.decode()));
-            const figure = figures[${index}];
-            const img = figure.querySelector('img');
-            (${count} > 1 && host.offsetHeight < innerHeight ? host : figure).scrollIntoView({block:'center'});
+            const frame = frames[${index}];
+            frame.scrollIntoView({block:'center'});
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            const panel = host.closest('.panel'); const frame = figure.querySelector('.setup-shot').getBoundingClientRect();
-            return { imageLoaded: img.naturalWidth > 0, overflow: panel.scrollWidth > panel.clientWidth,
-              imagesVisible: figures.length === ${count} && [...figures].every(n => n.getBoundingClientRect().height > 0),
-              captionTranslated: host.querySelector('figcaption p').textContent === window.t(${JSON.stringify('Select the workspace you use in ChatGPT, then create the tunnel and copy its ID.')}) || '${group}' !== 'tunnel',
-              labelsFit: [...figure.querySelectorAll('.setup-callout, .setup-target')].every(n => {
-                const r=n.getBoundingClientRect(); return r.left >= frame.left - 1 && r.right <= frame.right + 1 && r.top >= frame.top - 1 && r.bottom <= frame.bottom + 1;
-              }),
-              pairLayout: ${count} === 1 || (host.clientWidth > 510
-                ? Math.abs(figures[0].getBoundingClientRect().top - figures[1].getBoundingClientRect().top) < 1
-                : figures[1].getBoundingClientRect().top > figures[0].getBoundingClientRect().bottom)
+            const panel = host.closest('.panel');
+            const picture = frame.querySelector('.guide-picture').getBoundingClientRect();
+            return { imageLoaded: frame.querySelector('img').naturalWidth > 0, overflow: panel.scrollWidth > panel.clientWidth,
+              shown: !frame.hidden && picture.height > 0 && frames.filter(other => !other.hidden).length === 1,
+              labelled: frame.getAttribute('aria-label') === window.t('Enlarge image'),
+              spotsFit: [...frame.querySelectorAll('.guide-spot')].every(n => {
+                const r = n.getBoundingClientRect();
+                return r.left >= picture.left - 1 && r.right <= picture.right + 1 && r.top >= picture.top - 1 && r.bottom <= picture.bottom + 1;
+              })
             };
           })()`);
-          assert.deepEqual(measured, { imageLoaded: true, overflow: false, imagesVisible: true, captionTranslated: true, labelsFit: true, pairLayout: true }, JSON.stringify({ group, index, width, zoom, measured }));
+          assert.deepEqual(measured, { imageLoaded: true, overflow: false, shown: true, labelled: true, spotsFit: true }, JSON.stringify({ group, index, width, zoom, measured }));
           results.push({ group, index, width, zoom, language, theme, ...measured });
           // Image decoding/layout can finish before the offscreen compositor publishes its tile.
           await new Promise(resolve => setTimeout(resolve, 100));
           fs.writeFileSync(path.join(output, `${language}-${width}-${zoom}-${group}-${index}.png`), (await win.webContents.capturePage()).toPNG());
-          if (width === 1100 && zoom === 1) {
-            const rect = await win.webContents.executeJavaScript(`(() => {
-              const r=document.querySelectorAll('${selector} .setup-shot')[${index}].getBoundingClientRect();
-              return r.top >= 0 && r.bottom <= innerHeight ? { x:Math.round(r.x), y:Math.round(r.y), width:Math.round(r.width), height:Math.round(r.height) } : null;
-            })()`);
-            if (rect) fs.writeFileSync(path.join(output, `overlay-${group}-${index}.png`), (await win.webContents.capturePage(rect)).toPNG());
-          }
         }
       }
     }
@@ -171,7 +170,10 @@ app.whenReady().then(async () => {
       preference:document.getElementById('uiLanguage').value})`), {language:last, selected:'true', preference:last});
     // Native modal, Escape dismissal and focus restoration must work without opening a browser.
     await win.webContents.executeJavaScript(`(() => {
-      const button=document.querySelectorAll('[data-setup-guide="plugin"] .setup-enlarge')[1];
+      const host=document.querySelector('[data-setup-guide="plugin"]');
+      for (const step of document.querySelectorAll('.wizard > .step')) step.classList.toggle('is-open', step === host.closest('.step'));
+      host.querySelectorAll('.guide-dot')[1].click();
+      const button=host.querySelectorAll('.guide-frame')[1];
       button.focus(); button.click();
     })()`);
     assert.equal(await win.webContents.executeJavaScript('document.querySelector(".setup-image-dialog").open'), true);
@@ -180,7 +182,7 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESCAPE' });
     await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     assert.equal(await win.webContents.executeJavaScript('document.querySelector(".setup-image-dialog").open'), false);
-    assert.equal(await win.webContents.executeJavaScript('document.activeElement.textContent'), await win.webContents.executeJavaScript('window.t("Enlarge image")'));
+    assert.equal(await win.webContents.executeJavaScript('document.activeElement.getAttribute("aria-label")'), await win.webContents.executeJavaScript('window.t("Enlarge image")'));
     const details = await win.webContents.executeJavaScript(`(() => {
       const d=document.getElementById('desktopTunnelField'); const initial=d.open;
       d.querySelector('summary').click(); return { initial, opened:d.open };

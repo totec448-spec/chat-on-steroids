@@ -1,3 +1,4 @@
+import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
@@ -32,6 +33,7 @@ import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import type { AppState, Capability, ChatBrowser, Config, LogEntry, SurfaceStatus } from '../shared/types.js';
+import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import {
   browserExtensionRequired,
   isNewer,
@@ -66,11 +68,16 @@ publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
+const browserSetup = initBrowserSetup({
+  choose: chooseChatBrowser,
+  repaint: () => { setupOpenStep = 'browser'; if (state) apply(state); },
+  open: (browser, page) => run(api.openSetupBrowser(browser, page))
+});
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
 const appearance = initAppearance(patch => { void save(patch); });
 
-/** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
+/** Same shape the platform uses; mirrored here only to grey out the tunnel step until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
 
 interface Group {
@@ -137,13 +144,33 @@ function applyChecked(control: HTMLInputElement, next: boolean, previous?: boole
 /** The one expanded permission group, or null. One at a time keeps the layout still. */
 let openGroup: string | null = null;
 /** Null follows setup completion; an explicit guide choice survives status pushes. */
-let showAllSteps: boolean | null = null;
+/** The Setup step the user opened from the rail or with Back/Next; null follows the first unfinished one. */
+let setupOpenStep: string | null = null;
+/** The steps this setup shows, in order, and the one open now: what Back and Next move between. */
+let setupSteps: string[] = [];
+let setupOpen: string | null = null;
 let setupProfileBusy = false;
 let setupKeySave: Promise<boolean> = Promise.resolve(true);
 
 // ------------------------------------------------------------------- tabs
 
 let openSkillsLibrary: () => void = () => undefined;
+
+/**
+ * Beside each Setup button that opens a ChatGPT or OpenAI page in the built-in browser, the same
+ * page in the system's own browser, for anyone signed in there instead. Shown only while the
+ * built-in browser is the chosen one; otherwise the button itself already opens it there.
+ */
+const externalSetupLinks = [...document.querySelectorAll<HTMLButtonElement>('#wizard button[data-link]')]
+  .filter(button => opensInCosBrowser(button.dataset.link!))
+  .map(button => {
+    const other = el('button', 'btn', () => t('Open in another browser'));
+    other.setAttribute('type', 'button');
+    other.dataset.linkExternal = button.dataset.link!;
+    other.hidden = true;
+    button.after(other);
+    return other;
+  });
 
 function showTab(name: string): void {
   if (name === 'skills') openSkillsLibrary();
@@ -742,17 +769,17 @@ function missingStep(
   // clipboard may legitimately be rootless; enabling one must not hide a root still needed
   // by an effective file/patch/command capability on Core.
   if (config.roots.length === 0 && requiresApprovedFilesystemRoot(config)) {
-    return { step: 'folder', text: t("Choose a folder to share — step 1.") };
+    return { step: 'folder', text: t("Choose a folder to share — step 2.") };
   }
   if (config.tunnel.kind === 'openai') {
     if (!TUNNEL_ID_PATTERN.test(values.tunnelId)) {
-      return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step 2.") };
+      return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step 3.") };
     }
     if (!(next.secureStorage?.available ?? true) && !values.hasApiKey) {
       return { step: 'key', text: next.secureStorage?.detail ?? t("Secure credential storage is unavailable.") };
     }
     if (!values.hasApiKey) {
-      return { step: 'key', text: t("Add a restricted API key — step 3.") };
+      return { step: 'key', text: t("Add a restricted API key — step 4.") };
     }
   } else if (!next.resolvedBinary && config.tunnel.kind === 'cloudflared') {
     return { step: 'connect', text: t("cloudflared was not found on this computer.") };
@@ -1118,7 +1145,7 @@ async function changeSetupProfile(action: 'add' | 'select' | 'remove', id?: stri
       $<HTMLDialogElement>('setupProfileDialog').close();
     }
     $('setupProfileMenu').hidePopover();
-    showAllSteps = null;
+    setupOpenStep = null;
     apply(next);
   } finally {
     setupProfileBusy = false;
@@ -1323,12 +1350,29 @@ function apply(next: AppState): void {
   step('tunnel').hidden = !openai;
   step('key').hidden = !openai;
   step('browser').hidden = !browserRequired;
+  const cosBrowser = (config.ui.chatBrowser ?? 'chrome') === 'cos';
+  const browserProgress = browserSetup.render(next);
+  for (const other of externalSetupLinks) other.hidden = !cosBrowser;
   // Only this method needs a tunnel per connector. Cloudflare and manual publish the
   // whole address, so both connectors already ride the one tunnel on their own paths.
   const desktopSurface = status.surfaces.find((surface) => surface.id === 'desktop');
   $('desktopTunnelField').hidden = !openai || !desktopSurface?.available;
 
-  ui($('wizFolders'), 'textContent', () => config.roots.length === 0 ? t("None yet") : config.roots.map((r) => `/${r.name}`).join('  '));
+  // The add button is the call to action until a folder is shared, then it quiets to done.
+  $('wizAddFolder').dataset.tone = config.roots.length > 0 ? 'ok' : 'off';
+  // One folder per line: they are paths, and a row of them wraps mid-name.
+  $('wizFolders').replaceChildren(...(config.roots.length === 0
+    ? [(() => {
+      // Empty is an invitation, not a hole: the whole area chooses a folder, like the button.
+      const row = el('li', 'is-empty');
+      const pick = el('button', 'folder-empty');
+      pick.setAttribute('type', 'button');
+      pick.append(icon('i-folder'), el('span', '', () => t("No folder shared yet. Choose one to start.")));
+      pick.addEventListener('click', () => void addFolder());
+      row.append(pick);
+      return row;
+    })()]
+    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; })));
   const secureStorageAvailable = next.secureStorage?.available ?? true;
   const apiKey = $<HTMLInputElement>('apiKey');
   ui(apiKey, 'placeholder', () => next.hasApiKey ? t("•••••••• stored") : 'sk-…');
@@ -1343,14 +1387,25 @@ function apply(next: AppState): void {
   $('apiKeyState').classList.toggle('is-warn', !secureStorageAvailable);
   $<HTMLButtonElement>('removeApiKey').disabled = !next.hasApiKey || !secureStorageAvailable;
 
+  // The tunnel's state in one glance: a coloured badge, and the button that changes it. Only a
+  // failure says more, since only then is there something to do about it.
   const wizConnect = $<HTMLButtonElement>('wizConnect');
-  ui(wizConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
+  const tone = failed ? 'bad' : status.state === 'connected' ? 'ok' : running || disconnecting ? 'wait' : 'off';
+  ui($('wizConnectLabel'), 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
   wizConnect.disabled = connectBtn.disabled;
-  ui($('wizStatus'), 'textContent', () => running || failed || disconnecting ? status.detail || t(STATUS_TEXT[status.state]) : '');
+  wizConnect.dataset.tone = tone;
+  const pill = $('wizStatusPill');
+  pill.dataset.tone = tone;
+  ui(pill, 'textContent', () => t(STATUS_TEXT[status.state]));
+  const detail = $('wizStatus');
+  detail.hidden = !failed || !status.detail;
+  ui(detail, 'textContent', () => failed ? status.detail : '');
 
+  // The pictures show the tunnel path; only a published URL needs saying in words.
+  $('chatgptConn').hidden = openai;
   $('chatgptConn').replaceChildren(
     openai
-      ? frag("For the connection, choose ", "Tunnel", " and pick the tunnel you made in step 2.")
+      ? frag("For the connection, choose ", "Tunnel", " and pick the tunnel you made in step 3.")
       : frag("For the connection, paste the URL below into ", "MCP server URL", '.')
   );
 
@@ -1359,7 +1414,7 @@ function apply(next: AppState): void {
   // The middle case is the one that costs hours: ChatGPT connects and reads the tool
   // list, but the model is never allowed to call anything — Developer mode is off.
   // Every connector this app is publishing that ChatGPT has never reached. Computed here
-  // because it decides three things at once: the summary line, whether step 5 counts as
+  // because it decides three things at once: the summary line, whether the ChatGPT step counts as
   // done, and whether the cards stay on screen after the wizard tidies itself away.
   // This run's evidence, else the lasting proof kept for the tunnel each connector uses now:
   // a plugin that worked yesterday is still created in ChatGPT after a restart.
@@ -1370,6 +1425,7 @@ function apply(next: AppState): void {
   // Created is the plugin existing in ChatGPT: ChatGPT reached it, or listed it as installed.
   const unverified = surfaces.filter((surface) => surface.available && !pluginCreated(surface));
   const chatgptNote = $('wizChatgpt');
+  chatgptNote.hidden = reachedAt === null && unverified.length === surfaces.filter(surface => surface.available).length;
   chatgptNote.classList.toggle(
     'is-warn',
     reachedAt !== null && (ranAt === null || unverified.length > 0)
@@ -1377,7 +1433,7 @@ function apply(next: AppState): void {
   ui(chatgptNote, 'textContent', () => reachedAt === null
       ? unverified.length < surfaces.filter(surface => surface.available).length
         ? t("The plugin is in your ChatGPT. It runs the first time a chat asks for it.")
-        : t("ChatGPT has not called this app yet.")
+        : ''
       : ranAt === null
         ? t("ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.", [ago(reachedAt)])
         : unverified.length > 0
@@ -1389,21 +1445,16 @@ function apply(next: AppState): void {
           : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
-  // A connector the user has switched on but never created in ChatGPT is unfinished setup,
-  // so its card must survive the tidy collapse instead of disappearing behind "Show all
-  // steps" — otherwise a half-done Desktop setup reads as a complete one.
-  cards.classList.toggle('has-unfinished', unverified.length > 0);
-  const desktopExpanded = cards.querySelector<HTMLDetailsElement>('details')?.open ?? false;
-  cards.replaceChildren(...connectorCards(next, desktopExpanded));
+  cards.replaceChildren(...connectorCards(next));
 
   // Step marks: everything before the first unfinished step counts as done.
-  const order = ['folder', 'tunnel', 'key', 'connect', 'chatgpt', 'browser'];
+  const order = ['browser', 'folder', 'tunnel', 'key', 'connect', 'chatgpt'];
   const done = new Set<string>();
   if (config.roots.length > 0 || missingStep(next)?.step !== 'folder') done.add('folder');
   if (!openai || TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) done.add('tunnel');
   if (!openai || next.hasApiKey) done.add('key');
   if (connected) done.add('connect');
-  // The only honest proof step 5 is finished: ChatGPT has actually called the connectors
+  // The only honest proof the ChatGPT step is finished: ChatGPT has actually called the connectors
   // this app cannot work without. Judged per surface, because a Core request says nothing
   // about whether the Desktop connector was ever created. An optional connector never
   // blocks completion — a user may enable clipboard access and still not want a second
@@ -1412,11 +1463,8 @@ function apply(next: AppState): void {
     (surface) => surface.available && !surface.optional && !pluginCreated(surface)
   );
   if (!requiredUnverified && (reachedAt !== null || surfaces.some(surface => surface.available && pluginCreated(surface)))) done.add('chatgpt');
-  // Pairing is durable authorization, not liveness. A token surviving an app restart says
-  // only that this extension is allowed to connect; setup is complete when a required browser
-  // has actually checked in during this process. If no enabled feature needs the browser,
-  // this optional step is hidden and deliberately cannot block the wizard.
-  if (!browserRequired || next.bridge.present) done.add('browser');
+  // External installation and the selected execution path must both be ready.
+  if (!browserRequired || browserProgress.ready) done.add('browser');
   const current = order.find((name) => !done.has(name)) ?? null;
   for (const name of order) {
     const node = step(name);
@@ -1433,17 +1481,43 @@ function apply(next: AppState): void {
   ui($('setupProgressText'), 'textContent', () => finished === shown.length
     ? t('All {0} steps done', [shown.length])
     : t('{0} of {1} steps done', [finished, shown.length]));
-  $('setupProgressFill').style.width = `${shown.length ? Math.round(finished / shown.length * 100) : 0}%`;
 
-  // Setup that is finished should stop reading like a to-do list: the instructions
-  // collapse away so the page fits without scrolling, and come back on request.
-  const allDone = current === null;
-  const tidy = showAllSteps === null ? allDone : !showAllSteps;
-  $('wizard').classList.toggle('is-tidy', tidy);
-  const expand = $<HTMLButtonElement>('wizExpand');
-  expand.hidden = false;
-  expand.setAttribute('aria-expanded', String(!tidy));
-  ui(expand, 'textContent', () => tidy ? t("Show setup guide") : t("Hide setup guide"));
+  // One step open at a time: the one the user picked, else the first unfinished. Past the last
+  // task comes Ready, which reads every check back, so a finished setup opens on its proof.
+  // Following the first unfinished step is what moves the page on as each step completes.
+  const path = [...shown, 'ready'];
+  const open = setupOpenStep !== null && path.includes(setupOpenStep) ? setupOpenStep : current ?? 'ready';
+  setupSteps = path;
+  setupOpen = open;
+  const allSet = current === null;
+  for (const name of path) {
+    step(name).classList.toggle('is-open', name === open);
+    // Its place among the steps shown: only the open one is on screen, so no CSS counter can count it.
+    const mark = step(name).querySelector<HTMLElement>('.step-mark');
+    if (mark) mark.dataset.number = String(path.indexOf(name) + 1);
+  }
+  step('ready').classList.toggle('is-done', allSet);
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.setup-rail [data-rail-step]')) {
+    const name = button.dataset.railStep!;
+    const item = button.closest('li')!;
+    item.hidden = !path.includes(name);
+    item.classList.toggle('is-done', name === 'ready' ? allSet : done.has(name));
+    item.classList.toggle('is-current', name === current);
+    if (name === open) button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+  }
+  for (const nav of document.querySelectorAll<HTMLElement>('#wizard .step-nav')) {
+    const name = nav.closest<HTMLElement>('.step')!.dataset.step!;
+    const at = path.indexOf(name);
+    nav.querySelector<HTMLButtonElement>('[data-step-nav="back"]')!.hidden = at <= 0;
+    nav.querySelector<HTMLButtonElement>('[data-step-nav="next"]')!.hidden = at < 0 || at === path.length - 1;
+    nav.classList.toggle('is-ready', done.has(name));
+    if (name === 'browser') {
+      nav.hidden = !browserProgress.choosingLocation;
+      nav.querySelector<HTMLButtonElement>('[data-step-nav="next"]')!.disabled = !browserProgress.ready;
+    }
+  }
+  paintReady(shown, done, cosBrowser, allSet);
 
   const needsBinary = config.tunnel.kind !== 'manual';
   ui($('binaryState'), 'textContent', () => !needsBinary
@@ -1497,17 +1571,17 @@ function copyRow(label: string | (() => string), value: string, what: string): H
  * connector called "my pc" with a description the user invented is one the model may
  * never reach for, and that failure looks exactly like the app being broken.
  */
-function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[] {
+function connectorCards(next: AppState): HTMLElement[] {
   const { status, config } = next;
   return status.surfaces
     .filter((surface) => surface.id !== 'plugins')
     .map((surface) => {
-    const optional = surface.id === 'desktop';
-    const card = optional ? document.createElement('details') : el('div');
+    // Every connector shows what to copy, Desktop beside Core: folded away, it read as optional
+    // reading rather than a plugin to create.
+    const card = el('div');
     card.className = `connector is-${surface.state}`;
-    if (optional) (card as HTMLDetailsElement).open = desktopExpanded;
 
-    const head = optional ? document.createElement('summary') : el('div');
+    const head = el('div');
     head.className = 'connector-head';
     head.append(
       el('h4', '', surface.connectorName),
@@ -1538,9 +1612,7 @@ function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[]
         el(
           'p',
           'hint',
-          () => (surface.id === 'desktop' && !config.tunnel.desktopTunnelId) || (surface.id === 'plugins' && !config.tunnel.pluginsTunnelId)
-            ? t("Pick this connector’s own tunnel — paste its ID in step 2 first.")
-            : t("Choose Tunnel, then pick this connector’s tunnel.")
+          () => t("Select the tunnel for this connector.")
         )
       );
     }
@@ -1567,9 +1639,8 @@ function connectorCards(next: AppState, desktopExpanded: boolean): HTMLElement[]
       );
     }
 
-    if (surface.tools.length > 0) {
-      card.append(el('p', 'hint', () => t("Tools: {0}", [surface.tools.join(', ')])));
-    }
+    // The tool list is reference, not a step: it stays on hand as the card title's tooltip.
+    if (surface.tools.length > 0) ui(head, 'title', () => t("Tools: {0}", [surface.tools.join(', ')]));
     return card;
     });
 }
@@ -1681,6 +1752,99 @@ window.setInterval(paintClock, 1000);
 function step(name: string): HTMLElement {
   return document.querySelector<HTMLElement>(`[data-step="${name}"]`)!;
 }
+
+/** What each finished step proves, in the words Ready reads them back with. */
+const READY_CHECKS: Record<string, { done: string; cos?: string }> = {
+  browser: { done: 'Browser connected', cos: 'Signed in to ChatGPT' },
+  folder: { done: 'Folder shared' },
+  tunnel: { done: 'Tunnel created' },
+  key: { done: 'API key stored' },
+  connect: { done: 'Tunnel running' },
+  chatgpt: { done: 'Plugin added in ChatGPT' }
+};
+
+/**
+ * Ready: every check of the steps above, passed or not. All passing says so plainly and offers the
+ * chat; anything still open is listed as a way back to its step, never as a failure.
+ */
+function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, allSet: boolean): void {
+  ui($('readyTitle'), 'textContent', () => allSet ? t('You’re all set!') : t('Almost there'));
+  ui($('readyLead'), 'textContent', () => allSet
+    ? t('ChatGPT can now work in your folders. Ask it anything in a new chat.')
+    : t('Finish the steps still open below.'));
+  $('readyStart').hidden = !allSet;
+  step('ready').classList.toggle('is-all-set', allSet);
+  const list = $('readyChecks');
+  const rows = shown.map(name => {
+    const check = READY_CHECKS[name]!;
+    const passed = done.has(name);
+    const row = el('li', `ready-check${passed ? ' is-passed' : ''}`);
+    const label = () => t(cosBrowser && check.cos ? check.cos : check.done);
+    if (passed) {
+      row.append(icon('i-check-circle'), el('span', '', label));
+    } else {
+      const go = el('button', 'ready-go');
+      go.setAttribute('type', 'button');
+      go.append(el('span', 'ready-pending', () => t('Step {0}', [shown.indexOf(name) + 1])), el('span', '', label), icon('i-arrow-right'));
+      go.addEventListener('click', () => openSetupStep(name));
+      row.append(go);
+    }
+    return row;
+  });
+  list.replaceChildren(...rows);
+}
+
+/** A connector's newest evidence that ChatGPT uses it: this run's, else what earlier runs proved. */
+function withEvidence(surface: SurfaceStatus): SurfaceStatus {
+  return {
+    ...surface,
+    lastRequestAt: surface.lastRequestAt ?? surface.proof?.requestAt ?? null,
+    lastToolCallAt: surface.lastToolCallAt ?? surface.proof?.toolCallAt ?? null
+  };
+}
+
+/** Whether this connector's plugin exists in ChatGPT: ChatGPT reached it, or ChatGPT listed it. */
+function pluginCreated(surface: SurfaceStatus): boolean {
+  return surface.lastRequestAt !== null || (surface.proof?.installedAt ?? null) !== null;
+}
+
+/** Shows Setup on one step, out of the finished summary if need be, and brings it into view. */
+function openSetupStep(name: string): void {
+  // Picking the first unfinished step is following progress, so the page moves on when it is done.
+  setupOpenStep = step(name).classList.contains('is-current') ? null : name;
+  if (state) apply(state);
+  showTab('setup');
+  document.querySelector('.setup-track')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Back and Next under each step, built once: every step moves the same way.
+for (const body of document.querySelectorAll<HTMLElement>('#wizard > .step > .step-body')) {
+  const nav = el('div', 'step-nav');
+  // The label is its own span: a language switch rewrites only the words, never the arrow.
+  const back = el('button', 'btn step-back');
+  back.setAttribute('type', 'button');
+  back.dataset.stepNav = 'back';
+  back.append(icon('i-arrow-left'), el('span', '', () => t('Back')));
+  const forward = el('button', 'btn step-next');
+  forward.setAttribute('type', 'button');
+  forward.dataset.stepNav = 'next';
+  forward.append(el('span', '', () => t('Next')), icon('i-arrow-right'));
+  nav.append(back, forward);
+  if (body.closest<HTMLElement>('.step')?.dataset.step === 'browser') {
+    nav.insertBefore($('browserBack'), forward);
+  }
+  body.append(nav);
+}
+document.querySelector('.setup-rail')!.addEventListener('click', event => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>('[data-rail-step]');
+  if (button) openSetupStep(button.dataset.railStep!);
+});
+$('wizard').addEventListener('click', event => {
+  const nav = (event.target as HTMLElement).closest<HTMLElement>('[data-step-nav]');
+  if (!nav || setupOpen === null) return;
+  const next = setupSteps[setupSteps.indexOf(setupOpen) + (nav.dataset.stepNav === 'next' ? 1 : -1)];
+  if (next) openSetupStep(next);
+});
 
 /** Builds "text <strong>bold</strong> text" without touching innerHTML. */
 function frag(before: string, bold: string, after: string): DocumentFragment {
@@ -1875,7 +2039,8 @@ async function toggleConnection(): Promise<void> {
   if (!state || state.status.state === 'disconnecting') return;
   if (!isRunning(state.status.state) && !(await persistSetupDraftsForConnection())) {
     const missing = state ? missingStep(state) : null;
-    if (missing) { showTab('setup'); step(missing.step).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    // The wizard shows one step at a time: open the one that still needs the person.
+    if (missing) openSetupStep(missing.step);
     return;
   }
   if (!state) return;
@@ -1974,10 +2139,6 @@ window.addEventListener('drop', (event) => event.preventDefault());
   });
 }
 
-$('wizExpand').addEventListener('click', () => {
-  showAllSteps = $('wizard').classList.contains('is-tidy');
-  if (state) apply(state);
-});
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
 
 /**
@@ -2004,7 +2165,16 @@ $('headerConnect').addEventListener('click', async () => {
 });
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
-
+$('readyStart').addEventListener('click', () => showTab('chat'));
+$('showCosBrowser').addEventListener('click', event => void run(
+  (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? api.signOutChatGpt() : api.showCosBrowser()));
+/** Setup's browser choice is the same save as choosing it in Settings, so both share one rule. */
+function chooseChatBrowser(browser: ChatBrowser): void {
+  const choice = $<HTMLSelectElement>('chatBrowser');
+  if (choice.value === browser) return;
+  choice.value = browser;
+  choice.dispatchEvent(new Event('change', { bubbles: true }));
+}
 $('pickBinary').addEventListener('click', async () => {
   const next = await run(api.pickBinary());
   if (next) apply(next);
@@ -2112,6 +2282,8 @@ $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); }
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (!target.closest('.connection-anchor') && !$('connectionPopover').contains(target) && !$('connectionPopover').hidden) setConnectionPopover(false);
+  const external = target.closest<HTMLElement>('[data-link-external]');
+  if (external?.dataset.linkExternal) void run(api.openLink(external.dataset.linkExternal, { external: true }));
   const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
 });
@@ -2123,11 +2295,8 @@ document.addEventListener('keydown', (event) => {
 
 $('bridgeDownload').addEventListener('click', () => void run(api.downloadExtension()));
 $('updateExtension').addEventListener('click', () => {
-  showAllSteps = true;
-  if (state) apply(state);
-  showTab('setup');
   step('browser').hidden = false;
-  step('browser').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  openSetupStep('browser');
 });
 
 api.onStateChanged(apply);
@@ -2168,16 +2337,3 @@ void (async () => {
   const swarm = await run(api.getSwarm());
   if (swarm) paintAgentFilter(swarm);
 })();
-
-/** This run's evidence for a connector, else the proof kept from earlier runs on the same tunnel. */
-function withEvidence(surface: SurfaceStatus): SurfaceStatus {
-  return {
-    ...surface,
-    lastRequestAt: surface.lastRequestAt ?? surface.proof?.requestAt ?? null,
-    lastToolCallAt: surface.lastToolCallAt ?? surface.proof?.toolCallAt ?? null
-  };
-}
-/** The plugin exists in ChatGPT: ChatGPT reached it, or listed it as installed. */
-function pluginCreated(surface: SurfaceStatus): boolean {
-  return withEvidence(surface).lastRequestAt !== null || (surface.proof?.installedAt ?? null) !== null;
-}

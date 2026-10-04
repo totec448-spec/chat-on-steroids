@@ -8,6 +8,35 @@ import { browserWindowBounds } from './browser-window-layout.js';
 
 type Exists = (candidate: string) => boolean;
 type Launch = typeof launchCommand;
+export type ExternalChatBrowser = Exclude<ChatBrowser, 'cos'>;
+export const EXTERNAL_BROWSER_LABELS: Record<ExternalChatBrowser, string> = {
+  chrome: 'Chrome', edge: 'Edge', brave: 'Brave'
+};
+
+/** Sign-in uses the person's normal profile, including its installed companion extension. */
+export function installedSignInBrowsers(): Array<{ browser: ExternalChatBrowser; executable: string }> {
+  return (['chrome', 'edge', 'brave'] as const).flatMap(browser => {
+    const executable = preferredBrowserCandidates(process.platform, process.env, undefined, browser)
+      .find(candidate => isExecutableBrowser(candidate, process.platform));
+    return executable ? [{ browser, executable }] : [];
+  });
+}
+
+export async function openBrowserSignIn(browser: ExternalChatBrowser,
+  options: Pick<PreferredBrowserOpenOptions, 'platform' | 'env' | 'home' | 'usable' | 'launch'> = {}): Promise<string> {
+  const platform = options.platform ?? process.platform;
+  const usable = options.usable ?? (candidate => isExecutableBrowser(candidate, platform));
+  for (const candidate of new Set(preferredBrowserCandidates(platform, options.env, options.home, browser))) {
+    if (!usable(candidate)) continue;
+    // No throwaway profile: it would have neither the person's extension nor their account.
+    // Start a fresh ChatGPT login instead of transplanting an embedded OAuth URL/PKCE state.
+    await (options.launch ?? launchCommand)(candidate,
+      ['--new-window', '--window-size=520,760', 'https://chatgpt.com/auth/login'],
+      (platform === 'win32' ? path.win32 : path.posix).dirname(candidate));
+    return candidate;
+  }
+  throw new Error(`${EXTERNAL_BROWSER_LABELS[browser]} was not found. Choose another installed browser.`);
+}
 
 /** A successful OS handoff is not a live browser. Unknown probes never grant opening authority. */
 export async function isPreferredBrowserRunning(
@@ -16,6 +45,7 @@ export async function isPreferredBrowserRunning(
   browser: ChatBrowser = getConfig().ui.chatBrowser ?? 'chrome',
   command: typeof runCommand = runCommand
 ): Promise<boolean | null> {
+  if (browser === 'cos') return (await import('./cos-browser/selection.js')).loadedCosBrowser()?.running() ?? false;
   try {
     if (platform !== 'win32') {
       if (platform !== 'darwin' && platform !== 'linux') return null;
@@ -43,6 +73,11 @@ export interface PreferredBrowserOpenOptions {
   browser?: ChatBrowser;
   /** Start the owned helper without activating its Windows startup window. */
   backgroundStartup?: boolean;
+  /**
+   * An explicit user action such as "open this chat". Only the CoS browser distinguishes it: it
+   * brings its window forward, while every other URL opens in a window that stays hidden.
+   */
+  reveal?: boolean;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -216,6 +251,12 @@ export async function openInPreferredBrowser(
   const usable = options.usable ?? ((candidate: string) => isExecutableBrowser(candidate, platform));
   const launch = options.launch ?? launchCommand;
   const selected = options.browser ?? getConfig().ui.chatBrowser ?? 'chrome';
+  if (selected === 'cos') {
+    // Loaded on demand, only when selected: the default extension path never loads it.
+    const cosBrowser = await (await import('./cos-browser/selection.js')).loadCosBrowser();
+    await cosBrowser.open(url, { reveal: options.reveal === true });
+    return 'cos';
+  }
   const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : 'Google Chrome / Chromium';
   const bounds = browserWindowBounds();
   // These switches only affect a newly started Chrome process; handing a URL to an

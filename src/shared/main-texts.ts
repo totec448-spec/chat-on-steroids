@@ -8,6 +8,8 @@
  */
 export const MAIN_TEXTS = [
   'Open',
+  'Show browser',
+  'Hide browser',
   'Connect',
   'Disconnect',
   'Quit',

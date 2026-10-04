@@ -178,15 +178,12 @@ app.whenReady().then(async () => {
     win.webContents.setZoomFactor(1);
     await js(`document.querySelector('.project-show-more').click()`);
     assert.equal(await js(`document.querySelectorAll('.project-group > .sess').length`),13);
-    await js(`document.querySelector('[data-tab="setup"]').click(); document.getElementById('wizExpand').click()`);
-    assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),true);
+    await js(`document.querySelector('[data-tab="setup"]').click()`);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`),true);
-    await new Promise(r=>setTimeout(r,200));
-    await screenshot('setup-collapsed.png');
-    await js(`document.getElementById('wizExpand').click()`);
-    assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),false);
+    // Setup is a stepped wizard, one step on screen at a time: there is no guide to collapse.
+    assert.equal(await js(`!!document.querySelector('#wizard > li.step.is-current')`),true);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').contains(document.getElementById('setupProfile'))`),false);
-    await new Promise(r=>setTimeout(r,100));
+    await new Promise(r=>setTimeout(r,200));
     await screenshot('setup-clean.png');
     await js(`document.querySelector('[data-tab="appearance"]').click(); document.getElementById('uiLanguage').scrollIntoView({block:'center'});`);
     for(const [width,zoom] of [[1100,1],[800,1],[1100,1.17],[800,1.17],[1100,1.5]]) {
