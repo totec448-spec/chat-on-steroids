@@ -4573,6 +4573,49 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
 });
 
+it('keeps round worker links and inline history secondary to the selected prime', async () => {
+  const rows: SessionEvent[] = [toolCall(1, 'read-first'),
+    { kind: 'agent_message', seq: 2, time: T0 + 2000, source: 'app', from: 'worker-1', to: 'prime',
+      messageId: 'report-first', delivery: 'delivered', message: text('Checked the first change') },
+    { kind: 'assistant_message', seq: 3, time: T0 + 3000, source: 'extension', messageId: 'round-break', message: text('Next, verify it.'), final: false },
+    toolCall(4, 'read-second'),
+    { kind: 'agent_message', seq: 5, time: T0 + 5000, source: 'app', from: 'worker-1', to: 'prime',
+      messageId: 'report-second', delivery: 'delivered', message: text('Verified the build') }];
+  const prime = summary(rows);
+  const worker = { ...summary([]), id: 'worker-local', title: 'Verify build', conversationId: 'worker-chat',
+    origin: { kind: 'worker' as const, fromSessionId: prime.id, agentId: 'worker-1', task: 'Verify build' } };
+  const { w, append } = await boot(rows, true, [], [], { sessions: [prime, worker] });
+  const api = (w as any).api, original = api.getSession;
+  api.getSession = vi.fn((id: string, options: unknown) => original(id, options));
+  const card = w.document.querySelector<HTMLDetailsElement>('#inlineAgents details')!;
+  expect(card.open).toBe(false);
+  const avatars = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-worker')];
+  expect(avatars).toHaveLength(2);
+  const firstRound = avatars[0]!.closest<HTMLDetailsElement>('.tool-group')!;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Keep the prime draft'; input.dispatchEvent(new w.Event('input'));
+  avatars[0]!.click(); await settle();
+  expect(firstRound.open).toBe(false);
+  expect(api.getSession).toHaveBeenCalledWith(worker.id, { limit: 160 });
+  expect(card.querySelectorAll('.agent-round-link')).toHaveLength(2);
+  expect(card.querySelector('.agent-avatar')?.getAttribute('data-color')).toBe(avatars[0]!.querySelector('.agent-avatar')?.getAttribute('data-color'));
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${prime.id}"]`)).not.toBeNull();
+  expect(input.value).toBe('Keep the prime draft');
+  const pane = w.document.getElementById('chatBody')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } });
+  pane.scrollTop = 300;
+  avatars[1]!.focus();
+  await append([{ kind: 'assistant_message', seq: 6, time: T0 + 6000, source: 'extension', messageId: 'live-output', message: text('More prime output'), final: false }]);
+  expect(pane.scrollTop).toBe(300);
+  expect(w.document.activeElement).toBe(avatars[1]);
+  card.querySelector<HTMLButtonElement>('.agent-round-link')!.click();
+  expect(firstRound.open).toBe(true);
+  expect(input.value).toBe('Keep the prime draft');
+  (w.document.getElementById('jumpLatest') as HTMLButtonElement).click();
+  await append([{ kind: 'assistant_message', seq: 7, time: T0 + 7000, source: 'extension', messageId: 'tail-output', message: text('Following again'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+});
+
 it.each([
   { setting: undefined, reader: 'moved', follows: true },
   { setting: undefined, reader: 'wheel', follows: false },

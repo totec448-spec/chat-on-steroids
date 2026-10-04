@@ -22,7 +22,7 @@ import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
-import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
+import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
@@ -2205,6 +2205,56 @@ function jumpToLatest(): void {
   scrollPane(pane, pane.scrollHeight, true);
 }
 
+/** Explicit history inspection releases the same follow/send hold as reading upwards. */
+function readTimeline(): void {
+  readerAtEnd = false; sendAnchor = null; readingAfterSend = true;
+}
+
+function workerRounds(id: string): Array<{ label: string; open: () => void }> {
+  const owner = selectedId, epoch = selectionGeneration;
+  return [...$('timeline').children].flatMap(node => {
+    const row = node as HTMLElement;
+    if (!(JSON.parse(row.dataset.workerSessions ?? '[]') as string[]).includes(id)) return [];
+    const label = row.querySelector('.activity-title, .agent-communication > summary, .tool > summary b')?.textContent ?? t('Activity');
+    return [{ label, open: () => {
+      if (selectedId !== owner || selectionGeneration !== epoch || !row.isConnected) return;
+      readTimeline();
+      if (row.matches('details')) (row as HTMLDetailsElement).open = true;
+      row.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
+      const pane = $('chatBody');
+      scrollPane(pane, pane.scrollTop + row.getBoundingClientRect().top - pane.getBoundingClientRect().top, false);
+      paintJumpLatest();
+    } }];
+  });
+}
+
+function roundWorkers(ids: string[], links = el('span', 'activity-workers')): HTMLElement {
+  ui(links, 'aria-label', () => t('Sub-agents'));
+  const buttons: HTMLElement[] = [];
+  for (const id of ids) {
+    const worker = sessions.find(entry => entry.id === id);
+    if (!worker?.origin?.agentId) continue;
+    const owner = selectedId, epoch = selectionGeneration;
+    const button = [...links.children].find(node => (node as HTMLElement).dataset.workerSession === id) as HTMLButtonElement | undefined
+      ?? el('button', 'activity-worker');
+    button.setAttribute('type', 'button');
+    button.dataset.workerSession = id;
+    ui(button, 'title', () => t('Open {0} chat', [worker.origin!.agentId!]));
+    ui(button, 'aria-label', () => t('Open {0} chat', [worker.origin!.agentId!]));
+    if (!button.childElementCount) button.append(workerAvatar(worker.origin.agentId));
+    button.onclick = event => {
+      event.preventDefault(); event.stopPropagation();
+      if (selectedId !== owner || selectionGeneration !== epoch) return;
+      void inlineAgents?.open(id);
+      $('inlineAgents').scrollIntoView({ block: 'nearest' });
+    };
+    buttons.push(button);
+  }
+  reconcileChildren(links, buttons);
+  links.hidden = links.childElementCount === 0;
+  return links;
+}
+
 function forgetTimelineRows(): void {
   openTools.clear();
   rowCache.clear();
@@ -2645,9 +2695,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
           : t("Received by {0}; recorded when it acknowledged delivery", [event.to]));
       const summary = el('summary');
       const worker = event.from === 'prime' ? event.to : event.from;
-      const avatar = el('span', 'agent-avatar', worker.replace(/^worker-/, ''));
-      avatar.dataset.color = String([...worker].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6);
-      avatar.setAttribute('aria-hidden', 'true');
+      const avatar = workerAvatar(worker);
       summary.append(avatar, el('span', '', () => communicationTitle(event)));
       const communicationKey = `agent:${context?.id ?? selectedId}:${event.seq}`;
       box.open = openTools.has(communicationKey);
@@ -3277,6 +3325,13 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [listed.length, label]));
     const symbol = latestHead?.querySelector('.ico, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
+    if (groups === toolGroups) {
+      const ids = [...new Set(members.flatMap(row => JSON.parse(row.dataset.workerSessions ?? '[]') as string[]))];
+      group.dataset.workerSessions = JSON.stringify(ids);
+      const links = group.querySelector<HTMLElement>(':scope > summary > .activity-workers');
+      const workers = roundWorkers(ids, links ?? undefined);
+      if (!links) group.querySelector('summary')!.insertBefore(workers, group.querySelector('.activity-chevron'));
+    }
     reconcileChildren(group.lastElementChild!, foldRoutineActivity(listed));
     grouped.push(group); i = end;
   }
@@ -3400,6 +3455,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
   const workedSeconds = exchangeDurations(events);
+  const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   for (const item of timelineItems(shown)) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
@@ -3413,7 +3469,9 @@ function paintDetail(followBottom = historyBefore === null): void {
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '');
     keep.add(key);
     const cached = rowCache.get(key);
+    const workerIds = JSON.stringify(item.kind === 'event' ? participatingWorkers(item.event, workers).map(worker => worker.id) : []);
     if (cached && cached.sig === sig) {
+      cached.row.dataset.workerSessions = workerIds;
       cached.row.dataset.activityBoundary = activityBoundary;
       if (item.kind === 'event' && item.event.kind === 'user_message') cached.row.dataset.askedAt = String(item.event.time);
       if (item.kind === 'event' && item.event.kind === 'user_message') {
@@ -3426,6 +3484,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event);
     if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn));
     row.dataset.timelineKey = key;
+    row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
     row.dataset.activityBoundary = activityBoundary;
     paintInputReceipt(row, item);
@@ -3436,6 +3495,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
   placeTurnLines(timelineRows, workedSeconds);
   reconcileChildren($('timeline'), groupImageRows(groupToolRows(timelineRows)));
+  inlineAgents?.refreshRounds();
   paintPendingInputs();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
   if (!holdSentMessage()) restoreViewport();
@@ -5417,7 +5477,8 @@ export function initChat(next: Deps): void {
     const agentToolGroups = new Map<string, HTMLDetailsElement>();
     return createAgentPanel({
       host: chatHost, mount, inline,
-      onShow: inline ? undefined : () => { filePanel?.hide(); docks.adopt('agents'); },
+      onShow: inline ? readTimeline : () => { filePanel?.hide(); docks.adopt('agents'); },
+      rounds: inline ? workerRounds : undefined,
       onEscape: inline ? () => $<HTMLTextAreaElement>('chatInput').focus() : () => { docks.setOpen(false); docks.rightToggle.focus(); },
       load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
       agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
@@ -5429,7 +5490,7 @@ export function initChat(next: Deps): void {
           if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
           const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
           tagImageRow(row, event);
-          row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
+          row.dataset.timelineKey = `pane:${id}:event:${event.seq}`; row.dataset.activityBoundary = boundary;
           body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
         });
         return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
