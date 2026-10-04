@@ -2918,3 +2918,17 @@ it('retires an opening send whose receipt never arrives after six hours, and not
     expect((await input.pendingBrowserInputs()).map(row => row.id)).not.toContain(request.id);
   } finally { clock.mockRestore(); }
 });
+
+describe('this install\'s connector names', () => {
+  it('reach the extension with every status reply, and follow a changed suffix at once', async () => {
+    await saveConfig(defaultConfig());
+    expect((await post('/status', { openConversations: [] })).body.connectorNames).toEqual({
+      core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins'
+    });
+    await saveConfig({ ...defaultConfig(), connectorSuffix: 'Windows' });
+    expect((await post('/status', { openConversations: [] })).body.connectorNames).toEqual({
+      core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)'
+    });
+    await saveConfig(defaultConfig());
+  });
+});

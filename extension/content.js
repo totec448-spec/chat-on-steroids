@@ -903,12 +903,24 @@
    * attaches an app only to a message that mentions it, every prompt the app sends mentions
    * Core; on the others the mention is a visible chip and changes nothing else.
    */
-  let coreMention = null;
+  // Every Core-like app the page lists, by name: this install picks its own (with this
+  // computer's suffix, if any) when it inserts the mention, whenever the app's names arrived.
+  let coreCandidates = [];
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-core-mention') return;
-    const path = typeof event.data.path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(event.data.path) ? event.data.path : null;
-    coreMention = path && event.data.name === 'Chat On Steroids Core' ? { path, name: event.data.name } : null;
+    const valid = (path) => typeof path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(path) ? path : null;
+    coreCandidates = Array.isArray(event.data.candidates)
+      ? event.data.candidates.slice(0, 16).filter(entry => typeof entry?.name === 'string' && entry.name.length <= 80)
+        .map(entry => ({ name: entry.name, path: valid(entry.path) }))
+      // An observer from before suffixes names only the plain Core.
+      : event.data.name === 'Chat On Steroids Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
   });
+  /** This install's Core app as the page lists it, or null when it is missing or ambiguous. */
+  function currentCoreMention() {
+    const own = CLF_DOM.connectorNames()[0];
+    const match = coreCandidates.find(entry => entry.name === own);
+    return match?.path ? { path: match.path, name: match.name } : null;
+  }
   /**
    * Whether the user's own prompts carry the Core mention (the app's ui.mentionCore, on unless off).
    *
@@ -919,7 +931,7 @@
    */
   let mentionCore = true;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = coreMention, sentRequest = null) {
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null) {
     return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
@@ -3932,7 +3944,7 @@
       window.addEventListener('message', onMessage);
       setTimeout(() => finish(null), FIBER_TIMEOUT_MS);
       try {
-        window.postMessage({ source: FIBER_ASK, nonce }, location.origin);
+        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames() }, location.origin);
       } catch {
         finish(null);
       }
@@ -5979,21 +5991,17 @@
    * single pre-1.7.1 name, no descriptor on any page matched it. Every call then looked
    * like a stranger's — so it produced no attribution evidence and, worse, local rows were
    * classified as ChatGPT-native activity and re-recorded as the assistant's own captions.
-   * `app_name` comes from the protected-resource metadata this app serves, not from what
-   * the user typed into ChatGPT, so these are this app naming itself.
+   * The names are this install's: the plain ones, or with this computer's suffix when one
+   * ChatGPT account is used on several computers ("Chat On Steroids Core (Windows)"). The other
+   * computer's calls run there, so they are not ours here (CLF_DOM.connectorNames).
    *
    * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    */
-  const OUR_CONNECTORS = [
-    'Chat On Steroids Core',
-    'Chat On Steroids Desktop',
-    'Chat On Steroids Plugins',
-    'TobisComputer'
-  ];
+  const LEGACY_CONNECTORS = ['TobisComputer'];
 
   function ourConnectorApp(name) {
-    return typeof name === 'string' && OUR_CONNECTORS.includes(name);
+    return typeof name === 'string' && (CLF_DOM.connectorNames().includes(name) || LEGACY_CONNECTORS.includes(name));
   }
 
   function ourConnectorSeen(seen) {
@@ -10770,6 +10778,7 @@
 
   async function checkStatus() {
     const reply = await ask({ type: 'status' });
+    if (reply?.connectorNames) CLF_DOM.setConnectorNames(reply.connectorNames);
     if (reply) {
       status = {
         connected: reply.connected === true,
@@ -12491,7 +12500,7 @@
         receipt = { conversation, user: { id: user.id } };
         return true;
       }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw,
-      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? coreMention : null,
+      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? currentCoreMention() : null,
       sentRequestSince);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&

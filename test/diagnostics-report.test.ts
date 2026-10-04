@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ app: {}, dialog: {}, shell: {} }));
 vi.mock('../src/main/config.js', () => ({
   getConfig: () => ({
+    connectorSuffix: 'Janes-MacBook',
     roots: [{ name: 'ClientWork', path: '/Users/jane/Clients/Acme Corp' }],
     tunnel: { kind: 'openai', profileName: 'Jane Personal', tunnelId: 'tun_8f3k2m9q', desktopTunnelId: '', binaryPath: '/Users/jane/bin/cloudflared' },
     ui: { theme: 'dark', language: 'de', browserOnly: false, autoContinue: true, chatBrowser: 'chrome' },
@@ -15,7 +16,7 @@ vi.mock('../src/main/config.js', () => ({
 const { renderDiagnosticsReport, reportableSettings } = await import('../src/main/diagnostics-report.js');
 
 const personal = ['jane', 'Clients', 'Acme', 'ClientWork', 'Jane Personal', 'tun_8f3k2m9q', 'cloudflared', 'private project notes',
-  'jane-home', 'Rebuild budget model', 'Audit the Q3 invoices', 'jane.doe@example.com', 'invoices.xlsx', 'Steuer'];
+  'jane-home', 'Rebuild budget model', 'Audit the Q3 invoices', 'jane.doe@example.com', 'invoices.xlsx', 'Steuer', 'Janes-MacBook', 'MacBook'];
 
 const sources = {
   app: { version: '2.1.27', electron: '44.3.0', chrome: '146.0', platform: 'darwin', arch: 'arm64', osRelease: '27.0.0', locale: 'de-DE' },
@@ -32,6 +33,7 @@ const sources = {
     '2026-10-04T06:48:22.158Z  info   multi-agent: created 1 worker(s) in run 6c578026-18d5-4efe-8c88-c63da86e6b3c',
     "2026-10-04T06:48:23.000Z  warn   tool read rejected in 3 ms: ENOENT, open '/Users/jane/Clients/Acme Corp/invoices.xlsx'",
     '2026-10-04T06:48:24.000Z  info   approved folder /ClientWork',
+    '2026-10-04T06:48:24.500Z  info   plugin refresh: Chat On Steroids Core (Janes-MacBook) is current',
     '2026-10-04T06:48:25.000Z  info   worker-2 task: Audit the Q3 invoices for jane.doe@example.com',
     '2026-10-04T06:49:53.818Z  warn   bridge: gave up on worker:6c578026-18d5-4efe-8c88-c63da86e6b3c:worker-2 — the chat this app opened did not report back in time'
   ].join('\n'),
@@ -68,7 +70,7 @@ describe('the diagnostics report', () => {
 
   it('reports settings as on/off values, numbers and option names only', () => {
     const lines = reportableSettings({ ui: { theme: 'dark', followOutput: true }, roots: [{ path: '/x' }], tunnel: { tunnelId: 't' },
-      compaction: { handoffPrompt: 'secret words' }, custom: { note: 'two words' } });
+      compaction: { handoffPrompt: 'secret words' }, custom: { note: 'two words' }, connectorSuffix: 'Janes-MacBook' });
     expect(lines).toEqual(['ui.theme: dark', 'ui.followOutput: true']);
   });
 });

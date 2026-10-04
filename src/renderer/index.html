@@ -270,7 +270,7 @@
             <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add the Chat On Steroids Plugins connector in ChatGPT once so it can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
             <button class="btn btn-solid" id="pluginsSetupLink" type="button">Set up plugins</button>
           </section>
-          <div class="plugin-refresh-guide"><p>After installing, updating or changing enabled plugins, refresh <strong>Chat On Steroids Plugins</strong> in ChatGPT to make its tools available.</p><button class="btn" id="pluginsOpenChatGPT" type="button">Open ChatGPT plugins</button></div>
+          <div class="plugin-refresh-guide"><p>After installing, updating or changing enabled plugins, refresh <strong id="pluginsRefreshName" translate="no">Chat On Steroids Plugins</strong> in ChatGPT to make its tools available.</p><button class="btn" id="pluginsOpenChatGPT" type="button">Open ChatGPT plugins</button></div>
           <div class="plugin-section-head"><h2>Installed <span id="pluginsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="pluginsRefresh" type="button">Check local status</button></div>
           <div id="pluginsInstalled" aria-live="polite"></div>
           <div class="plugin-section-head"><h2>Explore plugins</h2><span class="muted">Made for your workflow</span></div>
@@ -702,6 +702,27 @@
                   <!-- One card per connector. The name and description are what ChatGPT matches
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
+                  <!-- One ChatGPT account on several computers: each needs its own plugins, and they
+                       cannot share a name. The suffix names this computer's set; empty keeps the
+                       plain names, and the cards below always show what to type. -->
+                  <details class="setup-optional" id="connectorSuffixField">
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Several computers, one ChatGPT account <span class="tag is-optional">optional</span></summary>
+                    <div class="field">
+                      <label for="connectorSuffix">Name for this computer</label>
+                      <input
+                        id="connectorSuffix"
+                        translate="no"
+                        type="text"
+                        spellcheck="false"
+                        autocomplete="off"
+                        maxlength="32"
+                        placeholder="Windows"
+                        aria-describedby="connectorSuffixHint"
+                      />
+                      <p class="hint is-warn" id="connectorSuffixError" role="alert" hidden>Use up to 32 letters, digits, spaces, dots, dashes or underscores.</p>
+                      <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.</p>
+                    </div>
+                  </details>
                   <div class="connectors" id="connectorCards"></div>
                   <div class="plugin-permission-step">
                     <strong>Before you start: choose “Allow all actions”</strong>
