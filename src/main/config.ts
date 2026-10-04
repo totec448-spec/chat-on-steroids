@@ -2,6 +2,7 @@ import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
+import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 /**
  * Non-secret settings, stored as one small JSON file in the app's userData folder.
  * No database: there are at most a handful of roots and a dozen booleans.
@@ -307,6 +308,8 @@ const configSchema = z.object({
     pluginsTunnelId: z.string().max(128).optional().default(''),
     binaryPath: z.string().max(4096)
   }),
+  // A damaged value falls back to the plain names instead of failing the whole file.
+  connectorSuffix: z.string().trim().max(CONNECTOR_SUFFIX_MAX).regex(CONNECTOR_SUFFIX_PATTERN).optional().catch(undefined),
   setupProfiles: z.array(z.object({
     id: z.string().min(1).max(64), name: z.string().trim().min(1).max(80),
     tunnelId: z.string().max(128), desktopTunnelId: z.string().max(128), pluginsTunnelId: z.string().max(128)

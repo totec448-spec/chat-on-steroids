@@ -2473,13 +2473,12 @@ it('colors removed lines separately from added lines without changing other tool
 
   rows[0]!.open = true;
   rows[0]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[0]!.querySelector('.changes .metric')?.textContent).toBe('+28 −11');
-  expect(rows[0]!.querySelector('.changes .metric-added')?.textContent).toBe('+28');
-  expect(rows[0]!.querySelector('.changes .metric-removed')?.textContent).toBe('−11');
+  expect(rows[0]!.querySelector('.edit-card .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−11');
   rows[1]!.open = true;
   rows[1]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[1]!.querySelector('.changes .metric')?.textContent).toBe('+0 −7 (approx.)');
-  expect(rows[1]!.querySelector('.changes .metric-removed')?.textContent).toBe('−7');
+  expect(rows[1]!.querySelector('.edit-card summary')?.textContent).toContain('(approx.)');
+  expect(rows[1]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−7');
 });
 
 it('keeps mixed tool and agent activity in one latest-action disclosure between authored messages', async () => {
@@ -4573,52 +4572,72 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
 });
 
-it('keeps round worker links and inline history secondary to the selected prime', async () => {
-  const rows: SessionEvent[] = [toolCall(1, 'read-first'),
-    { kind: 'agent_message', seq: 2, time: T0 + 2000, source: 'app', from: 'worker-1', to: 'prime',
-      messageId: 'report-first', delivery: 'delivered', message: text('Checked the first change') },
-    { kind: 'assistant_message', seq: 3, time: T0 + 3000, source: 'extension', messageId: 'round-break', message: text('Next, verify it.'), final: false },
-    toolCall(4, 'read-second'),
-    { kind: 'agent_message', seq: 5, time: T0 + 5000, source: 'app', from: 'worker-1', to: 'prime',
-      messageId: 'report-second', delivery: 'delivered', message: text('Verified the build') }];
+it('opens round participants in the existing dock without moving the prime reader or draft', async () => {
+  const report = (seq: number, worker: string): SessionEvent => ({ kind: 'agent_message', seq, time: T0 + seq * 1000,
+    source: 'app', from: worker, to: 'prime', messageId: `report-${seq}`, delivery: 'delivered', message: text('Verified the build') });
+  const rows: SessionEvent[] = [toolCall(1, 'read-first'), report(2, 'worker-1'), report(3, 'worker-2'), report(4, 'worker-1'),
+    { kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'round-break', message: text('Next, verify it.'), final: false },
+    toolCall(6, 'read-second'), report(7, 'worker-2')];
   const prime = summary(rows);
-  const worker = { ...summary([]), id: 'worker-local', title: 'Verify build', conversationId: 'worker-chat',
-    origin: { kind: 'worker' as const, fromSessionId: prime.id, agentId: 'worker-1', task: 'Verify build' } };
-  const { w, append } = await boot(rows, true, [], [], { sessions: [prime, worker] });
+  const workers = [1, 2, 3].map(n => ({ ...summary([]), id: `worker-local-${n}`, title: `worker-${n}`, conversationId: `worker-chat-${n}`,
+    origin: { kind: 'worker' as const, fromSessionId: prime.id, agentId: `worker-${n}`, task: 'Verify build' } }));
+  const { w, append } = await boot(rows, true, [], [], { sessions: [prime, ...workers] });
   const api = (w as any).api, original = api.getSession;
   api.getSession = vi.fn((id: string, options: unknown) => original(id, options));
-  const card = w.document.querySelector<HTMLDetailsElement>('#inlineAgents details')!;
-  expect(card.open).toBe(false);
-  const avatars = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-worker')];
-  expect(avatars).toHaveLength(2);
-  const firstRound = avatars[0]!.closest<HTMLDetailsElement>('.tool-group')!;
+  expect(w.document.getElementById('inlineAgents')).toBeNull();
+  expect(w.document.querySelectorAll('#chatBody .agent-panel')).toHaveLength(0);
+  const indicators = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-workers')];
+  expect(indicators.map(button => button.textContent)).toEqual(['2', '1']);
+  expect(indicators[0]!.getAttribute('aria-label')).toBe('2 sub-agents in this round');
+  expect(indicators[0]!.type).toBe('button');
+  expect(indicators[0]!.querySelectorAll('.ico')).toHaveLength(1);
+  expect(indicators[0]!.querySelector('.agent-avatar')).toBeNull();
+  const firstRound = indicators[0]!.closest<HTMLDetailsElement>('.tool-group')!;
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'Keep the prime draft'; input.dispatchEvent(new w.Event('input'));
-  avatars[0]!.click(); await settle();
-  expect(firstRound.open).toBe(false);
-  expect(api.getSession).toHaveBeenCalledWith(worker.id, { limit: 160 });
-  expect(card.querySelectorAll('.agent-round-link')).toHaveLength(2);
-  expect(card.querySelector('.agent-avatar')?.getAttribute('data-color')).toBe(avatars[0]!.querySelector('.agent-avatar')?.getAttribute('data-color'));
-  expect(w.document.querySelector(`.sess.is-sel[data-id="${prime.id}"]`)).not.toBeNull();
-  expect(input.value).toBe('Keep the prime draft');
   const pane = w.document.getElementById('chatBody')!;
   Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } });
   pane.scrollTop = 300;
-  avatars[1]!.focus();
-  await append([{ kind: 'assistant_message', seq: 6, time: T0 + 6000, source: 'extension', messageId: 'live-output', message: text('More prime output'), final: false }]);
-  expect(pane.scrollTop).toBe(300);
-  expect(w.document.activeElement).toBe(avatars[1]);
-  card.querySelector<HTMLButtonElement>('.agent-round-link')!.click();
-  expect(firstRound.open).toBe(true);
+  indicators[0]!.focus(); indicators[0]!.click(); await settle();
+  expect(firstRound.open).toBe(false);
+  expect(api.getSession).not.toHaveBeenCalled();
+  const highlighted = () => [...w.document.querySelectorAll<HTMLElement>('#workDockRight .is-round-worker')].map(row => row.dataset.workerSession);
+  expect(highlighted()).toEqual(['worker-local-1', 'worker-local-2']);
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${prime.id}"]`)).not.toBeNull();
   expect(input.value).toBe('Keep the prime draft');
+  expect(pane.scrollTop).toBe(300);
+  indicators[1]!.click(); await settle();
+  expect(highlighted()).toEqual(['worker-local-2']);
+  indicators[1]!.focus();
+  await append([{ kind: 'assistant_message', seq: 8, time: T0 + 8000, source: 'extension', messageId: 'live-output', message: text('More prime output'), final: false }]);
+  expect(pane.scrollTop).toBe(300);
+  expect(w.document.activeElement).toBe(indicators[1]);
+  expect(highlighted()).toEqual(['worker-local-2']);
   (w.document.getElementById('jumpLatest') as HTMLButtonElement).click();
-  await append([{ kind: 'assistant_message', seq: 7, time: T0 + 7000, source: 'extension', messageId: 'tail-output', message: text('Following again'), final: false }]);
+  await append([{ kind: 'assistant_message', seq: 9, time: T0 + 9000, source: 'extension', messageId: 'tail-output', message: text('Following again'), final: false }]);
   expect(pane.scrollTop).toBe(pane.scrollHeight);
+  // A detached control cannot act, even while its parent is still selected.
+  firstRound.remove(); indicators[0]!.click();
+  expect(highlighted()).toEqual(['worker-local-2']);
+  const staleActivation = indicators[1]!.onclick!;
+  w.document.getElementById('newChat')!.click(); await settle();
+  (w.document.querySelector(`#sessionList [data-id="${prime.id}"] [data-session-select]`) as HTMLElement).click(); await settle();
+  const currentIndicators = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-workers')];
+  currentIndicators[1]!.click(); await settle();
+  expect(highlighted()).toEqual(['worker-local-2']);
+  // Exercise the captured A callback after A → B → A, with a connected current node.
+  staleActivation.call(currentIndicators[0]!, new w.MouseEvent('click') as unknown as PointerEvent);
+  expect(highlighted()).toEqual(['worker-local-2']);
+
 });
 
 it.each([
   { setting: undefined, reader: 'moved', follows: true },
   { setting: undefined, reader: 'wheel', follows: false },
+  { setting: undefined, reader: 'delayed-wheel', follows: false },
+  { setting: undefined, reader: 'delayed-touch', follows: false },
+  { setting: undefined, reader: 'delayed-key', follows: false },
+  { setting: undefined, reader: 'delayed-scrollbar', follows: false },
   { setting: false, reader: 'moved', follows: false }
 ])('follows new output unless the reader scrolled away (setting $setting, view $reader)', async ({ setting, reader, follows }) => {
   // 2026-10-02: in a busy chat the view often stopped short of the end although the reader had not
@@ -4634,11 +4653,138 @@ it.each([
     scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
   pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new w.Event('scroll'));
   await settle();
-  if (reader === 'wheel') pane.dispatchEvent(new w.WheelEvent('wheel'));
-  pane.scrollTop = 300;
-  pane.dispatchEvent(new w.Event('scroll'));
+  // Chromium queues scroll delivery until a rendering opportunity. The Windows hidden-window
+  // verifier delivered it a second after the wheel, outside the old 300 ms intent heuristic.
+  // Advance only the sampled clock, not timers or the frame: this is one delayed render step.
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    if (reader.endsWith('wheel')) pane.dispatchEvent(new w.WheelEvent('wheel'));
+    if (reader === 'delayed-touch') pane.dispatchEvent(new w.Event('touchmove'));
+    if (reader === 'delayed-key') pane.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'PageUp' }));
+    if (reader === 'delayed-scrollbar') pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0 }));
+    if (reader.startsWith('delayed-')) clock.mockReturnValue(now + 1000);
+    pane.scrollTop = 300;
+    pane.dispatchEvent(new w.Event('scroll'));
+    if (reader === 'delayed-scrollbar') w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+    pane.dispatchEvent(new w.Event('scrollend'));
+  } finally { clock.mockRestore(); }
   await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'follow-answer', message: text('A growing answer'), final: false }]);
   expect(pane.scrollTop).toBe(follows ? pane.scrollHeight : 300);
+});
+
+it.each(['scrollend', 'no-movement-frame'])(
+  'does not borrow a finished reader gesture for programmatic movement (%s)', async end => {
+    const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+      source: 'extension', kind: 'user_message', messageId: `ended-${i}`, message: text(`Item ${i + 1}`) }));
+    const { w, append } = await boot(rows);
+    const pane = w.document.getElementById('chatBody')!;
+    const timeline = w.document.getElementById('timeline')!;
+    Object.defineProperties(pane, { clientHeight: { value: 400 },
+      scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+    pane.scrollTop = pane.scrollHeight;
+    pane.dispatchEvent(new w.WheelEvent('wheel'));
+    if (end === 'scrollend') {
+      pane.dispatchEvent(new w.Event('scroll'));
+      pane.dispatchEvent(new w.Event('scrollend'));
+    } else {
+      await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+    }
+    // No fresh input: a repaint/clamp is not the reader moving away from the end.
+    pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+    await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+      messageId: 'ended-answer', message: text('A growing answer'), final: false }]);
+    expect(pane.scrollTop).toBe(pane.scrollHeight);
+  }
+);
+
+it('keeps a slow scrolling gesture through its final position at the end', async () => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `inertia-${i}`, message: text(`Item ${i + 1}`) }));
+  const { w, append } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  const now = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    pane.dispatchEvent(new w.WheelEvent('wheel'));
+    pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+    await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+    clock.mockReturnValue(now + 2000);
+    pane.scrollTop = pane.scrollHeight - pane.clientHeight;
+    pane.dispatchEvent(new w.Event('scroll'));
+    pane.dispatchEvent(new w.Event('scrollend'));
+  } finally { clock.mockRestore(); }
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'inertia-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+});
+
+it.each([false, true])('keeps a scrollbar press until release, even before its first movement (released: %s)', async released => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `pointer-${i}`, message: text(`Item ${i + 1}`) }));
+  const { w, append } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  pane.scrollTop = pane.scrollHeight;
+  pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0 }));
+  await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+  if (released) w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+  pane.dispatchEvent(new w.Event('scrollend'));
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'pointer-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(released ? pane.scrollHeight : 300);
+});
+
+it.each(['pending', 'escape', 'outside-click', 'scrollbar-click'])(
+  'handles a middle-click toggle whose first movement comes after release (%s)', async mode => {
+    const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+      source: 'extension', kind: 'user_message', messageId: `middle-${i}`, message: text(`Item ${i + 1}`) }));
+    const { w, append } = await boot(rows);
+    const pane = w.document.getElementById('chatBody')!;
+    const timeline = w.document.getElementById('timeline')!;
+    Object.defineProperties(pane, { clientHeight: { value: 400 },
+      scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+    pane.scrollTop = pane.scrollHeight;
+    pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 1 }));
+    w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 1 }));
+    await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+    if (mode === 'escape') w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+    if (mode === 'outside-click') w.document.body.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0, bubbles: true }));
+    if (mode === 'scrollbar-click') pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0 }));
+    pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+    if (mode === 'scrollbar-click') w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+    pane.dispatchEvent(new w.Event('scrollend'));
+    await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+      messageId: 'middle-answer', message: text('A growing answer'), final: false }]);
+    expect(pane.scrollTop).toBe(mode === 'pending' || mode === 'scrollbar-click' ? 300 : pane.scrollHeight);
+  }
+);
+
+it('does not lend a reader gesture to a new selection after A to B to A', async () => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `epoch-${i}`, message: text(`Item ${i + 1}`) }));
+  const first = summary(rows), second = { ...summary(rows), id: '2026-09-02-test0002', title: 'Other chat' };
+  const { w, append } = await boot(rows, true, [], [], { sessions: [first, second] });
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  pane.dispatchEvent(new w.WheelEvent('wheel'));
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  for (const id of [second.id, first.id]) {
+    w.document.querySelector<HTMLElement>(`#sessionList [data-id="${id}"]`)!.click();
+    await settle();
+  }
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'epoch-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
 });
 
 it('opens the next chat at its end after the reader scrolled away from a sent message', async () => {

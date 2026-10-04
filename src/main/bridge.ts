@@ -1,4 +1,5 @@
 import { conversationProgress } from './session/progress.js';
+import { connectorNames } from '../shared/connector-names.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
@@ -2285,6 +2286,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         conversations: live,
         stopTurns: await pendingStopCommands(),
         modelCatalogRequest: pendingChatModelRequest(),
+        // This install's connector names, so the extension recognizes exactly its own traffic.
+        connectorNames: connectorNames(getConfig().connectorSuffix),
         pluginRefreshRequests: getConfig().ui.autoRefreshPlugins === true ? pluginRefreshPublications().map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })) : [],
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),

@@ -23,6 +23,8 @@
 
 import type { Capabilities } from '../../shared/types.js';
 import { desktopAutomationSupported } from '../platform.js';
+import { getConfig } from '../config.js';
+import { CONNECTOR_BRAND, connectorName } from '../../shared/connector-names.js';
 import { WINDOWS_COMPUTER_METHODS, WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from '../../shared/windows-computer.js';
 import { BROWSER_TOOLS, BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../../shared/browser-control.js';
 
@@ -36,7 +38,7 @@ export type SurfaceId = (typeof SURFACE_IDS)[number];
  * name and the setup cards, and those three drifting apart is how a user ends up with
  * a connector whose name does not match the thing the instructions told them to type.
  */
-export const CONNECTOR_BRAND = 'Chat On Steroids';
+export { CONNECTOR_BRAND };
 
 export interface SurfaceDefinition {
   id: SurfaceId;
@@ -149,8 +151,13 @@ export const SURFACES: Record<SurfaceId, SurfaceDefinition> = { core: CORE, desk
 
 export const SURFACE_LIST: readonly SurfaceDefinition[] = [CORE, DESKTOP, PLUGINS];
 
+/**
+ * A surface as this install presents it. The connector name carries this computer's suffix
+ * (Settings › Setup), read at every call so a saved change reaches the Setup cards, the server
+ * instructions and plugin refresh without a restart. `SURFACES` keeps the plain names.
+ */
 export function surfaceDefinition(id: SurfaceId): SurfaceDefinition {
-  return SURFACES[id];
+  return { ...SURFACES[id], connectorName: connectorName(id, getConfig().connectorSuffix) };
 }
 
 /** Platform/capability projection used by setup; each registrar enforces the same split. */

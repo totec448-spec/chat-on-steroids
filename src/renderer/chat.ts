@@ -19,6 +19,7 @@ import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
+import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
@@ -188,7 +189,6 @@ function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
 function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
-let inlineAgents: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
@@ -971,7 +971,6 @@ function paintSessions(): void {
     ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   agentPanel?.update(selectedId, workers);
-  inlineAgents?.update(selectedId, workers);
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
   workspaceDocks?.sync();
@@ -2210,49 +2209,25 @@ function readTimeline(): void {
   readerAtEnd = false; sendAnchor = null; readingAfterSend = true;
 }
 
-function workerRounds(id: string): Array<{ label: string; open: () => void }> {
+function roundWorkers(ids: string[], button = el('button', 'activity-workers') as HTMLButtonElement): HTMLButtonElement {
+  button.type = 'button';
+  button.hidden = ids.length === 0;
+  ui(button, 'title', () => t('{0} sub-agents in this round', [ids.length]));
+  ui(button, 'aria-label', () => t('{0} sub-agents in this round', [ids.length]));
+  if (!button.childElementCount) button.append(icon('i-agents'), el('span'));
+  button.lastElementChild!.textContent = String(ids.length);
   const owner = selectedId, epoch = selectionGeneration;
-  return [...$('timeline').children].flatMap(node => {
-    const row = node as HTMLElement;
-    if (!(JSON.parse(row.dataset.workerSessions ?? '[]') as string[]).includes(id)) return [];
-    const label = row.querySelector('.activity-title, .agent-communication > summary, .tool > summary b')?.textContent ?? t('Activity');
-    return [{ label, open: () => {
-      if (selectedId !== owner || selectionGeneration !== epoch || !row.isConnected) return;
-      readTimeline();
-      if (row.matches('details')) (row as HTMLDetailsElement).open = true;
-      row.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
-      const pane = $('chatBody');
-      scrollPane(pane, pane.scrollTop + row.getBoundingClientRect().top - pane.getBoundingClientRect().top, false);
-      paintJumpLatest();
-    } }];
-  });
-}
-
-function roundWorkers(ids: string[], links = el('span', 'activity-workers')): HTMLElement {
-  ui(links, 'aria-label', () => t('Sub-agents'));
-  const buttons: HTMLElement[] = [];
-  for (const id of ids) {
-    const worker = sessions.find(entry => entry.id === id);
-    if (!worker?.origin?.agentId) continue;
-    const owner = selectedId, epoch = selectionGeneration;
-    const button = [...links.children].find(node => (node as HTMLElement).dataset.workerSession === id) as HTMLButtonElement | undefined
-      ?? el('button', 'activity-worker');
-    button.setAttribute('type', 'button');
-    button.dataset.workerSession = id;
-    ui(button, 'title', () => t('Open {0} chat', [worker.origin!.agentId!]));
-    ui(button, 'aria-label', () => t('Open {0} chat', [worker.origin!.agentId!]));
-    if (!button.childElementCount) button.append(workerAvatar(worker.origin.agentId));
-    button.onclick = event => {
-      event.preventDefault(); event.stopPropagation();
-      if (selectedId !== owner || selectionGeneration !== epoch) return;
-      void inlineAgents?.open(id);
-      $('inlineAgents').scrollIntoView({ block: 'nearest' });
-    };
-    buttons.push(button);
-  }
-  reconcileChildren(links, buttons);
-  links.hidden = links.childElementCount === 0;
-  return links;
+  button.onclick = event => {
+    event.preventDefault(); event.stopPropagation();
+    if (selectedId !== owner || selectionGeneration !== epoch || !button.isConnected) return;
+    const current = ids.filter(id => sessions.some(worker => worker.id === id &&
+      worker.origin?.kind === 'worker' && worker.origin.fromSessionId === owner));
+    if (!current.length) return;
+    readTimeline();
+    agentPanel?.showWorkers(current);
+    paintJumpLatest();
+  };
+  return button;
 }
 
 function forgetTimelineRows(): void {
@@ -2446,7 +2421,11 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
   raw.append(facts);
 
-  if (call.changes && call.changes.length > 0) {
+  const ownerId = context?.id ?? selectedId, generation = selectionGeneration;
+  const current = () => context ? context.current() : ownerId === selectedId && generation === selectionGeneration;
+  if (call.outcome === 'ok' && call.changes?.length && ownerId) {
+    raw.append(renderEditCards(call, ownerId, current));
+  } else if (call.changes && call.changes.length > 0) {
     const changes = el('ul', 'changes');
     for (const change of call.changes) {
       const li = el('li');
@@ -3328,9 +3307,11 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     if (groups === toolGroups) {
       const ids = [...new Set(members.flatMap(row => JSON.parse(row.dataset.workerSessions ?? '[]') as string[]))];
       group.dataset.workerSessions = JSON.stringify(ids);
-      const links = group.querySelector<HTMLElement>(':scope > summary > .activity-workers');
-      const workers = roundWorkers(ids, links ?? undefined);
-      if (!links) group.querySelector('summary')!.insertBefore(workers, group.querySelector('.activity-chevron'));
+      const links = group.querySelector<HTMLButtonElement>(':scope > summary > .activity-workers');
+      if (ids.length) {
+        const workers = roundWorkers(ids, links ?? undefined);
+        if (!links) group.querySelector('summary')!.insertBefore(workers, group.querySelector('.activity-chevron'));
+      } else links?.remove();
     }
     reconcileChildren(group.lastElementChild!, foldRoutineActivity(listed));
     grouped.push(group); i = end;
@@ -3495,7 +3476,6 @@ function paintDetail(followBottom = historyBefore === null): void {
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
   placeTurnLines(timelineRows, workedSeconds);
   reconcileChildren($('timeline'), groupImageRows(groupToolRows(timelineRows)));
-  inlineAgents?.refreshRounds();
   paintPendingInputs();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
   if (!holdSentMessage()) restoreViewport();
@@ -5473,32 +5453,27 @@ export function initChat(next: Deps): void {
   const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
   const docks = createWorkspaceDocks(chatHost);
   workspaceDocks = docks;
-  const makeAgentPanel = (mount: HTMLElement, inline = false) => {
-    const agentToolGroups = new Map<string, HTMLDetailsElement>();
-    return createAgentPanel({
-      host: chatHost, mount, inline,
-      onShow: inline ? readTimeline : () => { filePanel?.hide(); docks.adopt('agents'); },
-      rounds: inline ? workerRounds : undefined,
-      onEscape: inline ? () => $<HTMLTextAreaElement>('chatInput').focus() : () => { docks.setOpen(false); docks.rightToggle.focus(); },
-      load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
-      agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
-        !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
-      render: (source, id, current) => {
-        let boundary = '';
-        const rows = foldAgentCommunication(source).flatMap(event => {
-          if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
-          if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
-          const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
-          tagImageRow(row, event);
-          row.dataset.timelineKey = `pane:${id}:event:${event.seq}`; row.dataset.activityBoundary = boundary;
-          body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
-        });
-        return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
-      }
-    });
-  };
-  agentPanel = makeAgentPanel(docks.body);
-  inlineAgents = makeAgentPanel($('inlineAgents'), true);
+  const agentToolGroups = new Map<string, HTMLDetailsElement>();
+  agentPanel = createAgentPanel({
+    host: chatHost, mount: docks.body,
+    onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
+    onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
+    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+    agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
+      !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
+    render: (source, id, current) => {
+      let boundary = '';
+      const rows = foldAgentCommunication(source).flatMap(event => {
+        if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
+        if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
+        const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
+        tagImageRow(row, event);
+        row.dataset.timelineKey = `pane:${id}:event:${event.seq}`; row.dataset.activityBoundary = boundary;
+        body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
+      });
+      return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
+    }
+  });
   initChatModels(() => {
     paintLoopDelivery();
     const config = deps.state()?.config;
@@ -5824,17 +5799,70 @@ export function initChat(next: Deps): void {
     // nor does a key that acts on a focused control (Space toggling a disclosure), nor
     // programmatic scrolling.
     const pane = $('chatBody');
-    let intent = 0;
+    let intent: { generation: number; scrolled: boolean } | null = null;
+    let heldPointer: { id: number; generation: number; middle: boolean; released: boolean } | null = null;
+    let intentFrame: number | null = null;
+    const clearIntent = (): void => {
+      intent = null;
+      heldPointer = null;
+      if (intentFrame !== null) window.cancelAnimationFrame(intentFrame);
+      intentFrame = null;
+    };
+    const noteIntent = (): void => {
+      if (heldPointer && heldPointer.generation !== selectionGeneration) heldPointer = null;
+      const owner = intent?.generation === selectionGeneration ? intent : { generation: selectionGeneration, scrolled: false };
+      intent = owner;
+      if (intentFrame !== null) window.cancelAnimationFrame(intentFrame);
+      // Scroll events precede animation-frame callbacks. A slow/hidden rendering opportunity
+      // must not age out real input; input that did not move anything expires at that frame.
+      intentFrame = window.requestAnimationFrame(() => {
+        intentFrame = null;
+        if (intent === owner && !owner.scrolled && heldPointer?.generation !== owner.generation) intent = null;
+      });
+    };
     const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
-    pane.addEventListener('wheel', () => { intent = Date.now(); }, { passive: true });
-    pane.addEventListener('touchmove', () => { intent = Date.now(); }, { passive: true });
+    pane.addEventListener('wheel', noteIntent, { passive: true });
+    pane.addEventListener('touchmove', noteIntent, { passive: true });
     pane.addEventListener('keydown', event => {
-      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) intent = Date.now();
+      if (scrollKeys.has(event.key) && !(event.target as Element).closest('summary, button, a, input, textarea, select, [contenteditable]')) noteIntent();
     });
     // The scrollbar itself, and middle-button autoscroll, which starts anywhere over the content.
-    pane.addEventListener('pointerdown', event => { if (event.target === pane || event.button === 1) intent = Date.now(); }, { passive: true });
+    pane.addEventListener('pointerdown', event => {
+      // A second middle click only cancels the toggle. A new scrollbar press may itself
+      // move the viewport, so retire the old owner before classifying that new input.
+      if (heldPointer?.released && heldPointer.generation === selectionGeneration) {
+        clearIntent();
+        if (event.button === 1) return;
+      }
+      if (event.target !== pane && event.button !== 1) return;
+      const middle = event.button === 1 && pane.scrollHeight > pane.clientHeight &&
+        !(event.target as Element).closest('a, button, input, textarea, select, [contenteditable]');
+      heldPointer = { id: event.pointerId, generation: selectionGeneration, middle, released: false };
+      noteIntent();
+    }, { passive: true, capture: true });
+    const releasePointer = (event: PointerEvent): void => {
+      if (heldPointer?.id !== event.pointerId) return;
+      const generation = heldPointer.generation;
+      // Chromium's middle-click toggle starts moving after the button was released in its
+      // deadzone. Keep that pending input until its first scroll, or an explicit cancellation.
+      if (heldPointer.middle && !intent?.scrolled && event.type === 'pointerup') {
+        heldPointer.released = true;
+        return;
+      }
+      heldPointer = null;
+      if (intent?.generation === generation && (!intent.scrolled || event.type === 'pointercancel')) clearIntent();
+    };
+    window.addEventListener('pointerup', releasePointer, { passive: true });
+    window.addEventListener('pointercancel', releasePointer, { passive: true });
+    window.addEventListener('blur', () => { if (heldPointer) clearIntent(); });
+    window.addEventListener('pointerdown', event => {
+      if (heldPointer?.released && !pane.contains(event.target as Node)) clearIntent();
+    }, { passive: true, capture: true });
+    window.addEventListener('keydown', event => { if (event.key === 'Escape' && heldPointer?.released) clearIntent(); }, { capture: true });
     pane.addEventListener('scroll', () => {
-      if (Date.now() - intent < 300) {
+      if (intent?.generation === selectionGeneration) {
+        intent.scrolled = true;
+        if (heldPointer?.released) heldPointer = null;
         // The absolute end, reserve included: scrolling up out of an underfilled page's blank
         // space is reading too, and must not be pulled back down by the next delivery.
         readerAtEnd = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2;
@@ -5842,6 +5870,11 @@ export function initChat(next: Deps): void {
         if (readingAfterSend && distanceFromTail() <= 1) readingAfterSend = false;
       }
       paintJumpLatest();
+    }, { passive: true });
+    // Keep a smooth/inertial gesture through its final position, then retire its authority.
+    pane.addEventListener('scrollend', () => {
+      if (intent && heldPointer?.generation === intent.generation) intent.scrolled = false;
+      else clearIntent();
     }, { passive: true });
     const dock = el('div', 'jump-latest-dock');
     const jump = el('button', 'jump-latest') as HTMLButtonElement;

@@ -55,6 +55,8 @@ export interface SettingsPatch {
   mcp: Config['mcp'];
   /** Optional so callers that save other sections never have to carry it. */
   controlApi?: Config['controlApi'];
+  /** This computer's connector name suffix; omitted by callers that do not edit it. */
+  connectorSuffix?: string;
 }
 
 /** One page of the model catalogue, as the model picker asks for it. */

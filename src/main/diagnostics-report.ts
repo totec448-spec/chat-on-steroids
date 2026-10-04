@@ -37,7 +37,7 @@ export interface DiagnosticsReportSources {
 }
 
 /** Settings keys that name, address or unlock something. Never reported, whatever their value. */
-const PRIVATE_SETTING = /(tunnel|profile|path|root|folder|prompt|url|key|token|secret|name|email|instruction|objective|allowlist|rules|binary|^id$|Id$)/i;
+const PRIVATE_SETTING = /(tunnel|profile|path|root|folder|prompt|url|key|token|secret|name|email|instruction|objective|allowlist|rules|binary|suffix|^id$|Id$)/i;
 
 /** On/off values, numbers and short option names only; lists by length. */
 export function reportableSettings(value: unknown, prefix = ''): string[] {
@@ -115,6 +115,8 @@ function configKnownValues(): string[] {
   const tunnel = config.tunnel ?? {};
   const profiles: Array<{ name?: string }> = Array.isArray(tunnel.profiles) ? tunnel.profiles : [];
   return [
+    // A computer name can be a person's ("Maxims-MacBook"); log lines may quote connector names.
+    typeof config.connectorSuffix === 'string' ? config.connectorSuffix : '',
     ...roots.flatMap(root => [root.path ?? '', root.name ?? '']),
     tunnel.profileName ?? '', tunnel.tunnelId ?? '', tunnel.desktopTunnelId ?? '', tunnel.pluginsTunnelId ?? '', tunnel.binaryPath ?? '',
     ...profiles.map(profile => profile.name ?? '')

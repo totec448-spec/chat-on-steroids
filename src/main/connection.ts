@@ -13,7 +13,7 @@ import { effectiveCapabilities, getConfig } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import { lastRequestAt, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from './mcp/server.js';
 import { lastToolCallAt } from './mcp/tools.js';
-import { SURFACE_LIST, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
+import { SURFACE_LIST, surfaceDefinition, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
 import { getSecret } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
@@ -159,7 +159,7 @@ function describeSurfaces(): SurfaceStatus[] {
     const previous = status.surfaces.find((entry) => entry.id === surface.id);
     return {
       id: surface.id,
-      connectorName: surface.connectorName,
+      connectorName: surfaceDefinition(surface.id).connectorName,
       description: surface.description,
       cardSummary: surface.cardSummary,
       optional: !surface.required,
@@ -291,6 +291,11 @@ async function connectImpl(): Promise<void> {
   const generation = ++connectionGeneration;
 
   const config = getConfig();
+  // The endpoint generation belongs to the Setup profile selected when it was created. Keep
+  // this immutable while live config remains dynamic for permissions/roots: a profile switch
+  // commits config before the old endpoint has fully drained, so reading getConfig() inside a
+  // late old-profile call would otherwise relabel that call as the new connection.
+  const setupProfileId = config.tunnel.profileId ?? 'default';
   const caps = effectiveCapabilities(config);
   // A root is required by the capabilities that actually cross the filesystem boundary,
   // not by the mere presence or absence of Desktop. Otherwise enabling screen/clipboard
@@ -305,6 +310,7 @@ async function connectImpl(): Promise<void> {
     const startedEndpoint = await startMcpServer(() => {
       const live = getConfig();
       return {
+        setupProfileId,
         roots: live.roots,
         caps: effectiveCapabilities(live),
         readOnly: live.readOnly,

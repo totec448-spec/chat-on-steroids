@@ -239,3 +239,26 @@ it('keeps a custom remote server without OAuth on its static credential', async 
   await tick();
   expect(api.pluginsInstall).toHaveBeenCalledWith({ name: 'My MCP server', source: { kind: 'remote', args: [], url: 'https://mcp.example.org/mcp' }, credentials: { Authorization: 'Bearer x' } });
 });
+
+it('names this computer\'s own Plugins connector everywhere the page tells the user to act on it', async () => {
+  // One ChatGPT account on several computers: this computer's connector carries its suffix,
+  // and an instruction naming the plain one would send the user to the other computer's plugin.
+  const named = 'Chat On Steroids Plugins (Windows)';
+  const withName = (lastRequestAt: number | null) => ({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } },
+    status: { surfaces: [{ id: 'plugins', state: 'off', connectorName: named, lastRequestAt, tools: [] }] } }) as unknown as AppState;
+  initPlugins(); await tick();
+  applyPluginsState(withName(null));
+  expect(document.getElementById('pluginsSetupHint')!.textContent).toBe(`Add the ${named} connector in ChatGPT once so it can use your installed plugins.`);
+  expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain(`refresh ${named} in ChatGPT`);
+  state.plugins[0]!.tools = [{ name: 'remember', exposedName: 'plugin_one_remember', enabled: true }];
+  await refreshPlugins(); document.querySelector<HTMLButtonElement>('.plugin-entry')!.click();
+  const toggle = document.querySelector<HTMLInputElement>('.plugin-tool input')!;
+  toggle.checked = false; toggle.dispatchEvent(new dom.window.Event('change')); await tick();
+  expect(document.querySelector('.toast')!.textContent).toContain(`Refresh the ${named} connector in ChatGPT`);
+  // The name survives a language change, and a later state without a name falls back to the plain one.
+  setLanguage('de');
+  expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain(named);
+  setLanguage('en');
+  applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } }, status: { surfaces: [] } } as unknown as AppState);
+  expect(document.querySelector('.plugin-refresh-guide strong')!.textContent).toBe('Chat On Steroids Plugins');
+});

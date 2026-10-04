@@ -6,73 +6,61 @@ import type { SessionSummary } from '../src/shared/session.js';
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
-it('keeps inline disclosure and dock selections independent and loads only requested worker history', async () => {
-  dom = new JSDOM('<main><section></section><aside></aside></main>');
+it('highlights only round workers in the existing overview and loads history on selection', async () => {
+  dom = new JSDOM('<main></main>');
   Object.assign(globalThis, { document: dom.window.document });
-  const host = document.querySelector('main')!, load = vi.fn().mockResolvedValue({ events: [] });
-  const options = { host, load, render: () => {
-    const p = document.createElement('p'); p.textContent = 'Recorded worker response'; return [p];
-  }, openMain: vi.fn(), working: () => false };
-  const inline = createAgentPanel({ ...options, mount: document.querySelector('section')!, inline: true });
-  const dock = createAgentPanel({ ...options, mount: document.querySelector('aside')! });
-  const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
-  inline.update('prime', [worker]); dock.update('prime', [worker]);
-  const card = host.querySelector<HTMLDetailsElement>('details')!;
-  expect(card.hidden).toBe(false); expect(card.open).toBe(false);
-  expect(card.querySelector('summary')!.textContent).toContain('Sub-agents · 1');
+  const load = vi.fn().mockResolvedValue({ events: [] });
+  const panel = createAgentPanel({ host: document.querySelector('main')!, load, render: () => [], openMain: vi.fn(), working: () => false });
+  const workers = ['one', 'two', 'three'].map(id => ({ id, title: id, updatedAt: 1 } as SessionSummary));
+  panel.update('prime', workers);
+  panel.showWorkers(['one', 'one', 'three', 'foreign']);
+  const highlighted = () => [...document.querySelectorAll<HTMLElement>('.is-round-worker')].map(row => row.dataset.workerSession);
+  expect(highlighted()).toEqual(['one', 'three']);
+  expect(document.activeElement).toBe(document.querySelector('.is-round-worker'));
   expect(load).not.toHaveBeenCalled();
-  card.open = true; card.dispatchEvent(new dom.window.Event('toggle'));
-  expect(card.querySelectorAll('.agent-panel-row')).toHaveLength(1);
-  await inline.open('worker'); dock.show();
-  expect(card.textContent).toContain('Recorded worker response');
-  expect(document.querySelector('aside .agent-panel-row')).not.toBeNull();
-  expect(options.openMain).not.toHaveBeenCalled();
-  inline.update('another-prime', []);
-  expect(card.hidden).toBe(true); expect(card.open).toBe(false);
+  panel.update('prime', [workers[1]!, workers[2]!]);
+  expect(highlighted()).toEqual(['three']);
+  (document.querySelector('.is-round-worker') as HTMLButtonElement).click();
+  await Promise.resolve(); await Promise.resolve();
+  expect(load).toHaveBeenCalledWith('three');
+  (document.querySelector('.agent-back') as HTMLButtonElement).click();
+  expect(highlighted()).toEqual(['three']);
+  panel.update('other-prime', workers); panel.update('prime', workers); panel.show();
+  expect(highlighted()).toEqual([]);
 });
 
-it.each(['collapse', 'empty', 'parent'] as const)('retires pending inline history across a %s and return to the same worker', async boundary => {
-  dom = new JSDOM('<main><section></section></main>');
+it.each(['hide', 'empty', 'parent'] as const)('retires pending worker history across %s and return to the same worker', async boundary => {
+  dom = new JSDOM('<main></main>');
   Object.assign(globalThis, { document: dom.window.document });
-  const host = document.querySelector('main')!;
   let resolve!: (value: { events: [] }) => void;
   const load = vi.fn(() => new Promise<{ events: [] }>(done => { resolve = done; })), render = vi.fn(() => []);
-  const panel = createAgentPanel({ host, mount: document.querySelector('section')!, inline: true, load, render, openMain: vi.fn(), working: () => false });
+  const panel = createAgentPanel({ host: document.querySelector('main')!, load, render, openMain: vi.fn(), working: () => false });
   const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
   panel.update('prime', [worker]);
   const pending = panel.open('worker');
-  const card = host.querySelector<HTMLDetailsElement>('details')!;
-  if (boundary === 'collapse') { card.open = false; card.dispatchEvent(new dom.window.Event('toggle')); }
+  if (boundary === 'hide') panel.hide();
   else panel.update(boundary === 'empty' ? 'prime' : 'another-prime', []);
-  panel.update('prime', [worker]); card.open = true; card.dispatchEvent(new dom.window.Event('toggle'));
+  panel.update('prime', [worker]); panel.show();
   resolve({ events: [] }); await pending;
   expect(render).not.toHaveBeenCalled();
-  expect(card.querySelectorAll('.agent-panel-row')).toHaveLength(1);
+  expect(document.querySelectorAll('.agent-panel-row')).toHaveLength(1);
 });
 
-it('keeps round navigation available during inspection and does not re-enter reading on refresh', async () => {
-  dom = new JSDOM('<main><section></section></main>');
+it('does not re-open the dock on worker refresh or allow retired full-chat navigation', async () => {
+  dom = new JSDOM('<main></main>');
   Object.assign(globalThis, { document: dom.window.document });
   const worker = { id: 'worker', title: 'Worker', updatedAt: 1 } as SessionSummary;
-  const onShow = vi.fn(), openRound = vi.fn(), openMain = vi.fn();
-  const panel = createAgentPanel({ host: document.querySelector('main')!, mount: document.querySelector('section')!, inline: true,
-    load: async () => ({ events: [] }), render: () => [document.createElement('article')], working: () => false,
-    openMain, onShow, rounds: id => id === worker.id ? [{ label: 'Verified the build', open: openRound }] : [] });
+  const onShow = vi.fn(), openMain = vi.fn();
+  const panel = createAgentPanel({ host: document.querySelector('main')!, load: async () => ({ events: [] }),
+    render: () => [], working: () => false, openMain, onShow });
   panel.update('prime', [worker]); await panel.open(worker.id);
-  await new Promise(resolve => setTimeout(resolve, 0));
-  const links = document.querySelector<HTMLElement>('.inline-agent-panel > .agent-round-links')!;
-  const round = links.querySelector<HTMLButtonElement>('button')!;
-  round.click(); expect(openRound).toHaveBeenCalledTimes(1);
-  round.focus(); panel.refreshRounds();
-  expect(document.activeElement).toBe(round);
   onShow.mockClear();
   panel.update('prime', [{ ...worker, updatedAt: 2 }]);
   await Promise.resolve(); await Promise.resolve();
   expect(onShow).not.toHaveBeenCalled();
   const oldFullChat = [...document.querySelectorAll('button')].find(button => button.textContent === 'Open full chat')!;
   panel.update('another-prime', []); panel.update('prime', [worker]);
-  round.click(); oldFullChat.click();
-  expect(openRound).toHaveBeenCalledTimes(1);
+  oldFullChat.click();
   expect(openMain).not.toHaveBeenCalled();
 });
 it('keeps Prime selection independent and rejects late results after parent navigation', async () => {
