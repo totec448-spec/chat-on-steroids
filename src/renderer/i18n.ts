@@ -21,9 +21,34 @@ function parseLanguage(value: string | null | undefined): Language {
   return value === 'es' || value === 'zh-CN' || value === 'zh-TW' || value === 'ja' || value === 'ko' || value === 'tr' || value === 'vi' || value === 'fr' || value === 'pt-PT' || value === 'pt-BR' || value === 'de' || value === 'ru' ? value : 'en';
 }
 
+/**
+ * The first of the system's preferred languages that the app speaks, else English. Only a first start
+ * uses it: once someone picks a language, the saved choice wins. Before this, a German Windows opened
+ * Setup in English with nothing on screen saying the app speaks German.
+ */
+export function systemLanguage(preferred: readonly string[]): Language {
+  for (const raw of preferred) {
+    const tag = String(raw).toLowerCase();
+    const [base] = tag.split('-');
+    if (base === 'zh') return /-(hant|tw|hk|mo)\b/.test(tag) ? 'zh-TW' : 'zh-CN';
+    if (base === 'pt') return /^pt-pt\b/.test(tag) ? 'pt-PT' : 'pt-BR';
+    if (base === 'en' || base === 'es' || base === 'ja' || base === 'ko' || base === 'tr' || base === 'vi' || base === 'fr' || base === 'de' || base === 'ru') return base;
+  }
+  return 'en';
+}
+
+function systemPreferred(): readonly string[] {
+  try { return window.navigator.languages?.length ? window.navigator.languages : [window.navigator.language]; }
+  catch { return []; }
+}
+
 let language: Language = 'en';
-try { language = parseLanguage(window.localStorage.getItem(STORAGE_KEY)); }
-catch { /* Storage may be unavailable in a restricted renderer; English remains the default. */ }
+try {
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  language = saved === null ? systemLanguage(systemPreferred()) : parseLanguage(saved);
+} catch { /* Storage may be unavailable in a restricted renderer; follow the system as on a first start. */
+  language = systemLanguage(systemPreferred());
+}
 
 export function currentLanguage(): Language { return language; }
 

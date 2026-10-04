@@ -1,16 +1,7 @@
 /**
- * The one place CLF decides whether a piece of text the model sent matches a file on disk.
- *
- * There used to be two implementations of that question. `apply_patch` matched logical
- * lines, and `edit_file` ran `indexOf` over raw bytes — so an `edit_file` call carrying a
- * multi-line snippet copied verbatim out of CLF's own `read_file` failed on every CRLF
- * file in the repository, because reads are joined with LF and Windows files are not.
- * The documented workaround became PowerShell string surgery, which rewrote the endings of
- * whatever it touched and left files mixed, which broke the next edit a little harder.
- *
- * Both entry points now live here. Whatever the shape of the request, matching is line-
- * ending agnostic, a candidate must be unique before it is used, and the bytes written back
- * for unchanged text are always the file's own.
+ * Offset-based text replacement: match snippets independently of line endings, require a
+ * unique candidate, and preserve the original bytes outside the replacement. `apply_patch`
+ * has its own line-based grammar and matching engine in `codex/apply-patch/`.
  */
 
 export class TextMatchError extends Error {}
@@ -27,22 +18,12 @@ export function preferredNewline(text: string): Newline {
   return cr > lf ? '\r' : '\n';
 }
 
-/** Rewrites every terminator in freshly authored text to one the target file already uses. */
-export function adaptNewlines(text: string, newline: Newline): string {
-  return text.replace(/\r\n|\r|\n/g, newline);
-}
-
-export function rstrip(value: string): string {
-  return value.replace(/[\t ]+$/g, '');
-}
-
 /**
  * Typographic substitutions that do not change a string's length.
  *
  * Length preservation is what lets the offset-based entry point below map a match in folded
  * text back to a byte range in the original. Anything that changes length — an ellipsis
- * becoming three dots — is confined to the line-based ladder, where positions are line
- * indices and the length of a line does not matter.
+ * becoming three dots — is deliberately excluded from this offset-based matcher.
  */
 const SAME_LENGTH_FOLD: ReadonlyArray<readonly [RegExp, string]> = [
   [/[‐-―−]/g, '-'],
@@ -57,30 +38,11 @@ export function foldUnicodeSameLength(value: string): string {
   return out;
 }
 
-export function foldUnicode(value: string): string {
-  return foldUnicodeSameLength(value).replace(/…/g, '...');
-}
-
 export interface MatchTier {
   /** Reads as the tail of "matches ... (<label>)" in an ambiguity error. */
   readonly label: string;
   readonly normalize: (value: string) => string;
 }
-
-/**
- * The progressive relaxation ladder, strictest first — the same four rungs Codex's
- * seek_sequence walks, in the same order, so a patch that applies there applies here.
- *
- * The rungs decide only *whether* two lines are the same line. They never decide what gets
- * written: `apply_patch` keeps the file's own bytes for every context line it matched, which
- * is the difference between forgiving a model's indentation and adopting it.
- */
-export const MATCH_TIERS: readonly MatchTier[] = [
-  { label: 'exact match', normalize: (value) => value },
-  { label: 'ignoring trailing whitespace', normalize: rstrip },
-  { label: 'ignoring indentation', normalize: (value) => value.trim() },
-  { label: 'ignoring unicode punctuation', normalize: (value) => foldUnicode(value).trim() }
-];
 
 /** The offset-based ladder. Every tier must preserve length; see SAME_LENGTH_FOLD. */
 const SPAN_TIERS: readonly MatchTier[] = [
@@ -123,56 +85,6 @@ export function splitLogicalText(text: string): LogicalText {
     endings.push('');
   }
   return { lines, endings, newline, finalNewline };
-}
-
-export function joinLogicalText(value: LogicalText): string {
-  let out = '';
-  for (let index = 0; index < value.lines.length; index++) out += value.lines[index]! + (value.endings[index] ?? '');
-  return out;
-}
-
-/**
- * Restores the per-line terminator invariant after a splice.
- *
- * Inserted lines arrive without an origin, and removing the final line can leave the new
- * last line carrying a terminator the file never had. Only the last line may end bare, and
- * only when the file itself ends bare.
- */
-export function settleEndings(value: LogicalText): void {
-  const last = value.lines.length - 1;
-  if (last < 0) return;
-  for (let index = 0; index < last; index++) {
-    if (!value.endings[index]) value.endings[index] = value.newline;
-  }
-  value.endings[last] = value.finalNewline ? value.endings[last] || value.newline : '';
-}
-
-export function patternMatches(
-  lines: readonly string[],
-  at: number,
-  pattern: readonly string[],
-  tier: MatchTier
-): boolean {
-  if (at < 0 || at + pattern.length > lines.length) return false;
-  for (let offset = 0; offset < pattern.length; offset++) {
-    if (tier.normalize(lines[at + offset]!) !== tier.normalize(pattern[offset]!)) return false;
-  }
-  return true;
-}
-
-export function matchingPositions(
-  lines: readonly string[],
-  pattern: readonly string[],
-  start: number,
-  endExclusive: number,
-  tier: MatchTier
-): number[] {
-  const found: number[] = [];
-  const last = Math.max(start, endExclusive - pattern.length);
-  for (let at = start; at <= last; at++) {
-    if (patternMatches(lines, at, pattern, tier)) found.push(at);
-  }
-  return found;
 }
 
 // ---------------------------------------------------------------- byte spans

@@ -106,19 +106,43 @@ public static class CosWindowsCapture {
     } finally { operation.Close(); }
   }
 
+  static void ValidateContentSize(int poolWidth, int poolHeight, int width, int height, int contentWidth, int contentHeight) {
+    if (poolWidth <= 0 || poolHeight <= 0 || (long)poolWidth * poolHeight > MaxPixels)
+      throw new InvalidOperationException("CAPTURE_FAILED: capture dimensions exceed the pixel limit");
+    if (width <= 0 || height <= 0 || width > poolWidth || height > poolHeight || contentWidth != width || contentHeight != height)
+      throw new InvalidOperationException("STALE_FRAME: frame content and DWM bounds disagree");
+  }
+
+  static Bitmap ContentBitmap(byte[] pixels, int poolWidth, int poolHeight, int width, int height) {
+    ValidateContentSize(poolWidth, poolHeight, width, height, width, height);
+    if (pixels == null || pixels.Length != checked(poolWidth * poolHeight * 4))
+      throw new InvalidOperationException("STALE_FRAME: copied surface byte count changed");
+    var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+    try {
+      var locked = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+      try {
+        // WGC's pool can exceed ContentSize. The unused right/bottom surface is undefined;
+        // copy only the valid top-left rectangle, retaining the source allocation's row stride.
+        for (int row = 0; row < height; row++)
+          Marshal.Copy(pixels, checked(row * poolWidth * 4), IntPtr.Add(locked.Scan0, row * locked.Stride), checked(width * 4));
+      } finally { bitmap.UnlockBits(locked); }
+      return bitmap;
+    } catch { bitmap.Dispose(); throw; }
+  }
+
   public static string Capture(long handle, int maxWidth, string file) {
     if (!GraphicsCaptureSession.IsSupported()) throw new NotSupportedException("CAPTURE_FAILED: Windows.Graphics.Capture is unavailable");
     IntPtr window = new IntPtr(handle);
     RECT bounds = Bounds(window);
     var clock = Stopwatch.StartNew();
     var item = CreateItem(window);
-    int width = item.Size.Width, height = item.Size.Height;
-    if (width <= 0 || height <= 0 || (long)width * height > MaxPixels) throw new InvalidOperationException("CAPTURE_FAILED: capture dimensions exceed the pixel limit");
-    // WGC captures the extended DWM frame, excluding invisible resize borders.
-    // Never label pixels with GetWindowRect coordinates or silently guess offsets.
-    if (width != bounds.Right - bounds.Left || height != bounds.Bottom - bounds.Top) throw new InvalidOperationException("STALE_FRAME: capture and DWM bounds disagree");
+    var poolSize = item.Size;
+    int poolWidth = poolSize.Width, poolHeight = poolSize.Height;
+    int width = bounds.Right - bounds.Left, height = bounds.Bottom - bounds.Top;
+    if (poolWidth <= 0 || poolHeight <= 0 || (long)poolWidth * poolHeight > MaxPixels)
+      throw new InvalidOperationException("CAPTURE_FAILED: capture dimensions exceed the pixel limit");
     using (var device = CreateDevice())
-    using (var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 1, item.Size))
+    using (var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 1, poolSize))
     using (var session = pool.CreateCaptureSession(item)) {
       // One-shot tool screenshots must not flash Windows' yellow capture border.
       // Configure before StartCapture; older Windows keeps its system indicator.
@@ -133,19 +157,19 @@ public static class CosWindowsCapture {
       }
       using (frame) {
         RECT after = Bounds(window);
-        if (after.Left != bounds.Left || after.Top != bounds.Top || after.Right != bounds.Right || after.Bottom != bounds.Bottom || frame.ContentSize.Width != width || frame.ContentSize.Height != height)
+        if (after.Left != bounds.Left || after.Top != bounds.Top || after.Right != bounds.Right || after.Bottom != bounds.Bottom)
           throw new InvalidOperationException("STALE_FRAME: window geometry changed during capture");
+        // The actual frame, not the initial allocation, must match the unchanged DWM rectangle.
+        // Never relabel pixels with outer-window coordinates or infer a resize-border offset.
+        ValidateContentSize(poolWidth, poolHeight, width, height, frame.ContentSize.Width, frame.ContentSize.Height);
         using (var surface = frame.Surface)
         using (var software = CopySurface(surface, clock)) {
-          if (software.PixelWidth != width || software.PixelHeight != height) throw new InvalidOperationException("STALE_FRAME: copied surface dimensions changed");
-          byte[] pixels = new byte[checked(width * height * 4)];
+          if (software.PixelWidth != poolWidth || software.PixelHeight != poolHeight) throw new InvalidOperationException("STALE_FRAME: copied surface dimensions changed");
+          byte[] pixels = new byte[checked(poolWidth * poolHeight * 4)];
           var pixelBuffer = new Windows.Storage.Streams.Buffer((uint)pixels.Length);
           software.CopyToBuffer(pixelBuffer);
           using (var reader = Windows.Storage.Streams.DataReader.FromBuffer(pixelBuffer)) reader.ReadBytes(pixels);
-          using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb)) {
-            var locked = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-            try { Marshal.Copy(pixels, 0, locked.Scan0, pixels.Length); }
-            finally { bitmap.UnlockBits(locked); }
+          using (var bitmap = ContentBitmap(pixels, poolWidth, poolHeight, width, height)) {
             int outputWidth = maxWidth > 0 ? Math.Min(maxWidth, width) : width;
             int outputHeight = Math.Max(1, (int)Math.Round((double)height * outputWidth / width));
             if (outputWidth == width) bitmap.Save(file, ImageFormat.Png);

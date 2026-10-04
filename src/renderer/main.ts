@@ -2095,7 +2095,10 @@ $('updateExtension').addEventListener('click', () => {
 });
 
 api.onStateChanged(apply);
-api.onLogEntry(addLogLine);
+// Lines logged while the startup snapshot loads arrive live and are in the snapshot too. Hold
+// them until it lands, so each shows once and after the lines that came before it.
+let heldLogLines: LogEntry[] | null = [];
+api.onLogEntry(entry => { if (heldLogLines) heldLogLines.push(entry); else addLogLine(entry); });
 api.onSwarmChanged(paintAgentFilter);
 
 async function refresh(): Promise<void> {
@@ -2117,7 +2120,15 @@ void (async () => {
   // A first run has nothing set up, so open on the wizard rather than an empty Home.
   showTab(state && missingStep(state)?.step === 'folder' ? 'setup' : 'chat');
   const entries = await run(api.getLog());
-  for (const entry of entries ?? []) addLogLine(entry);
+  const key = (entry: LogEntry): string => `${entry.time}\0${entry.level}\0${entry.agent ?? ''}\0${entry.message}`;
+  const shown = new Map<string, number>();
+  for (const entry of entries ?? []) { addLogLine(entry); shown.set(key(entry), (shown.get(key(entry)) ?? 0) + 1); }
+  const held = heldLogLines ?? [];
+  heldLogLines = null;
+  for (const entry of held) {
+    const left = shown.get(key(entry)) ?? 0;
+    if (left > 0) shown.set(key(entry), left - 1); else addLogLine(entry);
+  }
   const swarm = await run(api.getSwarm());
   if (swarm) paintAgentFilter(swarm);
 })();

@@ -3089,17 +3089,20 @@ var CLF_DOM = (() => {
           return;
         }
         if (clicked) return;
-        // The native header arrives before the source chat finishes loading. Its link
+        // The native Project chrome can arrive before the source chat finishes loading. Its link
         // alone is not readiness: an early click can be swallowed during hydration.
         // Preserve the source draft/generation and spend our one click only once its
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
-        // The header link to this exact Project home is the native entry. Its folder icon lost
-        // its test id in October 2026, and every Project handoff then waited out its deadline;
-        // the link's own same-origin target is the identity, and it must be the only one on this page.
-        const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
-          !link.closest(OWN_SURFACES) && !onKeptPage(link) && new URL(link.href, location.href).origin === location.origin &&
+        // The exact same-origin Project-home target is the native entry. ChatGPT has moved this
+        // control across several shells: its folder icon lost a test id in early October, then the
+        // link itself moved outside both <header> and [role="banner"]. Do not bind navigation to
+        // either wrapper. Instead reject quoted/transcript links and hidden kept pages, then require
+        // one visible provider link to this exact Project. Ambiguity still fails closed.
+        const links = [...document.querySelectorAll('a[href]')].filter(link =>
+          !link.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(link) &&
+          new URL(link.href, location.href).origin === location.origin &&
           projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
         clicked = true;

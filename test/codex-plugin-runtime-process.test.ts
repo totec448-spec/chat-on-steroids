@@ -74,14 +74,16 @@ describe.runIf(process.platform === 'win32')('Windows Codex runtime launch bound
   });
 
   it('executes the real production launch path from Electron with an inert npm fixture', async () => {
-    // No installed app or Codex service is started. Strip types from the two production modules
+    // No installed app or Codex service is started. Strip types from the production modules
     // into a private fixture, then exercise their real filesystem and child_process boundaries.
     const runtime = path.join(directory, 'runtime');
     await mkdir(runtime);
     await writeFile(path.join(runtime, 'package.json'), '{"type":"module"}');
-    for (const name of ['env', 'codex-plugin-runtime']) {
+    for (const name of ['env', 'ripgrep', 'exec', 'codex-plugin-runtime']) {
       const source = await readFile(new URL(`../src/main/${name}.ts`, import.meta.url), 'utf8');
-      await writeFile(path.join(runtime, `${name}.js`), stripTypeScriptTypes(source));
+      // The app bundle is CommonJS, where each module has its own __dirname; ES modules do not.
+      const prelude = source.includes('__dirname') ? 'const __dirname = import.meta.dirname;\n' : '';
+      await writeFile(path.join(runtime, `${name}.js`), prelude + stripTypeScriptTypes(source));
     }
     await writeFile(script, `
       if (process.type === 'browser') require('electron').app.exit(42);
@@ -116,4 +118,35 @@ describe.runIf(process.platform === 'win32')('Windows Codex runtime launch bound
     });
     expect(result.stdout).toContain('CODEX_NODE_LAUNCH_VERIFIED');
   }, 35_000);
+});
+
+describe('Codex runtime environment', () => {
+  let directory: string;
+  beforeEach(async () => {
+    directory = await mkdtemp(path.join(os.tmpdir(), 'cos-plugin-env-'));
+    const native = path.join(directory, process.platform === 'win32' ? 'codex.exe' : 'codex');
+    await writeFile(native, 'synthetic fixture; never executed', { mode: 0o755 });
+    vi.stubEnv('PATH', directory);
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-must-not-reach-codex');
+    vi.stubEnv('CLOUDFLARED_TUNNEL_TOKEN', 'tunnel-token-must-not-reach-codex');
+    vi.stubEnv('COS_HARMLESS_SETTING', 'kept');
+    vi.mocked(spawn).mockImplementation(() => {
+      const child = Object.assign(new ChildProcess(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn() });
+      queueMicrotask(() => { child.stdout.end('{"installed":[]}'); child.emit('close', 0); });
+      return child;
+    });
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs();
+    if (directory) await rm(directory, { recursive: true, force: true });
+  });
+
+  it('never hands connector or tunnel secrets to whatever codex is first on PATH', async () => {
+    expect(await listInstalledCodexPlugins(directory, directory)).toEqual([]);
+    const [, , options] = vi.mocked(spawn).mock.calls[0] as [string, string[], SpawnOptions];
+    expect(envValue(options.env!, 'OPENAI_API_KEY')).toBeUndefined();
+    expect(envValue(options.env!, 'CLOUDFLARED_TUNNEL_TOKEN')).toBeUndefined();
+    expect(envValue(options.env!, 'COS_HARMLESS_SETTING')).toBe('kept');
+    expect(envValue(options.env!, 'CODEX_HOME')).toBe(directory);
+  });
 });

@@ -329,6 +329,8 @@ export interface ControlApiInputs {
 export interface ControlApiAgents {
   enabled: boolean;
   running: boolean;
+  /** The broker retains parked worker-family history outside its active runs. */
+  retainedHistory: boolean;
   agents: Array<{
     runId: string | null;
     id: string;

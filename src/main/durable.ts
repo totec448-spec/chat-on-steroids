@@ -39,10 +39,6 @@ export function initDurableStore(userDataDir: string): void {
   root = path.join(userDataDir, 'state');
 }
 
-export function durableStoreReady(): boolean {
-  return root !== '';
-}
-
 function fileFor(name: string): string {
   if (!/^[a-z0-9-]{1,40}$/.test(name)) throw new Error(`Invalid durable state name: ${name}`);
   return path.join(root, `${name}.json`);

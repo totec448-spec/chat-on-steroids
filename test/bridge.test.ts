@@ -6736,6 +6736,43 @@ describe('targeted open', () => {
     }
   });
 
+  /**
+   * #882 (2026-10-04): the replacement chat of an automatic handoff stopped at "choosing the model
+   * and reasoning" and the app waited out its whole 15-minute window. Meanwhile the prime was
+   * mid-transfer, so its workers' calls were refused, and one ended up asleep. The next pickup
+   * then opened a chat that finished in ten seconds.
+   */
+  it.each([
+    ['model', true], ['composer', true], ['composer-after-model', true], ['inserting', false]
+  ] as const)('releases an automatic handoff attempt whose page stops at a step before typing (%s)', async (stalledAt, released) => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async (url) => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession(
+        `66666666-7777-8888-9999-${stalledAt === 'inserting' ? 'aaaaaaaaaaab' : stalledAt === 'model' ? 'aaaaaaaaaaac' : stalledAt === 'composer' ? 'aaaaaaaaaaad' : 'aaaaaaaaaaae'}`,
+        'the stalled brief'
+      );
+      const first = queueResume(sessionId, token)!;
+      await waitForOpened(1);
+      expect((await redeem(first.id, 'tab-1')).text).toContain('the stalled brief');
+      expect((await request('POST', '/commands/step', { body: { id: first.id, client: 'tab-1', step: stalledAt } })).body).toEqual({ ok: true });
+      const prior = new Set(getLog());
+
+      await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+      await vi.waitFor(() => expect(pendingCommands().some((entry) => entry.id === first.id)).toBe(!released));
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      if (!released) return;
+      const note = getLog().find(entry => !prior.has(entry) && entry.message.includes('without closing its ticket'))?.message ?? '';
+      expect(note).toContain('last step:');
+      // The ticket survives, and the next pickup can carry the brief.
+      const second = queueResume(sessionId, token)!;
+      expect((await redeem(second.id, 'tab-2')).text).toContain('the stalled brief');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('withdraws a cancelled resume so no tab opens for it afterwards', async () => {
     setBrowserOpener(async (url) => {
       opened.push(url);
@@ -6857,6 +6894,29 @@ describe('a command that runs out of time says how far its page got', () => {
       const prior = new Set(getLog());
       await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
       expect(giveUp(prior, 'worker:')).toContain('opened through the operating system, and no page with the extension picked up its task');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
+    ['revival-busy', 'its chat was still answering'],
+    ['revival-draft', 'its message box was not empty'],
+    ['revival-editor', 'its page never showed a usable message box']
+  ])('names why a wake waited: %s', async (reason, text) => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      const conversationId = 'dededede-7654-3210-fedc-ba9876543210';
+      await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+      finishAgent({ conversationId }, 'reported, waiting for more');
+      wake([{ to: 'worker-1', text: 'continue with the second half' }]);
+      const { id } = await waitForRevival();
+      expect((await step(id, 'revival-busy', 'revival-document')).body).toEqual({ ok: true });
+      expect((await step(id, reason, 'revival-document')).body).toEqual({ ok: true });
+      const prior = new Set(getLog());
+      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS + 1_000);
+      expect(giveUp(prior, 'revive:')).toContain(`the browser did not claim this command before its deadline (${text})`);
     } finally { vi.useRealTimers(); }
   });
 

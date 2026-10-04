@@ -14,7 +14,7 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
-import { mainText, onMainTextsChange } from './main-texts.js';
+import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
@@ -95,6 +95,8 @@ import { editContextMenuTemplate } from './edit-context-menu.js';
 const SWARM_STATE = 'swarm';
 const RETIRED_WORKERS_STATE = 'retired-workers';
 const WINDOW_BOUNDS_STATE = 'window-bounds';
+/** The tray and notice texts in the last interface language; a launch to the tray opens no window to send them. */
+const MAIN_TEXTS_STATE = 'main-texts';
 
 let window: BrowserWindow | null = null;
 let savedWindowBounds: unknown = null;
@@ -367,6 +369,7 @@ void app.whenReady().then(async () => {
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
+  restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
   if (windowActivation.isDisabled()) return;
   initControlApiPath(userData);
   initUvRuntime(userData);
@@ -512,6 +515,7 @@ void app.whenReady().then(async () => {
   refreshTray();
   onStatusChange(refreshTray);
   onMainTextsChange(refreshTray);
+  onMainTextsChange(() => writeDurableSoon(MAIN_TEXTS_STATE, mainTextTranslations()));
 
   logInfo('app started');
 
