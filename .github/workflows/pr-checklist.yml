@@ -52,7 +52,8 @@ jobs:
     name: Fail-first test
     if: github.actor != 'dependabot[bot]'
     needs: fail-first-platform
-    runs-on: ${{ needs.fail-first-platform.outputs.runner }}
+    # Keep the computed preference inside two fixed hosted-runner choices.
+    runs-on: ${{ needs.fail-first-platform.outputs.runner == 'windows-2025' && 'windows-2025' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
