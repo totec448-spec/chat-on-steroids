@@ -425,16 +425,6 @@ export function toVirtualPath(root: Root, rootReal: string, realPath: string): s
 }
 
 /**
- * Resolves a root by name only, for tools that operate on a whole root.
- * Returns the canonical root path.
- */
-export async function resolveRoot(roots: readonly Root[], name: string): Promise<{ root: Root; real: string }> {
-  const root = roots.find((r) => r.name.toLowerCase() === name.toLowerCase());
-  if (!root) throw new SandboxError(`Unknown root "/${name}"`);
-  return { root, real: await realRoot(root) };
-}
-
-/**
  * Validates a folder the user picked in the UI before it becomes a root.
  * Allows local WSL folders, rejects other network paths and overlapping roots.
  */

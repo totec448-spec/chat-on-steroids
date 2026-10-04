@@ -193,8 +193,3 @@ export function surfaceIsUseful(
   }
   return true;
 }
-
-/** Surfaces worth connecting under these capabilities, in setup order. */
-export function usefulSurfaces(caps: Capabilities): SurfaceDefinition[] {
-  return SURFACE_LIST.filter((surface) => surfaceIsUseful(surface.id, caps));
-}

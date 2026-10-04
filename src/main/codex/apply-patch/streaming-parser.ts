@@ -17,7 +17,6 @@ import {
   EOF_MARKER,
   MOVE_TO_MARKER,
   UPDATE_FILE_MARKER,
-  type AddFileHunk,
   type Hunk,
   type UpdateFileChunk,
   type UpdateFileHunk,
@@ -56,17 +55,16 @@ export class StreamingPatchParser {
 
   /** `push_delta`: feeds text in, emitting the hunks parsed so far. */
   pushDelta(delta: string): Hunk[] {
-    for (const character of delta) {
-      if (character === '\n') {
-        let line = this.lineBuffer;
-        this.lineBuffer = '';
-        if (line.endsWith('\r')) line = line.slice(0, -1);
-        this.lineNumber += 1;
-        this.processLine(line);
-      } else {
-        this.lineBuffer += character;
-      }
+    let start = 0;
+    for (let end = delta.indexOf('\n'); end !== -1; end = delta.indexOf('\n', start)) {
+      let line = this.lineBuffer + delta.slice(start, end);
+      this.lineBuffer = '';
+      if (line.endsWith('\r')) line = line.slice(0, -1);
+      this.lineNumber += 1;
+      this.processLine(line);
+      start = end + 1;
     }
+    this.lineBuffer += delta.slice(start);
     return cloneHunks(this.hunks);
   }
 
@@ -181,7 +179,7 @@ export class StreamingPatchParser {
         if (this.handleHunkHeadersAndEndPatch(trimmed)) return;
         const last = this.lastHunk();
         if (line.startsWith('+') && last !== undefined && last.kind === 'add_file') {
-          (last as AddFileHunk).contents += `${line.slice(1)}\n`;
+          last.contents += `${line.slice(1)}\n`;
           return;
         }
         throw PatchParseError.invalidHunk(`'${trimmed}' ${INVALID_HUNK_HEADER_SUFFIX}`, this.lineNumber);
@@ -191,13 +189,12 @@ export class StreamingPatchParser {
         throw PatchParseError.invalidHunk(`'${trimmed}' ${INVALID_HUNK_HEADER_SUFFIX}`, this.lineNumber);
       }
       case 'update_file': {
-        const { hunkLineNumber } = this.mode;
         const updateLine = line.trimEnd();
         if (this.handleHunkHeadersAndEndPatch(updateLine)) return;
 
         const last = this.lastHunk();
         if (last !== undefined && last.kind === 'update_file') {
-          this.processUpdateFileLine(last, line, updateLine, hunkLineNumber);
+          this.processUpdateFileLine(last, line, updateLine);
           return;
         }
         throw PatchParseError.invalidHunk(
@@ -222,8 +219,7 @@ export class StreamingPatchParser {
   private processUpdateFileLine(
     hunk: UpdateFileHunk,
     line: string,
-    updateLine: string,
-    hunkLineNumber: number
+    updateLine: string
   ): void {
     const chunks = hunk.chunks;
     const isBlankChunk = (chunk: UpdateFileChunk | undefined): boolean =>
@@ -241,7 +237,6 @@ export class StreamingPatchParser {
 
     if (chunks.length === 0 && hunk.movePath === null && updateLine.startsWith(MOVE_TO_MARKER)) {
       hunk.movePath = updateLine.slice(MOVE_TO_MARKER.length);
-      this.mode = { kind: 'update_file', hunkLineNumber };
       return;
     }
 
@@ -257,7 +252,6 @@ export class StreamingPatchParser {
 
     if (updateLine === EMPTY_CHANGE_CONTEXT_MARKER) {
       chunks.push(newUpdateFileChunk());
-      this.mode = { kind: 'update_file', hunkLineNumber };
       return;
     }
 
@@ -266,7 +260,6 @@ export class StreamingPatchParser {
         ...newUpdateFileChunk(),
         changeContext: updateLine.slice(CHANGE_CONTEXT_MARKER.length)
       });
-      this.mode = { kind: 'update_file', hunkLineNumber };
       return;
     }
 
@@ -276,37 +269,18 @@ export class StreamingPatchParser {
       }
       const lastChunk = chunks.at(-1);
       if (lastChunk !== undefined) lastChunk.isEndOfFile = true;
-      this.mode = { kind: 'update_file', hunkLineNumber };
       return;
     }
 
-    if (line === '') {
+    const prefix = line[0] ?? '';
+    if (prefix === '' || prefix === ' ' || prefix === '+' || prefix === '-') {
       if (chunks.length === 0) chunks.push(newUpdateFileChunk());
-      const lastChunk = chunks.at(-1);
-      if (lastChunk !== undefined) pushContextLine(lastChunk, '');
-      this.mode = { kind: 'update_file', hunkLineNumber };
-      return;
-    }
-
-    if (line.startsWith(' ')) {
-      if (chunks.length === 0) chunks.push(newUpdateFileChunk());
-      const lastChunk = chunks.at(-1);
-      if (lastChunk !== undefined) pushContextLine(lastChunk, line.slice(1));
-      this.mode = { kind: 'update_file', hunkLineNumber };
-      return;
-    }
-
-    if (line.startsWith('+')) {
-      if (chunks.length === 0) chunks.push(newUpdateFileChunk());
-      chunks.at(-1)?.newLines.push(line.slice(1));
-      this.mode = { kind: 'update_file', hunkLineNumber };
-      return;
-    }
-
-    if (line.startsWith('-')) {
-      if (chunks.length === 0) chunks.push(newUpdateFileChunk());
-      chunks.at(-1)?.oldLines.push(line.slice(1));
-      this.mode = { kind: 'update_file', hunkLineNumber };
+      const chunk = chunks.at(-1)!;
+      if (prefix === '+' || prefix === '-') {
+        (prefix === '+' ? chunk.newLines : chunk.oldLines).push(line.slice(1));
+      } else {
+        pushContextLine(chunk, line.slice(1));
+      }
       return;
     }
 

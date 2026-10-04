@@ -58,6 +58,14 @@ describe('the diagnostics report', () => {
     expect(report).toContain('1 chat(s), 0 ended, 1 project(s)');
   });
 
+  it('scrubs Windows paths inside JSON sections, where backslashes are doubled', () => {
+    const report = renderDiagnosticsReport({ ...sources, home: 'C:\\Users\\Jane',
+      commands: [{ command: 'c2', what: 'worker:run-1:worker-3', lastError: 'spawn C:\\Users\\Jane\\bin\\codex.exe ENOENT' }],
+      extension: { status: { pairError: { error: 'x', message: 'cannot read D:\\Kunden\\Acme GmbH\\vertrag.pdf' } } } });
+    for (const leaked of ['Jane', 'codex.exe', 'Kunden', 'Acme', 'vertrag']) expect(report, leaked).not.toContain(leaked);
+    expect(report).toContain('worker:run-1:worker-3');
+  });
+
   it('reports settings as on/off values, numbers and option names only', () => {
     const lines = reportableSettings({ ui: { theme: 'dark', followOutput: true }, roots: [{ path: '/x' }], tunnel: { tunnelId: 't' },
       compaction: { handoffPrompt: 'secret words' }, custom: { note: 'two words' } });
