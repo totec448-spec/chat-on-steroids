@@ -473,6 +473,11 @@ input with no explicit Skill directive scores only the already-published managed
 metadata plus bounded `agents/openai.yaml` policy. It never calls `listSkills()`/`listSkillLibrary()`
 or reads every `SKILL.md` to make the routing decision; discovered repo/user/system/admin Skills
 remain explicit-only in this first slice because their descriptive metadata lives in `SKILL.md`.
+The matcher stems metadata words but treats common English/development name words as insufficient
+identity on their own. A distinctive name term or a complete multiword name must agree with a
+separate description term; repeating the same identity word in the description is not support.
+This precision-first rule may abstain even when the task would benefit from a Skill. The explicit
+picker/directive remains available rather than injecting a specialized Skill from generic wording.
 `allow_implicit_invocation=false`, invalid policy/config, weak relevance and close competing
 matches all fail to no selection. A routed choice is frozen in the durable input row as exact
 Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
