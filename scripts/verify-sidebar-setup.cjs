@@ -58,8 +58,12 @@ app.whenReady().then(async () => {
     const still=document.createElement('style'); still.textContent='*,*::before,*::after{animation:none!important;transition:none!important}'; document.head.append(still);
     window.fixtureReady=true;
   `;
+  // A verification worktree may share dependencies through a junction. Permit only the two
+  // actual icon assets outside this checkout; never publish a missing-glyph screenshot as proof.
+  const iconFiles = ['@phosphor-icons/web/regular/Phosphor.woff2', '@phosphor-icons/web/fill/Phosphor-Fill.woff2']
+    .map(file => fs.realpathSync(require.resolve(file)));
   const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'),
-    server:{host:'127.0.0.1',port:0}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
+    server:{host:'127.0.0.1',port:0,fs:{allow:[root,...iconFiles]}}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request,response) => {
         const source = fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8')
           .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>', '<script type="module">'+fixture+'</script></body>');
@@ -79,6 +83,8 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     };
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group > .sess").length === 5'));i++) await new Promise(r=>setTimeout(r,25));
+    assert.equal(await js(`Promise.all(['CoS Phosphor','CoS Phosphor Fill'].map(name=>document.fonts.load('16px "'+name+'"'))).then(faces=>faces.every(face=>face.length>0))`),true,
+      'The actual bundled icon faces must load before visual evidence is captured');
     await js(`window.disclosureEvents=[]; for(const type of ['keydown','keypress','keyup','click']) document.addEventListener(type,e=>window.disclosureEvents.push({type,key:e.key,tag:e.target.tagName,cls:e.target.className,open:document.querySelector('.project-group')?.open}),true)`);
     // Project groups start closed. Exercise native summary activation before the
     // existing visible-row geometry, drag ordering and pagination checks.
@@ -117,6 +123,24 @@ app.whenReady().then(async () => {
     await screenshot('project-color-blue.png');
     assert.equal(await js(`document.activeElement===document.querySelector('.project-color')`),true,
       'Saving a keyboard-selected swatch must return focus to its project color button');
+    // A later completion must not take focus back from a newer composer interaction.
+    await js(`window.originalColorSave=window.api.setProjectColor;
+      window.api.setProjectColor=(id,value)=>new Promise(resolve=>{window.completeColorSave=()=>window.originalColorSave(id,value).then(resolve)});
+      document.querySelector('.project-color').click();
+      document.querySelector('[data-project-color-choice="green"]').focus()`);
+    for (const type of ['keyDown','char','keyUp']) win.webContents.sendInputEvent({type,keyCode:type==='char'?'\r':'Enter'});
+    assert.equal(await js(`typeof window.completeColorSave`),'function');
+    const composerPoint = await js(`(() => {const r=document.getElementById('chatInput').getBoundingClientRect();return {x:Math.round(r.left+20),y:Math.round(r.top+r.height/2)}})()`);
+    win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...composerPoint});
+    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...composerPoint});
+    assert.equal(await js(`document.activeElement===document.getElementById('chatInput')`),true);
+    await js(`window.completeColorSave()`);
+    for(let i=0;i<100 && await js(`document.querySelector('.project-group').dataset.projectColor!=='green'`);i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-group').dataset.projectColor`),'green');
+    await screenshot('project-color-newer-focus.png');
+    assert.equal(await js(`document.activeElement===document.getElementById('chatInput')`),true,
+      'A delayed color save must not steal focus from a newer composer interaction');
+    await js(`window.api.setProjectColor=window.originalColorSave;delete window.originalColorSave;delete window.completeColorSave`);
     await js(`document.querySelector('.project-heading').focus()`);
     for (const keyCode of ['Space','Enter']) {
       win.webContents.sendInputEvent({type:'keyDown',keyCode});

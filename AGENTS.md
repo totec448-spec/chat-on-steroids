@@ -791,7 +791,8 @@ None) calls the same `projects:color` owner rather than cycling through values.
 After a keyboard color save, the repainted color button regains focus only while the same
 selected-chat generation is visible and the user has not focused another control. Leaving and
 returning to that chat invalidates the old focus action. A rejected save uses the same ownership
-check before reopening its palette; it never steals focus from a newer interaction.
+check before reopening its palette; it never steals focus from a newer interaction. Completion
+checks both focus notifications and the current active element, including an inactive document.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
