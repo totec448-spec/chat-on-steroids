@@ -5,7 +5,9 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-defaults.cjs');
-const output = process.argv[2] ? path.resolve(root, process.argv[2]) : path.join(root, '.tmp/message-send-20260918/ui');
+// The first plain argument; switches such as verify-ui's --lang=en-US are not an output folder.
+const outputArg = process.argv.slice(2).find(arg => !arg.startsWith('--'));
+const output = outputArg ? path.resolve(root, outputArg) : path.join(root, '.tmp/message-send-20260918/ui');
 app.setPath('userData', path.join(output, 'runtime'));
 
 app.whenReady().then(async () => {
