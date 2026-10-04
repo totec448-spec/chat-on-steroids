@@ -3498,7 +3498,9 @@ The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`
 `/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents` and `/v1/log`. Each asks the owner that
 already feeds the renderer (`session/read-model.ts`, `listInputs`, `swarmState`, `getLog`) and
 projects the answer through an allowlist, so a field an owner grows later stays private until
-it is named there. An event kind added later is published by name only; the kind, input-state
+it is named there. `/v1/agents` mirrors the broker's `retainedHistory` boolean so a watcher can
+distinguish parked worker history from no retained history; it does not expose dormant family
+identities or infer health/revivability. An event kind added later is published by name only; the kind, input-state
 and log-level tables are exhaustive by type. Message, tool argument/result, outbox and log text
 has known credential shapes masked (`redactSecretText`: API keys, GitHub/Slack/AWS/Google
 tokens, bearer and basic headers, JWTs, URL passwords, private keys, MCP endpoint paths) before

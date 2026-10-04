@@ -449,6 +449,7 @@ export function projectAgents(swarm: SwarmState): ControlApiAgents {
   return {
     enabled: swarm.enabled,
     running: swarm.running,
+    retainedHistory: swarm.retainedHistory === true,
     agents: swarm.agents.map((agent) => ({
       runId: agent.runId ?? null,
       id: agent.id,
