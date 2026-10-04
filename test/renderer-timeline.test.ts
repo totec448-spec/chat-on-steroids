@@ -2445,6 +2445,25 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   expect(timeline.children[0]!.className).toContain('ev-progress');
 });
 
+it('never titles a tool group with the app\'s own recovery note', async () => {
+  // #882: after a run of reloads, every tool group read "Reloaded chat to recover an interrupted
+  // response.", because the note in front of a group was taken for ChatGPT's phase caption.
+  // Repair notes are shown in developer mode, where that reporter saw it.
+  const { w } = await boot([
+    { seq: 1, time: T0, source: 'app', kind: 'progress', progressId: 'browser-repair:chat:one',
+      message: text('Reloaded chat to recover an interrupted response.') },
+    toolCall(2, 'first'), toolCall(3, 'last')
+  ], true, [], [], { developerMode: true });
+  const timeline = w.document.getElementById('timeline')!;
+  const group = timeline.querySelector<HTMLDetailsElement>('.tool-group')!;
+  const title = group.querySelector('.activity-title')!.textContent;
+  expect(title).not.toContain('Reloaded chat');
+  expect(title).toBe(group.querySelector('.ev-tool_call:last-of-type .tool > summary b')?.textContent ?? title);
+  expect(group.classList.contains('has-activity-phase')).toBe(false);
+  // The note itself stays in the transcript, in front of the group.
+  expect(timeline.children[0]!.textContent).toContain('Reloaded chat to recover an interrupted response.');
+});
+
 it('folds five consecutive status polls while retaining each exact tool row', async () => {
   const status = (seq: number): SessionEvent => {
     const event = toolCall(seq, `status-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
