@@ -13,6 +13,7 @@ import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../s
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, ToolEditReview } from '../shared/session.js';
+import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
  * The entire renderer-facing API.
@@ -297,6 +298,14 @@ const api = {
   listInputs: () => call<InputEntry[]>('sessions:outbox'),
   listPausedHelpers: () => call<Array<{ id: string; sourceSessionId: string }>>('sessions:pausedHelpers'),
   runningTools: (conversationIds: string[]) => call<RunningToolActivity[]>('sessions:runningTools', { conversationIds }),
+  runningProcesses: (sessionId: string) => call<RunningExecProcess[]>('sessions:runningProcesses', { sessionId }),
+  stopProcess: (sessionId: string, processId: number, incarnation: number) =>
+    call<boolean>('sessions:stopProcess', { sessionId, processId, incarnation }),
+  onBackgroundProcessesChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('sessions:backgroundExecChanged', wrapped);
+    return () => ipcRenderer.removeListener('sessions:backgroundExecChanged', wrapped);
+  },
   livePreview: (conversationIds: string[]) => call<string | null>('sessions:livePreview', { conversationIds }),
   retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
   editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),

@@ -1813,5 +1813,12 @@
   "Switches the saved tunnel IDs and tunnel API key, for example for another ChatGPT account.": "Alterna os IDs de túnel e a chave de API do túnel salvos, por exemplo para outra conta do ChatGPT.",
   "ChatGPT's page lost this answer's live stream. The answer may still be running: the reload reconnects the page without stopping it.": "A página do ChatGPT perdeu a transmissão ao vivo desta resposta. Ela pode continuar em andamento: o recarregamento reconecta a página sem interrompê-la.",
   "Don't reload this answer": "Não recarregar esta resposta",
-  "The reload has already started.": "O recarregamento já começou."
+  "The reload has already started.": "O recarregamento já começou.",
+  "Background process running · {0}": "Processo em segundo plano em execução · {0}",
+  "{0} background processes running · {1}": "{0} processos em segundo plano em execução · {1}",
+  "Running for {0}": "Em execução há {0}",
+  "Stop background process": "Parar processo em segundo plano",
+  "Stop": "Parar",
+  "Background process is no longer running": "O processo em segundo plano não está mais em execução",
+  "{0} background processes running": "{0} processos em segundo plano em execução"
 }
