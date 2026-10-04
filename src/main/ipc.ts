@@ -1605,7 +1605,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!await startBridge()) throw new Error('The browser bridge could not start');
     if (allowOpen) {
       await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
-      push('setup:toolApprovalNotice');
+      // The approval prompt it describes comes with ChatGPT's first Core tool call, which needs a Core
+      // tunnel. On a fresh install, discovery opened ChatGPT before any of that existed and the
+      // reminder read "One last step" at step 0 of 6; Setup's last card keeps it until then.
+      if (getConfig().tunnel.tunnelId.trim()) push('setup:toolApprovalNotice');
     }
   } });
   onUpdateChange(pushState);
