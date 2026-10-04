@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -196,7 +196,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }) },
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }),
+      ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -223,7 +224,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   const api: any = new Proxy(
     {
       getState: () => ok(state),
-      getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] },
+      getChatModels: () => options.noModels ? ok({ state: 'unavailable', requestedAt: 1, observedAt: null, models: [] }) : ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] },
         ...(options.astra ? [{ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'] }] : [])] }),
       getSessionControls: (id: string) => ok({ sessionId: id, conversationId: 'chat-a', automation: live.automation, activeTurnId: 'held-turn', finishHeld: live.finishHeld, blocked: '', job: live.compacting ? { busy: true } : null }),
       releaseSessionFinish: (id: string, turn: string) => { live.controlCalls.push({ id, action: `release:${turn}` }); live.finishHeld = false; return ok({}); },
@@ -1706,8 +1707,24 @@ it('Share a folder creates a sidebar project and keeps it when an older list ref
   expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: project.id, text: 'Work in this folder' });
 });
 
-it('preserves the draft and refuses send while model discovery has no confirmed choices', async () => {
-  const { w, live } = await boot([], false);
+it('sends a new chat at once with Automatic when no model list is readable and none was asked for (#864)', async () => {
+  // ChatGPT Go and Free show no model picker, so Send used to wait two minutes for a list that never came.
+  const { w, live } = await boot([], false, [], [], { noModels: true });
+  const discover = vi.fn(async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: null, models: [] } }));
+  (w as any).api.requestChatModels = discover;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  expect(w.document.getElementById('composerModelLabel')!.textContent).toBe('Automatic');
+  input.value = 'Hello from a Go account';
+  (w.document.getElementById('chatSend') as HTMLButtonElement).click();
+  await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'Hello from a Go account', model: null, reasoningEffort: null });
+  expect(discover).not.toHaveBeenCalled();
+});
+
+it('preserves the draft and refuses send while model discovery cannot confirm the default model', async () => {
+  // The default is an exact request: without a list it is never replaced by Automatic (#864).
+  const { w, live } = await boot([], false, [], [], { defaultChatModel: 'gpt-6' });
   const discover = vi.fn(async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: null, models: [] } }));
   (w as any).api.requestChatModels = discover;
   (w.document.getElementById('refreshComposerModels') as HTMLButtonElement).click();
@@ -3778,6 +3795,29 @@ it('renders existing-chat Goal draft stages from main controls without starting 
   expect(opening).not.toHaveBeenCalled();
 });
 
+it('says the goal was reached instead of still pursuing it, and only once', async () => {
+  // Found on Windows (2026-10-04): the helper decided the goal was met and sent nothing, yet the
+  // row kept saying "Pursuing goal", so the run looked as if it were still working.
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let draft: unknown = { stage: 'no-reply', model: 'fixture', text: '', error: null };
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, automation: 'goal',
+    objective: 'Write one poem about tides', goalDraft: draft } });
+  await append([]);
+  const goalRow = w.document.getElementById('activeGoalRow')!;
+  expect(goalRow.textContent).toContain('Goal reached · Write one poem about tides');
+  expect(goalRow.textContent).not.toContain('Pursuing goal');
+  expect(goalRow.querySelector('.ico')!.className).toContain('ph-check');
+  // Pause and Edit stay: the objective can be continued or changed.
+  expect(goalRow.querySelectorAll('.dock-action')).toHaveLength(2);
+  expect(w.document.getElementById('goalLifecycle')!.hidden).toBe(true);
+  // A newer turn replaces the outcome; the run is pursuing again.
+  draft = null; await append([]);
+  expect(goalRow.textContent).toContain('Pursuing goal · Write one poem about tides');
+  expect(goalRow.querySelector('.ico')!.className).toContain('ph-activity');
+});
+
 it('shows the immediate recovery deadline before a draft exists and clears it on fresh work', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api, original = api.getSessionControls;
@@ -4570,6 +4610,97 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   content.style.setProperty('--timeline-scroll-reserve', '300px');
   jump.click();
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
+});
+
+it('opens round participants in the existing dock without moving the prime reader or draft', async () => {
+  const report = (seq: number, worker: string): SessionEvent => ({ kind: 'agent_message', seq, time: T0 + seq * 1000,
+    source: 'app', from: worker, to: 'prime', messageId: `report-${seq}`, delivery: 'delivered', message: text('Verified the build') });
+  const rows: SessionEvent[] = [toolCall(1, 'read-first'), report(2, 'worker-1'), report(3, 'worker-2'), report(4, 'worker-1'),
+    { kind: 'assistant_message', seq: 5, time: T0 + 5000, source: 'extension', messageId: 'round-break', message: text('Next, verify it.'), final: false },
+    toolCall(6, 'read-second'), report(7, 'worker-2')];
+  const prime = summary(rows);
+  const workers = [1, 2, 3].map(n => ({ ...summary([]), id: `worker-local-${n}`, title: `worker-${n}`, conversationId: `worker-chat-${n}`,
+    origin: { kind: 'worker' as const, fromSessionId: prime.id, agentId: `worker-${n}`, task: 'Verify build' } }));
+  const { w, append } = await boot(rows, true, [], [], { sessions: [prime, ...workers] });
+  const api = (w as any).api, original = api.getSession;
+  api.getSession = vi.fn((id: string, options: unknown) => original(id, options));
+  expect(w.document.getElementById('inlineAgents')).toBeNull();
+  expect(w.document.querySelectorAll('#chatBody .agent-panel')).toHaveLength(0);
+  const indicators = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-workers')];
+  expect(indicators.map(button => button.textContent)).toEqual(['2', '1']);
+  expect(indicators[0]!.getAttribute('aria-label')).toBe('2 sub-agents in this round');
+  expect(indicators[0]!.type).toBe('button');
+  expect(indicators[0]!.querySelectorAll('.ico')).toHaveLength(1);
+  expect(indicators[0]!.querySelector('.agent-avatar')).toBeNull();
+  const firstRound = indicators[0]!.closest<HTMLDetailsElement>('.tool-group')!;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Keep the prime draft'; input.dispatchEvent(new w.Event('input'));
+  const pane = w.document.getElementById('chatBody')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } });
+  pane.scrollTop = 300;
+  indicators[0]!.focus(); indicators[0]!.click(); await settle();
+  expect(firstRound.open).toBe(false);
+  expect(api.getSession).not.toHaveBeenCalled();
+  const highlighted = () => [...w.document.querySelectorAll<HTMLElement>('#workDockRight .is-round-worker')].map(row => row.dataset.workerSession);
+  expect(highlighted()).toEqual(['worker-local-1', 'worker-local-2']);
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${prime.id}"]`)).not.toBeNull();
+  expect(input.value).toBe('Keep the prime draft');
+  expect(pane.scrollTop).toBe(300);
+  indicators[1]!.click(); await settle();
+  expect(highlighted()).toEqual(['worker-local-2']);
+  indicators[1]!.focus();
+  await append([{ kind: 'assistant_message', seq: 8, time: T0 + 8000, source: 'extension', messageId: 'live-output', message: text('More prime output'), final: false }]);
+  expect(pane.scrollTop).toBe(300);
+  expect(w.document.activeElement).toBe(indicators[1]);
+  expect(highlighted()).toEqual(['worker-local-2']);
+  (w.document.getElementById('jumpLatest') as HTMLButtonElement).click();
+  await append([{ kind: 'assistant_message', seq: 9, time: T0 + 9000, source: 'extension', messageId: 'tail-output', message: text('Following again'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+  // A detached control cannot act, even while its parent is still selected.
+  firstRound.remove(); indicators[0]!.click();
+  expect(highlighted()).toEqual(['worker-local-2']);
+  const staleActivation = indicators[1]!.onclick!;
+  w.document.getElementById('newChat')!.click(); await settle();
+  (w.document.querySelector(`#sessionList [data-id="${prime.id}"] [data-session-select]`) as HTMLElement).click(); await settle();
+  const currentIndicators = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-workers')];
+  currentIndicators[1]!.click(); await settle();
+  expect(highlighted()).toEqual(['worker-local-2']);
+  // Exercise the captured A callback after A → B → A, with a connected current node.
+  staleActivation.call(currentIndicators[0]!, new w.MouseEvent('click') as unknown as PointerEvent);
+  expect(highlighted()).toEqual(['worker-local-2']);
+
+});
+
+it('keeps round inspection at the tail during a dock-induced viewport resize', async () => {
+  const observers: Array<{ targets: Set<Element>; notify: () => void }> = [];
+  vi.stubGlobal('ResizeObserver', class {
+    targets = new Set<Element>();
+    constructor(callback: () => void) { observers.push({ targets: this.targets, notify: callback }); }
+    observe(target: Element): void { this.targets.add(target); }
+    unobserve(target: Element): void { this.targets.delete(target); }
+    disconnect(): void { this.targets.clear(); }
+  });
+  try {
+    const rows: SessionEvent[] = [toolCall(1, 'round-resize'), { kind: 'agent_message', seq: 2, time: T0 + 2000,
+      source: 'app', from: 'worker-1', to: 'prime', messageId: 'resize-report', delivery: 'delivered', message: text('Verified') }];
+    const prime = summary(rows);
+    const worker = { ...summary([]), id: 'resize-worker', origin: { kind: 'worker' as const, fromSessionId: prime.id, agentId: 'worker-1', task: 'Verify' } };
+    const { w } = await boot(rows, true, [], [], { sessions: [prime, worker] });
+    const pane = w.document.getElementById('chatBody')!;
+    let height = 400;
+    Object.defineProperties(pane, { clientHeight: { get: () => height }, scrollHeight: { value: 2000 } });
+    const resize = observers.find(observer => observer.targets.size === 1 && observer.targets.has(pane))!;
+    expect(resize).toBeDefined();
+    resize.notify();
+    // Chromium clamps the initial follow to the tail; inspection there is still an explicit read.
+    pane.scrollTop = 1600; pane.dispatchEvent(new w.Event('scroll'));
+    (w.document.querySelector('#timeline .activity-workers') as HTMLButtonElement).click();
+    height = 350; resize.notify();
+    expect(pane.scrollTop).toBe(1600);
+    (w.document.getElementById('jumpLatest') as HTMLButtonElement).click();
+    height = 300; resize.notify();
+    expect(pane.scrollTop).toBe(pane.scrollHeight);
+  } finally { vi.unstubAllGlobals(); }
 });
 
 it.each([

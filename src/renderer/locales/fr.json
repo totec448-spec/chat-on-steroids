@@ -1576,10 +1576,8 @@
   "The provider reported an error while generating the continuation. Check its status or choose another model.": "Le fournisseur a signalé une erreur pendant la génération de la continuation. Vérifiez son état ou choisissez un autre modèle.",
   "PDF exceeds the preview limit": "Le PDF dépasse la limite d’aperçu",
   "PDF page dimensions exceed the preview limit": "Les dimensions de la page PDF dépassent la limite d’aperçu",
-  "ChatGPT’s current model": "Modèle actuel de ChatGPT",
   "Sent without choosing a model": "Envoyé sans choisir de modèle",
   "Use ChatGPT’s current model": "Utiliser le modèle actuel de ChatGPT",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "Votre forfait ChatGPT n’affiche aucun sélecteur de modèle. Envoyer avec le modèle que ChatGPT utilise déjà.",
   "Right panel": "Panneau droit",
   "New tab": "Nouvel onglet",
   "Hide right panel": "Masquer le panneau droit",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "{0} lignes inchangées",
   "More edited files are available in the recording.": "D’autres fichiers modifiés sont disponibles dans l’enregistrement.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Le plugin est dans votre ChatGPT. Il s’exécute la première fois qu’un chat en a besoin.",
-  "Added in ChatGPT. Its tools have not run yet.": "Ajouté dans ChatGPT. Ses outils n’ont pas encore servi."
+  "Added in ChatGPT. Its tools have not run yet.": "Ajouté dans ChatGPT. Ses outils n’ont pas encore servi.",
+  "{0} sub-agents in this round": "{0} sous-agents dans cette étape"
 }

@@ -1576,10 +1576,8 @@
   "{0} — found {1} · app receipt {2} · owner {3} · tool activity {4}": "{0} — 找到 {1} · 應用程式回執 {2} · 擁有者 {3} · 工具活動 {4}",
   "{0}: drag, click, or open the context menu": "{0}：拖曳、點擊或開啟內容功能表",
   "… still writing. The full answer appears when it finishes.": "… 仍在撰寫。完成後會顯示完整回答。",
-  "ChatGPT’s current model": "ChatGPT 目前的模型",
   "Sent without choosing a model": "不選擇模型直接傳送",
   "Use ChatGPT’s current model": "使用 ChatGPT 目前的模型",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "你的 ChatGPT 方案沒有模型選擇器。使用 ChatGPT 目前正在使用的模型傳送。",
   "Right panel": "右側面板",
   "New tab": "新增分頁",
   "Hide right panel": "隱藏右側面板",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "{0} 行未變更",
   "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "外掛程式已在你的 ChatGPT 中。聊天第一次需要時就會執行。",
-  "Added in ChatGPT. Its tools have not run yet.": "已在 ChatGPT 中新增。其工具尚未執行。"
+  "Added in ChatGPT. Its tools have not run yet.": "已在 ChatGPT 中新增。其工具尚未執行。",
+  "{0} sub-agents in this round": "本輪有 {0} 個子代理"
 }

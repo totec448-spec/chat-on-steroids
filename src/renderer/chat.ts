@@ -23,7 +23,7 @@ import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
-import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
+import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
@@ -969,7 +969,8 @@ function paintSessions(): void {
   chatList.replaceChildren(...rows);
   if (focusedProject && focusedControl) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
-  agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
+  const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
+  agentPanel?.update(selectedId, workers);
   filePanel?.update(selectedLocalProject());
   reviewPanel?.update(selectedLocalProject());
   workspaceDocks?.sync();
@@ -1100,7 +1101,8 @@ function paintGoalProgress(): void {
     ['silence', 'listening', 'native-busy', 'quiet'].includes(wait.reason) && controlledRecovery.some(countdown =>
       ['silence', 'post-reload', 'native-busy', 'thinking-failed'].includes(countdown.kind) &&
       countdown.deadline === wait.until && (countdown.visibleAt ?? 0) <= Date.now());
-  row.hidden = !phase || sharedRecoveryWait;
+  // "Goal reached" is said by the Goal row itself; a second row would only repeat it.
+  row.hidden = !phase || sharedRecoveryWait || (phase === 'no-reply' && !error && goalReachedShown());
   if (row.hidden) { row.replaceChildren(); row.setAttribute('aria-busy', 'false'); return; }
   const busy = ['settling', 'saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
   row.setAttribute('aria-busy', String(busy));
@@ -1175,15 +1177,22 @@ function dockAction(label: string | (() => string), symbol: string, click: (even
   button.type = 'button'; ui(button, 'title', description); ui(button, 'aria-label', description);
   button.append(icon(symbol)); button.onclick = click; return button;
 }
+/** Whether the selected chat's last Goal decision, still current, was "the goal is met". */
+function goalReachedShown(): boolean {
+  return controlledSessionId === selectedId && controlledSelection === selectionGeneration && goalDraftView?.stage === 'no-reply' &&
+    !finishGoalDraftView;
+}
 function paintActiveGoal(): void {
   const row = $('activeGoalRow');
   const mode = $<HTMLSelectElement>('chatAutomation').value;
   row.hidden = mode === 'off';
   if (row.hidden) { row.replaceChildren(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective').value.trim();
-  const label = el('span', 'queue-label', () => `${mode === 'loop' ? t("Loop") : t("Pursuing goal")}${objective ? ' · ' + objective : ''}`);
+  // A run whose helper decided the goal is met has ended; the objective stays for a later message.
+  const reached = mode === 'goal' && goalReachedShown();
+  const label = el('span', 'queue-label', () => `${mode === 'loop' ? t("Loop") : reached ? t("Goal reached") : t("Pursuing goal")}${objective ? ' · ' + objective : ''}`);
   label.title = objective;
-  row.replaceChildren(icon('i-pulse'), label,
+  row.replaceChildren(icon(reached ? 'i-check' : 'i-pulse'), label,
     dockAction(() => t("Pause automation"), 'i-power', () => { const select = $<HTMLSelectElement>('chatAutomation'); select.value = 'off'; select.dispatchEvent(new Event('change')); }),
     dockAction(() => t("Edit task"), 'i-pencil', event => {
       // This opener is outside the menu; its click must not immediately dismiss it.
@@ -2203,6 +2212,32 @@ function jumpToLatest(): void {
   scrollPane(pane, pane.scrollHeight, true);
 }
 
+/** Explicit history inspection releases the same follow/send hold as reading upwards. */
+function readTimeline(): void {
+  readerAtEnd = false; sendAnchor = null; readingAfterSend = true;
+}
+
+function roundWorkers(ids: string[], button = el('button', 'activity-workers') as HTMLButtonElement): HTMLButtonElement {
+  button.type = 'button';
+  button.hidden = ids.length === 0;
+  ui(button, 'title', () => t('{0} sub-agents in this round', [ids.length]));
+  ui(button, 'aria-label', () => t('{0} sub-agents in this round', [ids.length]));
+  if (!button.childElementCount) button.append(icon('i-agents'), el('span'));
+  button.lastElementChild!.textContent = String(ids.length);
+  const owner = selectedId, epoch = selectionGeneration;
+  button.onclick = event => {
+    event.preventDefault(); event.stopPropagation();
+    if (selectedId !== owner || selectionGeneration !== epoch || !button.isConnected) return;
+    const current = ids.filter(id => sessions.some(worker => worker.id === id &&
+      worker.origin?.kind === 'worker' && worker.origin.fromSessionId === owner));
+    if (!current.length) return;
+    readTimeline();
+    agentPanel?.showWorkers(current);
+    paintJumpLatest();
+  };
+  return button;
+}
+
 function forgetTimelineRows(): void {
   openTools.clear();
   rowCache.clear();
@@ -2647,9 +2682,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
           : t("Received by {0}; recorded when it acknowledged delivery", [event.to]));
       const summary = el('summary');
       const worker = event.from === 'prime' ? event.to : event.from;
-      const avatar = el('span', 'agent-avatar', worker.replace(/^worker-/, ''));
-      avatar.dataset.color = String([...worker].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6);
-      avatar.setAttribute('aria-hidden', 'true');
+      const avatar = workerAvatar(worker);
       summary.append(avatar, el('span', '', () => communicationTitle(event)));
       const communicationKey = `agent:${context?.id ?? selectedId}:${event.seq}`;
       box.open = openTools.has(communicationKey);
@@ -3279,6 +3312,15 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
     ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [listed.length, label]));
     const symbol = latestHead?.querySelector('.ico, .agent-avatar');
     group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
+    if (groups === toolGroups) {
+      const ids = [...new Set(members.flatMap(row => JSON.parse(row.dataset.workerSessions ?? '[]') as string[]))];
+      group.dataset.workerSessions = JSON.stringify(ids);
+      const links = group.querySelector<HTMLButtonElement>(':scope > summary > .activity-workers');
+      if (ids.length) {
+        const workers = roundWorkers(ids, links ?? undefined);
+        if (!links) group.querySelector('summary')!.insertBefore(workers, group.querySelector('.activity-chevron'));
+      } else links?.remove();
+    }
     reconcileChildren(group.lastElementChild!, foldRoutineActivity(listed));
     grouped.push(group); i = end;
   }
@@ -3402,6 +3444,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
   const workedSeconds = exchangeDurations(events);
+  const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   for (const item of timelineItems(shown)) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
@@ -3415,7 +3458,9 @@ function paintDetail(followBottom = historyBefore === null): void {
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '');
     keep.add(key);
     const cached = rowCache.get(key);
+    const workerIds = JSON.stringify(item.kind === 'event' ? participatingWorkers(item.event, workers).map(worker => worker.id) : []);
     if (cached && cached.sig === sig) {
+      cached.row.dataset.workerSessions = workerIds;
       cached.row.dataset.activityBoundary = activityBoundary;
       if (item.kind === 'event' && item.event.kind === 'user_message') cached.row.dataset.askedAt = String(item.event.time);
       if (item.kind === 'event' && item.event.kind === 'user_message') {
@@ -3428,6 +3473,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event);
     if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn));
     row.dataset.timelineKey = key;
+    row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
     row.dataset.activityBoundary = activityBoundary;
     paintInputReceipt(row, item);
@@ -5165,7 +5211,8 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     if (entry.error === 'Requested model or reasoning could not be confirmed') {
       const selection = await ensureComposerModel(true);
       if (generation !== selectionGeneration || cancelledStarts.has(args.id)) return;
-      if (!selection) { toast(t("Model refresh could not confirm your selection. Choose an available model, then retry the plan.")); return; }
+      // This message asked for an exact model; Automatic would quietly replace it (#864).
+      if (!selection?.model) { toast(t("Model refresh could not confirm your selection. Choose an available model, then retry the plan.")); return; }
       Object.assign(args, selection);
     }
     startingInputs.set(args.id, { ...args, state: 'queued', owner: null, createdAt: args.dueAt, conversationId: null });
@@ -5430,7 +5477,7 @@ export function initChat(next: Deps): void {
         if (!['user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
         const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
         tagImageRow(row, event);
-        row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
+        row.dataset.timelineKey = `pane:${id}:event:${event.seq}`; row.dataset.activityBoundary = boundary;
         body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
       });
       return groupImageRows(groupToolRows(rows, `pane:${id}`, agentToolGroups));
@@ -5905,18 +5952,14 @@ export function initChat(next: Deps): void {
     if (historyDemand) void fillTimelineHistory();
   }, { passive: true });
   // The visible chat area also shrinks without new content: opening the bottom terminal or a
-  // side panel, or a growing message box. A reader who was at the end stays at the end; anyone
-  // who scrolled up keeps their place.
-  let atEnd = true;
-  const measureEnd = (): void => { atEnd = historyPane.scrollTop + historyPane.clientHeight >= historyPane.scrollHeight - 2; };
-  historyPane.addEventListener('scroll', measureEnd, { passive: true });
+  // side panel, or a growing message box. Use the reader's existing intent here too: explicit
+  // round inspection releases following even when its indicator was reached at the tail.
   if (typeof ResizeObserver === 'function') {
     let lastHeight = historyPane.clientHeight;
     new ResizeObserver(() => {
       const height = historyPane.clientHeight;
-      if (height !== lastHeight && atEnd) historyPane.scrollTop = historyPane.scrollHeight;
+      if (height !== lastHeight && readerAtEnd && !sendAnchor && !readingAfterSend) historyPane.scrollTop = historyPane.scrollHeight;
       lastHeight = height;
-      measureEnd();
     }).observe(historyPane);
   }
   $('timeline').addEventListener('click', event => {

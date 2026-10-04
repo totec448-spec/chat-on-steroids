@@ -1467,7 +1467,6 @@
   "Authentication": "Autenticação",
   "Blocked commands (one rule per line)": "Comandos bloqueados (uma regra por linha)",
   "Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.": "As ferramentas do conector do Chat On Steroids mudaram. Atualize o conector afetado no ChatGPT; isso é independente da extensão do navegador.",
-  "ChatGPT’s current model": "Modelo atual do ChatGPT",
   "Command policy mode": "Modo da política de comandos",
   "Commands matching any of these rules may not start.": "Comandos que correspondam a qualquer uma destas regras não podem ser iniciados.",
   "Controls what Compact & Resume preserves in the brief. Continuation identity and recovery rules stay fixed.": "Controla o que Compactar e retomar preserva no resumo. A identidade da continuação e as regras de recuperação continuam fixas.",
@@ -1532,7 +1531,6 @@
   "Wait for sub-agents": "Aguardar os subagentes",
   "Waiting for this chat’s sub-agents": "Aguardando os subagentes deste chat",
   "Workers cannot run their own Goal/Loop. Enable continuation in the parent chat instead.": "Workers não podem executar o próprio Goal/Loop. Ative a continuação no chat principal.",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "Seu plano do ChatGPT não mostra o seletor de modelos. Envie com o modelo que o ChatGPT já usa.",
   "bound": "vinculado",
   "companion browser": "navegador da extensão",
   "complete": "concluído",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "{0} linhas sem alterações",
   "More edited files are available in the recording.": "Mais arquivos editados estão disponíveis no registro.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "O plugin está no seu ChatGPT. Ele roda na primeira vez que um chat precisar dele.",
-  "Added in ChatGPT. Its tools have not run yet.": "Adicionado no ChatGPT. As ferramentas dele ainda não rodaram."
+  "Added in ChatGPT. Its tools have not run yet.": "Adicionado no ChatGPT. As ferramentas dele ainda não rodaram.",
+  "{0} sub-agents in this round": "{0} subagentes nesta rodada"
 }

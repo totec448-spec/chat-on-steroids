@@ -33,7 +33,8 @@ it('opens the model list as presentation only and returns focus through both Esc
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(list.hidden).toBe(false);
   expect(list.inert).toBe(false);
-  expect([...list.querySelectorAll<HTMLElement>('[data-model]')].map(button => button.dataset.model)).toEqual(['sol', 'pro', 'future']);
+  // Automatic comes first, as a deliberate choice that switches nothing (#864).
+  expect([...list.querySelectorAll<HTMLElement>('[data-model]')].map(button => button.dataset.model)).toEqual(['', 'sol', 'pro', 'future']);
   expect(doc.activeElement?.getAttribute('data-model')).toBe('sol');
   expect(composerSendModel()).toEqual(pair);
   doc.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -113,7 +114,8 @@ it('derives the effort shortcut from slider, session and account changes and dis
   receive({ state: 'unavailable', models: [], error: 'No account choices' });
   expect(spark.disabled).toBe(true);
   spark.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  expect(composerSendModel()).toBeNull();
+  // Without a list, an existing chat sends with its own current model, switching nothing (#864).
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
 });
 it('shows pending reasons and failed refresh separately from usable cached choices', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
@@ -165,29 +167,53 @@ it.each([true, false])('a model-rejection refresh waits beyond cached availabili
   expect(await result).toEqual(available ? { model: 'gpt-6', reasoningEffort: 'high' } : null);
 });
 
-it('a send requests missing models once and waits for the pushed catalog before selecting', async () => {
+it('a send for an exact default requests missing models once and waits for the pushed catalog before selecting', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
   const requestChatModels = vi.fn(async () => ({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }));
   const models = [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high'] }];
-  Object.assign(dom.window, { api: { requestChatModels, getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models } }) } });
-  const { initChatModels, ensureComposerModel, applyChatModels } = await import('../src/renderer/chat-models.js');
+  let ready = false;
+  Object.assign(dom.window, { api: { requestChatModels, getChatModels: async () => ({ ok: true,
+    data: ready ? { state: 'ready', requestedAt: 1, observedAt: 2, models } : { state: 'unknown', requestedAt: null, observedAt: null, models: [] } }) } });
+  const { initChatModels, ensureComposerModel, applyChatModels, applyComposerSessionModel } = await import('../src/renderer/chat-models.js');
   initChatModels();
+  const config = { ui: { defaultChatModel: 'gpt-6', defaultChatReasoning: 'high' }, multiAgent: {}, goal: {} } as Config;
+  applyChatModels(config); await Promise.resolve();
+  applyComposerSessionModel(null, null);
   const first = ensureComposerModel(), second = ensureComposerModel();
   let resolved = false; void first.then(() => { resolved = true; });
   await Promise.resolve(); await Promise.resolve();
   expect(requestChatModels).toHaveBeenCalledTimes(1); expect(resolved).toBe(false);
-  applyChatModels({ multiAgent: {}, goal: {} } as Config);
+  ready = true;
+  applyChatModels(config); await Promise.resolve();
   expect(await first).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
   expect(await second).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
 });
 
-it('a failed discovery keeps sending unconfirmed and settles its wait', async () => {
+it('sends Automatic at once when no particular model was asked for and no list is readable yet (#864)', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
-  Object.assign(dom.window, { api: { requestChatModels: async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: 2, models: [] } }) } });
-  const { initChatModels, ensureComposerModel } = await import('../src/renderer/chat-models.js');
-  initChatModels(); expect(await ensureComposerModel()).toBeNull();
+  const requestChatModels = vi.fn(async () => ({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }));
+  Object.assign(dom.window, { api: { requestChatModels, getChatModels: async () => ({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }) } });
+  const { initChatModels, ensureComposerModel, applyChatModels, applyComposerSessionModel, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  applyComposerSessionModel(null, null);
+  // Go and Free accounts have no picker at all; Send used to wait two minutes for a list that never came.
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
+  expect(await ensureComposerModel()).toEqual({ model: null, reasoningEffort: null });
+  expect(requestChatModels).not.toHaveBeenCalled();
+  expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('Automatic');
+});
+
+it('a failed discovery confirms no exact default and settles its wait', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  Object.assign(dom.window, { api: { requestChatModels: async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: 2, models: [] } }),
+    getChatModels: async () => ({ ok: true, data: { state: 'unknown', requestedAt: null, observedAt: null, models: [] } }) } });
+  const { initChatModels, ensureComposerModel, applyChatModels, applyComposerSessionModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ ui: { defaultChatModel: 'gpt-6', defaultChatReasoning: 'high' }, multiAgent: {}, goal: {} } as Config);
+  applyComposerSessionModel(null, null);
+  expect(await ensureComposerModel()).toBeNull();
 });
 
 it('opening an empty or pending picker requests models immediately without a separate refresh', async () => {
@@ -202,7 +228,8 @@ it('opening an empty or pending picker requests models immediately without a sep
   menu.open = true;
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(requestChatModels).toHaveBeenCalledTimes(1);
-  expect(dom.window.document.getElementById('composerPowerTitle')!.textContent).toBe('Loading models…');
+  // Nothing particular is asked for, so the composer stays Automatic while the list loads.
+  expect(dom.window.document.getElementById('composerPowerTitle')!.textContent).toBe('Automatic');
   menu.open = false;
   await new Promise(resolve => setTimeout(resolve, 0));
   menu.open = true;
@@ -478,7 +505,7 @@ it('keeps model provider order and restricts the slider to the selected model’
   const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const doc = dom.window.document;
-  expect([...doc.querySelectorAll<HTMLElement>('[data-model]')].map(row => row.dataset.model)).toEqual(['astra', 'old', 'sol']);
+  expect([...doc.querySelectorAll<HTMLElement>('[data-model]')].map(row => row.dataset.model)).toEqual(['', 'astra', 'old', 'sol']);
   // A single effort (Instant) is not a choice: no slider, the effort is named instead.
   expect(doc.querySelector('#composerPowerChoices input')).toBeNull();
   expect(doc.getElementById('composerPowerTitle')!.textContent).toBe('High');
@@ -622,32 +649,36 @@ it.each(['5.6', 'gpt-5.6-sol', 'GPT-5.6 Sol', 'gpt-5-6-thinking'])('keeps saved 
   check(); receive({ state: 'ready', models: [...models].reverse() }); check();
 });
 
-it('offers ChatGPT’s current model only when no account list is readable, and only on an explicit choice (#104)', async () => {
+it('keeps an exact default exact without a list, and offers Automatic instead of assuming it (#104, #864)', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
   let receive!: (catalog: any) => void;
   Object.assign(dom.window, { api: {
     getChatModels: async () => ({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }),
     onChatModelsChanged: (listener: typeof receive) => { receive = listener; } } });
-  const { initChatModels, applyChatModels, composerSendModel, confirmedComposerModel, ensureComposerModel } = await import('../src/renderer/chat-models.js');
-  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const { initChatModels, applyChatModels, applyComposerSessionModel, composerSendModel, confirmedComposerModel, ensureComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ ui: { defaultChatModel: 'gpt-6', defaultChatReasoning: 'high' }, multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  applyComposerSessionModel(null, null);
   const button = () => dom.window.document.querySelector<HTMLButtonElement>('[data-use-current-model]');
-  // Still reading: nothing is offered, and nothing is sent without a choice.
-  expect(button()).toBeNull();
+  // The person asked for GPT-6 as their default: nothing else is sent while it cannot be confirmed.
   expect(composerSendModel()).toBeNull();
-  // A Go/Free account has no picker, so discovery ends without any list.
   receive({ state: 'unavailable', requestedAt: 1, observedAt: 2, models: [], error: 'ChatGPT’s native model picker could not be read.' });
-  expect(button(), 'offered once no list is readable').not.toBeNull();
-  expect(composerSendModel(), 'never chosen silently').toBeNull();
+  expect(button(), 'Automatic is offered once no list is readable').not.toBeNull();
+  expect(composerSendModel(), 'never chosen silently over an exact default').toBeNull();
   button()!.click();
   expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
   expect(await ensureComposerModel()).toEqual({ model: null, reasoningEffort: null });
   expect(confirmedComposerModel(), 'the confirmed-pair contract is unchanged').toBeNull();
-  expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('ChatGPT’s current model');
-  // A readable list takes over again at once.
+  expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('Automatic');
+  // A deliberate Automatic stays chosen when a list appears; picking a model ends it.
   receive({ state: 'ready', requestedAt: 3, observedAt: 4, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high'] }] });
-  expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
   expect(button()).toBeNull();
+  dom.window.document.querySelector<HTMLButtonElement>('[data-model="gpt-6"]')!.click();
+  expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+  dom.window.document.querySelector<HTMLButtonElement>('[data-model=""]')!.click();
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
+  expect(dom.window.document.querySelector('[data-model=""]')!.getAttribute('aria-pressed')).toBe('true');
 });
 
 it('glides the effort thumb, picks the nearest effort, settles on release and steps by keys', async () => {

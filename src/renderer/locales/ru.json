@@ -1575,10 +1575,8 @@
   "The provider reported an error while generating the continuation. Check its status or choose another model.": "Провайдер сообщил об ошибке при создании продолжения. Проверьте его состояние или выберите другую модель.",
   "PDF exceeds the preview limit": "PDF превышает лимит предпросмотра",
   "PDF page dimensions exceed the preview limit": "Размер страницы PDF превышает лимит предпросмотра",
-  "ChatGPT’s current model": "Текущая модель ChatGPT",
   "Sent without choosing a model": "Отправлено без выбора модели",
   "Use ChatGPT’s current model": "Использовать текущую модель ChatGPT",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "В вашем тарифе ChatGPT нет выбора модели. Отправляйте с моделью, которую ChatGPT уже использует.",
   "Right panel": "Правая панель",
   "New tab": "Новая вкладка",
   "Hide right panel": "Скрыть правую панель",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "Неизменённых строк: {0}",
   "More edited files are available in the recording.": "Другие изменённые файлы доступны в записи.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Плагин добавлен в ваш ChatGPT. Он запустится, когда чат впервые к нему обратится.",
-  "Added in ChatGPT. Its tools have not run yet.": "Добавлен в ChatGPT. Его инструменты ещё не запускались."
+  "Added in ChatGPT. Its tools have not run yet.": "Добавлен в ChatGPT. Его инструменты ещё не запускались.",
+  "{0} sub-agents in this round": "Подагенты в этом раунде: {0}"
 }

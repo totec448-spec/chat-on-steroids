@@ -1467,7 +1467,6 @@
   "Authentication": "인증",
   "Blocked commands (one rule per line)": "차단할 명령(줄마다 규칙 하나)",
   "Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.": "Chat On Steroids 커넥터 도구가 변경되었습니다. ChatGPT에서 해당 커넥터를 새로고침하세요. 브라우저 확장 프로그램과는 별개입니다.",
-  "ChatGPT’s current model": "ChatGPT의 현재 모델",
   "Command policy mode": "명령 정책 모드",
   "Commands matching any of these rules may not start.": "다음 규칙 중 하나와 일치하는 명령은 실행할 수 없습니다.",
   "Controls what Compact & Resume preserves in the brief. Continuation identity and recovery rules stay fixed.": "‘압축 후 계속’이 요약에 보존할 내용을 제어합니다. 계속하기의 식별 및 복구 규칙은 그대로 유지됩니다.",
@@ -1532,7 +1531,6 @@
   "Wait for sub-agents": "서브에이전트 대기",
   "Waiting for this chat’s sub-agents": "이 채팅의 서브에이전트 대기 중",
   "Workers cannot run their own Goal/Loop. Enable continuation in the parent chat instead.": "워커는 자체 Goal/Loop를 실행할 수 없습니다. 대신 상위 채팅에서 계속하기를 켜세요.",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "현재 ChatGPT 요금제에는 모델 선택기가 표시되지 않습니다. ChatGPT가 이미 사용 중인 모델로 전송하세요.",
   "bound": "연결됨",
   "companion browser": "보조 브라우저",
   "complete": "완료",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "변경 없는 줄 {0}개",
   "More edited files are available in the recording.": "기록에서 더 많은 편집된 파일을 확인할 수 있습니다.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "플러그인이 ChatGPT에 있습니다. 채팅에서 처음 필요할 때 실행됩니다.",
-  "Added in ChatGPT. Its tools have not run yet.": "ChatGPT에 추가됨. 아직 도구가 실행되지 않았습니다."
+  "Added in ChatGPT. Its tools have not run yet.": "ChatGPT에 추가됨. 아직 도구가 실행되지 않았습니다.",
+  "{0} sub-agents in this round": "이 라운드의 하위 에이전트 {0}개"
 }

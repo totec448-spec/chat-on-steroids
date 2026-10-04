@@ -1576,10 +1576,8 @@
   "Controls what Compact & Resume preserves in the brief. Continuation identity and recovery rules stay fixed.": "Controla o que Compactar e Retomar preserva no resumo. A identidade da continuação e as regras de recuperação mantêm-se fixas.",
   "Saved when you leave the editor. This changes brief content only; Compact & Resume protocol framing remains fixed.": "Guardado ao sair do editor. Isto altera apenas o conteúdo do resumo; o enquadramento do protocolo de Compactar e Retomar mantém-se fixo.",
   "Handoff prompt restored to default": "Pedido de passagem de contexto reposto para o valor predefinido",
-  "ChatGPT’s current model": "Modelo atual do ChatGPT",
   "Sent without choosing a model": "Enviado sem escolher um modelo",
   "Use ChatGPT’s current model": "Usar o modelo atual do ChatGPT",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "O seu plano do ChatGPT não mostra seletor de modelos. Envie com o modelo que o ChatGPT já usa.",
   "Right panel": "Painel direito",
   "New tab": "Novo separador",
   "Hide right panel": "Ocultar painel direito",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "{0} linhas sem alterações",
   "More edited files are available in the recording.": "Estão disponíveis mais ficheiros editados no registo.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "O plugin está no seu ChatGPT. Corre na primeira vez que um chat precisar dele.",
-  "Added in ChatGPT. Its tools have not run yet.": "Adicionado no ChatGPT. As ferramentas ainda não correram."
+  "Added in ChatGPT. Its tools have not run yet.": "Adicionado no ChatGPT. As ferramentas ainda não correram.",
+  "{0} sub-agents in this round": "{0} subagentes nesta ronda"
 }
