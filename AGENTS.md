@@ -3366,6 +3366,7 @@ Its tab close or Escape closes the pane; a selected worker retains its title and
 A collapsed Sub-agents card below the selected prime's timeline projects the same exact-family
 worker summaries as the existing overview. It reuses createAgentPanel with an independent reading
 selection and preserves the sidebar and right dock. Collapsed cards do not fetch worker history.
+The input queue remains directly after the transcript so delivery receipts preserve its position.
 Collapse, parent navigation and loss of worker membership retire pending loads, including a return
 to the same id; opening worker history leaves the prime composer selected.
 

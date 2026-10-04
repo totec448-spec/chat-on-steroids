@@ -41,6 +41,7 @@ app.whenReady().then(async()=>{
  await js(`document.querySelector('#sessionList [data-id="composer-preview"]').click()`);
  await until(`document.querySelectorAll('#timeline .tool').length===3`);
  if(!before){
+  assert.equal(await js(`document.getElementById('timeline').nextElementSibling.id`),'inputQueue','Pending corrections remain adjacent to the transcript');
   await until(`document.querySelector('#inlineAgents .inline-agent-panel:not([hidden])')!==null`);
   await js(`document.querySelector('#inlineAgents details').open=true`);
   await until(`document.querySelectorAll('#inlineAgents .agent-panel-row').length===1`);
