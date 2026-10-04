@@ -4108,6 +4108,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'desktop_input',
     'model_catalog',
     'plugin_refresh',
+    'core_plugin',
     'usage_observation',
     'events',
     'bind',
