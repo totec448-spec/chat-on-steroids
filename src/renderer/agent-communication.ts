@@ -1,7 +1,41 @@
 import { t } from './i18n.js';
-import type { SessionEvent } from '../shared/session.js';
+import type { SessionEvent, SessionSummary } from '../shared/session.js';
+import { el } from './dom.js';
 
 type Communication = Extract<SessionEvent, { kind: 'agent_message' }>;
+
+export function workerAvatar(worker: string): HTMLElement {
+  const avatar = el('span', 'agent-avatar', worker.replace(/^worker-/, ''));
+  avatar.dataset.color = String([...worker].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6);
+  avatar.setAttribute('aria-hidden', 'true');
+  return avatar;
+}
+
+/** Recorded participation, never a roster/status snapshot or a guessed slot incarnation. */
+export function participatingWorkers(event: SessionEvent, workers: SessionSummary[]): SessionSummary[] {
+  let names: unknown[] = [];
+  if (event.kind === 'agent_message') names = [event.from, event.to];
+  else if (event.kind === 'tool_call' && event.call.tool === 'agents' && event.call.outcome === 'ok') {
+    if (event.call.args.truncated) return [];
+    try {
+      const args = JSON.parse(event.call.args.text);
+      if (args.action === 'message' && !args.target_run_id) {
+        names = Array.isArray(args.messages) ? args.messages.map((message: { to?: unknown }) => message?.to) : [args.to];
+      }
+      // Only structured spawn receipts name the workers actually accepted. Prose and
+      // requested assignments cannot prove which reusable worker the broker chose.
+      if (args.action === 'spawn' && !event.call.result.truncated) {
+        const result = JSON.parse(event.call.result.text)?.structuredContent;
+        if (result?.action === 'spawn' && Array.isArray(result.workers)) names = result.workers.map((worker: { id?: unknown }) => worker?.id);
+      }
+    } catch { return []; }
+  }
+  return [...new Set(names)].flatMap(name => {
+    if (typeof name !== 'string' || !name.startsWith('worker-')) return [];
+    const matches = workers.filter(worker => worker.origin?.agentId === name);
+    return matches.length === 1 ? matches : [];
+  });
+}
 
 export function communicationTitle(event: Communication): string {
   const worker = event.from === 'prime' ? event.to : event.from;

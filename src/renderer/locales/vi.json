@@ -1842,5 +1842,6 @@
   "Loading edit…": "Đang tải chỉnh sửa…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "Xem trước giới hạn 600 dòng. Mở mục Xem lại để xem toàn bộ chỉnh sửa.",
   "{0} unchanged lines": "{0} dòng không đổi",
-  "More edited files are available in the recording.": "Các tệp đã chỉnh sửa khác có trong bản ghi."
+  "More edited files are available in the recording.": "Các tệp đã chỉnh sửa khác có trong bản ghi.",
+  "{0} sub-agents in this round": "{0} tác nhân phụ trong vòng này"
 }

@@ -1842,5 +1842,6 @@
   "Loading edit…": "Carregando edição…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "Prévia limitada a 600 linhas. Abra Revisão para ver a edição completa.",
   "{0} unchanged lines": "{0} linhas sem alterações",
-  "More edited files are available in the recording.": "Mais arquivos editados estão disponíveis no registro."
+  "More edited files are available in the recording.": "Mais arquivos editados estão disponíveis no registro.",
+  "{0} sub-agents in this round": "{0} subagentes nesta rodada"
 }

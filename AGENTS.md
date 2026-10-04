@@ -3441,6 +3441,16 @@ event-time order when late attribution repairs append older calls, so the overvi
 every worker transcript just to paint one line. These fields are read-only telemetry; lifecycle,
 scheduling, messaging and execution authority remain with the existing broker/tool owners.
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
+Each collapsed activity round that used workers shows one Phosphor Sub-agents icon and the
+number of distinct workers. Its keyboard-reachable button labels that count accessibly and
+opens the existing Sub-agents dock with those exact workers highlighted; it does not expand
+the round, load worker transcripts or move the timeline reader. Inspection releases the existing
+follow-output/send hold; Jump to latest resumes following. Membership and selection generations
+fence activation, and parent changes clear highlights. Participation derives from recorded
+communication and successful agent messages/complete structured spawn receipts, never status
+rosters, foreign families, rejected/truncated calls or ambiguous reused worker names.
+Worker history remains owned by the existing dock; there is no aggregate timeline history card.
+
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
 Files uses one action toolbar with Refresh; its tab close hides the panel. Its shared
