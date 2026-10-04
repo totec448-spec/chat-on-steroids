@@ -2019,6 +2019,13 @@ holding that chat. A browser handed work for a chat it lacks opens the chat itse
 copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
 first browser it is handed to while that browser polls. Requests without an id are not told apart.
 
+"Open in ChatGPT" on a chat row is shown by the extension, not the OS: the OS hands a URL to
+whichever browser window last had focus, which can be a browser without the extension or one
+signed in to another account. An extension whose `/status` body says `canReveal: true` receives
+the chat in `reveals`, under the same holding rule, and focuses its tab or opens it (restoring a
+minimized window). When no such extension is connected, or none takes it within 4 s, the request
+is withdrawn and the app opens the URL through the OS as before.
+
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
 authorized, its shared layout policy bounds it to 45% of the work area and 800×600, then
