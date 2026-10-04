@@ -3340,15 +3340,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .project-heading:hover .project-new, .project-heading:focus-within .project-new { opacity: 1; }
 .project-remove { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; padding: 4px; color: var(--faint); opacity: 0; }
 .project-heading:hover .project-remove, .project-heading:focus-within .project-remove { opacity: 1; }
-.project-folders { display: grid; gap: 3px; margin: 1px 8px 6px 24px; padding: 4px 0 6px; border-bottom: 1px solid var(--line); }
-.project-folder-row { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 27px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
-.project-folder-row > .ico { --ico: 13px; color: var(--faint); }
-.project-folder-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-folder-primary { flex-shrink: 0; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); }
-.project-folder-remove { display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; color: var(--faint); }
-.project-folder-remove:hover:not(:disabled) { color: var(--ink); }
-.project-folder-add { justify-self: start; min-height: 26px; padding: 3px 7px; gap: 5px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
-.project-folder-add .ico { --ico: 12px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }

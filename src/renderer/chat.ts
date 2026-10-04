@@ -913,55 +913,6 @@ function paintSessions(): void {
         } finally { remove.disabled = false; }
       });
       heading.append(remove);
-
-      const folderList = el('div', 'project-folders');
-      folderList.setAttribute('role', 'list');
-      ui(folderList, 'aria-label', () => t('Project folders'));
-      const renderFolder = (folder: string, primary: boolean): HTMLElement => {
-        const row = el('div', 'project-folder-row'); row.setAttribute('role', 'listitem');
-        const value = el('span', 'project-folder-path', folder); value.setAttribute('translate', 'no'); value.title = folder;
-        row.append(icon('i-folder'), value);
-        if (primary) row.append(ui(el('span', 'project-folder-primary'), 'textContent', () => t('Primary project folder')));
-        else {
-          const detach = el('button', 'btn project-folder-remove') as HTMLButtonElement;
-          detach.type = 'button'; detach.append(icon('i-x'));
-          ui(detach, 'title', () => t('Remove folder {0} from project {1}', [folder, project.name]));
-          ui(detach, 'aria-label', () => t('Remove folder {0} from project {1}', [folder, project.name]));
-          detach.addEventListener('click', async event => {
-            event.preventDefault(); event.stopPropagation();
-            if (detach.disabled) return;
-            detach.disabled = true;
-            try {
-              const updated = await run(api.removeProjectFolder(id, folder));
-              if (!updated) return;
-              ++sessionsLoadGeneration;
-              projects = projects.map(row => row.id === id ? updated : row);
-              expandedProjects.add(id); paintSessions();
-            } finally { detach.disabled = false; }
-          });
-          row.append(detach);
-        }
-        return row;
-      };
-      folderList.append(renderFolder(project.path, true), ...(project.additionalPaths ?? []).map(folder => renderFolder(folder, false)));
-      const addFolder = el('button', 'btn project-folder-add') as HTMLButtonElement;
-      const addLabel = el('span'); ui(addLabel, 'textContent', () => t('Add folder'));
-      addFolder.type = 'button'; addFolder.append(icon('i-plus'), addLabel);
-      ui(addFolder, 'title', () => t('Add folder to project {0}', [project.name]));
-      ui(addFolder, 'aria-label', () => t('Add folder to project {0}', [project.name]));
-      addFolder.addEventListener('click', async event => {
-        event.preventDefault(); event.stopPropagation();
-        if (addFolder.disabled) return;
-        addFolder.disabled = true;
-        try {
-          const updated = await run(api.addProjectFolder(id));
-          if (!updated) return;
-          ++sessionsLoadGeneration;
-          projects = projects.map(row => row.id === id ? updated : row);
-          expandedProjects.add(id); paintSessions();
-        } finally { addFolder.disabled = false; }
-      });
-      folderList.append(addFolder); section.append(folderList);
     }
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
