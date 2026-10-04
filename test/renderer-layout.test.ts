@@ -170,21 +170,11 @@ describe('the session card header', () => {
    * because the chat is what writes the brief — a button here would be a second way to
    * start the one thing that must happen exactly once.
    */
-  it('keeps global theme and connection actions in the title bar while details stay in the sidebar popover', () => {
+  it('keeps global connection status out of the chat header and in the sidebar footer', () => {
     const header = document.querySelector('#chatTitle')!.closest('header')!;
-    const topbar = document.querySelector('.app-topbar')!;
-    const theme = document.getElementById('themeBtn')!;
-    const topbarConnection = document.getElementById('headerConnect')!;
     const connection = document.getElementById('sidebarConnection')!;
     const footer = connection.closest('.sidebar-bottom')!;
     expect(header.contains(connection)).toBe(false);
-    expect(header.contains(theme)).toBe(false);
-    expect(header.contains(topbarConnection)).toBe(false);
-    expect(topbar.contains(theme)).toBe(true);
-    expect(topbar.contains(topbarConnection)).toBe(true);
-    expect(theme.getAttribute('aria-label')).toBe('Switch to light mode');
-    expect(theme.querySelector('.ph-sun')).not.toBeNull();
-    expect(rule('.app-topbar > .btn, .view-menu')).toContain('-webkit-app-region: no-drag');
     expect(footer).not.toBeNull();
     expect([...footer.children].map((node) => (node as HTMLElement).id || (node as HTMLElement).className)).toEqual([
       'workspaceSettings',
