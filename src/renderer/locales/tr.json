@@ -1816,5 +1816,8 @@
   "Stop background process": "Arka plan işlemini durdur",
   "Stop": "Durdur",
   "Background process is no longer running": "Arka plan işlemi artık çalışmıyor",
-  "{0} background processes running": "{0} arka plan işlemi çalışıyor"
+  "{0} background processes running": "{0} arka plan işlemi çalışıyor",
+  "Diagnostics report": "Tanılama raporu",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Sürümleri, ayarları, bağlantı durumunu ve günlüğü kişisel bilgiler çıkarılmış olarak tek bir dosyaya kaydeder; hata bildirimine ekleyebilirsiniz.",
+  "Diagnostics report saved as {0}. Read it before you share it.": "Tanılama raporu {0} olarak kaydedildi. Paylaşmadan önce okuyun."
 }

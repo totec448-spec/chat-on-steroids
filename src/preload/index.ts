@@ -214,6 +214,7 @@ const api = {
   connect: () => call<AppState>('connection:connect'),
   disconnect: () => call<AppState>('connection:disconnect'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
+  saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   getLog: () => call<LogEntry[]>('log:get'),
   getLogText: () => call<string>('log:text'),

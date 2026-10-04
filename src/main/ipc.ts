@@ -71,6 +71,8 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { livePreview } from './live-preview.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
+import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
+import { listSessions } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from './projects.js';
@@ -92,6 +94,7 @@ import {
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
+  pendingCommands,
   onBridgeChange,
   startBridge,
   stopBridge,
@@ -1036,6 +1039,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('diagnostics:run', async () => runDiagnostics());
+  // "Save diagnostics report": one plain-text file for a bug report, personal details removed
+  // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
+  handle('diagnostics:saveReport', async () => {
+    const selfTest = await Promise.race([
+      runDiagnostics().catch(() => null),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 10_000).unref())
+    ]);
+    const workers = swarmState().agents;
+    const text = renderDiagnosticsReport({
+      app: systemFacts(app), home: app.getPath('home'),
+      bridge: await bridgeStatus(), extension: await companionDiagnostics().catch(() => null),
+      selfTest: selfTest && { summary: selfTest.summary, checks: selfTest.checks.map(({ name, status, detail }) => ({ name, status, detail })) },
+      commands: pendingCommands().map(({ id, what, lastError }) => ({ command: id, what, lastError })),
+      workers: workers.map(({ id, role, state, model, reasoningEffort, createdAt, activatedAt, finishedAt, pending, delivered, conversationId, revivable }) =>
+        ({ worker: id, role, state, model, reasoningEffort, createdAt, activatedAt, finishedAt, pending, delivered, conversationId, revivable })),
+      sessions: await listSessions().catch(() => []),
+      projects: await listProjects().catch(() => []),
+      workerTexts: workers.flatMap(worker => [worker.task ?? '', worker.label ?? '', worker.result ?? '']),
+      log: await readRecentLog(),
+      now: Date.now()
+    });
+    return saveDiagnosticsReport(text, getWindow());
+  });
   handle('desktop:requestAccessibility', async () => {
     await refreshMacOSDesktopAccess({ promptAccessibility: true });
     return buildState();

@@ -1816,5 +1816,8 @@
   "Stop background process": "バックグラウンドプロセスを停止",
   "Stop": "停止",
   "Background process is no longer running": "バックグラウンドプロセスはすでに停止しています",
-  "{0} background processes running": "{0} 個のバックグラウンドプロセスを実行中"
+  "{0} background processes running": "{0} 個のバックグラウンドプロセスを実行中",
+  "Diagnostics report": "診断レポート",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "バージョン、設定、接続状態、ログを個人情報を除いて1つのファイルに保存します。不具合報告に添付できます。",
+  "Diagnostics report saved as {0}. Read it before you share it.": "診断レポートを {0} として保存しました。共有する前に内容を確認してください。"
 }

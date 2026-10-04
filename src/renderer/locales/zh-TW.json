@@ -1816,5 +1816,8 @@
   "Stop background process": "停止背景程序",
   "Stop": "停止",
   "Background process is no longer running": "背景程序已不再執行",
-  "{0} background processes running": "{0} 個背景程序正在執行"
+  "{0} background processes running": "{0} 個背景程序正在執行",
+  "Diagnostics report": "診斷報告",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "將版本、設定、連線狀態和記錄儲存為一個檔案（已移除個人資訊），可附加到錯誤回報中。",
+  "Diagnostics report saved as {0}. Read it before you share it.": "診斷報告已儲存為 {0}。分享前請先檢查內容。"
 }

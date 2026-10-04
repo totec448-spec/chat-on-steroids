@@ -1816,5 +1816,8 @@
   "Stop background process": "Detener proceso en segundo plano",
   "Stop": "Detener",
   "Background process is no longer running": "El proceso en segundo plano ya no se está ejecutando",
-  "{0} background processes running": "{0} procesos en segundo plano en ejecución"
+  "{0} background processes running": "{0} procesos en segundo plano en ejecución",
+  "Diagnostics report": "Informe de diagnóstico",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Guarda un archivo con las versiones, los ajustes, el estado de la conexión y el registro, sin datos personales, para adjuntarlo a un informe de error.",
+  "Diagnostics report saved as {0}. Read it before you share it.": "Informe de diagnóstico guardado como {0}. Léelo antes de compartirlo."
 }

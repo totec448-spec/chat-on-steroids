@@ -1816,5 +1816,8 @@
   "Stop background process": "Parar processo em segundo plano",
   "Stop": "Parar",
   "Background process is no longer running": "O processo em segundo plano já não está em execução",
-  "{0} background processes running": "{0} processos em segundo plano em execução"
+  "{0} background processes running": "{0} processos em segundo plano em execução",
+  "Diagnostics report": "Relatório de diagnóstico",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "Guarda um ficheiro com as versões, as definições, o estado da ligação e o registo, sem dados pessoais, para anexar a um relatório de erro.",
+  "Diagnostics report saved as {0}. Read it before you share it.": "Relatório de diagnóstico guardado como {0}. Leia-o antes de o partilhar."
 }

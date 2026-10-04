@@ -1816,5 +1816,8 @@
   "Stop background process": "停止后台进程",
   "Stop": "停止",
   "Background process is no longer running": "后台进程已不再运行",
-  "{0} background processes running": "{0} 个后台进程正在运行"
+  "{0} background processes running": "{0} 个后台进程正在运行",
+  "Diagnostics report": "诊断报告",
+  "Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.": "将版本、设置、连接状态和日志保存为一个文件（已移除个人信息），可附加到错误报告中。",
+  "Diagnostics report saved as {0}. Read it before you share it.": "诊断报告已保存为 {0}。分享前请先查看内容。"
 }
