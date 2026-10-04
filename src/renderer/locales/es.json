@@ -1576,10 +1576,8 @@
   "{0} — found {1} · app receipt {2} · owner {3} · tool activity {4}": "{0} — encontrados {1} · recibo de la aplicación {2} · propietario {3} · actividad de herramientas {4}",
   "{0}: drag, click, or open the context menu": "{0}: arrastra, haz clic o abre el menú contextual",
   "… still writing. The full answer appears when it finishes.": "… todavía escribiendo. La respuesta completa aparecerá cuando termine.",
-  "ChatGPT’s current model": "Modelo actual de ChatGPT",
   "Sent without choosing a model": "Se envía sin elegir un modelo",
   "Use ChatGPT’s current model": "Usar el modelo actual de ChatGPT",
-  "Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses.": "Tu plan de ChatGPT no muestra selector de modelos. Envía con el modelo que ChatGPT ya usa.",
   "Right panel": "Panel derecho",
   "New tab": "Nueva pestaña",
   "Hide right panel": "Ocultar panel derecho",
@@ -1846,5 +1844,6 @@
   "{0} unchanged lines": "{0} líneas sin cambios",
   "More edited files are available in the recording.": "Hay más archivos editados en la grabación.",
   "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "El plugin está en tu ChatGPT. Se ejecuta la primera vez que un chat lo necesite.",
-  "Added in ChatGPT. Its tools have not run yet.": "Añadido en ChatGPT. Sus herramientas aún no se han ejecutado."
+  "Added in ChatGPT. Its tools have not run yet.": "Añadido en ChatGPT. Sus herramientas aún no se han ejecutado.",
+  "{0} sub-agents in this round": "{0} subagentes en esta ronda"
 }

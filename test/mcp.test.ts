@@ -1906,6 +1906,18 @@ describe('bounded output', () => {
     expect(text).not.toContain('app.ts');
   });
 
+  it('lists the shared folders for the virtual root, where a model naturally starts', async () => {
+    // Live on macOS (2026-10-04): "read /" answered only "Path is empty. Use an approved virtual
+    // root such as /<root>/file.txt.", so the model had to guess the folder names.
+    const reply = await core('tools/call', { name: 'read', arguments: { paths: ['/', '/workspace/notes.txt'] } });
+    const text = textOf(reply);
+    expect(failed(reply), text).toBe(false);
+    expect(text).toContain('--- / — 1 entry, one level ---');
+    expect(text).toContain('d workspace');
+    expect(text).not.toContain('ERROR');
+    expect(text).not.toContain(approved);
+  });
+
   it('validates tool arguments instead of trusting them', async () => {
     const reply = await core('tools/call', { name: 'read', arguments: { paths: [12345] } });
     expect(failed(reply)).toBe(true);

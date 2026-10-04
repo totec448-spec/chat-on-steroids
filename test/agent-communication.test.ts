@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import type { SessionEvent } from '../src/shared/session.js';
-import { communicationTitle, foldAgentCommunication } from '../src/renderer/agent-communication.js';
+import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
+import { communicationTitle, foldAgentCommunication, participatingWorkers } from '../src/renderer/agent-communication.js';
 
 const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
 const message = (overrides = {}): SessionEvent => ({ kind: 'agent_message', source: 'app', seq: 2, time: 112,
@@ -25,4 +25,28 @@ it('distinguishes worker status, messages and final reports', () => {
   expect(title('[worker-1 is awake again] It resumed')).toBe('worker-1 resumed work');
   expect(title('[worker-1 reported] RESULT: Done')).toBe('worker-1 finished · report');
   expect(title('The room is ready for review')).toBe('Message from worker-1');
+});
+
+it('links recorded participation only to a unique worker in the selected family', () => {
+  const worker = { id: 'local-worker', origin: { agentId: 'worker-1' } } as SessionSummary;
+  expect(participatingWorkers(message(), [worker])).toEqual([worker]);
+  expect(participatingWorkers(call, [worker])).toEqual([worker]);
+  expect(participatingWorkers(message({ to: 'worker-2' }), [worker])).toEqual([]);
+  expect(participatingWorkers(message(), [worker, { ...worker, id: 'older-incarnation' }])).toEqual([]);
+  const tool = call as Extract<SessionEvent, { kind: 'tool_call' }>;
+  for (const args of [{ action: 'status' }, { action: 'message', to: 'worker-1', target_run_id: 'foreign-family' }]) {
+    expect(participatingWorkers({ ...tool, call: { ...tool.call, args: text(JSON.stringify(args)) } }, [worker])).toEqual([]);
+  }
+  expect(participatingWorkers({ ...tool, call: { ...tool.call, outcome: 'tool_rejected' } }, [worker])).toEqual([]);
+  expect(participatingWorkers({ ...tool, call: { ...tool.call, args: { ...tool.call.args, truncated: true } } }, [worker])).toEqual([]);
+});
+
+it('uses a complete structured spawn receipt and never infers accepted workers from prose', () => {
+  const worker = { id: 'local-worker', origin: { agentId: 'worker-1' } } as SessionSummary;
+  const tool = call as Extract<SessionEvent, { kind: 'tool_call' }>;
+  const spawn = { ...tool, call: { ...tool.call, args: text('{"action":"spawn"}'),
+    result: text(JSON.stringify({ structuredContent: { action: 'spawn', workers: [{ id: 'worker-1' }] } })) } };
+  expect(participatingWorkers(spawn, [worker])).toEqual([worker]);
+  expect(participatingWorkers({ ...spawn, call: { ...spawn.call, result: text('worker-1 (opening)') } }, [worker])).toEqual([]);
+  expect(participatingWorkers({ ...spawn, call: { ...spawn.call, result: { ...spawn.call.result, truncated: true } } }, [worker])).toEqual([]);
 });

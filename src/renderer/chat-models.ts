@@ -12,24 +12,36 @@ const catalogWaiters = new Set<() => void>();
 let discovery: Promise<void> | null = null;
 let catalogSubscribed = false;
 type ObservedSelection = { model: string; reasoningEffort?: ReasoningEffort; observedAt: number };
-let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean } | null = null;
+let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean; automatic?: boolean } | null = null;
 let ordinaryDefaults: { model: string; reasoningEffort: string } = { model: '', reasoningEffort: '' };
 /**
- * The user's explicit choice to send with whatever model ChatGPT already has selected.
+ * Automatic: send with whatever model ChatGPT already has selected, switching nothing.
  *
- * Some plans (ChatGPT Go and Free, #104) show no model picker at all, so discovery can never
- * produce a list and Send refused every message. Nothing is guessed or switched silently: this is
- * offered only while no account list is readable, the person has to pick it, and a readable list
- * takes over again the moment one exists.
+ * Send used to wait up to two minutes for the account's model list, and on plans that show no
+ * model picker (ChatGPT Go and Free, #104, #864) that wait always ended in failure. So while no
+ * list is readable, a message that asks for no particular model goes out at once, Automatic.
+ * Once a list is readable, new chats keep their usual choice (the person's default, or the
+ * preferred observed model). Exact requests stay exact: a model the person picked or set as the
+ * new-chat default is never replaced by Automatic. The menu also offers Automatic deliberately.
  */
-let useCurrentModel = false;
 type SendModel = { model: string | null; reasoningEffort: ReasoningEffort | null };
-const CURRENT_MODEL: SendModel = { model: null, reasoningEffort: null };
-function currentModelOffered(): boolean {
-  return !catalog.models.length && catalog.state !== 'pending' && (catalog.state === 'unavailable' || !!catalog.error);
+const AUTOMATIC: SendModel = { model: null, reasoningEffort: null };
+/** Whether this composer asks for one particular model rather than whatever ChatGPT uses. */
+function exactModelRequested(): boolean {
+  if (composerContext?.automatic) return false;
+  if (composerContext?.edited) return !!$<HTMLSelectElement>('composerModel').value;
+  // A new chat asks for the configured default; an existing chat already has its own model.
+  return !composerContext || composerContext.scope === null ? !!ordinaryDefaults.model : false;
 }
-function currentModelChosen(): boolean {
-  return useCurrentModel && currentModelOffered();
+function automaticApplies(): boolean {
+  return composerContext?.automatic === true || (!catalog.models.length && !exactModelRequested());
+}
+/** The person chose Automatic (from the menu, or instead of an unavailable exact model). */
+function chooseAutomatic(): void {
+  if (composerContext) { composerContext.edited = true; composerContext.automatic = true; }
+  else composerContext = { scope: null, observation: null, edited: true, automatic: true };
+  paintPair('composerModel', 'composerReasoning', '', '');
+  paintStatus();
 }
 const pairs = [
   ['composerModel', 'composerReasoning', false],
@@ -156,7 +168,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     return;
   }
   nextModel = observed?.id ?? nextModel;
-  if (models.length && !nextModel && !allowEmpty) {
+  if (models.length && !nextModel && !allowEmpty && !(modelId === 'composerModel' && composerContext?.automatic)) {
     // A preference selects only a model/effort actually observed in this catalog.
     const preferred = models.find(item => /^gpt[ -]?6$/i.test(item.label) && item.efforts.includes('high'));
     nextModel = (preferred ?? models[0]!).id;
@@ -194,6 +206,12 @@ function paintEffortShortcut(supported: readonly ReasoningEffort[]): void {
   ui(spark, 'title', label); ui(spark, 'aria-label', label);
 }
 
+/** What the open menu shows; the same value means the live slider is kept, not rebuilt. */
+function choicesSignature(choices: ReturnType<typeof composerModels>): string {
+  return JSON.stringify([catalog.state, choices, $<HTMLSelectElement>('composerModel').value,
+    $<HTMLSelectElement>('composerReasoning').value, automaticApplies()]);
+}
+
 function paintComposerChoices(): void {
   const models = document.getElementById('composerModelChoices');
   const modelOptions = document.getElementById('composerModelOptions');
@@ -202,7 +220,7 @@ function paintComposerChoices(): void {
   const selected = $<HTMLSelectElement>('composerModel');
   const effort = $<HTMLSelectElement>('composerReasoning');
   const choices = composerModels();
-  const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
+  const signature = choicesSignature(choices);
   if (models.dataset.signature === signature) return;
   models.dataset.signature = signature;
   const supported = choices.find(choice => choice.id === selected.value)?.efforts ?? [];
@@ -217,26 +235,36 @@ function paintComposerChoices(): void {
     if (toggle) toggle.setAttribute('aria-expanded', 'false');
     models.hidden = true;
     models.inert = true;
-    if (currentModelChosen()) {
-      if (title) ui(title, 'textContent', () => t("ChatGPT’s current model"));
+    if (automaticApplies()) {
+      if (title) ui(title, 'textContent', () => t("Automatic"));
       if (subtitle) ui(subtitle, 'textContent', () => t("Sent without choosing a model"));
       return;
     }
     if (title) ui(title, 'textContent', () => catalog.state === 'pending' ? t("Loading models…") : t("Models unavailable"));
     if (subtitle) ui(subtitle, 'textContent', () => catalog.state === 'pending' ? t("Reading your ChatGPT account") : t("Reload models"));
-    if (currentModelOffered()) {
-      const use = el('button', 'btn', () => t("Use ChatGPT’s current model")) as HTMLButtonElement;
-      use.type = 'button';
-      use.dataset.useCurrentModel = '';
-      ui(use, 'title', () => t("Your ChatGPT plan shows no model picker. Send with the model ChatGPT already uses."));
-      use.addEventListener('click', () => {
-        useCurrentModel = true;
-        if (composerContext) composerContext.edited = true;
-        paintStatus();
-      });
-      powers.append(use);
-    }
+    // An exact model was asked for and no list can confirm it. Automatic is offered, never assumed.
+    const use = el('button', 'btn', () => t("Use ChatGPT’s current model")) as HTMLButtonElement;
+    use.type = 'button';
+    use.dataset.useCurrentModel = '';
+    use.addEventListener('click', chooseAutomatic);
+    powers.append(use);
     return;
+  }
+  {
+    // Automatic sits first in the list, as a deliberate choice that switches nothing.
+    const button = el('button', 'model-choice') as HTMLButtonElement;
+    button.type = 'button'; button.dataset.keepMenu = 'true'; button.dataset.model = '';
+    const auto = composerContext?.automatic === true;
+    button.setAttribute('aria-pressed', String(auto));
+    button.append(el('span', '', () => t("Automatic")), icon('i-check'));
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      if (composerContext?.automatic) return;
+      const focused = document.activeElement === button;
+      chooseAutomatic();
+      if (focused) models.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
+    });
+    modelOptions.append(button);
   }
   for (const choice of distinctModelChoices(choices)) {
     const button = el('button', 'model-choice') as HTMLButtonElement;
@@ -256,6 +284,11 @@ function paintComposerChoices(): void {
     modelOptions.append(button);
   }
   const current = supported.findIndex(power => power === effort.value);
+  if (composerContext?.automatic) {
+    if (title) ui(title, 'textContent', () => t("Automatic"));
+    if (subtitle) ui(subtitle, 'textContent', () => t("Sent without choosing a model"));
+    return;
+  }
   if (title) ui(title, 'textContent', () => current < 0 ? t('Previous selection unavailable') : effortLabel(effort.value));
   const selectedLabel = distinctModelChoices(choices).find(choice => choice.id === selected.value)?.label;
   if (subtitle) ui(subtitle, 'textContent', () => typeof selectedLabel === 'function' ? selectedLabel() : selectedLabel ?? t('Select model'));
@@ -266,7 +299,7 @@ function paintComposerChoices(): void {
     if (title) ui(title, 'textContent', () => effortLabel(power));
     paintComposerLabel();
     paintEffortShortcut(supported);
-    models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
+    models.dataset.signature = choicesSignature(choices);
   };
   // One effort (an Instant model) is not a choice: no slider, just its name. A stale saved
   // effort still needs one explicit confirmation before Send may use this model.
@@ -336,9 +369,10 @@ function paintComposerChoices(): void {
 }
 
 /** Admission guard for desktop sends: a stale selection is not permission to use defaults. */
-/** What Send uses: the confirmed pair, or the explicitly chosen "ChatGPT's current model". */
+/** What Send uses: the confirmed pair, or Automatic (see {@link automaticApplies}). */
 export function composerSendModel(): SendModel | null {
-  return confirmedComposerModel() ?? (currentModelChosen() ? { ...CURRENT_MODEL } : null);
+  if (composerContext?.automatic) return { ...AUTOMATIC };
+  return confirmedComposerModel() ?? (automaticApplies() ? { ...AUTOMATIC } : null);
 }
 
 export function confirmedComposerModel(): { model: string; reasoningEffort: ReasoningEffort } | null {
@@ -355,7 +389,7 @@ function paintComposerLabel(): void {
   const modelLabel = confirmed ? catalog.models.find(model => model.id === confirmed.model)!.label : '';
   const label = () => confirmed
     ? chatModelDisplayLabel(modelLabel, confirmed.reasoningEffort, effortLabel(confirmed.reasoningEffort))
-    : currentModelChosen() ? t("ChatGPT’s current model")
+    : automaticApplies() ? t("Automatic")
     : catalog.state === 'pending' ? t("Loading models…") : t("Select model");
   const node = $('composerModelLabel');
   if (confirmed) {
@@ -416,8 +450,9 @@ function discoverModels(): Promise<void> {
 }
 
 export async function ensureComposerModel(refresh = false): Promise<SendModel | null> {
+  // Automatic never waits for the list; only an exact request does.
+  if (!refresh && automaticApplies()) return composerSendModel();
   if (!refresh && catalog.models.length && catalog.state !== 'pending') return confirmedComposerModel();
-  if (!refresh && currentModelChosen()) return { ...CURRENT_MODEL };
   const ready = new Promise<void>(resolve => {
     const finish = () => { clearTimeout(timer); catalogWaiters.delete(check); resolve(); };
     const check = () => { if (catalog.state === 'ready' || catalog.state === 'unavailable') finish(); };
@@ -426,7 +461,8 @@ export async function ensureComposerModel(refresh = false): Promise<SendModel | 
   });
   await discoverModels();
   await ready;
-  return catalog.state === 'ready' && !catalog.error ? confirmedComposerModel() : currentModelChosen() ? { ...CURRENT_MODEL } : null;
+  // A refresh that failed confirms nothing, even with older choices still on screen.
+  return catalog.state === 'ready' && !catalog.error ? composerSendModel() : automaticApplies() ? { ...AUTOMATIC } : null;
 }
 
 export function applyChatModels(config: Config, previous?: Config): void {
@@ -511,7 +547,10 @@ export function initChatModels(onPaint?: () => void): void {
   });
   for (const [modelId, effortId, allowEmpty] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
-      if (modelId === 'composerModel' && composerContext) composerContext.edited = true;
+      if (modelId === 'composerModel' && composerContext) {
+        composerContext.edited = true;
+        if ($<HTMLSelectElement>(modelId).value) composerContext.automatic = false;
+      }
       const model = $<HTMLSelectElement>(modelId);
       const effort = $<HTMLSelectElement>(effortId);
       const supported = catalog.models.find(item => item.id === model.value)?.efforts ?? [];
