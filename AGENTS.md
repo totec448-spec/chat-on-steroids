@@ -452,6 +452,20 @@ canonical paths and remain stable when similarly named packages appear. `skill-m
 bounded YAML/TOML parsing and layered configuration. Invalid policy never enables implicit use.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+When `CODEX_HOME` is already inside an approved root and has a plugin cache, that same read-only
+catalog may project Skills from the authoritative `codex plugin list --json` installed/enabled
+snapshot. CoS does not infer state by enumerating cached versions: the runtime-provided plugin,
+marketplace and installed version select exactly
+`plugins/cache/<marketplace>/<plugin>/<version>`. That package must still pass the normal sandbox
+checks plus `plugin.json` (or compatibility `.codex-plugin/plugin.json`) identity validation before
+only its `skills/` root is scanned. Disabled plugins, unlisted stale cache entries, marketplace
+source checkouts and unapproved Codex homes remain invisible. The catalog carries the runtime's
+plugin/package source provenance. Plugin skill command identity is based on marketplace + plugin
+and package-relative Skill path so an installed version upgrade does not rename the command.
+The Windows npm shim is not executed through a shell: its JavaScript entry runs through the
+current executable with child-only `ELECTRON_RUN_AS_NODE=1`. A native Codex executable keeps its
+existing environment. This distinction prevents a packaged Electron executable from reopening
+the app instead of running the npm entry; it changes neither installed Electron fuses nor roots.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated

@@ -71,6 +71,24 @@ export interface SkillConfiguration {
   maxContextTokens?: number;
   rules: Array<{ name?: string; path?: string; enabled: boolean }>;
 }
+
+/** Parse only the package identity CoS needs before exposing a cached Codex plugin's Skills. */
+export function parseCodexPluginManifest(text: string): { name: string; version?: string } {
+  if (Buffer.byteLength(text, 'utf8') > 128_000) throw new Error('Codex plugin manifest exceeds 128,000 bytes');
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { throw new Error('Codex plugin manifest is not valid JSON'); }
+  const manifest = object(value);
+  if (!manifest) throw new Error('Codex plugin manifest must be an object');
+  const name = manifest.name;
+  if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) throw new Error('Codex plugin manifest needs a safe name');
+  const version = manifest.version;
+  if (version !== undefined && (typeof version !== 'string' || version.length > 160 || /[\u0000-\u001f\u007f]/.test(version))) {
+    throw new Error('Codex plugin manifest version must be bounded plain text');
+  }
+  return { name, ...(typeof version === 'string' && version ? { version } : {}) };
+}
+
 export function parseSkillConfiguration(text: string): SkillConfiguration {
   if (Buffer.byteLength(text, 'utf8') > 128_000) throw new Error('Skills configuration exceeds 128,000 bytes');
   const raw = parse(text).skills;

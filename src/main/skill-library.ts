@@ -7,11 +7,17 @@ import { effectiveCapabilities, getConfig } from './config.js';
 import { isContained, resolvePath } from './sandbox.js';
 import { listSkills, readSkill, readSkillTextSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
-import { parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
-import type { SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
+import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
+import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
+import type { CodexPluginRuntimeEntry, CodexPluginSkillProvenance, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
 
 export interface SkillLibraryScope { projectPath?: string | null }
-type Candidate = { file: string; scope: SkillScope; source: SkillSource };
+type CodexPluginCandidate = Omit<CodexPluginSkillProvenance, 'skillPath'>;
+type Candidate = { file: string; scope: SkillScope; source: SkillSource; codexPlugin?: CodexPluginCandidate };
+export interface SkillLibraryRuntime {
+  codexPlugins: (codexHome: string, cwd: string) => Promise<CodexPluginRuntimeEntry[]>;
+}
+const DEFAULT_RUNTIME: SkillLibraryRuntime = { codexPlugins: listInstalledCodexPlugins };
 const identity = (file: string): string => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
 const samePath = (a: string, b: string): boolean => identity(a) === identity(b);
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -28,6 +34,24 @@ async function readApproved(file: string): Promise<{ real: string; virtual: stri
   if (!samePath(current.real, target.real) || stat.isSymbolicLink() ||
       !(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'] as const).every(key => snapshot.identity[key] === stat[key])) throw new Error('Skill path changed during reading');
   return { ...target, text: snapshot.text };
+}
+async function approvedDirectory(file: string): Promise<{ real: string; virtual: string } | null> {
+  const candidate = await approved(file, true);
+  let stat: Awaited<ReturnType<typeof fs.lstat>>;
+  try { stat = await fs.lstat(candidate.real); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+  const current = await approved(file);
+  if (!samePath(current.real, candidate.real) || !(await fs.lstat(current.real)).isDirectory()) throw new Error('Directory changed while it was being inspected');
+  return current;
+}
+async function readOptionalApproved(file: string): Promise<string | null> {
+  const candidate = await approved(file, true);
+  let stat: Awaited<ReturnType<typeof fs.lstat>>;
+  try { stat = await fs.lstat(candidate.real); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Expected a regular file');
+  return (await readApproved(file)).text;
 }
 async function interfaceFor(directory: string, managed: boolean, errors: string[], managedId?: string): Promise<SkillMetadata> {
   let packageDirectory = directory;
@@ -83,7 +107,7 @@ async function interfaceFor(directory: string, managed: boolean, errors: string[
   }
 }
 
-async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]; configs: string[] }> {
+async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]; configs: string[]; codexHome: string }> {
   const home = path.resolve((process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME) || os.homedir());
   const codex = path.resolve(process.env.CODEX_HOME?.trim() || path.join(home, '.codex'));
   const admin = process.platform === 'win32' ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'OpenAI', 'Codex') : '/etc/codex';
@@ -117,10 +141,49 @@ async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]
     { file: path.join(codex, 'skills', '.system'), scope: 'system', source: 'bundled' },
     { file: path.join(admin, 'skills'), scope: 'admin', source: 'admin' }
   );
-  return { roots, configs };
+  return { roots, configs, codexHome: codex };
 }
 
-export async function listSkillLibrary(scope: SkillLibraryScope = {}): Promise<SkillLibrary> {
+function pluginSkillIdentity(plugin: CodexPluginCandidate, skillPath: string): string {
+  return `${plugin.marketplaceName}\0${plugin.pluginName}\0${skillPath.replaceAll('\\', '/')}`;
+}
+
+async function codexPluginCandidates(codexHome: string, plugins: CodexPluginRuntimeEntry[], addError: (message: string) => void): Promise<Candidate[]> {
+  const result: Candidate[] = [];
+  for (const plugin of plugins.filter(value => value.installed && value.enabled)) {
+    const packageDirectory = path.join(codexHome, 'plugins', 'cache', plugin.marketplaceName, plugin.pluginName, plugin.version);
+    try {
+      const checkedPackage = await approvedDirectory(packageDirectory);
+      if (!checkedPackage || !samePath(checkedPackage.real, packageDirectory)) throw new Error('active plugin package changed location');
+      let manifestText: string | null = null;
+      for (const relative of ['plugin.json', path.join('.codex-plugin', 'plugin.json')]) {
+        manifestText = await readOptionalApproved(path.join(checkedPackage.real, relative));
+        if (manifestText) break;
+      }
+      if (!manifestText) throw new Error('active plugin package has no plugin.json manifest');
+      const manifest = parseCodexPluginManifest(manifestText);
+      if (manifest.name !== plugin.pluginName) throw new Error(`manifest names ${JSON.stringify(manifest.name)} instead of ${JSON.stringify(plugin.pluginName)}`);
+      if (manifest.version && manifest.version !== plugin.version && plugin.version !== 'local') {
+        throw new Error(`manifest version ${JSON.stringify(manifest.version)} does not match runtime version ${JSON.stringify(plugin.version)}`);
+      }
+      const skills = path.join(checkedPackage.real, 'skills');
+      const checkedSkills = await approvedDirectory(skills);
+      if (!checkedSkills || !samePath(checkedSkills.real, skills)) continue;
+      result.push({
+        file: checkedSkills.real, scope: 'user', source: 'codex-plugin',
+        codexPlugin: {
+          pluginId: plugin.pluginId, pluginName: plugin.pluginName, marketplaceName: plugin.marketplaceName,
+          version: plugin.version, source: plugin.source, ...(plugin.marketplaceSource ? { marketplaceSource: plugin.marketplaceSource } : {})
+        }
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') addError(`Codex plugin ${plugin.pluginId}: ${errorText(error)}`);
+    }
+  }
+  return result;
+}
+
+export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: SkillLibraryRuntime = DEFAULT_RUNTIME): Promise<SkillLibrary> {
   const managed = await listSkills();
   const library: SkillLibrary = { skills: [], roots: [], errors: [], includeInstructions: true };
   const root = skillsDirectory();
@@ -129,7 +192,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}): Promise<S
   const addError = (message: string): void => { if (library.errors.length < 64) library.errors.push(message.slice(0, 600)); };
   const config: SkillConfiguration = { rules: [] };
   let invalidConfiguration = false;
-  const search = effectiveCapabilities(getConfig()).read ? await locations(scope) : { roots: [], configs: [] };
+  const search = effectiveCapabilities(getConfig()).read ? await locations(scope) : { roots: [], configs: [], codexHome: '' };
   for (const file of [...new Set(search.configs)]) {
     try { await approved(file, true); } catch { continue; }
     try {
@@ -147,6 +210,20 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}): Promise<S
         addError(`Skills configuration: ${errorText(error)}`);
         invalidConfiguration = true;
       }
+    }
+  }
+  if (search.codexHome) {
+    let codexApproved = false;
+    try { await approved(search.codexHome, true); codexApproved = true; } catch { /* Global Codex state grants no new read root. */ }
+    if (codexApproved) {
+      try {
+        const cacheRoot = await approvedDirectory(path.join(search.codexHome, 'plugins', 'cache'));
+        if (cacheRoot) {
+          const cwd = scope.projectPath ? (await approved(scope.projectPath)).real : search.codexHome;
+          const plugins = await runtime.codexPlugins(search.codexHome, cwd);
+          search.roots.push(...await codexPluginCandidates(search.codexHome, plugins, addError));
+        }
+      } catch (error) { addError(`Codex plugin runtime: ${errorText(error)}`); }
     }
   }
   library.includeInstructions = !invalidConfiguration && (config.includeInstructions ?? true);
@@ -208,11 +285,13 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}): Promise<S
           if (!seen.has(identity(document.real))) {
             const metadata = parseSkillFrontmatter(document.text);
             if (enabled(metadata.name, document.real)) {
-              const hash = createHash('sha256').update(identity(document.real)).digest('hex').slice(0, 12);
+              const skillPath = path.relative(resolved.real, current.directory).split(path.sep).join('/');
+              const codexPlugin = candidate.codexPlugin ? { ...candidate.codexPlugin, skillPath } : undefined;
+              const hash = createHash('sha256').update(codexPlugin ? pluginSkillIdentity(candidate.codexPlugin!, skillPath) : identity(document.real)).digest('hex').slice(0, 12);
               const stem = path.basename(current.directory).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35) || 'skill';
-              const id = `${stem}--${candidate.scope}-${hash}`;
+              const id = `${stem}--${codexPlugin ? 'codex' : candidate.scope}-${hash}`;
               library.skills.push({ id, ...metadata, path: document.virtual, ...await interfaceFor(current.directory, false, library.errors),
-                scope: candidate.scope, source: candidate.source, managed: false });
+                scope: candidate.scope, source: candidate.source, managed: false, ...(codexPlugin ? { codexPlugin } : {}) });
               seen.add(identity(document.real));
             }
           }
@@ -241,7 +320,9 @@ export async function readLibrarySkill(id: string, scope: SkillLibraryScope = {}
   }
   const document = await readApproved(selected.path);
   // Commands are derived from canonical paths, not catalog ordering or mutable names.
-  const hash = createHash('sha256').update(identity(document.real)).digest('hex').slice(0, 12);
+  const hash = createHash('sha256').update(selected.codexPlugin
+    ? pluginSkillIdentity(selected.codexPlugin, selected.codexPlugin.skillPath)
+    : identity(document.real)).digest('hex').slice(0, 12);
   if (!id.endsWith(`-${hash}`)) throw new Error('The selected Skill changed location');
   return { summary: selected, text: document.text };
 }
