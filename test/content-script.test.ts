@@ -620,6 +620,31 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, silenceTurnId })).toEqual({ ok: change === 'accepted' });
     expect(sends()).toBe(change === 'accepted' ? 1 : 0);
     if (change !== 'accepted') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ error: 'After-turn pickup was withdrawn before Send.' }));
+    // The release names the condition that ended it, so a report can tell a moving page from a lost lease (#882).
+    if (change === 'interim') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ detail: 'turn-progressed' }));
+    if (change === 'refused') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ detail: 'app-refused' }));
+  });
+  it('names a turn that moved while its silence pickup was being claimed', async () => {
+    // #882: a main chat whose failed answer kept changing withdrew its automatic Continue for
+    // 17 minutes, and the log could not say why: this exit reported no reason at all.
+    let silenceTurnId: string;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: async message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        live!.reply.set('activity', () => ({ ok: true, data: { stream: [{ kind: 'assistant_message', seq: 92,
+          turnId: silenceTurnId, messageId: 'claim-interim', text: 'Still working', state: 'streaming' }], entries: [], pendingTools: 0 } }));
+        await live!.hook.pullActivity();
+        return { ok: true, data: { input: claimed({ silenceBoundary: { turnId: silenceTurnId } }) } };
+      }
+    });
+    startGenerating(live.document); live.hook.observe(); await settle();
+    silenceTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    stopGenerating(live.document);
+    const sends = watchSend(live.document);
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, silenceTurnId })).toEqual({ ok: false });
+    expect(sends()).toBe(0);
+    expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({
+      error: 'After-turn pickup was withdrawn before Send.', detail: 'turn-progressed' }));
   });
   it.each(['accepted', 'refused', 'new-question', 'draft'])('direct delivery stops only the claimed source turn before normal Send (%s)', async change => {
     let directTurn: { id: string; startedAt: number };
@@ -15265,6 +15290,33 @@ describe('the fresh chat the app opened', () => {
       event: expect.objectContaining({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) })] : []);
   });
 
+  it.each(['sends', 'hangs choosing the model'])('reports each bootstrap step by name only (%s, #882)', async outcome => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '24242424-3535-4646-8787-909090909090';
+    live = await harness('https://chatgpt.com/?clf=cmd-steps', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'stepped-worker-user', 'Private worker task', { sent: false });
+      });
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = outcome === 'sends' ? vi.fn(async () => true) : vi.fn(() => new Promise(() => undefined));
+    release({ ok: true, command: { id: 'cmd-steps', type: 'worker', text: 'Private worker task', agent: 'worker-1', model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
+    await settle(400);
+    const steps = live.sent.filter(message => message.type === 'command_step');
+    expect(steps.map(message => message.step)).toEqual(outcome === 'sends'
+      ? ['composer', 'model', 'composer-after-model', 'inserting', 'sending']
+      : ['composer', 'model']);
+    for (const message of steps) {
+      expect(message.id).toBe('cmd-steps');
+      expect(JSON.stringify(message)).not.toContain('Private worker task');
+    }
+  });
+
   it('reacquires a home composer replaced after model selection before placing a worker bootstrap', async () => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
@@ -15886,6 +15938,56 @@ describe('the fresh chat the app opened', () => {
         agent: 'worker-1'
       })
     ]);
+  });
+
+  it.each([
+    ['an earlier wake ChatGPT restored as the draft', 'is delivered', true],
+    ['a draft the person typed', 'waits and keeps the draft', false]
+  ] as const)('with %s in the editor, a new wake %s', async (_label, _outcome, reclaim) => {
+    // #882: ChatGPT keeps unsent editor text as the chat's draft and restores it when the worker
+    // tab opens again. The wake waited for an empty editor until its deadline, every time.
+    const chat = reclaim ? '25252525-3636-4747-8888-818181818181' : '26262626-3737-4848-8989-828282828282';
+    const draft = reclaim
+      ? 'Old instruction.\n\n(Chat On Steroids: you are still worker-1 in the same run, and this is the prime agent talking to you again in the chat you already know. Pick up from what you did here before rather than starting over. Report with agents action=message to="prime" as you go and action=finish when this piece is done.)'
+      : 'My own note for this worker';
+    let redeemCalls = 0;
+    let sends = 0;
+    live = await nonProHarness(
+      `https://chatgpt.com/c/${chat}`,
+      {
+        activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, activeTurnId: null } }),
+        redeem: () => {
+          redeemCalls++;
+          return { ok: true, command: { id: `cmd-revive-${reclaim}`, type: 'worker', text: 'New instruction.', agent: 'worker-1', conversationId: chat } };
+        },
+        ack: () => ({ ok: true })
+      },
+      (document) => {
+        const box = document.querySelector('#prompt-textarea')!;
+        box.textContent = '';
+        for (const part of draft.split('\n\n')) { const paragraph = document.createElement('p'); paragraph.textContent = part; box.append(paragraph); }
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
+          document.querySelector('#prompt-textarea')!.textContent = '';
+        });
+      }
+    );
+    const handedOff = live.runtimeMessage({ type: 'clf-run-command', id: `cmd-revive-${reclaim}`, conversationId: chat });
+    await settle(300);
+    if (reclaim) {
+      expect(await handedOff).toEqual({ ok: true, claimed: true });
+      expect(redeemCalls).toBe(1);
+      expect(sends).toBe(1);
+      expect(live.sent.filter((message) => message.type === 'ack')).toEqual([
+        expect.objectContaining({ id: 'cmd-revive-true', status: 'sent', conversationId: chat, agent: 'worker-1' })
+      ]);
+    } else {
+      expect(redeemCalls).toBe(0);
+      expect(sends).toBe(0);
+      expect(composerText(live.document)).toContain('My own note for this worker');
+      // The app's timeout message can then say why the wake waited (#882).
+      expect(live.sent.filter((message) => message.type === 'command_step').map((message) => message.step)).toEqual(['revival-draft']);
+    }
   });
 
   it('does not redeem until deferred-revival custody survives a transient persistence failure', async () => {

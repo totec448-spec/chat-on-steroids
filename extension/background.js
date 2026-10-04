@@ -2591,6 +2591,28 @@ async function followApp(data) {
   if (Object.keys(patch).length) await chrome.storage.local.set(patch);
 }
 
+/**
+ * "Open in ChatGPT" from the app, shown in this browser: the chat's tab if it has one, else a new
+ * one. The app asks here rather than the OS, which can pick another browser or account (#882).
+ */
+async function revealChats(ids) {
+  if (!Array.isArray(ids)) return;
+  for (const raw of ids.slice(0, 5)) {
+    const conversationId = cleanConversationId(raw);
+    if (!conversationId) continue;
+    const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
+    const shown = tab
+      ? await chrome.tabs.update(tab.id, { active: true })
+      : await chrome.tabs.create({ url: `https://chatgpt.com/c/${conversationId}`, active: true });
+    const windowId = shown?.windowId ?? tab?.windowId;
+    if (!Number.isInteger(windowId)) continue;
+    // A worker tab can sit in the app's minimized background window; the user asked to see it.
+    const window = await chrome.windows.get(windowId).catch(() => null);
+    await chrome.windows.update(windowId, window?.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
+  }
+}
+
 let extensionReloadPending = false;
 /**
  * Why an offered extension update has not happened yet, reported with the next `/status` so the
@@ -2648,7 +2670,7 @@ async function maintainOnce() {
     .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
     .map(conversationForTab)
     .filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations,
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations, canReveal: true,
     ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
   if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
@@ -2657,6 +2679,7 @@ async function maintainOnce() {
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
+  void revealChats(reply.data.reveals).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;
@@ -3909,6 +3932,18 @@ const HANDLERS = {
     return ackCommand(String(message.id || ''), message.status === 'sent' ? 'sent' : 'failed', message.error,
       message.conversationId, null, message.client, source, message.turnId);
   },
+  /**
+   * How far a redeemed command's page got: a step name only, never its text. The app keeps the
+   * last one so a command that runs out of time can say where it stopped. Best effort.
+   */
+  async command_step(message) {
+    const id = typeof message.id === 'string' ? message.id.slice(0, 128) : '';
+    const step = typeof message.step === 'string' ? message.step.slice(0, 32) : '';
+    if (!id || !step) return { ok: false };
+    const result = await call('/commands/step', { method: 'POST',
+      body: JSON.stringify({ id, client: String(message.client || '').slice(0, 64), step }) });
+    return { ok: result.ok === true };
+  },
   /** The marked page asking for the one command it was opened for. */
   async redeem(message) {
     return redeemCommand(
@@ -4035,6 +4070,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'settings_get',
     'repair_fiber',
     'redeem',
+    'command_step',
     'defer_revival',
     'forget_revival',
     'ack'

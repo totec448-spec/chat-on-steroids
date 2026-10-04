@@ -1805,6 +1805,39 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /**
+   * The closing sentence every worker wake ends with (src/main/agents.ts planRevivalText), compared
+   * without whitespace: ProseMirror's textContent drops the paragraph break before it.
+   */
+  const REVIVAL_RESIDUE = new RegExp('\\(ChatOnSteroids:youarestill[A-Za-z0-9_-]{1,40}inthesamerun,' +
+    'andthisistheprimeagenttalkingtoyouagaininthechatyoualreadyknow\\.' +
+    'Pickupfromwhatyoudidherebeforeratherthanstartingover\\.' +
+    'Reportwithagentsaction=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
+
+  /**
+   * Empties an editor that holds only an earlier worker wake (#882).
+   *
+   * ChatGPT keeps unsent editor text as the chat's draft and restores it when the chat opens
+   * again. A wake whose Send never landed therefore came back in every reopened worker tab, and
+   * each later wake waited for an empty editor until its deadline: "the browser did not claim
+   * this command", then the worker failed. Only text that ends with the app's own wake sentence
+   * is reclaimed; anything a person added after it, an attachment, or a busy page keeps it.
+   */
+  function clearRevivalResidue() {
+    return safe(() => {
+      const box = composer();
+      if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
+      const text = String(box.textContent || '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+      if (!text || !REVIVAL_RESIDUE.test(text)) return false;
+      box.focus();
+      const selection = document.getSelection();
+      if (!selection || document.activeElement !== box) return false;
+      selection.selectAllChildren(box);
+      document.execCommand('delete', false);
+      return (box.textContent || '').trim() === '';
+    }, false);
+  }
+
   /** A visible editor can still be read-only while the provider mounts or changes models. */
   function composerWritable() {
     const box = composer();
@@ -3056,17 +3089,20 @@ var CLF_DOM = (() => {
           return;
         }
         if (clicked) return;
-        // The native header arrives before the source chat finishes loading. Its link
+        // The native Project chrome can arrive before the source chat finishes loading. Its link
         // alone is not readiness: an early click can be swallowed during hydration.
         // Preserve the source draft/generation and spend our one click only once its
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
-        // The header link to this exact Project home is the native entry. Its folder icon lost
-        // its test id in October 2026, and every Project handoff then waited out its deadline;
-        // the link's own same-origin target is the identity, and it must be the only one on this page.
-        const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
-          !link.closest(OWN_SURFACES) && !onKeptPage(link) && new URL(link.href, location.href).origin === location.origin &&
+        // The exact same-origin Project-home target is the native entry. ChatGPT has moved this
+        // control across several shells: its folder icon lost a test id in early October, then the
+        // link itself moved outside both <header> and [role="banner"]. Do not bind navigation to
+        // either wrapper. Instead reject quoted/transcript links and hidden kept pages, then require
+        // one visible provider link to this exact Project. Ambiguity still fails closed.
+        const links = [...document.querySelectorAll('a[href]')].filter(link =>
+          !link.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(link) &&
+          new URL(link.href, location.href).origin === location.origin &&
           projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
         clicked = true;
@@ -3202,6 +3238,7 @@ var CLF_DOM = (() => {
     errors,
     composer,
     composerSubmitReady,
+    clearRevivalResidue,
     composerWritable,
     composerBox,
     pageTheme,

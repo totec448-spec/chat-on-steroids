@@ -5,8 +5,6 @@
  * the path exactly as the patch spelled it, because that spelling is what the summary prints.
  */
 
-import nodePath from 'node:path';
-
 export const BEGIN_PATCH_MARKER = '*** Begin Patch';
 export const END_PATCH_MARKER = '*** End Patch';
 export const ADD_FILE_MARKER = '*** Add File: ';
@@ -98,17 +96,6 @@ export type Hunk = AddFileHunk | DeleteFileHunk | UpdateFileHunk;
 export function hunkPath(hunk: Hunk): string {
   if (hunk.kind === 'update_file' && hunk.movePath !== null) return hunk.movePath;
   return hunk.path;
-}
-
-/**
- * `Hunk::resolve_path`: the path the hunk reads or writes, resolved against the turn cwd.
- *
- * An update resolves its *source* path even when it also moves the file, because that is the file
- * whose contents the chunks are matched against.
- */
-export function hunkResolvedPath(hunk: Hunk, cwd: string): string {
-  const path = hunk.kind === 'update_file' ? hunk.path : hunkPath(hunk);
-  return nodePath.resolve(cwd, path);
 }
 
 /** `Vec<Hunk>::clone`: the streaming parser hands out snapshots, not live state. */

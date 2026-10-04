@@ -120,6 +120,9 @@ function mirrorToFile(entry: LogEntry): void {
   startWriter(state);
 }
 
+/** The mirrored log file, or null before `initLogFile`. Its previous rotation is `<file>.1`. */
+export function logFilePath(): string | null { return mirror?.file ?? null; }
+
 /** Includes lines accepted while an earlier batch was being written. */
 export async function flushLogFile(): Promise<void> {
   const state = mirror;

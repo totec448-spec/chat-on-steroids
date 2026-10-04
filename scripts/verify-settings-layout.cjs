@@ -109,6 +109,30 @@ app.whenReady().then(async () => {
               cornerHitsRow: !!document.elementFromPoint(r.left + 2, r.top + 2)?.closest('.perm-head'),
               centerHitsRow: !!document.elementFromPoint(r.left + 60, r.top + 20)?.closest('.perm-head') };
           })()`);
+          // Every section-head button stays readable in both states: Read-only on used to paint its
+          // label in the same color as its inverted background (#1039), an empty white or black pill.
+          const contrast = await js(`(() => {
+            const rgb = value => (value.match(/[\\d.]+/g) || []).map(Number);
+            const lum = ([r, g, b]) => { const c = [r, g, b].map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+              return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+            const background = el => { for (let node = el; node; node = node.parentElement) {
+              const c = rgb(getComputedStyle(node).backgroundColor); if (c.length >= 3 && (c[3] ?? 1) > 0.5) return c; } return [255, 255, 255]; };
+            const ratio = el => { const a = lum(rgb(getComputedStyle(el).color)), b = lum(background(el)); return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
+            const readOnly = document.getElementById('readOnlyBtn'), out = [];
+            for (const on of [false, true]) {
+              readOnly.classList.toggle('is-on', on);
+              // Colors are read after their transition; a mid-fade read would see the old background.
+              for (const animation of document.getAnimations()) animation.finish();
+              for (const button of document.querySelectorAll('.settings-section-head .btn')) {
+                if (!button.checkVisibility() || !button.textContent.trim()) continue;
+                const value = ratio(button);
+                if (value < 4.5) out.push((button.id || button.textContent.trim()) + (on ? ' (Read-only on)' : '') + ': ' + value.toFixed(2));
+              }
+            }
+            readOnly.classList.remove('is-on');
+            return out;
+          })()`);
+          assert.deepEqual(contrast, [], `Unreadable section-head buttons (${theme}, ${width}px, zoom ${zoom})`);
           assert.equal(corners.overflow, 'hidden');
           assert.equal(corners.cornerHitsRow, false, 'Hover must not paint outside the rounded corner');
           assert.equal(corners.centerHitsRow, true, 'Clipping must preserve the row hit target');
@@ -141,6 +165,24 @@ app.whenReady().then(async () => {
         if (zoom === 1) {
           await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
           fs.writeFileSync(path.join(output, `${theme}-${width}-${page}.png`), (await win.webContents.capturePage()).toPNG());
+          if (page === 'chat' && width === 1440) {
+            const autoSkill = await js(`(() => {
+              const input = document.getElementById('autoSelectSkills');
+              input.scrollIntoView({ block: 'center' });
+              const row = input.closest('.setting'), rect = row.getBoundingClientRect();
+              return {
+                visible: row.checkVisibility(),
+                inside: rect.top >= 0 && rect.bottom <= innerHeight,
+                label: row.textContent
+              };
+            })()`);
+            assert.equal(autoSkill.visible, true, 'Auto-select Skills must be visible in General settings');
+            assert.equal(autoSkill.inside, true, 'Auto-select Skills must fit inside the visible settings viewport');
+            assert.match(autoSkill.label, /Auto-select Skills/);
+            assert.match(autoSkill.label, /exact name in the message, not by topic/);
+            await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+            fs.writeFileSync(path.join(output, `${theme}-auto-select-skills.png`), (await win.webContents.capturePage()).toPNG());
+          }
           if (page === 'home') {
             const { root: doc } = await win.webContents.debugger.sendCommand('DOM.getDocument');
             for (const [label, selector] of [['first', '.perm:first-child .perm-head'], ['last', '.perm:last-child .perm-head']]) {

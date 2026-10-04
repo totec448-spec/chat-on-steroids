@@ -687,6 +687,55 @@ describe('surface boundaries', () => {
     }
   });
 
+  it('preserves the existing agents guidance while adding only the cross-prime address parameter', async () => {
+    everything();
+    const agentsTool = toolList(await core('tools/list')).find((tool) => tool.name === 'agents')!;
+    expect(agentsTool.description).toBe(
+      'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. ' +
+      'message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. ' +
+      'status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.'
+    );
+    expect(agentsTool.inputSchema.properties.run_id.description).toBe(
+      'Select your returned worker family when status lists several; never grants another caller’s workers.'
+    );
+    expect(agentsTool.inputSchema.properties.context.description).toBe(
+      'spawn: shared instructions prepended to every task, e.g. repo, conventions, edit limits and validation.'
+    );
+    expect(agentsTool.inputSchema.properties.workers.description).toBe(
+      'spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.'
+    );
+    expect(agentsTool.inputSchema.properties.messages.description).toBe(
+      'message: atomic batch; prefer this to one call per recipient.'
+    );
+    expect(agentsTool.inputSchema.properties.to.description).toBe(
+      'message: one recipient; messaging a sleeping worker wakes it.'
+    );
+    expect(agentsTool.inputSchema.properties.result.description).toBe(
+      'finish: factual handoff under RESULT / CHANGES / VALIDATION / BLOCKERS.'
+    );
+    const targetRun = agentsTool.inputSchema.properties.target_run_id;
+    expect(targetRun.description).toBe(
+      'message: existing prime run id; prime-only, no worker/status access.'
+    );
+    expect(targetRun).toMatchObject({ type: 'string', minLength: 1, maxLength: 36 });
+    const worker = agentsTool.inputSchema.properties.workers.items;
+    expect(worker.properties.label.description).toBe('Short name shown to the user, e.g. "Security".');
+    expect(worker.properties.task.description).toBe(
+      'This worker\'s job: objective, relevant files, constraints and expected handoff.'
+    );
+    expect(worker.properties.model.description).toBe(
+      'Omit unless explicitly requested by the user; app settings supply defaults. Use an exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser confirms availability before Send.'
+    );
+    expect(worker.properties.reasoning_effort.description).toBe(
+      'Omit unless explicitly requested by the user; app settings supply defaults. Do not ask just to spawn a worker. This selects reasoning only, never a model.'
+    );
+    const targetRunOverhead = Buffer.byteLength(
+      `,"target_run_id":${JSON.stringify(agentsTool.inputSchema.properties.target_run_id)}`,
+      'utf8'
+    );
+    expect(targetRunOverhead).toBe(148);
+  });
+
   it('removes the agents tool entirely once multi-agent is switched off', async () => {
     everything();
     expect(toolNames(await core('tools/list'))).toContain('agents');
@@ -859,7 +908,8 @@ describe('surface boundaries', () => {
           : tool.name === 'apply_patch'
             ? 5_000
             : tool.name === 'agents'
-              ? 3_400
+              // Main's 3,400-byte guardrail plus the measured 148-byte target_run_id property.
+              ? 3_548
               : tool.name === 'exec_command'
                 // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
                 // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a
@@ -3111,6 +3161,17 @@ describe('exec_command and write_stdin', () => {
     expect(textOf(first)).toContain('first=raw-no-newline');
     expect(textOf(first)).toContain(`Process running with session ID ${sessionId}`);
 
+    // Check the unread cursor while the child is still idle. ConPTY may emit a *new* screen
+    // repaint containing the first line when the console exits; those bytes are not a replay
+    // by CoS and must stay in the raw terminal stream.
+    const idle = await core('tools/call', {
+      name: 'write_stdin',
+      arguments: { session_id: sessionId, chars: '', yield_time_ms: 1_000 }
+    });
+    expect(idle.body.result?.isError).not.toBe(true);
+    expect(idle.body.result?.structuredContent?.output).toBe('');
+    expect(textOf(idle)).toContain(`Process running with session ID ${sessionId}`);
+
     const second = await core('tools/call', {
       name: 'write_stdin',
       arguments: { session_id: sessionId, chars: 'done\r', yield_time_ms: 5_000 }
@@ -3118,8 +3179,7 @@ describe('exec_command and write_stdin', () => {
     expect(second.body.result?.isError).not.toBe(true);
     expect(textOf(second)).toContain('second=done');
     expect(textOf(second)).toContain('Process exited with code 0');
-    // The process buffer is drained per call; previously delivered output is not replayed.
-    expect(textOf(second)).not.toContain('first=raw-no-newline');
+    expect(second.body.result?.structuredContent?.output_replayed).not.toBe(true);
   });
 
   it('runs in workdir and omits the old connector-specific cwd header', async () => {
@@ -3435,7 +3495,27 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(prove('wfr_execown_old_recycled', 'conv-execown-old')).toBe('stored');
     expect(prove('wfr_execown_new_recycled', 'conv-execown-new')).toBe('stored');
 
-    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const allocate = unifiedExecManager.allocateProcessId.bind(unifiedExecManager);
+    const allocation = vi.spyOn(unifiedExecManager, 'allocateProcessId').mockImplementation(() => {
+      const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+      try { return allocate(); } finally { random.mockRestore(); }
+    });
+    // Hold only publication of the real process result, not process creation or ownership.
+    // The process is alive and writable, but the MCP handler has not yet installed its new
+    // owner. This is the same custody gap without racing a five-second shell-startup budget
+    // against the one-second exec yield on a loaded Windows runner.
+    const execute = unifiedExecManager.execCommand.bind(unifiedExecManager);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let reached!: (output: Awaited<ReturnType<typeof execute>>) => void;
+    const atPublication = new Promise<Awaited<ReturnType<typeof execute>>>(resolve => { reached = resolve; });
+    const execution = vi.spyOn(unifiedExecManager, 'execCommand').mockImplementation(async request => {
+      const output = await execute(request);
+      reached(output);
+      await held;
+      return output;
+    });
+    let starting: ReturnType<typeof asChat> | undefined;
     try {
       // Block in the shell process itself. Spawning a second cold `node` here made this
       // ownership regression depend on hosted-runner process startup rather than on the
@@ -3447,18 +3527,20 @@ describe('exec sessions belong to the chat that opened them', () => {
 
       // Do not await. The process is registered while exec_command spends its initial yield
       // collecting output, which is the exact old authority window.
-      const starting = asChat('wfr_execown_new_recycled', 'exec_command', {
+      starting = asChat('wfr_execown_new_recycled', 'exec_command', {
         cmd: holdOpen,
         workdir: '/workspace',
         tty: true,
         yield_time_ms: 1_000
       });
-      await vi.waitFor(
-        () => {
-          expect(unifiedExecManager.listProcesses().some((entry) => entry.processId === recycledId)).toBe(true);
-        },
-        { timeout: 5_000, interval: 10 }
-      );
+      // Surface a pre-launch refusal instead of hanging on a signal that can never arrive.
+      const boundary = await Promise.race([
+        atPublication.then(output => ({ output })),
+        starting.then(reply => ({ reply }))
+      ]);
+      if ('reply' in boundary) throw new Error(`Exec did not reach publication: ${textOf(boundary.reply)}`);
+      expect(boundary.output.processId).toBe(recycledId);
+      expect(unifiedExecManager.listProcesses().some(entry => entry.processId === recycledId)).toBe(true);
 
       // Allocation must have removed the stale principal before the new process became
       // writable. The old chat knows this integer from its own previous session, but it no
@@ -3472,6 +3554,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       expect(stolen.body.result?.isError).toBe(true);
       expect(textOf(stolen)).toContain('EXEC_SESSION_UNAVAILABLE');
 
+      release();
       const started = await starting;
       expect(started.body.result?.isError, textOf(started)).not.toBe(true);
       expect(Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1])).toBe(recycledId);
@@ -3490,7 +3573,10 @@ describe('exec sessions belong to the chat that opened them', () => {
       expect(textOf(owner)).toContain('got=owner');
       expect(textOf(owner)).toContain('Process exited with code 0');
     } finally {
-      random.mockRestore();
+      release();
+      await starting?.catch(() => undefined);
+      execution.mockRestore();
+      allocation.mockRestore();
       await unifiedExecManager.terminateAllProcesses();
       resetExecOwnershipForTests();
     }

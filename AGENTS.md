@@ -70,7 +70,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | ChatGPT conversation | Replaceable provider frontend; its id is not the durable session id. |
 | Turn | One authored user-message generation and its exact response/work. Interim prose is not a final boundary. |
 | Approved root | Filesystem access the user granted; may be a parent containing several projects. |
-| Local project | One primary folder plus optional additional folder associations and sidebar grouping; grants no new permission. |
+| Local project | Explicit folder association and sidebar grouping; grants no new permission. |
 | Native ChatGPT project | Provider `/g/.../c/...` context; separate from the app's local folder catalog. |
 | Goal objective | The requested finish line for one chat. It persists independently of a provider attempt. |
 | Goal / Loop | Mutually exclusive modes of one driver. Goal can decide no further message is needed; Loop continues within scope. |
@@ -198,6 +198,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8; global worker admission cap Off (`0`, configurable through 64). | Legacy absent enabled/allow-unattributed fields remain false; an absent global cap remains Off. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
+| Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Ambiguous or unnamed input selects none; explicit `/id` or `/prompt id` always wins. |
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
@@ -229,7 +230,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
 | Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
 | Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
-| Local files/processes | `src/main/{rawfs,fsops,search,ripgrep,env,toolchain,exec,exec-hints,text-match,diffstat}.ts`, `src/main/codex/*`: bounded filesystem/shell implementation. |
+| Local files/processes | `src/main/{rawfs,fsops,search,ripgrep,env,toolchain,exec,exec-hints,text-match,diffstat}.ts`, `src/main/codex/*`, `src/shared/background-exec.ts`: bounded filesystem/shell implementation and the read-only renderer projection of live exec children. |
 | Terminal custody | `src/main/codex/{manager,ownership,unified-exec,unified-exec-constants,shell,command-batch,head-tail-buffer,truncate,exec-output}.ts`. |
 | Patching/images | `src/main/codex/apply-patch/*`, `codex/{filesystem,read-backend,view-image}.ts`. |
 | Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
@@ -258,6 +259,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
+| Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
@@ -426,7 +428,11 @@ internal length and closing boundary; authored whitespace after the frame remain
 ### Text Skills
 
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
-bounded UTF-8 import/read and metadata catalog. `skill-access.ts` exposes only that canonical
+bounded UTF-8 import/read and metadata catalog. Valid YAML name/description fields use the
+shared bounded parser before publication, including folded/literal multiline descriptions;
+catalog fields are normalized to one bounded line without rewriting the source body. Legacy
+plain Markdown or invalid/incomplete headers keep the existing heading/prose fallback.
+`skill-access.ts` exposes only that canonical
 directory as `/skills` to Core, including nested code-mode calls. Current capability/Read-only
 guards still apply. This root is not saved in config, does not satisfy connection folder setup,
 and never becomes the default or learned project cwd, including native paths through an
@@ -455,6 +461,31 @@ canonical paths and remain stable when similarly named packages appear. `skill-m
 bounded YAML/TOML parsing and layered configuration. Invalid policy never enables implicit use.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+When `CODEX_HOME` is already inside an approved root and has a plugin cache, that same read-only
+catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
+Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
+prompt preparation, follow-up selection and MCP instructions never start or await the CLI.
+A missing or invalidated snapshot means no plugin Skills yet, including while a refresh is
+pending. The in-memory cache is bounded to eight home/cwd contexts, coalesces a context's
+in-flight refresh, and invalidates on the approved cache directory identity/mtime or any read
+Skills configuration bytes changing. An unchanged successful snapshot is reused; a failed
+refresh may be retried by another explicit inspection. After a CLI wait, publication performs
+one cache-only library read under the current home, configuration and permissions; a changed
+context cannot publish the old selection and this read never starts a second CLI. No timer, directory watcher, disk store
+or new renderer authority is added. Every use still rechecks current approved paths, package
+identity and ordinary read permission. This is last-observed runtime metadata, not continuous
+proof of the external CLI's current state. CoS does not infer state by enumerating cached versions: the runtime-provided plugin,
+marketplace and installed version select exactly
+`plugins/cache/<marketplace>/<plugin>/<version>`. That package must still pass the normal sandbox
+checks plus `plugin.json` (or compatibility `.codex-plugin/plugin.json`) identity validation before
+only its `skills/` root is scanned. Disabled plugins, unlisted stale cache entries, marketplace
+source checkouts and unapproved Codex homes remain invisible. The catalog carries the runtime's
+plugin/package source provenance. Plugin skill command identity is based on marketplace + plugin
+and package-relative Skill path so an installed version upgrade does not rename the command.
+The Windows npm shim is not executed through a shell: its JavaScript entry runs through the
+current executable with child-only `ELECTRON_RUN_AS_NODE=1`. A native Codex executable keeps its
+existing environment. This distinction prevents a packaged Electron executable from reopening
+the app instead of running the npm entry; it changes neither installed Electron fuses nor roots.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
@@ -469,6 +500,34 @@ Explicit follow-ups add only selected Skills. `deliveryText` freezes exact bytes
 subsequent library changes cannot alter an already prepared send. No new MCP tool, executable
 hook, watcher, or provider reconnect is introduced. The catalog refreshes on list/import and
 before opening preparation; provider-cached initialize instructions remain a snapshot.
+
+Optional `ui.autoSelectSkills` defaults off. When enabled, admission of an ordinary human-authored
+input with no explicit Skill directive compares only the already-published managed/imported catalog
+identity metadata plus bounded `agents/openai.yaml` policy. It never calls `listSkills()`/`listSkillLibrary()`
+or reads every `SKILL.md` to make the routing decision; discovered repo/user/system/admin Skills
+remain explicit-only in this first slice because their descriptive metadata lives in `SKILL.md`.
+The matcher uses only complete `id`, `name` or `display_name` phrases, case-folded with hyphens
+and whitespace treated as the same name separators. Canonically equivalent Unicode is normalized
+to NFC, but diacritics and other punctuation remain literal. Descriptions, partial identity words,
+stemming and semantic/domain overlap are not routing evidence. The sole naming alias is a complete
+leading `using X` identity invoked as `use X`, with the whole X suffix still contiguous; this is the
+maintainer-suggested `using-git-worktrees` → “use git worktrees” convention, not a general morphology
+rule. Therefore “migrate this Dagster pipeline to Airflow” intentionally does not name
+`migrating-dagster-to-airflow`; a literal full id/name/display-name invocation does. This
+precision-first rule may abstain even when the task would benefit from a Skill. The explicit
+picker/directive remains available rather than injecting a specialized Skill from generic wording.
+This matches literal name presence, not intent: it does not interpret negation or quoted examples.
+`allow_implicit_invocation=false`, invalid policy/config, no literal identity and multiple literal
+matches all fail to no selection. A routed choice is frozen in the durable input row as exact
+Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
+Retries/restarts reuse that record instead of rerouting. Prompt preparation reads only the chosen
+managed body through the existing selected-Skill path and rejects it if its revision changed.
+The Skill list in that prompt stays complete: managed Skills come from the published catalog
+(no body re-read), while personal, project and Codex plugin Skills are discovered as without routing.
+An explicit queued-message edit clears the automatic record rather than silently rerouting changed
+text; a new explicit Skill directive in that edited text is still authoritative at preparation.
+Explicit slash/picker selection never combines with the automatic record. Routing grants no root,
+capability, cwd, tool or execution permission; the existing live guards remain authoritative.
 
 ### `exec({code})` composes tools; it is not a shell
 
@@ -723,35 +782,22 @@ escapes, live revocation during an await, and preserving an unrelated user's new
 **Intent:** a chat consistently works in its selected local folder, and workers/resumed chats
 retain that choice. Sidebar organization must not destroy work or grant access.
 
-`projects.ts` owns a bounded catalog with stable UUIDs. The legacy `path` field remains the
-authoritative primary workspace; optional `additionalPaths` are canonical project members and
-old single-folder rows require no rewrite. Adding either kind uses the native folder
-selection/approved-root flow, resolves the real directory and keeps canonical/native-case folder
-identity unique across the entire catalog. Direct project mutation never approves a root. `projects:addFolder` and
-`projects:removeFolder` are the fixed IPC mutations for additional membership; removing membership
-does not remove its approved root. The sidebar project disclosure lists the primary and additional
-folders, adds through that same independently approved picker flow, and exposes removal only for
-additional membership. Session metadata owns only `projectId`, never a member path.
-
-Catalog restore fails closed on duplicate project ids or duplicate **primary** workspace identity.
-Duplicate optional member identities are compatibility noise instead: primaries take precedence,
-then restore keeps the first additional native identity in stored catalog order and ignores later
-duplicates/case aliases. This cleanup is a read projection; the next catalog mutation persists the
-cleaned shape. Downgrading to an older build that does not understand `additionalPaths` can drop
-those memberships if that build rewrites the project catalog; it does not change the primary path.
-
-Before send/use, `projectWorkspace(id)` and `getSessionProject()` re-resolve the primary under
-current roots and reject moved/unavailable folders. `projectWorkspace(id, folder)` is the explicit
-member lookup: it re-resolves that folder under current roots and accepts it only when its canonical
-identity is the primary or one of `additionalPaths`. Revoking or losing an additional folder makes
-that lookup fail closed and never changes the primary cwd; the stored member can still be detached.
+`projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
+Adding uses the native folder selection/approved-root flow, resolves the real directory and
+deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
+`getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.
 Null means no project; a broken explicit binding is an error, not a reason to infer a new cwd.
-Project Skill scope, Files and default project terminals continue to use the primary only;
-additional folders do not merge their `AGENTS.md` files or become implicit cwd candidates. The
-opening project/worker prompt is the bounded discoverability consumer: it names currently approved
-additional folders by virtual path while still naming the primary as the sole default cwd and
-instruction directory. Unapproved/unavailable additional members are omitted, never treated as
-permission or as a reason to fail an otherwise valid primary project.
+Projects may also store one optional color from the fixed `PROJECT_COLORS` palette. Color is
+sidebar presentation metadata only: changing or removing it never resolves paths, changes the
+project folder, grants permission, rebinds sessions, or changes prompt/workspace
+selection. Legacy rows without color remain unchanged. The sidebar keeps an unset color control
+quiet until hover/focus and opens an explicit keyboard-reachable palette; choosing a swatch (or
+None) calls the same `projects:color` owner rather than cycling through values.
+After a keyboard color save, the repainted color button regains focus only while the same
+selected-chat generation is visible and the user has not focused another control. Leaving and
+returning to that chat invalidates the old focus action. A rejected save uses the same ownership
+check before reopening its palette; it never steals focus from a newer interaction. Completion
+checks both focus notifications and the current active element, including an inactive document.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
@@ -2010,6 +2056,13 @@ holding that chat. A browser handed work for a chat it lacks opens the chat itse
 copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
 first browser it is handed to while that browser polls. Requests without an id are not told apart.
 
+"Open in ChatGPT" on a chat row is shown by the extension, not the OS: the OS hands a URL to
+whichever browser window last had focus, which can be a browser without the extension or one
+signed in to another account. An extension whose `/status` body says `canReveal: true` receives
+the chat in `reveals`, under the same holding rule, and focuses its tab or opens it (restoring a
+minimized window). When no such extension is connected, or none takes it within 4 s, the request
+is withdrawn and the app opens the URL through the OS as before.
+
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
 authorized, its shared layout policy bounds it to 45% of the work area and 800×600, then
@@ -2147,6 +2200,9 @@ be resent or receive an ACK. A generic timeout or missing receipt cannot grant t
 Stop and Send permission are checked again after their durable claim writes. A stale result
 does not issue permission and cannot replay the spent claim. Native page checks fence the
 same question, turn, work revision and document immediately before the actual input.
+A pre-Send withdrawal reports which fence ended it (`left-chat`, `stop-requested`,
+`new-user-message`, `turn-changed`, `turn-progressed`, `page-final`, `page-unreadable`,
+`journal-pending`, `app-refused` or `lease-lost`), so the log can tell a moving page from a lost claim.
 
 Continue also refreshes the current native assistant response before recovery Stop and
 before and after asynchronous Send authorization. Its exact final message vetoes Continue
@@ -2290,6 +2346,10 @@ chats retain their no-reload behavior for these blocking notices; no new grant c
 | Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |
 | Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; the shared 2/5/10/15-minute pickup schedule follows its initial silence/busy wait. |
 | Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
+
+An automatic handoff's opened chat holds its attempt for up to 15 minutes, but a page that reports
+a step before typing (`composer`, `model`, `composer-after-model`) and then nothing for 3 minutes
+releases it early. The ticket stays; its send was never attempted, so the next pickup opens a fresh chat.
 
 Unattributed recovery keeps a bounded incident per exact unresolved request id, with one
 shared timer. At the first filed unattributed call it freezes the chats then shown Active,
@@ -2579,13 +2639,16 @@ The browser says writing only with current generation proof for the marked summa
 a sent checkpoint alone means waiting. Bootstrap folds require the app's exact recorded opening
 message id plus current route/epoch. Retired folds unwrap all native children and controls.
 
-Native ChatGPT Project destinations enter through the source chat's exact native Project link.
-The header alone is not readiness: `chatgpt-dom.js::enterProject` waits for the source editor
-to be mounted, empty, idle and attachment-free before its one click. Source readiness and
-replacement-editor navigation each have a bounded 12-second phase using the same observer/timer.
-Destination proof requires the exact Project home, a different connected editor and no source
-turns. User interaction, cancellation or a foreign route revokes the attempt; no extra tab or
-second click compensates for a missing result.
+Native ChatGPT Project destinations enter through the source chat's exact native Project-home
+link. The provider may move that control between top-level shells, so
+`chatgpt-dom.js::enterProject` identifies it by exact same-origin Project target rather than a
+header/banner wrapper, excludes transcript/extension/hidden-kept-page links and requires one
+visible candidate. The link alone is not readiness: the source editor must be mounted, empty,
+idle and attachment-free before the one click. Source readiness has a bounded 60-second phase;
+the native transition then gets its own bounded 12-second phase. Destination proof requires the
+exact Project home, a connected ready editor and no displayed source turns. User interaction,
+cancellation or a foreign route revokes the attempt; no extra tab or second click compensates
+for a missing result.
 
 The brief includes the original task, accepted steering, current result, remaining checks and
 relevant durable ids. Linked project instructions and current executor settings still apply.
@@ -2599,8 +2662,9 @@ it must not guess a new rebind, delete history or become the path for new contin
 ## 16. Multiple prime families and reusable workers
 
 **Intent:** each prime can delegate bounded work to its own reusable workers while several
-independent user tasks run at once. Inside a family the topology is a star: workers report to
-their prime and cannot create worker descendants.
+independent user tasks run at once. Inside a family the worker topology is a star: workers report
+to their prime and cannot create worker descendants. Existing primes may also exchange a message
+across families when the sender already has the destination's explicit run address.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
@@ -2622,9 +2686,16 @@ and task text remain intact. The recorder notifies its consumers after this orig
 Several recovered fleets may belong to the same real prime. Keep each run, worker conversation
 and inbox intact; parked histories are keyed by their last run incarnation, not just the prime.
 `agents status` returns `available_runs`; `run_id` selects an already-owned family for ambiguous
-operations. Naming a foreign run grants no authority. Ordinary prime results collect all its
-inboxes under one shared output budget, label repeated worker names by run, and acknowledge
-only messages actually offered. A wake returns its fresh incarnation ID.
+operations and still never selects a foreign family. `target_run_id` is the one narrow exception:
+on `agents action=message`, an existing prime may use that opaque address to queue text only to
+the other family's prime. It grants no status/discovery or worker access. Cross-prime inbox rows
+carry `source_run_id` so replies do not need global family discovery. That reply address stays
+stable while wake creates fresh incarnation IDs: the family retains one opaque reply alias plus
+the eight most recent former incarnation selectors, while browser-command fences still require
+the current incarnation. Restore preserves an alias that was actually saved; it does not infer a
+legacy reply address that an older build had already evicted from its bounded history. Ordinary prime results
+collect all its inboxes under one shared output budget, label repeated worker names by run, and
+acknowledge only messages actually offered. A wake returns its fresh incarnation ID.
 If late proof identifies a provisional prime as an existing worker, its accepted fleet is
 attached to that worker's real root prime; the worker cannot control descendants or spawn more.
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
@@ -2666,7 +2737,9 @@ constraints; it does not turn arbitrary tool-result text into higher-priority in
 sleeping worker with `agents action=message` before spawning a replacement. Messaging, inbox
 delivery and report receipts are at-least-once transports with durable message identities;
 acknowledgement belongs to the exact recipient/run, not a UI read. Pending reports remain
-available when the last worker sleeps and the family parks.
+available when the last worker sleeps and the family parks. Prime-to-prime messages use that
+same staged durability barrier; the sender's run address is durable routing metadata, and a
+foreign `target_run_id` never widens the recipient to its workers.
 
 Attached and detached workers share `WORKER_SILENCE_MS` (three minutes). Only accepted new
 assistant output, native work or exactly attributed tool activity renews this clock. Page
@@ -2684,6 +2757,15 @@ Invited workers retain the existing bootstrap deadlines. A waking worker has one
 three-minute delivery attempt; only proven delivery grants the existing additional silence
 budget. Redeeming does not renew the deadline, and expiry never authorizes another send.
 Timer and maintenance expiry share the same claim-based diagnostic and retain specific errors.
+The page reports how far it got with `/commands/step` (`{ id, client, step }`), step names only:
+`revival-busy`, `revival-draft` or `revival-editor` before redeem (a wake held by a chat still
+answering, a non-empty editor, or no usable editor yet; re-reported when the reason changes;
+older pages send `revival-waiting`), then
+`composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
+Reports are fire-and-forget and advisory: they change no lease, deadline or outcome, a report
+from a page that does not own the command is ignored, and they never carry text, titles or
+addresses. Expiry names the last one, or whether the browser or the OS opened the chat and no
+page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
@@ -2719,6 +2801,12 @@ raising the user's worker cap is not a substitute for lifecycle correctness.
 most 16) beside the legacy single `revival`; the extension remembers each one and routes or opens
 them in one pass. Handing out only the oldest held every later wake behind a slow one until the
 revival deadline (#882). Redeem stays the one ownership boundary per wake.
+A wake still waits for an empty editor (`composerSubmitReady`), but ChatGPT keeps unsent editor
+text as the chat's draft and restores it when the chat opens again; a wake whose Send never
+landed then blocked every later wake into that chat until its deadline. While all other
+readiness holds, the page reclaims an editor whose whole text ends with the wake's own closing
+sentence (`clearRevivalResidue`, matching `planRevivalText`); anything added after it, an
+attachment or a busy page keeps the draft.
 
 Detached means browser attachment is missing, not necessarily that tool execution died. An
 exact call can prove the worker server-side alive; a new page can reattach it. During waking,
@@ -2966,10 +3054,9 @@ Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
 
-Dark is the default theme. Appearance settings remain the durable theme owner; the app title bar
-also exposes a compact light/dark shortcut through that same settings-save path. The chat header
-has no theme or connection action. Files and worker-panel controls attach to the chat header
-independently of appearance controls.
+Dark is the default theme. Theme selection belongs in Appearance settings; the main header
+has no light/dark shortcut. Files and worker-panel controls attach to the header independently
+of appearance controls.
 
 ### Renderer and IPC
 
@@ -3041,7 +3128,8 @@ Desktop fields are not marked required. Setup assets contain no embedded image m
 The final Setup card uses the supplied `tool-approval.jpg` screenshot at compact width and
 explains ChatGPT's Always allow separately from Plugins' Allow all actions. The existing
 authorized model-discovery browser handoff emits `setup:toolApprovalNotice` only after its
-dispatch succeeds. `renderer/tool-approval.ts` shows the same reminder once until dismissed;
+dispatch succeeds and only once a Core tunnel ID is saved: before that, ChatGPT cannot call a tool,
+so a fresh install no longer sees "One last step" at step 0. `renderer/tool-approval.ts` shows the same reminder once until dismissed;
 only dismissal persists the local acknowledgement. The permanent card remains available.
 This presentation event proves neither a newly opened tab nor provider approval, and grants
 no browser-opening or tool authority. A passive discovery or failed handoff emits no reminder.
@@ -3233,7 +3321,18 @@ the Goal row opens the objective editor, including before the first message. The
 and Loop pencils open that editor without switching automation; Save applies objective and mode,
 then closes the menu. The Plan toolbar toggle only arms planning, even over an existing draft;
 Send/Enter generates. Queued and prepared plan stages show up to three lines. The model menu lists
-every observed model separately and the effort slider only adjusts the selected model. Hidden
+every observed model separately behind its model-name disclosure; the compact popover leads
+with the selected effort and the slider only adjusts that model. Closing the popover resets
+the disclosure; Escape closes the list before the popover and returns focus to its trigger.
+The list expands/collapses through one CSS grid transition; hidden choices are inert immediately.
+Reduced motion makes the disclosure instantaneous. The model-name chevron uses the app's
+existing disclosure rotation, driven by that button's `aria-expanded` state.
+The lightning shortcut selects the current model's lowest observed effort; its brain icon
+then offers the highest observed effort, not the previous selection. It never switches models
+to obtain Instant or Pro. The existing hidden effort select owns the choice, and slider,
+session and catalog changes repaint the next action. Without two observed efforts it is disabled.
+Selection changes immediately; a finite, interruptible 200ms icon transition supplies feedback,
+using only opacity under reduced motion. It has no send, discovery or saved-setting side effect. Hidden
 native selects retain send admission; stale selections still require an explicit choice.
 Unverified saved model preferences show their status beside the model select.
 The composer dock measures its natural inner body and animates only transient height changes;
@@ -3266,11 +3365,10 @@ refresh complete or starts a browser action.
 
 ### Project Files workspace
 
-The Files panel projects the current session's LocalProject primary workspace through fixed IPC
-using a project UUID and relative paths; additional project folders never become implicit Files
-roots. It does not change the main composer or grant additional filesystem access. Main re-resolves
-current approved roots and rejects traversal, symbolic links/junctions and project-root mutation.
-The renderer's `workspace-docks.ts` owns the right tool dock and
+The Files panel projects the current session's LocalProject through fixed IPC using a project
+UUID and relative paths. It does not change the main composer or grant additional filesystem
+access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
+and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
@@ -3326,6 +3424,16 @@ beside the session record. That historical review belongs to the recorded tool c
 the file's later contents, and it is retrieved only by session/call/change identity. Failed,
 inexact or oversized edits do not gain fabricated review evidence. Current Git Changes and recorded
 edit review therefore share a diff renderer but have separate truth owners.
+Recorded successful edits also expose lazy inline diff cards under their exact tool call. They
+use the existing getToolEditReview IPC and immutable snapshots, never the current filesystem or
+patch intent. Each reply must match call id, change index and path, and retain its captured session
+generation through syntax loading. Cards cap files at 32 and preview lines at 600; unavailable
+assets stay explicit. Copy file copies the entire recorded resulting file and Expand increases
+only the bounded viewport. Unavailable reads reset lazy-load admission so closing and reopening
+retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
+file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
+surfaces. The existing Review dock remains available.
+
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
 The horizontal preview separator paints a one-pixel hover line with a three-pixel drag area.
@@ -3429,7 +3537,9 @@ The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`
 `/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents` and `/v1/log`. Each asks the owner that
 already feeds the renderer (`session/read-model.ts`, `listInputs`, `swarmState`, `getLog`) and
 projects the answer through an allowlist, so a field an owner grows later stays private until
-it is named there. An event kind added later is published by name only; the kind, input-state
+it is named there. `/v1/agents` mirrors the broker's `retainedHistory` boolean so a watcher can
+distinguish parked worker history from no retained history; it does not expose dormant family
+identities or infer health/revivability. An event kind added later is published by name only; the kind, input-state
 and log-level tables are exhaustive by type. Message, tool argument/result, outbox and log text
 has known credential shapes masked (`redactSecretText`: API keys, GitHub/Slack/AWS/Google
 tokens, bearer and basic headers, JWTs, URL passwords, private keys, MCP endpoint paths) before
@@ -3530,20 +3640,17 @@ Late startup results retire their own handles without publishing them; late tunn
 for the accepted-response drain first. Activity logs record Disconnect admission and the
 accepted-response count.
 
-The app title bar exposes a compact Connect shortcut only before a connection is running: it stays
-visible as disabled `Connecting…` during server/tunnel startup and is hidden once connected,
-offline or disconnecting. The sidebar footer owns the compact connection-status popover outside
-the translucent sidebar stacking context and is the running-state Disconnect surface. The popover's
-sidebar-themed surface is 160 CSS pixels wide, with
+The sidebar footer owns global connection controls in a compact popover outside the translucent
+sidebar stacking context. Its sidebar-themed surface is 160 CSS pixels wide, with
 single-line labels and status dots. Status text remains accessible to screen readers and in
 tooltips. The header states connection status once; no redundant off/verification subtitle
 appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
 and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
 action is Connect/Disconnect; opening it does not request companion diagnostics.
-Extension-only Overwrite/Timestamps and the redundant settings link are absent. The title-bar
-Connect shortcut briefly highlights the footer status on a newly confirmed connection (respecting
-reduced motion); it never becomes a Disconnect action. Setup stays reachable from Settings and from
-Connect when configuration is incomplete, and that click focuses the exact missing step. The View menu has its own foreground
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
+Connect action remains visible while disconnected and disappears only on confirmed connection,
+briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
+Settings and from Connect when configuration is incomplete. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
@@ -3599,6 +3706,11 @@ this checks matching policy, not live focus/Space transitions or packaged Mac in
 Windows uses source-owned Windows.Graphics.Capture for exact HWND compositor pixels, including
 covered GPU windows, without activation or a visible-screen fallback. Minimized/unavailable
 capture fails explicitly. DWM image bounds and outer window geometry have distinct roles.
+The initial capture item size defines the frame-pool allocation, not the valid image extent.
+Each actual frame's `ContentSize` must equal unchanged DWM bounds and fit the bounded pool;
+the copied surface must still match that pool. Only the top-left content rows are published,
+using the allocation's row stride and excluding undefined right/bottom padding. Unknown or
+clipped content remains `STALE_FRAME`; this never substitutes outer-window coordinates.
 Before starting a window capture, the optional `IGraphicsCaptureSession3` interface disables
 the capture border so individual screenshots do not flash a yellow outline. Older Windows
 without that interface retains its system indicator; permissions and capture failures remain
@@ -3728,6 +3840,9 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+The fail-first workflow selects Windows for changed `test/windows-*` and `test/computer*`
+suites through `scripts/pr-fail-first.mjs`; other changes keep the Linux runner. The selected
+job still runs changed tests against base code: platform-skipped native tests are not proof.
 
 When delegation is authorized, reuse a suitable worker. Give each assignment the project,
 concrete task, evidence, allowed files, ownership boundaries, checks and expected handoff.
@@ -3751,6 +3866,18 @@ keeps a redacted 500-entry ring and bounded async `app.log` batches with rotatio
 overload omissions, a two-second final flush and separate `.crash` snapshot. Logs are human
 diagnostics, not restart authority; secrets must never be printed to investigate a connection.
 
+Activity › Diagnostics report (`diagnostics:saveReport`, `diagnostics-report.ts`) saves one plain-text
+file for bug reports: versions, bridge/companion state, the connection self-test, settings,
+pending commands/workers and the newest 3 MB of `app.log`, then reveals it so the user reads
+it first. Everything passes `report-scrub.ts`: credentials, emails, `KEY=value`/`Bearer`, private
+hosts and IPs are masked; the home folder becomes `~`; every other path segment becomes a stable
+`<p:xxxx>` tag that keeps its extension (ids, dated session ids and structural/app folder names stay
+readable); known personal values (project paths/names, chat titles, worker tasks/labels/results,
+approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only booleans, numbers
+and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
+dropped unless the value is a number or boolean. Never add message, task or title text to a section.
+Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
+
 ## 20. Build, installation, updater and release
 
 Source, bundle, package, installed bytes and live behavior are separate gates (§3). The app id
@@ -3762,6 +3889,16 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
+`stage-firefox-extension.mjs` can manually derive a Firefox test tree from that same canonical
+extension: it changes only the Gecko manifest packaging shape and carries the shared runtime bytes.
+`npm run extension:firefox:stage` is developer/testing tooling only. Stable release planning,
+checksums, candidate assembly, publishing and post-publish verification intentionally omit a
+Firefox ZIP until live Gecko validation proves the background lifecycle, tabs/windows and bridge.
+A valid staged tree is packaging evidence only and does not establish Firefox runtime support.
+Before replacing staged files, the stager rejects a destination outside `release` and any
+existing symbolic link or junction in the release/destination path. This preflight keeps a
+linked output ancestor from redirecting recursive replacement into another folder; it is not
+an OS-level guarantee against a concurrent filesystem actor swapping paths after validation.
 The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
 privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
@@ -3797,7 +3934,7 @@ path, development does not stage. Explicit install may relaunch; ordinary quit d
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
-assembles installers, extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
+assembles installers, the Chromium extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
 is dispatched **at the reviewed version tag**, calls that reusable build in the same run,
 requires `docs/release-notes/vX.Y.Z.md`, rechecks versions/privacy/hashes and refuses an existing
 release. A tag alone does not build/publish. An unpublished candidate can be built separately,

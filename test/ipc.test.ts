@@ -20,8 +20,8 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
-  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })) },
-  shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => '') },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })) },
+  shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   nativeTheme: { themeSource: 'system' },
   safeStorage: {
     isAsyncEncryptionAvailable: vi.fn(async () => true),
@@ -29,7 +29,7 @@ vi.mock('electron', () => ({
     encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
     decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
-  app: { on: vi.fn(), getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
+  app: { on: vi.fn(), getPath: (_name: string) => '', getLocale: () => 'en-US', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
@@ -110,6 +110,15 @@ it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch
   // A stale snapshot that never touched the switch keeps the saved value.
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui[key]).toBe(wanted);
+});
+
+it('saves Auto-select Skills through Settings and preserves it across a stale unrelated save', async () => {
+  const base = getConfig();
+  const wanted = !(base.ui.autoSelectSkills ?? false);
+  expect(await save({ ...base, ui: { ...base.ui, autoSelectSkills: wanted } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.autoSelectSkills).toBe(wanted);
 });
 
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
@@ -479,24 +488,15 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(getConfig().roots).toHaveLength(1);
   const listed = await handlers.get('projects:list')!(null, {}) as any;
   expect(listed.data).toHaveLength(2);
-  const related = path.join(dir, 'picker-related');
-  await fs.mkdir(related);
-  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [related] });
-  const addFolder = () => handlers.get('projects:addFolder')!(null, { id: first.data.id }) as Promise<any>;
-  const withRelated = await addFolder();
-  expect(withRelated).toMatchObject({ ok: true, data: { id: first.data.id } });
-  expect(withRelated.data.additionalPaths).toHaveLength(1);
-  const storedRelated = withRelated.data.additionalPaths[0];
-  expect(path.isAbsolute(storedRelated)).toBe(true);
-  expect((await addFolder()).data.additionalPaths).toEqual([storedRelated]);
-  expect(getConfig().roots).toHaveLength(2);
-  const withoutRelated = await handlers.get('projects:removeFolder')!(null, { id: first.data.id, path: storedRelated }) as any;
-  expect(withoutRelated).toMatchObject({ ok: true, data: { id: first.data.id } });
-  expect(withoutRelated.data.additionalPaths).toBeUndefined();
-  expect(getConfig().roots).toHaveLength(2);
+  const colored = await handlers.get('projects:color')!(null, { id: first.data.id, color: 'blue' }) as any;
+  expect(colored).toMatchObject({ ok: true, data: { id: first.data.id, color: 'blue' } });
+  expect(await handlers.get('projects:color')!(null, { id: first.data.id, color: 'chartreuse' })).toMatchObject({ ok: false });
+  const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
+  expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
+  expect(uncolored.data.color).toBeUndefined();
   const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
   expect(removed).toMatchObject({ ok: true, data: { id: first.data.id, ungrouped: true } });
-  expect(getConfig().roots).toHaveLength(2);
+  expect(getConfig().roots).toHaveLength(1);
   expect((await fs.stat(folder)).isDirectory()).toBe(true);
   expect(await handlers.get('projects:remove')!(null, { id: folder })).toMatchObject({ ok: false });
   expect(await handlers.get('projectGit:snapshot')!(null, { projectId: folder })).toMatchObject({ ok: false });
@@ -1990,4 +1990,31 @@ describe('Stop IPC exact session and turn authority', () => {
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
     expect(await invoke({ id: missing.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'session_not_recorded' });
   });
+});
+
+it('saves a diagnostics report through the renderer channel without personal details', async () => {
+  const { flushLogFile, initLogFile, logInfo } = await import('../src/main/logger.js');
+  const home = path.join(dir, 'home-jane');
+  const clients = path.join(home, 'Acme Clients');
+  await fs.mkdir(clients, { recursive: true });
+  initLogFile(path.join(dir, 'app.log'));
+  logInfo(`tool read rejected: ENOENT, open '${path.join(clients, 'invoice 7.xlsx')}' for jane@example.com`);
+  logInfo('bridge: gave up on worker:run-1:worker-2 — the chat this app opened did not report back in time');
+  await flushLogFile();
+  await createSession({ title: 'Quarterly tax return draft', conversationId: 'diagnostics-report-session' });
+  const getPath = app.getPath;
+  const target = path.join(dir, 'report.txt');
+  (app as { getPath: (name: string) => string }).getPath = (name: string) => name === 'home' ? home : dir;
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  try {
+    expect(await handlers.get('diagnostics:saveReport')!(null, undefined)).toEqual({ ok: true, data: { saved: true, name: 'report.txt' } });
+  } finally {
+    (app as { getPath: typeof getPath }).getPath = getPath;
+  }
+  const report = await fs.readFile(target, 'utf8');
+  expect(report).toContain('# Chat On Steroids diagnostics report');
+  expect(report).toContain('did not report back in time');
+  expect(report).toMatch(/open '~[\\/]<p:[0-9a-f]{4}>[\\/]<p:[0-9a-f]{4}>\.xlsx'/);
+  for (const personal of ['home-jane', 'Acme', 'invoice', 'jane@example.com', 'Quarterly tax return']) expect(report).not.toContain(personal);
+  expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
 });

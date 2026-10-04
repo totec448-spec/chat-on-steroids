@@ -62,16 +62,20 @@ import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } fro
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
+import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
+import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
 import { livePreview } from './live-preview.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
+import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
+import { listSessions } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addProjectFolder, getProject, getSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from './projects.js';
+import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -89,6 +93,8 @@ import {
   sessionControlsFor, cancelAssistantRecovery, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
+  revealChatInBrowser,
+  pendingCommands,
   onBridgeChange,
   startBridge,
   stopBridge,
@@ -196,6 +202,7 @@ const settingsPatch = z.object({
     browserBridgePort: browserBridgePortSchema.optional(),
     browserOnly: z.boolean().optional(),
     autoRefreshPlugins: z.boolean().optional(),
+    autoSelectSkills: z.boolean().optional(),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
@@ -357,6 +364,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         : pick(current.ui.browserBridgePort ?? 'auto', base.ui.browserBridgePort ?? 'auto', wanted.ui.browserBridgePort),
       browserOnly: pick(current.ui.browserOnly, base.ui.browserOnly, wanted.ui.browserOnly),
       autoRefreshPlugins: pick(current.ui.autoRefreshPlugins, base.ui.autoRefreshPlugins, wanted.ui.autoRefreshPlugins),
+      autoSelectSkills: pick(current.ui.autoSelectSkills, base.ui.autoSelectSkills, wanted.ui.autoSelectSkills),
       tabsToKeepOpen: pick(current.ui.tabsToKeepOpen, base.ui.tabsToKeepOpen, wanted.ui.tabsToKeepOpen),
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
@@ -796,7 +804,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)
       : scope.projectId ? projectWorkspace(scope.projectId) : Promise.resolve(null);
     const before = await folder();
-    const library = await listSkillLibrary({ projectPath: before?.real ?? null });
+    const library = await listSkillLibrary({ projectPath: before?.real ?? null, refreshCodexPlugins: true });
     if ((await folder())?.real !== before?.real) throw new Error('The project changed while Skills were loading');
     return library;
   });
@@ -822,27 +830,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     push('session:changed');
     return project;
   });
-  handle('projects:addFolder', async payload => {
-    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
-    if (!(await getProject(id))) throw new Error('Project not found');
-    const window = getWindow();
-    if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { title: 'Choose an additional project folder', properties: ['openDirectory'] });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const folder = result.filePaths[0];
-    try { await resolvePath(getConfig().roots, folder); }
-    catch (error) {
-      if (!(error instanceof SandboxError)) throw error;
-      const state = await approveRoot(folder);
-      push('state:changed', state);
-    }
-    const project = await addProjectFolder(id, folder);
-    push('session:changed');
-    return project;
-  });
-  handle('projects:removeFolder', async payload => {
-    const { id, path: folder } = z.object({ id: z.string().uuid(), path: z.string().min(1).max(32768) }).strict().parse(payload);
-    const project = await removeProjectFolder(id, folder);
+  handle('projects:color', async payload => {
+    const { id, color } = z.object({ id: z.string().uuid(), color: z.enum(PROJECT_COLORS).nullable() }).strict().parse(payload);
+    const project = await setProjectColor(id, color);
     push('session:changed');
     return project;
   });
@@ -1051,6 +1041,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('diagnostics:run', async () => runDiagnostics());
+  // "Save diagnostics report": one plain-text file for a bug report, personal details removed
+  // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
+  handle('diagnostics:saveReport', async () => {
+    const selfTest = await Promise.race([
+      runDiagnostics().catch(() => null),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 10_000).unref())
+    ]);
+    const workers = swarmState().agents;
+    const text = renderDiagnosticsReport({
+      app: systemFacts(app), home: app.getPath('home'),
+      bridge: await bridgeStatus(), extension: await companionDiagnostics().catch(() => null),
+      selfTest: selfTest && { summary: selfTest.summary, checks: selfTest.checks.map(({ name, status, detail }) => ({ name, status, detail })) },
+      commands: pendingCommands().map(({ id, what, lastError }) => ({ command: id, what, lastError })),
+      workers: workers.map(({ id, role, state, model, reasoningEffort, createdAt, activatedAt, finishedAt, pending, delivered, conversationId, revivable }) =>
+        ({ worker: id, role, state, model, reasoningEffort, createdAt, activatedAt, finishedAt, pending, delivered, conversationId, revivable })),
+      sessions: await listSessions().catch(() => []),
+      projects: await listProjects().catch(() => []),
+      workerTexts: workers.flatMap(worker => [worker.task ?? '', worker.label ?? '', worker.result ?? '']),
+      log: await readRecentLog(),
+      now: Date.now()
+    });
+    return saveDiagnosticsReport(text, getWindow());
+  });
   handle('desktop:requestAccessibility', async () => {
     await refreshMacOSDesktopAccess({ promptAccessibility: true });
     return buildState();
@@ -1220,6 +1233,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
     return runningToolActivity(conversationIds);
   });
+  handle('sessions:runningProcesses', async (payload) => {
+    const { sessionId } = z.object({
+      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i)
+    }).parse(payload);
+    return runningExecProcesses(sessionId);
+  });
+  handle('sessions:stopProcess', async (payload) => {
+    const { sessionId, processId, incarnation } = z.object({
+      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+      processId: z.number().int().min(1_000).max(99_999),
+      incarnation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
+    }).parse(payload);
+    return stopExecProcess(sessionId, processId, incarnation);
+  });
   // The newest sentence a working chat shows before ChatGPT publishes it (#942).
   // The window armed its Keychain notice; the first Keychain read may start.
   handle('keychain:noticeReady', async () => keychainNoticeReady());
@@ -1251,7 +1278,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
     }
-    await openInPreferredBrowser(chatUrl(conversationId));
+    // The extension's own browser first: the OS may pick another browser or account (#882).
+    if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId));
     return true;
   });
 
@@ -1577,7 +1605,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!await startBridge()) throw new Error('The browser bridge could not start');
     if (allowOpen) {
       await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
-      push('setup:toolApprovalNotice');
+      // The approval prompt it describes comes with ChatGPT's first Core tool call, which needs a Core
+      // tunnel. On a fresh install, discovery opened ChatGPT before any of that existed and the
+      // reminder read "One last step" at step 0 of 6; Setup's last card keeps it until then.
+      if (getConfig().tunnel.tunnelId.trim()) push('setup:toolApprovalNotice');
     }
   } });
   onUpdateChange(pushState);
@@ -1585,5 +1616,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onLog((entry) => push('log:entry', entry));
   // Recorder pushes name their exact transcript owners; payload-less pushes are catalog/control only.
   onSessionChange(change => push('session:changed', change));
+  onBackgroundExecChange(() => push('sessions:backgroundExecChanged'));
   onSwarmChange(() => push('swarm:changed', swarmState()));
 }

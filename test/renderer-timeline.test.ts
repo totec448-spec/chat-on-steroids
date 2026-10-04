@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -216,6 +216,9 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   const live = { events: [...events], inputs: [] as InputEntry[], sent: [] as InputArgs[], automation: 'off', controlCalls: [] as Array<{ id: string; action: string }>, compacting: false, finishHeld: true };
   let sessionListener: (change?: unknown) => void = () => undefined;
   let writeSessionListener: (id: string) => void = () => undefined;
+  let backgroundProcessListener: () => void = () => undefined;
+  let backgroundProcesses: Array<{ processId: number; incarnation: number; command: string; startedAt: number; tty: boolean }> = [];
+  let resolveBackgroundStop: (() => void) | null = null;
   const taskProgressListeners = new Set<(progress: any) => void>();
   const api: any = new Proxy(
     {
@@ -259,7 +262,19 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         entry.state = 'cancelled'; entry.cancelledByUser = true;
         return ok(true);
       }),
-      runningTools: () => ok([]), livePreview: () => ok(null), listPausedHelpers: () => ok(pausedHelpers),
+      runningTools: () => ok([]),
+      runningProcesses: () => ok(structuredClone(backgroundProcesses)),
+      stopProcess: vi.fn(async (_sessionId: string, processId: number, incarnation: number) => {
+        if (options.deferProcessStop) await new Promise<void>(resolve => { resolveBackgroundStop = resolve; });
+        backgroundProcesses = backgroundProcesses.filter(row => row.processId !== processId || row.incarnation !== incarnation);
+        backgroundProcessListener();
+        return { ok: true, data: true };
+      }),
+      onBackgroundProcessesChanged: (listener: () => void) => {
+        backgroundProcessListener = listener;
+        return () => undefined;
+      },
+      livePreview: () => ok(null), listPausedHelpers: () => ok(pausedHelpers),
       retryHelper: (id: string, sourceSessionId: string) => {
         live.controlCalls.push({ id: sourceSessionId, action: `retry:${id}` });
         pausedHelpers = pausedHelpers.filter(row => row.id !== id);
@@ -322,6 +337,12 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     notifySession: () => sessionListener({ allTranscripts: true }),
     writeSession: (id: string) => writeSessionListener(id),
     progress: (value: any) => { for (const listener of taskProgressListeners) listener(value); },
+    resolveBackgroundStop: () => { const resolve = resolveBackgroundStop; resolveBackgroundStop = null; resolve?.(); },
+    async publishBackgroundProcesses(rows: Array<{ processId: number; incarnation: number; command: string; startedAt: number; tty: boolean }>) {
+      backgroundProcesses = structuredClone(rows);
+      backgroundProcessListener();
+      await settle();
+    },
     async append(more: SessionEvent[]) {
       live.events.push(...more);
       sessionListener({ allTranscripts: true });
@@ -351,6 +372,120 @@ it('makes parent and worker session selectors keyboard-focusable and activates t
   expect(activate.defaultPrevented).toBe(true);
   await settle();
   expect(w.document.querySelector(`.sess.is-sel[data-id="${worker.id}"]`)).not.toBeNull();
+});
+
+it('shows elapsed runtime and stops the owned background process from the dock', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  await publishBackgroundProcesses([{
+    processId: 4101,
+    incarnation: 91,
+    command: 'npm run dev',
+    startedAt: Date.now() - 90_000,
+    tty: false
+  }]);
+  const row = w.document.getElementById('backgroundExecStatus')!;
+  expect(row.hidden).toBe(false);
+  expect(row.querySelector('.background-exec-time')?.textContent).toMatch(/^Running for 1m 3\ds$/);
+  const stop = row.querySelector<HTMLButtonElement>('.background-exec-stop')!;
+  expect(stop.textContent).toContain('Stop');
+  stop.click();
+  await settle();
+  expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4101, 91);
+  expect(row.hidden).toBe(true);
+});
+
+it('expands multiple background processes and stops each one from its own row', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  const startedAt = Date.now() - 45_000;
+  await publishBackgroundProcesses([
+    { processId: 4201, incarnation: 101, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4202, incarnation: 102, command: 'node server.js', startedAt: startedAt + 5_000, tty: true },
+    { processId: 4203, incarnation: 103, command: 'npm run worker', startedAt: startedAt + 10_000, tty: false }
+  ]);
+  const summaryRow = w.document.getElementById('backgroundExecStatus')!;
+  const list = w.document.getElementById('backgroundExecList')!;
+  expect(summaryRow.hidden).toBe(false);
+  expect(summaryRow.getAttribute('role')).toBe('button');
+  expect(summaryRow.getAttribute('aria-expanded')).toBe('false');
+  expect(summaryRow.getAttribute('aria-controls')).toBe('backgroundExecList');
+  expect((w.document.getElementById('backgroundExecLiveStatus') as HTMLElement).hidden).toBe(false);
+  expect(w.document.getElementById('backgroundExecLiveStatus')?.textContent).toContain('3 background processes running');
+  expect(summaryRow.querySelector('.queue-label')?.textContent).toBe('3 background processes running');
+  expect(summaryRow.querySelector('.queue-label')?.textContent).not.toContain('npm run watch');
+  expect(summaryRow.querySelector<HTMLButtonElement>('.background-exec-stop')!.hidden).toBe(true);
+  expect(list.hidden).toBe(true);
+
+  summaryRow.click();
+  expect(summaryRow.getAttribute('aria-expanded')).toBe('true');
+  expect(list.hidden).toBe(false);
+  const processRows = [...list.querySelectorAll<HTMLElement>('.background-exec-process')];
+  expect(processRows).toHaveLength(3);
+  expect(processRows[0]?.textContent).toContain('#4201 npm run watch');
+  expect(processRows[1]?.textContent).toContain('#4202 node server.js');
+  expect(processRows[2]?.textContent).toContain('#4203 npm run worker');
+  expect(processRows[0]?.querySelector('.background-exec-process-time')?.textContent).toMatch(/^Running for 4\ds$/);
+  expect(processRows[0]?.querySelector('.background-exec-stop')?.getAttribute('aria-label')).toContain('#4201 npm run watch');
+  expect(processRows[1]?.querySelector('.background-exec-stop')?.getAttribute('aria-label')).toContain('#4202 node server.js');
+
+  const secondStop = processRows[1]!.querySelector<HTMLButtonElement>('.background-exec-stop')!;
+  secondStop.focus();
+  secondStop.click();
+  expect(w.document.activeElement).toBe(secondStop);
+  await settle();
+  expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4202, 102);
+  expect(w.document.activeElement).toBe(summaryRow);
+  expect(summaryRow.querySelector('.queue-label')?.textContent).toBe('2 background processes running');
+  expect(summaryRow.getAttribute('role')).toBe('button');
+  expect(summaryRow.getAttribute('aria-expanded')).toBe('true');
+  expect(list.hidden).toBe(false);
+  expect(list.querySelectorAll('.background-exec-process')).toHaveLength(2);
+});
+
+it('does not restore background-process Stop focus after navigating away and back', async () => {
+  const { w, publishBackgroundProcesses, resolveBackgroundStop } = await boot([], true, [], [], { deferProcessStop: true });
+  const startedAt = Date.now() - 30_000;
+  await publishBackgroundProcesses([
+    { processId: 4301, incarnation: 111, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4302, incarnation: 112, command: 'node server.js', startedAt: startedAt + 5_000, tty: false }
+  ]);
+  const summaryRow = w.document.getElementById('backgroundExecStatus')!;
+  summaryRow.click();
+  const stop = w.document.querySelectorAll<HTMLButtonElement>('#backgroundExecList .background-exec-stop')[1]!;
+  stop.focus();
+  stop.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
+  await settle();
+  expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4302, 112);
+
+  (w.document.getElementById('newChat') as HTMLButtonElement).click();
+  await settle();
+  (w.document.querySelector('#sessionList [data-id] [data-session-select]') as HTMLElement).click();
+  await settle();
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.focus();
+  resolveBackgroundStop();
+  await settle();
+  expect(w.document.activeElement).toBe(input);
+});
+
+it('stacks a running process row with queued plan tasks above the composer', async () => {
+  const { w, live, append, publishBackgroundProcesses } = await boot([]);
+  await publishBackgroundProcesses([{ processId: 4201, incarnation: 92, command: 'npm run dev', startedAt: Date.now() - 5_000, tty: false }]);
+  live.inputs.push(...Array.from({ length: 5 }, (_, index) => ({
+    id: `plan-stage-${index}`, sessionId: summary([]).id, text: `Plan task ${index + 1}`, mode: 'after-turn' as const, dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued' as const, owner: null, createdAt: Date.now() + index, conversationId: 'chat-b'
+  })));
+  await append([]);
+  const processRow = w.document.getElementById('backgroundExecStatus')!;
+  const queue = w.document.getElementById('finishQueue')!;
+  const dock = w.document.querySelector('.composer-dock-body')!;
+  expect(processRow.hidden).toBe(false);
+  expect(queue.hidden).toBe(false);
+  expect(queue.querySelectorAll('.queued-input')).toHaveLength(5);
+  expect(queue.textContent).toContain('Plan task 5');
+  const visible = [...dock.children].filter(node => !(node as HTMLElement).hidden);
+  expect(visible).toContain(processRow);
+  expect(visible).toContain(queue);
+  expect(visible.indexOf(processRow)).toBeLessThan(visible.indexOf(queue));
 });
 
 it('keeps legacy Files, Agents and Review toggles out of the chat while dock controls remain available', async () => {
@@ -1426,36 +1561,123 @@ it('keeps the project visible when its removal fails', async () => {
   expect((w.document.querySelector('.project-remove') as HTMLButtonElement).disabled).toBe(false);
 });
 
-it('lists primary and additional project folders in the sidebar and mutates only additional membership', async () => {
+it('picks and clears project color without changing project membership', async () => {
   const project = {
-    id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary',
-    additionalPaths: ['C:\\workspace\\shared'], createdAt: 1
+    id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1
   };
   const { w } = await boot([], false, [], [project]);
   const api = (w as any).api;
-  const group = w.document.querySelector<HTMLDetailsElement>(`.project-group[data-project-id="${project.id}"]`)!;
-  group.querySelector<HTMLElement>('.project-heading')!.click();
+  api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
+  const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  const color = group.querySelector<HTMLButtonElement>('.project-color')!;
+  expect(color.dataset.color).toBe('');
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  color.click(); await settle();
+  expect(color.getAttribute('aria-expanded')).toBe('true');
+  const none = group.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!;
+  const blue = group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  expect(w.document.activeElement).toBe(none);
+  none.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.activeElement).toBe(blue);
+  blue.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(color.getAttribute('aria-expanded')).toBe('false');
+  expect(w.document.activeElement).toBe(color);
+  color.click(); await settle();
+  group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(1, project.id, 'blue');
+  let refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBe('blue');
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('blue');
+  refreshed.querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
+  refreshed.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenNthCalledWith(2, project.id, null);
+  refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  expect(refreshed.dataset.projectColor).toBeUndefined();
+  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
+});
 
-  const rows = [...group.querySelectorAll<HTMLElement>('.project-folder-row')];
-  expect(rows.map(row => row.querySelector('.project-folder-path')?.textContent)).toEqual(['C:\\workspace\\primary', 'C:\\workspace\\shared']);
-  expect(rows[0]!.querySelector('.project-folder-remove')).toBeNull();
-  expect(rows[0]!.textContent).toContain('Primary');
-  const remove = rows[1]!.querySelector<HTMLButtonElement>('.project-folder-remove')!;
-  expect(remove.getAttribute('aria-label')).toContain('C:\\workspace\\shared');
+it.each([[false, true], [true, true], [true, false]])('preserves the keyboard color-save focus owner (focus moved: %s, focusin: %s)', async (moved, propagates) => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  let finish!: (value: unknown) => void;
+  (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  color.focus(); color.click(); await settle();
+  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  blue.focus(); blue.click();
+  const other = w.document.createElement('button'); other.textContent = 'Other control'; w.document.body.append(other);
+  if (moved) {
+    // An inactive Electron document can update activeElement without delivering focusin.
+    // Suppress that notification only; the real DOM still owns the current focused element.
+    if (!propagates) w.document.addEventListener('focusin', event => event.stopImmediatePropagation(), { capture: true, once: true });
+    other.focus();
+  }
+  finish({ ok: true, data: { ...project, color: 'blue' } }); await settle();
+  const currentColor = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  expect(currentColor.dataset.color).toBe('blue');
+  expect(w.document.activeElement === (moved ? other : currentColor)).toBe(true);
+});
 
-  api.addProjectFolder = vi.fn(async () => ({ ok: true, data: { ...project, additionalPaths: [...project.additionalPaths, 'C:\\workspace\\new'] } }));
-  const add = group.querySelector<HTMLButtonElement>('.project-folder-add')!;
-  expect(add.getAttribute('aria-label')).toContain('Workspace');
-  add.click(); await settle();
-  expect(api.addProjectFolder).toHaveBeenCalledExactlyOnceWith(project.id);
-  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\new');
+it.each([false, true])('a rejected color-save preserves the current focus owner (focus moved: %s)', async moved => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  let finish!: (value: unknown) => void;
+  (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  color.focus(); color.click(); await settle();
+  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  blue.focus(); blue.click();
+  const other = w.document.getElementById('chatInput')!;
+  if (moved) other.focus();
+  finish({ ok: false, error: 'Synthetic save refusal' }); await settle();
+  expect(color.disabled).toBe(false);
+  expect(color.dataset.color).toBe('');
+  const selected = w.document.querySelector('[data-project-color-choice=""]');
+  expect(w.document.activeElement === (moved ? other : selected)).toBe(true);
+});
 
-  api.removeProjectFolder = vi.fn(async () => ({ ok: true, data: { ...project, additionalPaths: ['C:\\workspace\\new'] } }));
-  const refreshed = w.document.querySelector<HTMLDetailsElement>(`.project-group[data-project-id="${project.id}"]`)!;
-  refreshed.querySelectorAll<HTMLButtonElement>('.project-folder-remove')[0]!.click(); await settle();
-  expect(api.removeProjectFolder).toHaveBeenCalledExactlyOnceWith(project.id, 'C:\\workspace\\shared');
-  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).not.toContain('C:\\workspace\\shared');
-  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)?.textContent).toContain('C:\\workspace\\primary');
+it.each([false, true])('does not restore an old color-save focus after selecting another chat and returning (rejected: %s)', async rejected => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const a = { ...summary([]), id: 'color-chat-a', projectId: project.id };
+  const b = { ...summary([]), id: 'color-chat-b', projectId: project.id };
+  const { w } = await boot([], true, [], [project], { sessions: [a, b] });
+  let finish!: (value: unknown) => void;
+  (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
+  color.focus(); color.click(); await settle();
+  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  blue.focus(); blue.click();
+  w.document.querySelector<HTMLElement>('[data-id="color-chat-b"] [data-session-select]')!.click(); await settle();
+  w.document.querySelector<HTMLElement>('[data-id="color-chat-a"] [data-session-select]')!.click(); await settle();
+  const focused = w.document.activeElement;
+  finish(rejected ? { ok: false, error: 'Synthetic save refusal' } : { ok: true, data: { ...project, color: 'blue' } }); await settle();
+  expect(w.document.querySelector<HTMLButtonElement>('.project-color')!.dataset.color).toBe(rejected ? '' : 'blue');
+  expect(w.document.activeElement === focused).toBe(true);
+});
+
+it('names project colors in the interface language and keeps focus on the color button after a pick', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
+  const group = (): HTMLElement => w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  // The menu is already named "Change project color"; each choice is the color itself, in words
+  // a screen reader can say, never the internal value.
+  const blue = group().querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  expect(blue.getAttribute('aria-label')).toBe('Blue');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(blue.getAttribute('aria-label')).toBe('Blau');
+  expect(blue.title).toBe('Blau');
+  setLanguage('en');
+
+  // Picking repaints the sidebar. Focus must come back to the new color button, not fall to the page.
+  group().querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
+  group().querySelector<HTMLButtonElement>('[data-project-color-choice="teal"]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenCalledWith(project.id, 'teal');
+  const button = group().querySelector<HTMLButtonElement>('.project-color')!;
+  expect(button.dataset.color).toBe('teal');
+  expect(w.document.activeElement).toBe(button);
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
@@ -2251,13 +2473,12 @@ it('colors removed lines separately from added lines without changing other tool
 
   rows[0]!.open = true;
   rows[0]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[0]!.querySelector('.changes .metric')?.textContent).toBe('+28 −11');
-  expect(rows[0]!.querySelector('.changes .metric-added')?.textContent).toBe('+28');
-  expect(rows[0]!.querySelector('.changes .metric-removed')?.textContent).toBe('−11');
+  expect(rows[0]!.querySelector('.edit-card .metric-added')?.textContent).toBe('+28');
+  expect(rows[0]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−11');
   rows[1]!.open = true;
   rows[1]!.dispatchEvent(new w.Event('toggle'));
-  expect(rows[1]!.querySelector('.changes .metric')?.textContent).toBe('+0 −7 (approx.)');
-  expect(rows[1]!.querySelector('.changes .metric-removed')?.textContent).toBe('−7');
+  expect(rows[1]!.querySelector('.edit-card summary')?.textContent).toContain('(approx.)');
+  expect(rows[1]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−7');
 });
 
 it('keeps mixed tool and agent activity in one latest-action disclosure between authored messages', async () => {
@@ -2280,6 +2501,25 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   ]);
   expect(timeline.querySelectorAll('.tool-group')).toHaveLength(2);
   expect(timeline.children[0]!.className).toContain('ev-progress');
+});
+
+it('never titles a tool group with the app\'s own recovery note', async () => {
+  // #882: after a run of reloads, every tool group read "Reloaded chat to recover an interrupted
+  // response.", because the note in front of a group was taken for ChatGPT's phase caption.
+  // Repair notes are shown in developer mode, where that reporter saw it.
+  const { w } = await boot([
+    { seq: 1, time: T0, source: 'app', kind: 'progress', progressId: 'browser-repair:chat:one',
+      message: text('Reloaded chat to recover an interrupted response.') },
+    toolCall(2, 'first'), toolCall(3, 'last')
+  ], true, [], [], { developerMode: true });
+  const timeline = w.document.getElementById('timeline')!;
+  const group = timeline.querySelector<HTMLDetailsElement>('.tool-group')!;
+  const title = group.querySelector('.activity-title')!.textContent;
+  expect(title).not.toContain('Reloaded chat');
+  expect(title).toBe(group.querySelector('.ev-tool_call:last-of-type .tool > summary b')?.textContent ?? title);
+  expect(group.classList.contains('has-activity-phase')).toBe(false);
+  // The note itself stays in the transcript, in front of the group.
+  expect(timeline.children[0]!.textContent).toContain('Reloaded chat to recover an interrupted response.');
 });
 
 it('folds five consecutive status polls while retaining each exact tool row', async () => {

@@ -503,6 +503,8 @@ export type SessionEvent =
       messageId: string;
       from: string;
       to: string;
+      /** Prime-family reply address for a cross-family message. */
+      fromRunId?: string;
       message: StoredText;
       delivery: 'sent' | 'delivered';
     })
@@ -1010,6 +1012,14 @@ export interface AgentMessage {
   id: string;
   from: string;
   to: string;
+  /**
+   * Prime-family address of the sender when a message crosses between existing prime families.
+   *
+   * Agent ids are only unique inside one family, so a bare `from: "prime"` cannot be replied
+   * to across that boundary. This is routing metadata only; it grants no status or worker access
+   * to the receiving prime.
+   */
+  fromRunId?: string;
   time: number;
   text: string;
   /** When it was last written into a tool result. Re-offered until acknowledged. */

@@ -7,7 +7,10 @@ const native = vi.hoisted(() => ({
   allowUnattributed: false, correlations: new Map<string, { sessionId: string }>()
 }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ multiAgent: { allowUnattributedCalls: native.allowUnattributed } }) }));
-vi.mock('../src/main/session/correlation.js', () => ({ requestCorrelation: (requestId: string) => native.correlations.get(requestId) ?? null }));
+vi.mock('../src/main/session/correlation.js', () => ({
+  requestCorrelation: (requestId: string) => native.correlations.get(requestId) ?? null,
+  onRequestCorrelation: () => () => undefined
+}));
 vi.mock('../src/main/computer/index.js', () => ({
   ComputerError: class extends Error {}, act: native.act, getWindowState: native.getWindowState
 }));
