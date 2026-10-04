@@ -103,7 +103,7 @@ it('discovers enabled Codex plugin skills from only the active installed version
     pluginId: 'review-pack@team-market', pluginName: 'review-pack', marketplaceName: 'team-market', version,
     installed: true as const, enabled: true, source: { source: 'git' as const, url: 'https://example.invalid/review-pack.git', ref: 'main', sha: 'a'.repeat(40) }
   }] };
-  const before = await listSkillLibrary({ projectPath: project }, runtime);
+  const before = await listSkillLibrary({ projectPath: project, refreshCodexPlugins: true }, runtime);
   expect(before.skills).toHaveLength(1);
   expect(before.skills[0]).toMatchObject({
     name: 'Audit', source: 'codex-plugin', scope: 'user', managed: false,
@@ -118,7 +118,8 @@ it('discovers enabled Codex plugin skills from only the active installed version
   await write(path.join(plugin, '2.0.0/plugin.json'), JSON.stringify({ name: 'review-pack', version: '2.0.0' }));
   await write(path.join(plugin, '2.0.0/skills/audit/SKILL.md'), contents('Audit', 'Upgraded plugin instructions.'));
   version = '2.0.0';
-  const after = await listSkillLibrary({ projectPath: project }, runtime);
+  await write(path.join(codex, 'config.toml'), '# Plugin configuration changed\n');
+  const after = await listSkillLibrary({ projectPath: project, refreshCodexPlugins: true }, runtime);
   expect(after.skills).toHaveLength(1);
   expect(after.skills[0]!.id).toBe(command);
   expect(after.skills[0]).toMatchObject({ codexPlugin: { version: '2.0.0' } });
@@ -142,7 +143,7 @@ it('prefers a local Codex plugin install and ignores disabled, unconfigured and 
     pluginId: `${name}@team-market`, pluginName: name, marketplaceName: 'team-market', version,
     installed: true as const, enabled, source: { source: 'local' as const }
   });
-  const library = await listSkillLibrary({ projectPath: project }, { codexPlugins: async () => [
+  const library = await listSkillLibrary({ projectPath: project, refreshCodexPlugins: true }, { codexPlugins: async () => [
     entry('review-pack', 'local', true), entry('disabled-pack', '1.0.0', false), entry('wrong-name', '1.0.0', true)
   ] });
   expect(library.skills.map(skill => skill.name)).toEqual(['Review']);
