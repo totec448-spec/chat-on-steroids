@@ -8,8 +8,8 @@ const candidate = (overrides: Partial<SkillRoutingMetadata> = {}): SkillRoutingM
   allowImplicitInvocation: true, ...overrides
 });
 
-// Public metadata used by the maintainer's matcher review. Keep these descriptions realistic so
-// the regression protects routing against the same noisy metadata users actually install.
+// Representative metadata for names discussed in the maintainer's review, not the complete
+// external 48-Skill corpus. Description prose must never act as exact-name routing evidence.
 const publicSkills: SkillRoutingMetadata[] = [
   candidate({
     id: 'airflow-plugins', revision: revision('b'), name: 'airflow-plugins',
@@ -22,6 +22,11 @@ const publicSkills: SkillRoutingMetadata[] = [
   candidate({
     id: 'systematic-debugging', revision: revision('d'), name: 'systematic-debugging',
     description: 'Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes'
+  }),
+  candidate({
+    id: 'migrating-dagster-to-airflow', revision: revision('e'), name: 'migrating-dagster-to-airflow',
+    displayName: 'Dagster to Airflow Migration',
+    description: 'Migrate Dagster pipelines to Airflow while preserving scheduling and orchestration behavior.'
   }),
   // Small domain-representative metadata for the second review's misleading names.
   // These summaries are test fixtures, not a claim to replay the maintainer's full 48-Skill corpus.
@@ -38,27 +43,99 @@ const publicSkills: SkillRoutingMetadata[] = [
   ].map(([id, description]) => candidate({ id: id!, name: id!, description: description! }))
 ];
 
-it('routes one strong metadata match and carries its exact published revision', () => {
-  expect(routeSkillMetadata('Review this source code change for correctness and maintainability.', [candidate()]))
+it('routes one literal normalized Skill name and carries its exact published revision', () => {
+  expect(routeSkillMetadata('Please use Code-Review for this change.', [candidate()]))
     .toEqual([{ id: 'code-review', revision: revision('a') }]);
 });
 
-it('returns none for weak, ambiguous, or implicit-disabled metadata', () => {
-  const task = 'Review this source code change for correctness.';
+it('returns none for unnamed, ambiguous, or implicit-disabled metadata', () => {
+  const task = 'Please use Code Review for this change.';
   expect(routeSkillMetadata('Prepare a quarterly budget summary.', [candidate()])).toEqual([]);
-  expect(routeSkillMetadata(task, [candidate(), candidate({ id: 'source-review', revision: revision('b'), name: 'Source Review' })])).toEqual([]);
+  expect(routeSkillMetadata(task, [candidate(), candidate({ id: 'source-review', revision: revision('b'), name: 'Code Review' })])).toEqual([]);
   expect(routeSkillMetadata(task, [candidate({ allowImplicitInvocation: false })])).toEqual([]);
 });
 
-it('does not route from generic description overlap without a Skill identity term', () => {
-  expect(routeSkillMetadata('Why does my React component render twice when the state changes?', publicSkills)).toEqual([]);
+it.each(['Code/Review', 'Code+Review', 'Code.Review', 'Code_Review'])(
+  'does not normalize non-hyphen punctuation into the different name %s', mention => {
+    expect(routeSkillMetadata(`Use ${mention} for this change.`, [candidate()])).toEqual([]);
+  }
+);
+
+it('keeps diacritics in names while accepting canonically equivalent Unicode', () => {
+  const skill = candidate({ id: 'locale-audit', name: 'Café Review' });
+  expect(routeSkillMetadata('Use Cafe Review for this change.', [skill])).toEqual([]);
+  expect(routeSkillMetadata('Use Cafe\u0301 Review for this change.', [skill]))
+    .toEqual([{ id: skill.id, revision: skill.revision }]);
 });
 
-it('stems distinctive identities while requiring independent description support', () => {
-  expect(routeSkillMetadata('Brainstorm a creative design for a new feature', publicSkills))
-    .toEqual([{ id: 'brainstorming', revision: revision('c') }]);
-  expect(routeSkillMetadata('Use systematic debugging to investigate unexpected test failure', publicSkills))
+it('keeps literal punctuation inside a complete display name', () => {
+  const skill = candidate({ id: 'cpp-audit', name: 'C++ Review' });
+  expect(routeSkillMetadata('Use C Review for this change.', [skill])).toEqual([]);
+  expect(routeSkillMetadata('Use C++ Review.', [skill]))
+    .toEqual([{ id: skill.id, revision: skill.revision }]);
+});
+
+const maintainerTable = [
+  {
+    message: 'Draft a plan for migrating our app from REST to GraphQL.',
+    reviewedPick: 'migrating-dagster-to-airflow', reviewedExpected: null, option1Expected: null,
+    kind: 'semantic paraphrase'
+  },
+  {
+    message: 'Help me migrate this Dagster pipeline to Airflow.',
+    reviewedPick: null, reviewedExpected: 'migrating-dagster-to-airflow', option1Expected: null,
+    kind: 'semantic paraphrase; exact-name mode intentionally abstains'
+  },
+  {
+    message: 'Use git worktrees to work on two branches at once.',
+    reviewedPick: null, reviewedExpected: 'using-git-worktrees', option1Expected: 'using-git-worktrees',
+    kind: 'maintainer-suggested literal using→use name alias'
+  },
+  {
+    message: 'Lets brainstorm ideas for the onboarding flow.',
+    reviewedPick: null, reviewedExpected: 'brainstorming', option1Expected: null,
+    kind: 'semantic/morphological paraphrase; exact-name mode intentionally abstains'
+  },
+  {
+    message: 'Review my airflow DAG for scheduling problems.',
+    reviewedPick: null, reviewedExpected: 'an Airflow Skill', option1Expected: null,
+    kind: 'domain wording without one exact Skill name'
+  },
+  {
+    message: 'Use systematic debugging to find why this test fails.',
+    reviewedPick: 'systematic-debugging', reviewedExpected: 'systematic-debugging', option1Expected: 'systematic-debugging',
+    kind: 'literal normalized Skill name'
+  }
+] as const;
+
+it.each(maintainerTable)(
+  'implements option 1 for the maintainer table: $message [$kind]',
+  ({ message, option1Expected }) => {
+    const routed = routeSkillMetadata(message, publicSkills);
+    if (!option1Expected) expect(routed).toEqual([]);
+    else {
+      const match = publicSkills.find(skill => skill.id === option1Expected)!;
+      expect(routed).toEqual([{ id: match.id, revision: match.revision }]);
+    }
+  }
+);
+
+it('matches full id/name/display-name phrases after case and hyphen/space normalization only', () => {
+  expect(routeSkillMetadata('Use SYSTEMATIC-DEBUGGING for this failure.', publicSkills))
     .toEqual([{ id: 'systematic-debugging', revision: revision('d') }]);
+  expect(routeSkillMetadata('Use migrating dagster to airflow for this pipeline.', publicSkills))
+    .toEqual([{ id: 'migrating-dagster-to-airflow', revision: revision('e') }]);
+  expect(routeSkillMetadata('Use Dagster-to-Airflow Migration for this pipeline.', publicSkills))
+    .toEqual([{ id: 'migrating-dagster-to-airflow', revision: revision('e') }]);
+  expect(routeSkillMetadata('Use brainstorming for the onboarding flow.', publicSkills))
+    .toEqual([{ id: 'brainstorming', revision: revision('c') }]);
+});
+
+it('supports only the maintainer-suggested complete using→use alias and never partial/gapped identity words', () => {
+  expect(routeSkillMetadata('Use git worktrees to work on two branches at once.', publicSkills))
+    .toEqual([{ id: 'using-git-worktrees', revision: revision('a') }]);
+  expect(routeSkillMetadata('Use git feature worktrees to work on two branches.', publicSkills)).toEqual([]);
+  expect(routeSkillMetadata('Explain how git rebase works compared to merge.', publicSkills)).toEqual([]);
 });
 
 it.each([
@@ -76,19 +153,9 @@ it.each([
   expect(routeSkillMetadata(authored, publicSkills)).toEqual([]);
 });
 
-it('prefers no injection when a distinctive name has no supporting description evidence', () => {
-  // The precision-first second review requires both signals. An explicit picker/directive
-  // remains available for this task; metadata alone does not establish its intended domain.
-  expect(routeSkillMetadata('I want to brainstorm names for my new coffee shop', publicSkills)).toEqual([]);
-});
-
-it('accepts a full common-word name only with separate supporting description terms', () => {
-  expect(routeSkillMetadata('Use profiling tables to inspect slow SQL queries', publicSkills))
-    .toEqual([{ id: 'profiling-tables', revision: revision('a') }]);
-});
-
-it('keeps precise domain matches and does not count a repeated name as description support', () => {
-  expect(routeSkillMetadata('Build an Airflow plugin with Python and FastAPI', publicSkills))
-    .toEqual([{ id: 'airflow-plugins', revision: revision('b') }]);
-  expect(routeSkillMetadata('Airflow plugins', [publicSkills[0]!])).toEqual([]);
+it('treats multiple literal identity matches as ambiguity instead of choosing one', () => {
+  expect(routeSkillMetadata('Use Code Review for this change.', [
+    candidate(),
+    candidate({ id: 'review-helper', revision: revision('b'), name: 'Review Helper', displayName: 'Code Review' })
+  ])).toEqual([]);
 });

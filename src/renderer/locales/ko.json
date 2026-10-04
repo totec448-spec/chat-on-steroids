@@ -1801,7 +1801,7 @@
   "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "새 채팅과 하위 에이전트의 기본 모델과 추론을 계정에서 제공하는 항목 중에서 선택합니다.",
   "Choose whether imported Skills can be matched to ordinary messages.": "가져온 Skills를 일반 메시지와 자동으로 연결할지 선택합니다.",
   "Auto-select Skills": "Skills 자동 선택",
-  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "가져온 Skill 하나가 메타데이터상 명확히 일치할 때만 해당 메시지에 추가합니다. 명시적으로 선택한 Skill이 항상 우선합니다.",
+  "Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.": "메시지의 주제가 아니라 정확한 이름으로 가져온 Skill 하나를 찾습니다. 명시적으로 선택한 Skill이 항상 우선합니다.",
   "Auto-selected Skill: /{0}": "자동 선택된 Skill: /{0}",
   "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "모든 워커를 지울까요? 실행 중인 워커는 중지되고 저장된 기록은 완전히 삭제됩니다. 채팅은 ChatGPT에 남습니다.",
   "Quit": "종료",

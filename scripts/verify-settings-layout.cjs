@@ -155,6 +155,7 @@ app.whenReady().then(async () => {
             assert.equal(autoSkill.visible, true, 'Auto-select Skills must be visible in General settings');
             assert.equal(autoSkill.inside, true, 'Auto-select Skills must fit inside the visible settings viewport');
             assert.match(autoSkill.label, /Auto-select Skills/);
+            assert.match(autoSkill.label, /exact name in the message, not by topic/);
             await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
             fs.writeFileSync(path.join(output, `${theme}-auto-select-skills.png`), (await win.webContents.capturePage()).toPNG());
           }

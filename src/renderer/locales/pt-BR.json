@@ -1801,7 +1801,7 @@
   "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Escolha o modelo e o raciocínio padrão para novos chats e subagentes, entre o que sua conta oferece.",
   "Choose whether imported Skills can be matched to ordinary messages.": "Escolha se Skills importadas podem ser associadas automaticamente a mensagens comuns.",
   "Auto-select Skills": "Selecionar Skills automaticamente",
-  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Quando uma única Skill importada corresponder claramente pelos metadados, ela será adicionada à mensagem. Escolhas explícitas de Skill sempre têm prioridade.",
+  "Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.": "Selecione uma Skill importada pelo nome exato na mensagem, não pelo assunto. Escolhas explícitas de Skill sempre têm prioridade.",
   "Auto-selected Skill: /{0}": "Skill selecionada automaticamente: /{0}",
   "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Limpar todos os workers? Os que estão em execução param, e os históricos salvos são removidos de vez. Os chats continuam no ChatGPT.",
   "Quit": "Sair",
