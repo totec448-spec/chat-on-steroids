@@ -4576,6 +4576,10 @@ it('offers a way back to the end of the chat that clears any reserved space', as
 it.each([
   { setting: undefined, reader: 'moved', follows: true },
   { setting: undefined, reader: 'wheel', follows: false },
+  { setting: undefined, reader: 'delayed-wheel', follows: false },
+  { setting: undefined, reader: 'delayed-touch', follows: false },
+  { setting: undefined, reader: 'delayed-key', follows: false },
+  { setting: undefined, reader: 'delayed-scrollbar', follows: false },
   { setting: false, reader: 'moved', follows: false }
 ])('follows new output unless the reader scrolled away (setting $setting, view $reader)', async ({ setting, reader, follows }) => {
   // 2026-10-02: in a busy chat the view often stopped short of the end although the reader had not
@@ -4591,11 +4595,138 @@ it.each([
     scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
   pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new w.Event('scroll'));
   await settle();
-  if (reader === 'wheel') pane.dispatchEvent(new w.WheelEvent('wheel'));
-  pane.scrollTop = 300;
-  pane.dispatchEvent(new w.Event('scroll'));
+  // Chromium queues scroll delivery until a rendering opportunity. The Windows hidden-window
+  // verifier delivered it a second after the wheel, outside the old 300 ms intent heuristic.
+  // Advance only the sampled clock, not timers or the frame: this is one delayed render step.
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    if (reader.endsWith('wheel')) pane.dispatchEvent(new w.WheelEvent('wheel'));
+    if (reader === 'delayed-touch') pane.dispatchEvent(new w.Event('touchmove'));
+    if (reader === 'delayed-key') pane.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'PageUp' }));
+    if (reader === 'delayed-scrollbar') pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0 }));
+    if (reader.startsWith('delayed-')) clock.mockReturnValue(now + 1000);
+    pane.scrollTop = 300;
+    pane.dispatchEvent(new w.Event('scroll'));
+    if (reader === 'delayed-scrollbar') w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+    pane.dispatchEvent(new w.Event('scrollend'));
+  } finally { clock.mockRestore(); }
   await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'follow-answer', message: text('A growing answer'), final: false }]);
   expect(pane.scrollTop).toBe(follows ? pane.scrollHeight : 300);
+});
+
+it.each(['scrollend', 'no-movement-frame'])(
+  'does not borrow a finished reader gesture for programmatic movement (%s)', async end => {
+    const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+      source: 'extension', kind: 'user_message', messageId: `ended-${i}`, message: text(`Item ${i + 1}`) }));
+    const { w, append } = await boot(rows);
+    const pane = w.document.getElementById('chatBody')!;
+    const timeline = w.document.getElementById('timeline')!;
+    Object.defineProperties(pane, { clientHeight: { value: 400 },
+      scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+    pane.scrollTop = pane.scrollHeight;
+    pane.dispatchEvent(new w.WheelEvent('wheel'));
+    if (end === 'scrollend') {
+      pane.dispatchEvent(new w.Event('scroll'));
+      pane.dispatchEvent(new w.Event('scrollend'));
+    } else {
+      await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+    }
+    // No fresh input: a repaint/clamp is not the reader moving away from the end.
+    pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+    await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+      messageId: 'ended-answer', message: text('A growing answer'), final: false }]);
+    expect(pane.scrollTop).toBe(pane.scrollHeight);
+  }
+);
+
+it('keeps a slow scrolling gesture through its final position at the end', async () => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `inertia-${i}`, message: text(`Item ${i + 1}`) }));
+  const { w, append } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  const now = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    pane.dispatchEvent(new w.WheelEvent('wheel'));
+    pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+    await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+    clock.mockReturnValue(now + 2000);
+    pane.scrollTop = pane.scrollHeight - pane.clientHeight;
+    pane.dispatchEvent(new w.Event('scroll'));
+    pane.dispatchEvent(new w.Event('scrollend'));
+  } finally { clock.mockRestore(); }
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'inertia-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+});
+
+it.each([false, true])('keeps a scrollbar press until release, even before its first movement (released: %s)', async released => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `pointer-${i}`, message: text(`Item ${i + 1}`) }));
+  const { w, append } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  pane.scrollTop = pane.scrollHeight;
+  pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0 }));
+  await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+  if (released) w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+  pane.dispatchEvent(new w.Event('scrollend'));
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'pointer-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(released ? pane.scrollHeight : 300);
+});
+
+it.each(['pending', 'escape', 'outside-click', 'scrollbar-click'])(
+  'handles a middle-click toggle whose first movement comes after release (%s)', async mode => {
+    const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+      source: 'extension', kind: 'user_message', messageId: `middle-${i}`, message: text(`Item ${i + 1}`) }));
+    const { w, append } = await boot(rows);
+    const pane = w.document.getElementById('chatBody')!;
+    const timeline = w.document.getElementById('timeline')!;
+    Object.defineProperties(pane, { clientHeight: { value: 400 },
+      scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+    pane.scrollTop = pane.scrollHeight;
+    pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 1 }));
+    w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 1 }));
+    await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+    if (mode === 'escape') w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+    if (mode === 'outside-click') w.document.body.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0, bubbles: true }));
+    if (mode === 'scrollbar-click') pane.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 7, button: 0 }));
+    pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+    if (mode === 'scrollbar-click') w.dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 7, button: 0 }));
+    pane.dispatchEvent(new w.Event('scrollend'));
+    await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+      messageId: 'middle-answer', message: text('A growing answer'), final: false }]);
+    expect(pane.scrollTop).toBe(mode === 'pending' || mode === 'scrollbar-click' ? 300 : pane.scrollHeight);
+  }
+);
+
+it('does not lend a reader gesture to a new selection after A to B to A', async () => {
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `epoch-${i}`, message: text(`Item ${i + 1}`) }));
+  const first = summary(rows), second = { ...summary(rows), id: '2026-09-02-test0002', title: 'Other chat' };
+  const { w, append } = await boot(rows, true, [], [], { sessions: [first, second] });
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  pane.dispatchEvent(new w.WheelEvent('wheel'));
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  for (const id of [second.id, first.id]) {
+    w.document.querySelector<HTMLElement>(`#sessionList [data-id="${id}"]`)!.click();
+    await settle();
+  }
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'epoch-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
 });
 
 it('opens the next chat at its end after the reader scrolled away from a sent message', async () => {
