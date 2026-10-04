@@ -98,6 +98,17 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: npm run build
 
+      - name: Verify recovery capture on the hosted compositor
+        if: steps.scope.outputs.run == 'true'
+        # These two focused gates run exactly once: no UI skip list, retry loop or timeout wrapper.
+        # Recovery uses the offscreen paint frame directly; Plan owns its media preference through
+        # CDP, so both can be validated on the hosted macOS renderer before the broader UI suite.
+        run: env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/verify-recovery-layout.cjs
+
+      - name: Verify Plan motion matrix on hosted macOS
+        if: steps.scope.outputs.run == 'true'
+        run: env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/verify-plan-collapse.cjs
+
       - name: Run the UI checks
         if: steps.scope.outputs.run == 'true'
         env:
