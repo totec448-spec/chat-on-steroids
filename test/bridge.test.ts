@@ -6736,6 +6736,43 @@ describe('targeted open', () => {
     }
   });
 
+  /**
+   * #882 (2026-10-04): the replacement chat of an automatic handoff stopped at "choosing the model
+   * and reasoning" and the app waited out its whole 15-minute window. Meanwhile the prime was
+   * mid-transfer, so its workers' calls were refused, and one ended up asleep. The next pickup
+   * then opened a chat that finished in ten seconds.
+   */
+  it.each([
+    ['model', true], ['composer', true], ['composer-after-model', true], ['inserting', false]
+  ] as const)('releases an automatic handoff attempt whose page stops at a step before typing (%s)', async (stalledAt, released) => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async (url) => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession(
+        `66666666-7777-8888-9999-${stalledAt === 'inserting' ? 'aaaaaaaaaaab' : stalledAt === 'model' ? 'aaaaaaaaaaac' : stalledAt === 'composer' ? 'aaaaaaaaaaad' : 'aaaaaaaaaaae'}`,
+        'the stalled brief'
+      );
+      const first = queueResume(sessionId, token)!;
+      await waitForOpened(1);
+      expect((await redeem(first.id, 'tab-1')).text).toContain('the stalled brief');
+      expect((await request('POST', '/commands/step', { body: { id: first.id, client: 'tab-1', step: stalledAt } })).body).toEqual({ ok: true });
+      const prior = new Set(getLog());
+
+      await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+      await vi.waitFor(() => expect(pendingCommands().some((entry) => entry.id === first.id)).toBe(!released));
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      if (!released) return;
+      const note = getLog().find(entry => !prior.has(entry) && entry.message.includes('without closing its ticket'))?.message ?? '';
+      expect(note).toContain('last step:');
+      // The ticket survives, and the next pickup can carry the brief.
+      const second = queueResume(sessionId, token)!;
+      expect((await redeem(second.id, 'tab-2')).text).toContain('the stalled brief');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('withdraws a cancelled resume so no tab opens for it afterwards', async () => {
     setBrowserOpener(async (url) => {
       opened.push(url);
