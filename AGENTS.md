@@ -3369,6 +3369,14 @@ session and catalog changes repaint the next action. Without two observed effort
 Selection changes immediately; a finite, interruptible 200ms icon transition supplies feedback,
 using only opacity under reduced motion. It has no send, discovery or saved-setting side effect. Hidden
 native selects retain send admission; stale selections still require an explicit choice.
+Automatic (`{ model: null, reasoningEffort: null }`: send without switching ChatGPT's model, #864)
+applies while no model list is readable and the composer asks for no particular model: a new chat
+without a configured default, or an existing chat (it keeps its own model). Send then never waits
+for discovery; ChatGPT Go and Free show no picker, so that wait always failed. An exact request (a
+model picked in the composer, or the new-chat default) still waits for the list and is never
+replaced silently; without a list, the menu offers "Use ChatGPT's current model" for it. Once a list
+is readable, new chats keep the default or preferred observed model. Automatic is also the first
+entry of the model list, as a deliberate per-composer choice that a list does not override.
 Unverified saved model preferences show their status beside the model select.
 The composer dock measures its natural inner body and animates only transient height changes;
 CSS owns resting height/visibility. The plan's existing green completion owns its own collapse,
