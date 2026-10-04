@@ -847,17 +847,32 @@ function paintSessions(): void {
           if (savingColor) return;
           if ((project.color ?? null) === choice) return closeColorMenu(true);
           savingColor = true;
+          const selectionAtSave = selectedId;
+          const generationAtSave = selectionGeneration;
+          let restoreColorFocus = colorWrap.contains(document.activeElement);
+          // Disabling a focused choice can move focus to body. A later deliberate focus
+          // change belongs to the user, not to the pending save's repaint.
+          const noticeFocus = (event: FocusEvent): void => {
+            if (event.target !== document.body && !colorWrap.contains(event.target as Node)) restoreColorFocus = false;
+          };
+          document.addEventListener('focusin', noticeFocus);
           color.disabled = true;
           menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = true; });
-          const updated = await run(api.setProjectColor(id, choice as ProjectColor | null));
+          let updated: LocalProject | null | undefined;
+          try { updated = await run(api.setProjectColor(id, choice as ProjectColor | null)); }
+          finally { document.removeEventListener('focusin', noticeFocus); }
           if (!updated) {
             savingColor = false; color.disabled = false;
             menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = false; });
-            return openColorMenu();
+            if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) openColorMenu();
+            return;
           }
           ++sessionsLoadGeneration;
           projects = projects.map(row => row.id === id ? updated : row);
           paintSessions();
+          if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) {
+            $('projectList').querySelector<HTMLElement>(`.project-group[data-project-id="${id}"] .project-color`)?.focus({ preventScroll: true });
+          }
         });
         menu.append(option);
       }

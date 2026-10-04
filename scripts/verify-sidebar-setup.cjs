@@ -105,12 +105,18 @@ app.whenReady().then(async () => {
     assert.equal(await js(`getComputedStyle(document.querySelector('.project-color')).opacity`),'0');
     await js(`document.querySelector('.project-color').click()`);
     assert.equal(await js(`document.querySelector('.project-color').getAttribute('aria-expanded')`),'true');
-    await js(`document.querySelector('[data-project-color-choice="blue"]').click()`);
+    await js(`document.querySelector('[data-project-color-choice="blue"]').focus()`);
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'});
+    // Include Enter's native character event, as for the summary activation below.
+    win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
+    win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
     for(let i=0;i<100 && await js(`document.querySelector('.project-group').dataset.projectColor!=='blue'`);i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.querySelector('.project-group').dataset.projectColor`),'blue');
     assert.equal(await js(`document.querySelector('.project-color').dataset.color`),'blue');
     assert.equal(await js(`getComputedStyle(document.querySelector('.project-color')).opacity`),'1');
     await screenshot('project-color-blue.png');
+    assert.equal(await js(`document.activeElement===document.querySelector('.project-color')`),true,
+      'Saving a keyboard-selected swatch must return focus to its project color button');
     await js(`document.querySelector('.project-heading').focus()`);
     for (const keyCode of ['Space','Enter']) {
       win.webContents.sendInputEvent({type:'keyDown',keyCode});
