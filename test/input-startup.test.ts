@@ -40,6 +40,16 @@ it('leaves explicit tool delivery on the durable queue without browser startup',
   expect(ports.bridge).not.toHaveBeenCalled();
   expect(ports.open).not.toHaveBeenCalled();
 });
+it('says Setup, not the browser, stopped a send on a fresh install, and still sends after Setup', async () => {
+  ports.status = { state: 'disconnected', detail: 'Add a folder before connecting.' };
+  await sendDesktopInput(request);
+  await vi.waitFor(() => expect(ports.rows[0]?.error).toBe('Message queued. Finish Setup to send: Add a folder before connecting.'));
+  expect(ports.open).not.toHaveBeenCalled();
+  ports.status = { state: 'connected', detail: '' };
+  await retryQueuedInputBrowser(request.id);
+  expect(ports.open).toHaveBeenCalledTimes(1);
+  expect(ports.rows[0]).toMatchObject({ id: request.id, state: 'queued', error: undefined });
+});
 it('retries only the failed browser wake for the same queued UUID', async () => {
   ports.open.mockRejectedValueOnce(new Error('startup refused'));
   await sendDesktopInput(request);
