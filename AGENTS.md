@@ -2623,7 +2623,11 @@ and inbox intact; parked histories are keyed by their last run incarnation, not 
 operations and still never selects a foreign family. `target_run_id` is the one narrow exception:
 on `agents action=message`, an existing prime may use that opaque address to queue text only to
 the other family's prime. It grants no status/discovery or worker access. Cross-prime inbox rows
-carry `source_run_id` so replies do not need global family discovery. Ordinary prime results
+carry `source_run_id` so replies do not need global family discovery. That reply address stays
+stable while wake creates fresh incarnation IDs: the family retains one opaque reply alias plus
+the eight most recent former incarnation selectors, while browser-command fences still require
+the current incarnation. Restore preserves an alias that was actually saved; it does not infer a
+legacy reply address that an older build had already evicted from its bounded history. Ordinary prime results
 collect all its inboxes under one shared output budget, label repeated worker names by run, and
 acknowledge only messages actually offered. A wake returns its fresh incarnation ID.
 If late proof identifies a provisional prime as an existing worker, its accepted fleet is
