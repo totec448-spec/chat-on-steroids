@@ -198,7 +198,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8; global worker admission cap Off (`0`, configurable through 64). | Legacy absent enabled/allow-unattributed fields remain false; an absent global cap remains Off. Existing choices stay exact. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
-| Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill from already-published metadata. Weak or ambiguous matches select none; explicit `/id` or `/prompt id` always wins. |
+| Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Ambiguous or unnamed input selects none; explicit `/id` or `/prompt id` always wins. |
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
@@ -469,16 +469,22 @@ hook, watcher, or provider reconnect is introduced. The catalog refreshes on lis
 before opening preparation; provider-cached initialize instructions remain a snapshot.
 
 Optional `ui.autoSelectSkills` defaults off. When enabled, admission of an ordinary human-authored
-input with no explicit Skill directive scores only the already-published managed/imported catalog
-metadata plus bounded `agents/openai.yaml` policy. It never calls `listSkills()`/`listSkillLibrary()`
+input with no explicit Skill directive compares only the already-published managed/imported catalog
+identity metadata plus bounded `agents/openai.yaml` policy. It never calls `listSkills()`/`listSkillLibrary()`
 or reads every `SKILL.md` to make the routing decision; discovered repo/user/system/admin Skills
 remain explicit-only in this first slice because their descriptive metadata lives in `SKILL.md`.
-The matcher stems metadata words but treats common English/development name words as insufficient
-identity on their own. A distinctive name term or a complete multiword name must agree with a
-separate description term; repeating the same identity word in the description is not support.
-This precision-first rule may abstain even when the task would benefit from a Skill. The explicit
+The matcher uses only complete `id`, `name` or `display_name` phrases, case-folded with hyphens
+and whitespace treated as the same name separators. Canonically equivalent Unicode is normalized
+to NFC, but diacritics and other punctuation remain literal. Descriptions, partial identity words,
+stemming and semantic/domain overlap are not routing evidence. The sole naming alias is a complete
+leading `using X` identity invoked as `use X`, with the whole X suffix still contiguous; this is the
+maintainer-suggested `using-git-worktrees` → “use git worktrees” convention, not a general morphology
+rule. Therefore “migrate this Dagster pipeline to Airflow” intentionally does not name
+`migrating-dagster-to-airflow`; a literal full id/name/display-name invocation does. This
+precision-first rule may abstain even when the task would benefit from a Skill. The explicit
 picker/directive remains available rather than injecting a specialized Skill from generic wording.
-`allow_implicit_invocation=false`, invalid policy/config, weak relevance and close competing
+This matches literal name presence, not intent: it does not interpret negation or quoted examples.
+`allow_implicit_invocation=false`, invalid policy/config, no literal identity and multiple literal
 matches all fail to no selection. A routed choice is frozen in the durable input row as exact
 Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
 Retries/restarts reuse that record instead of rerouting. Prompt preparation reads only the chosen

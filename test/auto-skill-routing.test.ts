@@ -42,31 +42,31 @@ afterEach(async () => {
 
 it('keeps automatic Skill routing off unless the user enables it', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
-  const row = await enqueueInput(request('Review this source code change for correctness.'));
+  const row = await enqueueInput(request('Please use Code Review for this source change.'));
   expect(routedIds(row)).toBeUndefined();
 });
 
-it('freezes one strong unambiguous metadata match into the durable input owner', async () => {
+it('freezes one literal unambiguous metadata match into the durable input owner', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await enableAutoRouting();
-  const row = await enqueueInput(request('Review this source code change for correctness and maintainability.'));
+  const row = await enqueueInput(request('Please use Code Review for this source change.'));
   expect(getConfig().ui).toMatchObject({ autoSelectSkills: true });
   expect(routedIds(row)).toEqual(['code-review']);
   expect(row.autoSkills![0]!.revision).toMatch(/^[0-9a-f]{64}$/);
 });
 
-it('freezes an explicit none when metadata is ambiguous or has no strong match', async () => {
+it('freezes an explicit none when a literal name is ambiguous or no exact name is present', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
-  await install('source-review', 'Source Review', 'Review source code changes for correctness and maintainability.');
+  await install('source-review', 'Code Review', 'Review another source change for correctness and maintainability.');
   await enableAutoRouting();
-  expect(routedIds(await enqueueInput(request('Review this source code change for correctness.')))).toEqual([]);
+  expect(routedIds(await enqueueInput(request('Please use Code Review for this source change.')))).toEqual([]);
   expect(routedIds(await enqueueInput(request('Prepare a quarterly budget summary.')))).toEqual([]);
 });
 
 it('ignores metadata that forbids implicit invocation', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.', false);
   await enableAutoRouting();
-  expect(routedIds(await enqueueInput(request('Review this source code change for correctness.')))).toEqual([]);
+  expect(routedIds(await enqueueInput(request('Please use Code Review for this source change.')))).toEqual([]);
 });
 
 it('lets an explicit Skill directive override auto-routing for that turn', async () => {
@@ -81,13 +81,13 @@ it('lets an explicit Skill directive override auto-routing for that turn', async
 it('reuses the frozen routed set on exact retry even after the metadata catalog changes', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await enableAutoRouting();
-  const id = randomUUID(), input = request('Review this source code change for correctness and maintainability.', id);
+  const id = randomUUID(), input = request('Please use Code Review for this source change.', id);
   const first = await enqueueInput(input);
   expect(routedIds(first)).toEqual(['code-review']);
 
-  // A second equally relevant candidate would make a fresh routing decision ambiguous. Exact
+  // A second candidate with the same literal name would make a fresh routing decision ambiguous. Exact
   // input replay must return the durable owner's already-frozen decision instead of rerouting.
-  await install('source-review', 'Source Review', 'Review source code changes for correctness and maintainability.');
+  await install('source-review', 'Code Review', 'Review another source change for correctness and maintainability.');
   resetInputForTests();
   const replay = await enqueueInput(input);
   expect(routedIds(replay)).toEqual(['code-review']);
@@ -98,7 +98,7 @@ it('clears a frozen automatic selection on deliberate queued text edit instead o
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await enableAutoRouting();
   const session = await createSession({ title: 'Queued edit', conversationId: 'queued-edit-conversation' });
-  const row = await enqueueInput({ ...request('Review this source code change for correctness and maintainability.'),
+  const row = await enqueueInput({ ...request('Please use Code Review for this source change.'),
     sessionId: session.id, mode: 'after-turn' });
   expect(routedIds(row)).toEqual(['code-review']);
   expect(await editQueuedInput(row.id, 'Prepare the quarterly budget summary.')).toBe(true);
@@ -108,7 +108,7 @@ it('clears a frozen automatic selection on deliberate queued text edit instead o
 it('injects only the frozen auto-selected full Skill through the existing prompt path and preserves authored text', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await install('security-audit', 'Security Audit', 'Inspect software for security vulnerabilities and unsafe trust boundaries.');
-  const authored = 'Review this source code change for correctness and maintainability.';
+  const authored = 'Please use Code Review for this source change.';
   await enableAutoRouting();
   const routed = await enqueueInput(request(authored));
   const scope = { autoSkills: routed.autoSkills };
@@ -126,7 +126,7 @@ it('never combines frozen auto ids with an explicit Skill directive', async () =
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await install('security-audit', 'Security Audit', 'Inspect software for security vulnerabilities and unsafe trust boundaries.');
   await enableAutoRouting();
-  const routed = await enqueueInput(request('Review this source code change for correctness and maintainability.'));
+  const routed = await enqueueInput(request('Please use Code Review for this source change.'));
   const authored = '/security-audit\nReview this source code change for correctness.';
   const prompt = await prepareSkillFollowup(authored, authored, undefined, { autoSkills: routed.autoSkills });
   expect(prompt).toContain('FULL_SECURITY_AUDIT_BODY');
@@ -138,7 +138,7 @@ it('does not widen filesystem roots or capabilities when automatic routing is ev
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await enableAutoRouting();
   const before = structuredClone({ roots: getConfig().roots, capabilities: getConfig().capabilities, readOnly: getConfig().readOnly });
-  await enqueueInput(request('Review this source code change for correctness and maintainability.'));
+  await enqueueInput(request('Please use Code Review for this source change.'));
   expect({ roots: getConfig().roots, capabilities: getConfig().capabilities, readOnly: getConfig().readOnly }).toEqual(before);
 });
 
@@ -148,7 +148,7 @@ it('routes from the published metadata snapshot without rereading SKILL.md bodie
   // The imported metadata is already published. Make the body invalid for a fresh catalog scan;
   // routing must still use that snapshot and defer the selected body read until prompt preparation.
   await fs.writeFile(path.join(directory, 'skills', 'code-review', 'SKILL.md'), 'x'.repeat(140_000));
-  const row = await enqueueInput(request('Review this source code change for correctness and maintainability.'));
+  const row = await enqueueInput(request('Please use Code Review for this source change.'));
   expect(routedIds(row)).toEqual(['code-review']);
 });
 
@@ -156,7 +156,7 @@ it('keeps auto-routed opening preparation metadata-only and reads only the selec
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await install('security-audit', 'Security Audit', 'Inspect software for security vulnerabilities and unsafe trust boundaries.');
   await enableAutoRouting();
-  const row = await enqueueInput(request('Review this source code change for correctness and maintainability.'));
+  const row = await enqueueInput(request('Please use Code Review for this source change.'));
   expect(routedIds(row)).toEqual(['code-review']);
 
   // Break only the unselected body after its metadata was published. Auto prompt framing must
@@ -172,7 +172,7 @@ it('keeps auto-routed opening preparation metadata-only and reads only the selec
 it('fails closed if an auto-selected Skill body changes after metadata routing but before prompt preparation', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await enableAutoRouting();
-  const row = await enqueueInput(request('Review this source code change for correctness and maintainability.'));
+  const row = await enqueueInput(request('Please use Code Review for this source change.'));
   expect(routedIds(row)).toEqual(['code-review']);
   await fs.writeFile(path.join(directory, 'skills', 'code-review', 'SKILL.md'),
     '---\nname: Code Review\ndescription: Review source code changes for correctness and maintainability.\n---\n\nCHANGED_BODY_MUST_NOT_BE_INJECTED\n');

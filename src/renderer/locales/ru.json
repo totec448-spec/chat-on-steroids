@@ -1801,7 +1801,7 @@
   "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "Выберите модель и рассуждение по умолчанию для новых чатов и субагентов из того, что предлагает ваш аккаунт.",
   "Choose whether imported Skills can be matched to ordinary messages.": "Выберите, можно ли автоматически сопоставлять импортированные Skills с обычными сообщениями.",
   "Auto-select Skills": "Автоматически выбирать Skills",
-  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "Если по метаданным однозначно подходит один импортированный Skill, он добавляется к сообщению. Явный выбор Skill всегда имеет приоритет.",
+  "Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.": "Выбирать один импортированный Skill по точному имени в сообщении, а не по теме. Явный выбор Skill всегда имеет приоритет.",
   "Auto-selected Skill: /{0}": "Автоматически выбран Skill: /{0}",
   "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "Очистить всех воркеров? Работающие воркеры остановятся, а их сохранённые истории будут удалены навсегда. Их чаты останутся в ChatGPT.",
   "Quit": "Выйти",

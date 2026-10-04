@@ -1801,7 +1801,7 @@
   "Choose the default model and reasoning for new chats and sub-agents, from what your account offers.": "从你的账户提供的选项中，为新聊天和子智能体选择默认模型和推理强度。",
   "Choose whether imported Skills can be matched to ordinary messages.": "选择是否允许将已导入的 Skills 自动匹配到普通消息。",
   "Auto-select Skills": "自动选择 Skills",
-  "When one imported Skill is a clear metadata match, add it to that message. Explicit Skill choices always win.": "当且仅当一个已导入 Skill 在元数据上明确匹配时，将它加入该消息。显式选择的 Skill 始终优先。",
+  "Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.": "按消息中的准确名称匹配一个已导入 Skill，而不是根据主题。显式选择的 Skill 始终优先。",
   "Auto-selected Skill: /{0}": "已自动选择 Skill：/{0}",
   "Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.": "清除所有子智能体？正在运行的会停止，其保存的历史记录将被永久删除。它们的聊天仍保留在 ChatGPT 中。",
   "Quit": "退出",
