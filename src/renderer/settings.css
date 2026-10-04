@@ -67,6 +67,8 @@
 .settings-section-head p { max-width: 72ch; margin: 3px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
 .settings-section-head > .btn, .workspace-section-actions { flex: 0 0 auto; }
 .settings-section-head .btn { min-height: 34px; padding: 7px 9px; color: var(--ink); font-size: calc(11.5px * var(--text-scale, 1)); }
+/* The head color above outranks .btn.is-on; an on button keeps its inverted label (Read-only, #1039). */
+.settings-section-head .btn.is-on { color: var(--page); }
 .workspace-section-actions { display: flex; align-items: center; gap: 4px; }
 .workspace-section.drop-target .settings-surface { outline: 2px dashed var(--soft); outline-offset: -6px; background: var(--hover); }
 .workspace-activity #homeFeed { max-height: 248px; overflow: auto; }
