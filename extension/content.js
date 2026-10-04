@@ -10956,10 +10956,15 @@
    * that contains that tool call. The recorder's conservative generation state is the latter.
    */
   function revivalSubmitReady(target) {
+    if (!revivalReadyButForDraft(target)) return false;
+    return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
+  }
+
+  /** Everything revivalSubmitReady requires except an empty editor. */
+  function revivalReadyButForDraft(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
     if (generating || CLF_DOM.generating()) return false;
-    if (pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy)) return false;
-    return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
+    return !(pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy));
   }
 
   /**
@@ -10986,6 +10991,9 @@
       };
       const check = () => {
         if (attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return finish(false);
+        // #882: an earlier wake that ChatGPT restored as this chat's draft is the only thing in the
+        // way. Reclaim it once everything else is ready; the mutation it causes runs check again.
+        if (!revivalSubmitReady(target) && revivalReadyButForDraft(target)) CLF_DOM.clearRevivalResidue?.();
         if (!revivalSubmitReady(target) || flushingReadyBoundary) return;
         // Snapshot exactly what this already-finished turn left in page custody. Later observations
         // are allowed to exist independently; they must not turn this into an unbounded "queue must

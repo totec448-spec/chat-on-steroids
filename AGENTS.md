@@ -2691,6 +2691,12 @@ raising the user's worker cap is not a substitute for lifecycle correctness.
 most 16) beside the legacy single `revival`; the extension remembers each one and routes or opens
 them in one pass. Handing out only the oldest held every later wake behind a slow one until the
 revival deadline (#882). Redeem stays the one ownership boundary per wake.
+A wake still waits for an empty editor (`composerSubmitReady`), but ChatGPT keeps unsent editor
+text as the chat's draft and restores it when the chat opens again; a wake whose Send never
+landed then blocked every later wake into that chat until its deadline. While all other
+readiness holds, the page reclaims an editor whose whole text ends with the wake's own closing
+sentence (`clearRevivalResidue`, matching `planRevivalText`); anything added after it, an
+attachment or a busy page keeps the draft.
 
 Detached means browser attachment is missing, not necessarily that tool execution died. An
 exact call can prove the worker server-side alive; a new page can reattach it. During waking,
