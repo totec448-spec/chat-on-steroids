@@ -87,8 +87,10 @@ jobs:
       - name: Verify
         run: npm run verify:ci
         env:
-          # Only the slow Intel macOS runner retries a failed test; every other job stays strict.
-          COS_TEST_RETRY: ${{ matrix.platform == 'darwin' && matrix.arch == 'x64' && '2' || '0' }}
+          # The slow Intel macOS and Windows runners retry a failed test; the flaky reporter still names
+          # every retried test as a warning. Windows had no retry, so a known timing flake failed 3 of 8
+          # canaries on 2026-10-04 (plugins-manager, bridge, code-mode-mcp), each green in its PR's CI.
+          COS_TEST_RETRY: ${{ ((matrix.platform == 'darwin' && matrix.arch == 'x64') || matrix.platform == 'win32') && '2' || '0' }}
 
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
