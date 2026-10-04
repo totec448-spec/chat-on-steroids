@@ -9,6 +9,17 @@ function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
   const marker = `cos-input=${encodeURIComponent(entry.id)}`;
   return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
 }
+/**
+ * Connection setup, not the browser, stopped this send (#882 VM test, 2026-10-04: a fresh install
+ * said "Browser startup failed: Add a folder before connecting"). Its own prefix says what to do;
+ * retry accepts both, so the message still goes out once Setup is done.
+ */
+const SETUP_PREFIX = 'Message queued. Finish Setup to send: ';
+const BROWSER_PREFIX = 'Message queued. Browser startup failed: ';
+class SetupNotReady extends Error {}
+const startupError = (error: unknown): string =>
+  (error instanceof SetupNotReady ? SETUP_PREFIX : BROWSER_PREFIX) + (error as Error).message;
+
 async function ready(signal?: AbortSignal): Promise<void> {
   await connect();
   signal?.throwIfAborted();
@@ -25,7 +36,7 @@ async function ready(signal?: AbortSignal): Promise<void> {
       if (['starting-server', 'connecting-tunnel', 'offline'].includes(status.state)) return;
       clearTimeout(timer); unsubscribe(); signal?.removeEventListener('abort', abort);
       if (status.state === 'connected') resolve();
-      else reject(new Error(status.detail || 'Finish connection setup before sending.'));
+      else reject(new SetupNotReady(status.detail || 'Finish connection setup before sending.'));
     };
     unsubscribe = onStatusChange(inspect); inspect();
   });
@@ -57,8 +68,7 @@ async function startAcceptedInput(entry: InputEntry, controller: AbortController
     controller.signal.throwIfAborted();
     if (current?.state === 'queued') await deliver(current);
   } catch (error) {
-    if (!controller.signal.aborted) await noteInputStartupError(entry.id,
-      'Message queued. Browser startup failed: ' + (error as Error).message);
+    if (!controller.signal.aborted) await noteInputStartupError(entry.id, startupError(error));
   } finally {
     if (starting.get(entry.id) === controller) starting.delete(entry.id);
   }
@@ -88,7 +98,7 @@ export function stopInputStartup(): void {
 }
 export async function retryQueuedInputBrowser(id: string): Promise<InputEntry | null> {
   if (stopped || starting.has(id)) return null;
-  const eligible = (entry: InputEntry | undefined): entry is InputEntry => !!entry && entry.state === 'queued' && entry.purpose !== 'decision' && !!(entry.error?.startsWith('Message queued. Browser startup failed:') || entry.error?.startsWith('Local chat setup failed:'));
+  const eligible = (entry: InputEntry | undefined): entry is InputEntry => !!entry && entry.state === 'queued' && entry.purpose !== 'decision' && !!(entry.error?.startsWith(BROWSER_PREFIX) || entry.error?.startsWith(SETUP_PREFIX) || entry.error?.startsWith('Local chat setup failed:'));
   if (!eligible((await listInputs()).find(entry => entry.id === id)) || stopped || starting.has(id)) return null;
   const controller = new AbortController(); starting.set(id, controller);
   try {
@@ -100,7 +110,7 @@ export async function retryQueuedInputBrowser(id: string): Promise<InputEntry | 
     return entry?.state === 'queued' ? await deliver(entry, true) : null;
   } catch (error) {
     if (controller.signal.aborted) return null;
-    return await noteInputStartupError(id, 'Message queued. Browser startup failed: ' + (error as Error).message);
+    return await noteInputStartupError(id, startupError(error));
   } finally { if (starting.get(id) === controller) starting.delete(id); }
 }
 export function resetInputStartupForTests(): void { stopInputStartup(); stopped = false; resetBrowserStartupForTests(); }
