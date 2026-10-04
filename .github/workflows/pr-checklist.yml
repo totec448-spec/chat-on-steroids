@@ -30,10 +30,30 @@ jobs:
       - name: Check the description and files
         run: node scripts/pr-check.mjs
 
+  fail-first-platform:
+    name: Select fail-first runner
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.platform.outputs.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Select the OS for the changed tests
+        id: platform
+        run: node scripts/pr-fail-first.mjs --runner >> "$GITHUB_OUTPUT"
+
   fail-first:
     name: Fail-first test
     if: github.actor != 'dependabot[bot]'
-    runs-on: ubuntu-24.04
+    needs: fail-first-platform
+    # Keep the computed preference inside two fixed hosted-runner choices.
+    runs-on: ${{ needs.fail-first-platform.outputs.runner == 'windows-2025' && 'windows-2025' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -37,16 +37,30 @@ export function planFailFirst(nameStatus) {
   return { tests, restore, remove };
 }
 
+/**
+ * Select an OS that can execute the changed native tests rather than skip their proof.
+ * @param {string} nameStatus
+ */
+export function runnerForFailFirst(nameStatus) {
+  return planFailFirst(nameStatus).tests.some(file => /^test\/(?:windows-[^/]+|computer(?:-[^/]+)?)\.test\.ts$/.test(file))
+    ? 'windows-2025' : 'ubuntu-24.04';
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? '', 'utf8'));
   const pr = event.pull_request;
   if (!pr) { console.log('Not a pull request; nothing to prove.'); process.exit(0); }
+  const base = process.env.PR_BASE ?? `origin/${pr.base.ref}`;
+  const nameStatus = execFileSync('git', ['diff', '--name-status', '--find-renames', `${base}...HEAD`], { encoding: 'utf8' });
+  if (process.argv.includes('--runner')) {
+    console.log(`runner=${runnerForFailFirst(nameStatus)}`);
+    process.exit(0);
+  }
   if (OPT_OUT.test(String(pr.body ?? '').replace(/<!--[\s\S]*?-->/g, ''))) {
     console.log('The description says this PR has no failing-first test ("Fail-first: n/a"). Nothing to prove.');
     process.exit(0);
   }
-  const base = process.env.PR_BASE ?? `origin/${pr.base.ref}`;
-  const plan = planFailFirst(execFileSync('git', ['diff', '--name-status', '--find-renames', `${base}...HEAD`], { encoding: 'utf8' }));
+  const plan = planFailFirst(nameStatus);
   if (!plan.tests.length || !(plan.restore.length + plan.remove.length)) {
     console.log('This PR does not change both code and tests, so there is no failing-first claim to prove.');
     process.exit(0);
