@@ -39,16 +39,29 @@ function tokens(value: string): string[] {
     .filter(token => token.length >= 3 && !STOP.has(token)))];
 }
 
+// These words still help describe a task, but alone cannot identify a specialized Skill.
+// Normalize this vocabulary through the same stemmer so "testing" cannot evade "test".
+const COMMON_IDENTITY = new Set(tokens(
+  'add analyze analyzing build change check checking code create creating data debug debugging ' +
+  'design develop development execute executing export feature file fix function git implement ' +
+  'implementation input inspect manage message output plan planning plugin process profile profiling ' +
+  'project read receive receiving refactor request review script source state store system systematic ' +
+  'table test testing tool update user web workflow write'
+));
+
 function score(text: Set<string>, candidate: SkillRoutingMetadata): { score: number; strong: boolean } {
-  const identity = tokens([candidate.id.replace(/[-_.]+/g, ' '), candidate.name, candidate.displayName ?? ''].join(' '));
+  const names = [candidate.id, candidate.name, candidate.displayName ?? ''].map(tokens);
+  const identity = [...new Set(names.flat())];
   const descriptive = tokens([candidate.description, candidate.shortDescription ?? ''].join(' '));
   const identityOverlap = identity.filter(token => text.has(token));
-  const descriptiveOverlap = descriptive.filter(token => text.has(token));
+  // Repeating the same name word in the description is not a second piece of evidence.
+  const descriptiveOverlap = descriptive.filter(token => text.has(token) && !identity.includes(token));
   const score = identityOverlap.length * 3 + descriptiveOverlap.length;
-  const exactIdentity = identity.length > 0 && identityOverlap.length === identity.length;
-  // Description words alone never route a Skill. A complete name/id match is already explicit
-  // enough; a partial identity match also needs supporting overlap from the description.
-  return { score, strong: identityOverlap.length > 0 && (exactIdentity || descriptiveOverlap.length > 0) };
+  const distinctiveIdentity = identityOverlap.some(token => !COMMON_IDENTITY.has(token));
+  const fullName = names.some(name => name.length > 1 && name.every(token => text.has(token)));
+  // A generic word such as "test" must not select testing-dags. Prefer no injection unless a
+  // distinctive identity (or a complete multiword name) AND separate description support agree.
+  return { score, strong: (distinctiveIdentity || fullName) && descriptiveOverlap.length > 0 };
 }
 
 /** Pure metadata-only routing. A close second candidate makes the result intentionally empty. */
