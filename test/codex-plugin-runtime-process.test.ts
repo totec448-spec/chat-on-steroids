@@ -74,12 +74,12 @@ describe.runIf(process.platform === 'win32')('Windows Codex runtime launch bound
   });
 
   it('executes the real production launch path from Electron with an inert npm fixture', async () => {
-    // No installed app or Codex service is started. Strip types from the two production modules
+    // No installed app or Codex service is started. Strip types from the production modules
     // into a private fixture, then exercise their real filesystem and child_process boundaries.
     const runtime = path.join(directory, 'runtime');
     await mkdir(runtime);
     await writeFile(path.join(runtime, 'package.json'), '{"type":"module"}');
-    for (const name of ['env', 'codex-plugin-runtime']) {
+    for (const name of ['env', 'ripgrep', 'exec', 'codex-plugin-runtime']) {
       const source = await readFile(new URL(`../src/main/${name}.ts`, import.meta.url), 'utf8');
       await writeFile(path.join(runtime, `${name}.js`), stripTypeScriptTypes(source));
     }
