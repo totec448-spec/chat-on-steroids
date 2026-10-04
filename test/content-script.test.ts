@@ -15265,6 +15265,33 @@ describe('the fresh chat the app opened', () => {
       event: expect.objectContaining({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) })] : []);
   });
 
+  it.each(['sends', 'hangs choosing the model'])('reports each bootstrap step by name only (%s, #882)', async outcome => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '24242424-3535-4646-8787-909090909090';
+    live = await harness('https://chatgpt.com/?clf=cmd-steps', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'stepped-worker-user', 'Private worker task', { sent: false });
+      });
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = outcome === 'sends' ? vi.fn(async () => true) : vi.fn(() => new Promise(() => undefined));
+    release({ ok: true, command: { id: 'cmd-steps', type: 'worker', text: 'Private worker task', agent: 'worker-1', model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
+    await settle(400);
+    const steps = live.sent.filter(message => message.type === 'command_step');
+    expect(steps.map(message => message.step)).toEqual(outcome === 'sends'
+      ? ['composer', 'model', 'composer-after-model', 'inserting', 'sending']
+      : ['composer', 'model']);
+    for (const message of steps) {
+      expect(message.id).toBe('cmd-steps');
+      expect(JSON.stringify(message)).not.toContain('Private worker task');
+    }
+  });
+
   it('reacquires a home composer replaced after model selection before placing a worker bootstrap', async () => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
