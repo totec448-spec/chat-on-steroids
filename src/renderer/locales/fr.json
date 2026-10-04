@@ -1844,5 +1844,7 @@
   "Loading edit…": "Chargement de la modification…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "Aperçu limité à 600 lignes. Ouvrez Révision pour voir la modification complète.",
   "{0} unchanged lines": "{0} lignes inchangées",
-  "More edited files are available in the recording.": "D’autres fichiers modifiés sont disponibles dans l’enregistrement."
+  "More edited files are available in the recording.": "D’autres fichiers modifiés sont disponibles dans l’enregistrement.",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Le plugin est dans votre ChatGPT. Il s’exécute la première fois qu’un chat en a besoin.",
+  "Added in ChatGPT. Its tools have not run yet.": "Ajouté dans ChatGPT. Ses outils n’ont pas encore servi."
 }

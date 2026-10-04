@@ -274,6 +274,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Browser repair | `bridge.ts` process-memory episodes | Re-earn from live evidence; never restore an old reload token as action authority. |
 | Catalog/usage | Saved successful `chat-models`; derived `usage-cache`; live usage snapshot | Catalog is observation, not a send receipt; estimates are not provider billing. |
 | Connector refresh | `plugin-refresh.ts` / `state/plugin-refresh.json` | Exact installed app id + schema fingerprint, claimed before Refresh, verified after. |
+| Connector proof | `connector-proof.ts` / `connector-proof.json` | Per surface and tunnel: newest request, tool call and installed evidence from earlier runs. Setup reads it as "created in ChatGPT"; it is never call authority. A changed tunnel id has no proof. |
 | Control API endpoint | `control-api.ts` / `control-api/{token,endpoint.json}` | Per launch, only while the listener runs. Token written before the endpoint; endpoint removed first on stop. A crash can leave both behind, so a caller must still reach the port. |
 
 ## 5. Startup, configuration and shutdown
@@ -3539,6 +3540,11 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+Setup counts a connector as created in ChatGPT from this run's requests or from
+`connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
+enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
+Chat On Steroids Core; POST `/core-plugin` with its `asdk_app_` id). `SurfaceStatus.proof`
+carries it; cloudflared/manual tunnels change address per run and keep none.
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
 waking browser work; ordinary status polling and a closed helper do not grant another attempt.

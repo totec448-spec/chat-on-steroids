@@ -17,6 +17,7 @@
  * protected-resource metadata request properly and never emits a non-JSON body.
  */
 
+import { noteConnectorUse } from '../connector-proof.js';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createInboundTiming, formatInboundTiming, requestIdFromHeader, withInboundRequestId } from './inbound.js';
 import http from 'node:http';
@@ -410,6 +411,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     if (!selfTest && !tunnelProbe) {
       requestSeenAt = Date.now();
       surfaceRequestAt.set(route.id, requestSeenAt);
+      noteConnectorUse(route.id, 'request', requestSeenAt);
     }
 
     const declaredHeader = req.headers['content-length'];

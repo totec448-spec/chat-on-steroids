@@ -8,6 +8,8 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
 import path from 'node:path';
 import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
+import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
+import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
@@ -358,6 +360,7 @@ void app.whenReady().then(async () => {
     snapshotLogOnCrash(`${origin}: ${error.stack ?? error.message}`);
   });
   initConfigPath(userData);
+  initConnectorProofPath(userData);
   initSecretsPath(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
@@ -379,6 +382,9 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  await loadConnectorProof();
+  // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
+  for (const surface of await enrolledPluginSurfaces()) notePluginInstalled(surface);
   await pluginManager.initialize(userData);
   if (windowActivation.isDisabled()) return;
   try { applyLoginStartup(app, getConfig().ui.startAtLogin === true); }

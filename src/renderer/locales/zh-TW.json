@@ -1844,5 +1844,7 @@
   "Loading edit…": "正在載入編輯…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "預覽限制為600行。開啟審查查看完整編輯。",
   "{0} unchanged lines": "{0} 行未變更",
-  "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。"
+  "More edited files are available in the recording.": "更多已編輯檔案可在記錄中查看。",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "外掛程式已在你的 ChatGPT 中。聊天第一次需要時就會執行。",
+  "Added in ChatGPT. Its tools have not run yet.": "已在 ChatGPT 中新增。其工具尚未執行。"
 }

@@ -1,4 +1,5 @@
 import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
+import { noteConnectorUse } from '../connector-proof.js';
 import { pluginManager } from '../plugins/manager.js';
 import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 /**
@@ -691,6 +692,7 @@ async function dispatchTracked(
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
   surfaceToolCallAt.set(surface, Date.now());
+  noteConnectorUse(surface, 'tool');
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
   const allowUnattributed = context.allowUnattributed === true;

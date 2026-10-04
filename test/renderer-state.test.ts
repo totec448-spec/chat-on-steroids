@@ -1363,6 +1363,39 @@ it('highlights missing required setup fields while respecting drafts and a store
   expect(mounted.calls).toEqual([]);
 });
 
+it('counts a plugin ChatGPT used or listed in an earlier run, so a restart does not reopen its step', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  const core = {
+    id: 'core', connectorName: 'Core', description: '', cardSummary: '', optional: false,
+    available: true, localUrl: null, publicUrl: null, tools: ['read'], state: 'live', detail: '',
+    lastRequestAt: null, lastToolCallAt: null, proof: null as null | { requestAt: number | null; toolCallAt: number | null; installedAt?: number | null }
+  };
+  // Just restarted: connected, but ChatGPT has not called again yet in this run.
+  const restarted = structuredClone(mounted.state);
+  restarted.status.state = 'connected';
+  restarted.status.lastRequestAt = null;
+  restarted.bridge.present = true;
+  restarted.status.surfaces = [core] as typeof restarted.status.surfaces;
+  mounted.push(restarted);
+  const chatgpt = doc.querySelector('[data-step="chatgpt"]')!;
+  expect(chatgpt.classList.contains('is-done')).toBe(false);
+
+  const yesterday = Date.now() - 86_400_000;
+  const proven = structuredClone(restarted);
+  proven.status.surfaces = [{ ...core, proof: { requestAt: yesterday, toolCallAt: yesterday } }] as typeof restarted.status.surfaces;
+  mounted.push(proven);
+  expect(chatgpt.classList.contains('is-done')).toBe(true);
+  expect(doc.getElementById('wizChatgpt')!.textContent).toMatch(/whole chain works/);
+
+  // ChatGPT listing the plugin is enough: Setup does not ask for a test message.
+  const listed = structuredClone(restarted);
+  listed.status.surfaces = [{ ...core, proof: { requestAt: null, toolCallAt: null, installedAt: yesterday } }] as typeof restarted.status.surfaces;
+  mounted.push(listed);
+  expect(chatgpt.classList.contains('is-done')).toBe(true);
+  expect(doc.getElementById('wizChatgpt')!.textContent).toMatch(/plugin is in your ChatGPT/);
+});
+
 it('keeps folder access discoverable after setup and navigates without granting access', async () => {
   const addRoot = vi.fn();
   const mounted = await mountChat({ hasApiKey: true }, [], { addRoot });

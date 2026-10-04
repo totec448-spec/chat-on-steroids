@@ -1844,5 +1844,7 @@
   "Loading edit…": "Düzenleme yükleniyor…",
   "Preview limited to 600 lines. Open Review for the complete edit.": "Önizleme 600 satırla sınırlıdır. Tam düzenleme için İnceleme bölümünü açın.",
   "{0} unchanged lines": "{0} değişmeyen satır",
-  "More edited files are available in the recording.": "Kaydı inceleyerek diğer düzenlenen dosyalara ulaşabilirsiniz."
+  "More edited files are available in the recording.": "Kaydı inceleyerek diğer düzenlenen dosyalara ulaşabilirsiniz.",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Eklenti ChatGPT'nizde. Bir sohbet ilk kez ihtiyaç duyduğunda çalışır.",
+  "Added in ChatGPT. Its tools have not run yet.": "ChatGPT'ye eklendi. Araçları henüz çalışmadı."
 }
