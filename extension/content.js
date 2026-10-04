@@ -3429,16 +3429,21 @@
     if (!Array.isArray(raw)) return null;
     const out = [];
     const indexes = new Set();
-    for (const entry of raw.slice(0, 64)) {
+    // One budget for the whole reply, as the app applies it again: see MAX_REFERENCES_CHARS.
+    let budget = 32000;
+    for (const entry of raw.slice(0, 32)) {
       if (!entry || typeof entry !== 'object' || !Number.isInteger(entry.index) || entry.index < 0 || entry.index > 9999) continue;
       if (indexes.has(entry.index) || !Array.isArray(entry.sources)) continue;
       const sources = [];
-      for (const source of entry.sources.slice(0, 12)) {
+      for (const source of entry.sources.slice(0, 8)) {
         const url = source && typeof source.url === 'string' && source.url.length <= 2000 && /^https?:\/\/\S+$/i.test(source.url) ? source.url : null;
         if (!url) continue;
         const title = cap(source.title, 300) || url;
         const name = cap(source.source, 80);
         const snippet = cap(source.snippet, 300);
+        const size = title.length + url.length + (name ? name.length : 0) + (snippet ? snippet.length : 0);
+        if (size > budget) break;
+        budget -= size;
         const date = typeof source.date === 'number' && Number.isFinite(source.date) && source.date > 0 && source.date < 1e13 ? Math.round(source.date) : 0;
         sources.push({ title, url, ...(name ? { source: name } : {}), ...(date ? { date } : {}), ...(snippet ? { snippet } : {}) });
       }
@@ -3569,6 +3574,7 @@
         typeof entry.renderedHtml === 'string' && entry.renderedHtml.length <= 120_000 ? entry.renderedHtml : '';
       if (!rawText && !renderedHtml && !attachments.length &&
           !(entry.role === 'assistant' && entry.rawMessageId && entry.rawMessageId === raw.endMessageId)) continue;
+      const references = entry.role === 'assistant' ? readReferences(entry.references) : null;
       const message = {
         messageId,
         rawMessageId: cap(entry.rawMessageId, 200),
@@ -3584,7 +3590,7 @@
             : null,
         ...(entry.role === 'assistant' && typeof entry.resolvedModel === 'string' &&
           /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(entry.resolvedModel) ? { resolvedModel: entry.resolvedModel } : {}),
-        ...(entry.role === 'assistant' && readReferences(entry.references) ? { references: readReferences(entry.references) } : {}),
+        ...(references ? { references } : {}),
         rawText,
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
@@ -6568,7 +6574,10 @@
         conversationId,
         since,
         // Initial/loading state is unknown; only a completed scan or repair can report health.
-        fiber: fiberPresent === null ? undefined : !fiberPresent ? 'absent' : fiberTurns.size === 0 ? 'empty' : 'ok'
+        fiber: fiberPresent === null ? undefined : !fiberPresent ? 'absent' : fiberTurns.size === 0 ? 'empty' : 'ok',
+        // This document's own open turn, which it closes itself on end_turn or after ten
+        // minutes without progress. Keeps a long-thinking worker from being slept as silent.
+        generating
       });
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
@@ -7882,6 +7891,16 @@
     return reply.status === 0 && reply.error !== 'app_not_found';
   }
 
+  /** Keep the existing opening retry owner, but honor a provider's structured Retry-After. */
+  function openRetryWait(reply) {
+    const failure = (reply && reply.data) || reply || {};
+    const retryAfterMs = failure.retryAfterMs;
+    if (typeof retryAfterMs !== 'number' || !Number.isFinite(retryAfterMs)) return GOAL_RETRY_MS;
+    // A retryable Goal opening is still cancellable by navigation/settings while it waits. Bound
+    // one provider-directed pause to an hour so malformed metadata cannot strand the document.
+    return Math.max(GOAL_RETRY_MS, Math.min(GOAL_OPEN_RETRY_CAP_MS, Math.floor(retryAfterMs)));
+  }
+
   async function openWithObjective(goal, mode) {
     const openingEpoch = epoch;
     pendingObjective = goal;
@@ -7917,8 +7936,9 @@
       // only thing that knows which instruction the opening message is being written under.
       reply = await ask({ type: 'goal_open', text: goal, mode: pendingObjectiveMode });
       if (!current() || (reply && reply.ok === true) || !openRetryable(reply)) break;
+      goalRetryWaitMs = openRetryWait(reply);
       setGoalPhase('retrying', replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer'));
-      await sleep(GOAL_RETRY_MS);
+      await sleep(goalRetryWaitMs);
       if (!current()) break;
       setGoalPhase('requesting');
     }
@@ -10036,6 +10056,7 @@
    */
   const GOAL_RETRY_MS = 15_000;
   const GOAL_RETRY_CAP_MS = 4 * 60_000;
+  const GOAL_OPEN_RETRY_CAP_MS = 60 * 60_000;
   const goalRetryWait = () => Math.min(GOAL_RETRY_CAP_MS, GOAL_RETRY_MS * 2 ** goalRetries);
 
   /** The turn endings worth writing a next message about. See noteGoalTurn for the rest. */
@@ -10935,10 +10956,15 @@
    * that contains that tool call. The recorder's conservative generation state is the latter.
    */
   function revivalSubmitReady(target) {
+    if (!revivalReadyButForDraft(target)) return false;
+    return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
+  }
+
+  /** Everything revivalSubmitReady requires except an empty editor. */
+  function revivalReadyButForDraft(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
     if (generating || CLF_DOM.generating()) return false;
-    if (pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy)) return false;
-    return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
+    return !(pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy));
   }
 
   /**
@@ -10965,6 +10991,9 @@
       };
       const check = () => {
         if (attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return finish(false);
+        // #882: an earlier wake that ChatGPT restored as this chat's draft is the only thing in the
+        // way. Reclaim it once everything else is ready; the mutation it causes runs check again.
+        if (!revivalSubmitReady(target) && revivalReadyButForDraft(target)) CLF_DOM.clearRevivalResidue?.();
         if (!revivalSubmitReady(target) || flushingReadyBoundary) return;
         // Snapshot exactly what this already-finished turn left in page custody. Later observations
         // are allowed to exist independently; they must not turn this into an unbounded "queue must
@@ -11049,7 +11078,7 @@
   let commandJournalGate = false;
 
   /**
-   * Waits for ChatGPT to expose a connected composer without putting bootstrap delivery
+   * Waits for ChatGPT to expose a connected, writable composer without putting bootstrap delivery
    * behind a chain of timer samples.
    *
    * The old readiness gate required `document.readyState === 'complete'` four times in a
@@ -11063,7 +11092,7 @@
   function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
     if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
-    if (current && current.isConnected) return Promise.resolve(current);
+    if (current && current.isConnected && CLF_DOM.composerWritable()) return Promise.resolve(current);
     return new Promise((resolve) => {
       let timer = null;
       let observer = null;
@@ -11075,10 +11104,19 @@
       const check = () => {
         if (!stillCurrent()) return finish(null);
         const composer = CLF_DOM.composer();
-        if (composer && composer.isConnected) finish(composer);
+        if (composer && composer.isConnected && CLF_DOM.composerWritable()) finish(composer);
       };
       observer = new MutationObserver(check);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+          'class', 'style', 'hidden', 'aria-hidden', 'inert',
+          'contenteditable', 'aria-disabled', 'role',
+          'data-chatgpt-composer', 'data-composer-markdown'
+        ]
+      });
       timer = setTimeout(() => finish(null), timeoutMs);
       // Close the tiny race between the first lookup and installing the observer.
       check();
@@ -11232,6 +11270,11 @@
       reportClaim(false);
       return;
     }
+    const commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
+    const commandAlive = () => commandExpiresAt === null || Date.now() < commandExpiresAt;
+    const commandWaitMs = (fallbackMs, reserveMs = 0) => commandExpiresAt === null
+      ? fallbackMs
+      : Math.max(1, commandExpiresAt - Date.now() - reserveMs);
 
     // `/commands/redeem` persists RUN_ID as the command owner before returning `boot`. This is
     // the exact boundary the service worker needs before it may close the app-opened fallback:
@@ -11316,7 +11359,7 @@
     // the marker still names this command, and ChatGPT still has not assigned/opened a chat.
     // A command handed over by the service worker has no marker in this tab's URL to check;
     // the conversation fence above is the stronger half of the same proof and applies to it.
-    const stillOnTarget = () => alive && epoch === sendEpoch && (!fromUrl || markerId() === id) && onTarget();
+    const stillOnTarget = () => commandAlive() && alive && epoch === sendEpoch && (!fromUrl || markerId() === id) && onTarget();
     const failIfRetargeted = async () => {
       if (stillOnTarget()) return false;
       await fail(
@@ -11355,7 +11398,7 @@
     // transient unmount as a failed bootstrap: reacquire the editing host under the
     // same route/command fence before inserting authored text. This is deliberately
     // after selection, because the pre-selection composer is no longer authoritative.
-    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(12_000, stillOnTarget))) {
+    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget))) {
       if (await failIfRetargeted()) return;
       return void (await fail(t(
         'content_bootstrap_composer_unavailable',
@@ -11413,7 +11456,8 @@
         insertionFailure ? ` (${insertionFailure})` : ''
       )));
     }
-    const sendingBootstrap = submittedSendLifetime(target);
+    const submittedLifetime = submittedSendLifetime(target);
+    const sendingBootstrap = () => commandAlive() && submittedLifetime();
     // Stop/composer-clear may acknowledge acceptance before the authored row mounts.
     // Keep the original draft lease through that receipt, exactly as desktop delivery does;
     // identical text alone must never erase a later trusted edit or a replacement editor.
@@ -11533,8 +11577,11 @@
       if (attempt && boot.type === 'worker') attempt.phase = 'dispatching';
       return true;
     };
+    // Why Send ended without acceptance (#882): one short code from CLF_DOM.send, so a failed worker
+    // start or wake says which step it reached instead of only that it failed.
+    let sendRefusal = null;
     if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, authorizeBootstrapSend, null,
-                                  matchesSubmittedBootstrap))) {
+                                  matchesSubmittedBootstrap, null, why => { sendRefusal = why; }))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -11546,10 +11593,8 @@
       // The draft is a separate matter: left in the box it read as a message the user still had
       // to send (#864). Clear only our own unchanged text; anything the user typed stays.
       await bootstrapDraft.clear();
-      return void (await fail(t(
-        'content_bootstrap_send_not_accepted',
-        'ChatGPT did not accept the bootstrap send'
-      )));
+      const notAccepted = t('content_bootstrap_send_not_accepted', 'ChatGPT did not accept the bootstrap send');
+      return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted));
     }
     agent = boot.agent || null;
     agentCommandId = agent && typeof boot.id === 'string' ? boot.id : null;
@@ -11590,7 +11635,7 @@
     // The route and exact submitted user row must agree for workers as for resumes;
     // a missing receipt is still ambiguous and cannot report a successful binding.
     const found = await waitPageView(bootstrapConversation,
-      () => !attempt?.cancelled && sendingBootstrap(), 40000);
+      () => !attempt?.cancelled && sendingBootstrap(), Math.min(40000, commandWaitMs(40000, 2_000)));
     if (!found || !sendingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
     const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });

@@ -99,6 +99,42 @@ describe('managed Skills store', () => {
     });
   });
 
+  it.each(['>-', '|', '>+', '|-'])('publishes bounded YAML %s descriptions instead of body fallback', async scalar => {
+    const text = [
+      '\uFEFF---',
+      'name: Code Review',
+      `description: ${scalar}`,
+      '  Review source code',
+      '  for correctness and maintainability.',
+      '...',
+      '# A different body title',
+      '',
+      'BODY_ONLY_MUST_NOT_REPLACE_METADATA'
+    ].join('\r\n');
+    const source = await sourceFile('code-review.md', text);
+    const summary = await importSkillFile(source);
+    expect(summary).toMatchObject({
+      id: 'code-review', name: 'Code Review',
+      description: 'Review source code for correctness and maintainability.'
+    });
+    expect(skillCatalogInstructions()).toContain(JSON.stringify(summary));
+    expect(skillCatalogInstructions()).not.toContain('BODY_ONLY_MUST_NOT_REPLACE_METADATA');
+    // Rebuilding the published catalog uses the same parsed metadata. The text decoder
+    // already strips a BOM; the stored source bytes still retain it and the original CRLF.
+    await initSkillsPath(userData);
+    expect(await listSkills()).toEqual([summary]);
+    expect((await readSkill(summary.id)).text).toBe(text.replace(/^\uFEFF/, ''));
+    expect(await fs.readFile(path.join(userData, 'skills', summary.id, 'SKILL.md'), 'utf8')).toBe(text);
+  });
+
+  it('keeps legacy fallback for invalid YAML rather than evaluating tags or adopting duplicate values', async () => {
+    const source = await sourceFile('invalid.md', [
+      '---', 'name: First', 'name: Second', 'description: !!js/function value', '---',
+      '# Legacy title', '', 'Safe fallback prose.'
+    ].join('\n'));
+    expect(await importSkillFile(source)).toMatchObject({ name: 'Legacy title', description: 'Safe fallback prose.' });
+  });
+
   it('derives a stable ID from a plain text filename and refuses duplicate publication', async () => {
     const one = await sourceFile('My useful skill.md', 'Plain instructions without a heading.\nContinue here.');
     const two = await sourceFile('my-useful-skill.md', '# Replacement\n\nMust not replace the first file.');

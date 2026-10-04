@@ -39,6 +39,11 @@ app.whenReady().then(async () => {
     if (!passed) console.error(await js(`({dock:document.getElementById('composerDock').getBoundingClientRect().toJSON(),children:[...document.querySelector('.composer-dock-body').children].map(e=>({id:e.id,hidden:e.hidden,height:e.getBoundingClientRect().height,text:e.textContent})),planHidden:document.getElementById('agentPlan').hidden,goalHidden:document.getElementById('activeGoalRow').hidden,queued:document.querySelectorAll('#finishQueue .queued-input').length,context:getComputedStyle(document.getElementById('contextMeterInfo')).display,focus:document.activeElement.id})`));
     assert.equal(passed, true, name); checks.push(name);
   };
+  // A fixture scenario reaches the renderer through its asynchronous session reload. Poll for
+  // the expected state instead of sleeping a fixed time, which lost that race on slow runners.
+  const until = async (source, timeout = 5000) => {
+    for (const end = Date.now() + timeout; Date.now() < end && !(await js(source));) await pause(100);
+  };
   const click = async selector => { await js(`document.querySelector(${JSON.stringify(selector)}).click()`); await pause(200); };
   const type = async text => { await js(`(() => { const input = document.getElementById('chatInput'); input.value=${JSON.stringify(text)}; input.focus(); input.dispatchEvent(new Event('input', {bubbles:true})); })()`); await pause(260); };
   const capture = async name => { await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
@@ -167,7 +172,7 @@ app.whenReady().then(async () => {
   await click('#createPlan');
   await check('Plan toggles native send behavior', `document.getElementById('createPlan').getAttribute('aria-pressed')==='true'&&document.getElementById('chatSend').getAttribute('aria-label')==='Generate plan'`);
   await click('#createPlan');
-  await js(`composerFixture.scenario('queue')`); await pause(650);
+  await js(`composerFixture.scenario('queue')`); await until(`!document.getElementById('agentPlan').hidden&&!document.getElementById('activeGoalRow').hidden&&document.querySelectorAll('#finishQueue .queued-input').length===1`);
   await check('Plan, Goal and queue coexist', `!document.getElementById('agentPlan').hidden&&!document.getElementById('activeGoalRow').hidden&&document.querySelectorAll('#finishQueue .queued-input').length===1`);
   await capture('dock');
   await js(`composerFixture.scenario('complete')`);
@@ -176,23 +181,29 @@ app.whenReady().then(async () => {
     if (await js(`document.getElementById('agentPlan').hidden`)) break;
   }
   await check('Completion removes plan while preserving queue and Goal', `document.getElementById('agentPlan').hidden&&!document.getElementById('activeGoalRow').hidden&&document.querySelectorAll('#finishQueue .queued-input').length===1`);
-  await js(`composerFixture.scenario('empty')`); await pause(1000);
+  await js(`composerFixture.scenario('empty')`); await until(`document.getElementById('composerDock').getBoundingClientRect().height===0`);
   await check('Empty dock leaves no strip', `document.getElementById('composerDock').getBoundingClientRect().height===0`);
-  await js(`composerFixture.scenario('hold')`); await pause(500);
+  await js(`composerFixture.scenario('hold')`); await until(`document.getElementById('chatSend').dataset.action==='stop'`);
   await check('Stop is available during finish hold', `document.getElementById('chatSend').dataset.action==='stop'`);
   await click('#chatSend'); await pause(350);
   await check('Stop reaches native controller', `composerFixture.controls.activeTurnId===null`);
   await js(`composerFixture.scenario('empty')`); await pause(400);
   await click('#rightDockToggle'); await pause(300);
   await check('Composer controls fit with the right work panel open', `(()=>{const composer=document.getElementById('composer').getBoundingClientRect();const mode=document.getElementById('createPlan').getBoundingClientRect(),context=document.getElementById('contextMeter').getBoundingClientRect(),send=document.getElementById('chatSend').getBoundingClientRect();return mode.right<=context.left||mode.bottom<=context.top})()`);
+  win.setContentSize(900, 960); await pause(250);
+  await check('Narrow chat column with the right work panel keeps one action row', `(()=>{const nodes=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>document.getElementById(id).getBoundingClientRect()),card=document.querySelector('.card.is-session').getBoundingClientRect();const centers=nodes.map(r=>r.top+r.height/2);return card.width<520&&nodes.every(r=>r.left>=card.left&&r.right<=card.right)&&nodes.every((r,i)=>nodes.every((s,j)=>i===j||r.right<=s.left+.5||s.right<=r.left+.5||r.bottom<=s.top+.5||s.bottom<=r.top+.5))&&Math.max(...centers)-Math.min(...centers)<1})()`);
+  await check('Narrow work-dock column compacts labels by column width', `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
+  await capture('dock-900');
   await click('#rightDockToggle');
-  for (const width of [1440, 900]) {
+  for (const width of [1440, 900, 700, 640]) {
     win.setContentSize(width, 960); await pause(250);
     await click('#newChat'); await type('');
     const titleTop = await js(`document.getElementById('timelineEmpty').getBoundingClientRect().top`);
     await type(Array.from({length:12}, (_, i) => `Draft line ${i+1}`).join('\n'));
     await check('Welcome remains fixed while draft grows at '+width, `Math.abs(document.getElementById('timelineEmpty').getBoundingClientRect().top-${titleTop})<1`);
     await check('Toolbar fits at '+width, `(()=>{const nodes=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>document.getElementById(id).getBoundingClientRect());return nodes.every(r=>r.left>=0&&r.right<=innerWidth)&&nodes.every((r,i)=>nodes.every((s,j)=>i===j||r.right<=s.left+.5||s.right<=r.left+.5||r.bottom<=s.top+.5||s.bottom<=r.top+.5))})()`);
+    await check('Composer actions stay on one row at '+width, `(()=>{const centers=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.top+r.height/2});return Math.max(...centers)-Math.min(...centers)<1})()`);
+    if (width <= 700) await check('Narrow composer compacts labels instead of stacking at '+width, `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
     await type(''); await capture('empty-'+width);
   }
   await click('#composerSettings > summary'); await click('[data-mode="goal"]');

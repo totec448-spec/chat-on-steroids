@@ -2591,26 +2591,58 @@ async function followApp(data) {
   if (Object.keys(patch).length) await chrome.storage.local.set(patch);
 }
 
+/**
+ * "Open in ChatGPT" from the app, shown in this browser: the chat's tab if it has one, else a new
+ * one. The app asks here rather than the OS, which can pick another browser or account (#882).
+ */
+async function revealChats(ids) {
+  if (!Array.isArray(ids)) return;
+  for (const raw of ids.slice(0, 5)) {
+    const conversationId = cleanConversationId(raw);
+    if (!conversationId) continue;
+    const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
+    const shown = tab
+      ? await chrome.tabs.update(tab.id, { active: true })
+      : await chrome.tabs.create({ url: `https://chatgpt.com/c/${conversationId}`, active: true });
+    const windowId = shown?.windowId ?? tab?.windowId;
+    if (!Number.isInteger(windowId)) continue;
+    // A worker tab can sit in the app's minimized background window; the user asked to see it.
+    const window = await chrome.windows.get(windowId).catch(() => null);
+    await chrome.windows.update(windowId, window?.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
+  }
+}
+
 let extensionReloadPending = false;
+/**
+ * Why an offered extension update has not happened yet, reported with the next `/status` so the
+ * app can log it once. Without it, an update that never ran left no trace anywhere: on 2026-10-03
+ * an idle browser kept the old build after the app updated, and nothing said which check held it.
+ */
+let extensionUpdateHold = null;
 async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
-  if (extensionReloadPending || !offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) return;
+  if (extensionReloadPending) return;
+  if (!offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) { extensionUpdateHold = null; return; }
   await workerStampReady;
-  if (!workerStampValue || workerStampValue === offer.build) return;
+  if (!workerStampValue || workerStampValue === offer.build) { extensionUpdateHold = null; return; }
   // A chat with an agent or an active Goal is usually just waiting; only running work counts.
-  if (offer.busy !== false || liveOpenings.size || liveCommands.size) return;
+  if (offer.busy !== false) { extensionUpdateHold = 'app-busy'; return; }
+  if (liveOpenings.size) { extensionUpdateHold = 'sending'; return; }
+  if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
   const attempt = `${workerStampValue}>${offer.build}`;
-  if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) return;
+  if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
   for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
     if (!Number.isInteger(tab.id) || tab.discarded === true) continue;
     const ping = await tabReply(tab.id, { type: 'clf-recorder-ping' }).catch(() => null);
     // A page that cannot answer has nothing running here. One that answers without `busy` runs an
     // older recorder that cannot say, so it is treated as busy.
-    if (ping && ping.busy !== false) return;
+    if (ping && ping.busy !== false) { extensionUpdateHold = 'chat-busy'; return; }
   }
   extensionReloadPending = true;
   try {
     const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
-    if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) return;
+    if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
+    extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
     chrome.runtime.reload();
   } finally {
@@ -2638,7 +2670,8 @@ async function maintainOnce() {
     .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
     .map(conversationForTab)
     .filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations }) });
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations, canReveal: true,
+    ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
   if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
@@ -2646,6 +2679,7 @@ async function maintainOnce() {
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
+  void revealChats(reply.data.reveals).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;
@@ -2739,7 +2773,7 @@ async function maintainOnce() {
     recoveryMonitoring = monitoring;
     await persistLive().catch(() => undefined);
   }
-  if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
+  if (await acceptBrowserRevivals(reply.data)) await recoverDeferredRevivals();
   const nonDiscardable = new Set(
     (Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : [])
       .map(cleanConversationId)
@@ -2924,6 +2958,20 @@ async function performBrowserRepairs(repairs, policy) {
         }
         if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {
           await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved`);
+          continue;
+        }
+      }
+      if (target && reason === 'no-tab') {
+        // A no-tab repair exists to give the chat a tab. When it has one again by now, it is
+        // usually the tab a worker wake or another command just opened for it, and reloading that
+        // tab cut its page off in the middle of the send (#864, #882). A tab that is still loading
+        // or answers is the repair; only a silent one is reloaded.
+        const tab = await chrome.tabs.get(target.id);
+        const loading = tab.status === 'loading' || Boolean(tab.pendingUrl);
+        const status = loading ? null : await tabReply(target.id, { type: 'clf-page-status' },
+          documentId ? { documentId } : undefined);
+        if (loading || status?.ok === true) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=present`);
           continue;
         }
       }
@@ -3582,9 +3630,10 @@ const HANDLERS = {
       `&since=${Number(message.since) || 0}` +
       `&goalClient=${encodeURIComponent(String(source.tab))}` +
       // Forward only the helper states this document may report; these are diagnostics.
-      (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '');
+      (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '') +
+      (typeof message.generating === 'boolean' ? `&generating=${message.generating ? 1 : 0}` : '');
     const result = await call(`/activity${query}`);
-    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
+    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
       await recoverDeferredRevivals();
     }
     // A fresh chat the app wants opened beside this one. Offered only to the home chat's own
@@ -4427,6 +4476,17 @@ async function acceptBrowserRevival(raw) {
   const id = deferredRevivalId(raw?.id);
   const conversationId = cleanConversationId(raw?.conversationId);
   return id && conversationId ? rememberDeferredRevival(id, conversationId) : false;
+}
+
+/**
+ * Takes every wake an app reply hands out (#882). An app older than 2.1.27 sends only the oldest
+ * one as `revival`; taking just that one held the others behind it until their deadline.
+ */
+async function acceptBrowserRevivals(data) {
+  const list = Array.isArray(data?.revivals) ? data.revivals.slice(0, 16) : data?.revival ? [data.revival] : [];
+  let accepted = false;
+  for (const raw of list) if (await acceptBrowserRevival(raw)) accepted = true;
+  return accepted;
 }
 
 /**

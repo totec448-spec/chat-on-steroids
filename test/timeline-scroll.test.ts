@@ -39,7 +39,9 @@ it('anchors the logical reader row across late growth and replacement, while ret
     pane.scrollTop = 1300;
     restore = preserveTimelineViewport(pane, timeline);
     restore();
-    expect(pane.scrollTop).toBe(1500); // Browser clamps to the new bottom.
+    // Already at the end and nothing grew: the view is left exactly where it is (1300 + 200 is the
+    // bottom). Rewriting it to scrollHeight moved a followed view by rounding pixels.
+    expect(pane.scrollTop).toBe(1300);
   } finally { dom.window.close(); }
 });
 
@@ -115,5 +117,35 @@ it('preserves a visible row when the page shrinks below the scrollHeight viewpor
     const again = preserveTimelineViewport(pane, timeline, false);
     again();
     expect(reader.getBoundingClientRect().top).toBe(20);
+  } finally { dom.window.close(); }
+});
+
+it('keeps a followed view exactly still when the content only changes by layout rounding', () => {
+  // verify-message-reactions at 150 % zoom: a reaction badge moved the height by one rounding pixel,
+  // and following it shrank the reserve and moved every message by a pixel.
+  const dom = new JSDOM('<div id="pane"><div id="timeline"><div data-timeline-key="reader"></div></div></div>');
+  try {
+    const pane = dom.window.document.getElementById('pane')!;
+    const timeline = dom.window.document.getElementById('timeline')!;
+    let content = 600, reserve = 120;
+    const height = () => content + (Number.parseFloat(timeline.style.getPropertyValue('--timeline-scroll-reserve')) || 0);
+    Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { get: () => height() } });
+    pane.getBoundingClientRect = () => ({ top: 0 } as DOMRect);
+    timeline.getBoundingClientRect = () => ({ height: height() } as DOMRect);
+    timeline.style.setProperty('--timeline-scroll-reserve', `${reserve}px`);
+    pane.scrollTop = height() - 400;
+    const before = pane.scrollTop;
+    // Rounding: the followed view, its reserve and every row stay where they were.
+    let restore = preserveTimelineViewport(pane, timeline, true, true);
+    content += 1;
+    restore();
+    expect(pane.scrollTop).toBe(before);
+    expect(timeline.style.getPropertyValue('--timeline-scroll-reserve')).toBe(`${reserve}px`);
+    // Real output still follows: the reserve is consumed and the view goes to the end.
+    restore = preserveTimelineViewport(pane, timeline, true, true);
+    content += 40;
+    restore();
+    expect(timeline.style.getPropertyValue('--timeline-scroll-reserve')).toBe('80px');
+    expect(pane.scrollTop).toBe(height());
   } finally { dom.window.close(); }
 });

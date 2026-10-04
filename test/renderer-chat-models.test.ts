@@ -273,6 +273,63 @@ it('binds composer selection to the selected session across delayed catalog, use
   expect(confirmedComposerModel()?.reasoningEffort).toBe('xhigh');
 });
 
+it('uses ordinary new-chat defaults only when there is no per-conversation selection', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'] },
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high', 'xhigh'] }
+  ];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models } }) } });
+  const { initChatModels, applyChatModels, applyComposerSessionModel, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
+  const config = {
+    ui: { defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh' },
+    multiAgent: { defaultModel: 'gpt-6-pro', defaultReasoning: 'pro' },
+    goal: { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' }
+  } as unknown as Config;
+  initChatModels(); applyChatModels(config); await Promise.resolve();
+
+  applyComposerSessionModel(null, null);
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'xhigh' });
+  expect((dom.window.document.getElementById('workerModel') as HTMLSelectElement).value).toBe('gpt-6-pro');
+  expect((dom.window.document.getElementById('workerReasoning') as HTMLSelectElement).value).toBe('pro');
+  expect((dom.window.document.getElementById('helperReasoning') as HTMLSelectElement).value).toBe('high');
+
+  applyComposerSessionModel('existing:1', { model: 'gpt-5.6-sol', reasoningEffort: 'high', observedAt: 3 });
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  applyComposerSessionModel('existing:2', null);
+  expect(confirmedComposerModel()).toBeNull();
+  applyComposerSessionModel(null, null);
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'xhigh' });
+});
+
+it('keeps ordinary new-chat defaults Automatic through an explicit model refresh', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const catalog = {
+    state: 'ready' as const, requestedAt: 1, observedAt: 2,
+    models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high', 'xhigh'] as const }]
+  };
+  let resolveRefresh!: (value: any) => void;
+  const requestChatModels = vi.fn(() => new Promise<any>(resolve => { resolveRefresh = resolve; }));
+  Object.assign(dom.window, { api: {
+    getChatModels: async () => ({ ok: true, data: catalog }),
+    requestChatModels
+  } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ ui: {}, multiAgent: {}, goal: {} } as unknown as Config); await Promise.resolve();
+  const model = dom.window.document.getElementById('defaultChatModel') as HTMLSelectElement;
+  const reasoning = dom.window.document.getElementById('defaultChatReasoning') as HTMLSelectElement;
+  expect([model.value, reasoning.value]).toEqual(['', '']);
+
+  const refresh = dom.window.document.getElementById('refreshChatModels') as HTMLButtonElement;
+  refresh.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  expect(requestChatModels).toHaveBeenCalledTimes(1);
+  resolveRefresh({ ok: true, data: { ...catalog, requestedAt: 3, observedAt: 4 } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect([model.value, reasoning.value]).toEqual(['', '']);
+});
+
 it('renders the two observed Pro generations separately and sends their exact selection identities', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);

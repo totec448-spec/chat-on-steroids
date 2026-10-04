@@ -1733,9 +1733,21 @@ var CLF_DOM = (() => {
     return false;
   }
 
+  /** Reject stale transition editors that are hidden only by CSS. */
+  function composerCssVisible(node) {
+    return safe(() => {
+      if (!node || onKeptPage(node)) return false;
+      for (let parent = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+      }
+      return true;
+    }, false);
+  }
+
   function composer() {
     return safe(() => {
-      const classic = [...document.querySelectorAll('#prompt-textarea')].filter(node => !onKeptPage(node));
+      const classic = [...document.querySelectorAll('#prompt-textarea')].filter(composerCssVisible);
       if (classic.length) return classic.length === 1 ? classic[0] : null;
       // The current rich editor can remount before its surrounding form regains
       // data-chatgpt-composer. Accept that stable editor identity, but only while
@@ -1745,7 +1757,7 @@ var CLF_DOM = (() => {
         'form [data-composer-markdown][contenteditable="true"][role="textbox"]'
       )]
         .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`) &&
-          !onKeptPage(node));
+          composerCssVisible(node));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
   }
@@ -1790,6 +1802,39 @@ var CLF_DOM = (() => {
       if (generating() || stopButton()) return false;
       if ((box.textContent || '').trim() !== '') return false;
       return true;
+    }, false);
+  }
+
+  /**
+   * The closing sentence every worker wake ends with (src/main/agents.ts planRevivalText), compared
+   * without whitespace: ProseMirror's textContent drops the paragraph break before it.
+   */
+  const REVIVAL_RESIDUE = new RegExp('\\(ChatOnSteroids:youarestill[A-Za-z0-9_-]{1,40}inthesamerun,' +
+    'andthisistheprimeagenttalkingtoyouagaininthechatyoualreadyknow\\.' +
+    'Pickupfromwhatyoudidherebeforeratherthanstartingover\\.' +
+    'Reportwithagentsaction=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
+
+  /**
+   * Empties an editor that holds only an earlier worker wake (#882).
+   *
+   * ChatGPT keeps unsent editor text as the chat's draft and restores it when the chat opens
+   * again. A wake whose Send never landed therefore came back in every reopened worker tab, and
+   * each later wake waited for an empty editor until its deadline: "the browser did not claim
+   * this command", then the worker failed. Only text that ends with the app's own wake sentence
+   * is reclaimed; anything a person added after it, an attachment, or a busy page keeps it.
+   */
+  function clearRevivalResidue() {
+    return safe(() => {
+      const box = composer();
+      if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
+      const text = String(box.textContent || '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+      if (!text || !REVIVAL_RESIDUE.test(text)) return false;
+      box.focus();
+      const selection = document.getSelection();
+      if (!selection || document.activeElement !== box) return false;
+      selection.selectAllChildren(box);
+      document.execCommand('delete', false);
+      return (box.textContent || '').trim() === '';
     }, false);
   }
 
@@ -3190,6 +3235,7 @@ var CLF_DOM = (() => {
     errors,
     composer,
     composerSubmitReady,
+    clearRevivalResidue,
     composerWritable,
     composerBox,
     pageTheme,

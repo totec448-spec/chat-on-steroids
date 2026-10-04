@@ -18,18 +18,34 @@ import * as desktopBackend from '../src/main/computer/index.js';
 import sharp from 'sharp';
 import { randomBytes } from 'node:crypto';
 import { unifiedExecManager } from '../src/main/codex/manager.js';
+import { onLog } from '../src/main/logger.js';
 import { noteExecOwner, forgetExecOwner } from '../src/main/codex/ownership.js';
 import * as ownership from '../src/main/codex/ownership.js';
 import type { ExecCommandToolOutput } from '../src/main/codex/unified-exec.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string, endpoint: McpEndpoint, ctx: ToolContext;
+/**
+ * Finished MCP requests, counted from the server's own `request POST …` line. That line is written
+ * in the response's `finish` handler right after it stamps the publication's `completedAt`.
+ */
+let finishedRequests = 0;
+onLog(entry => { if (/^request POST mcp\//.test(entry.message)) finishedRequests++; });
+
 async function rpc(method: string, params: object, requestId?: string, surface: 'core' | 'desktop' = 'core'): Promise<any> {
+  const before = finishedRequests;
   const response = await fetch(endpoint.urls[surface], { method: 'POST', headers: {
     'content-type': 'application/json', accept: 'application/json, text/event-stream',
     ...(requestId ? { 'x-request-id': `${requestId}/attempt` } : {})
   }, body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }) });
   const raw = await response.text();
+  // On loopback the body can arrive before the server's `finish` handler has run, and a next call in
+  // the same millisecond reads as concurrent: it does not acknowledge background output that the
+  // previous answer delivered (`startedAt <= completedAt`). ChatGPT's next call comes seconds later;
+  // act like it by letting the server record this answer and the clock move past it.
+  await vi.waitFor(() => expect(finishedRequests).toBeGreaterThan(before));
+  const finishedAt = Date.now();
+  while (Date.now() <= finishedAt) await new Promise(resolve => setTimeout(resolve, 1));
   return JSON.parse(raw.startsWith('{') ? raw : [...raw.matchAll(/^data: (.+)$/gm)].at(-1)![1]!);
 }
 async function identity() {

@@ -132,6 +132,10 @@ export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 export interface UiPrefs {
   /** Recover an unfinished silent executor turn only while Goal and Loop are both off. */
   autoContinue?: boolean;
+  /** Preferred account-observed model for a fresh ordinary chat; omitted keeps the catalog fallback. */
+  defaultChatModel?: string;
+  /** Preferred reasoning for a fresh ordinary chat; omitted keeps the model's normal fallback. */
+  defaultChatReasoning?: ReasoningEffort;
   /** Maintenance may reuse existing tabs but cannot open helpers or missing chats. */
   browserOnly?: boolean;
   backgroundChats?: boolean;
@@ -204,6 +208,8 @@ export interface CompactionSettings {
   autoTokens: number;
   /** Editable content instructions for the brief; protocol/recovery framing stays code-owned. */
   handoffPrompt: string;
+  /** How long the brief should be; absent means 'thorough', the shipped 10k–30k rules. */
+  handoffLength?: 'thorough' | 'standard' | 'short';
 }
 
 /**
@@ -310,10 +316,18 @@ export interface MultiAgentSettings {
   defaultModel?: string;
   defaultReasoning?: ReasoningEffort | '';
   enabled: boolean;
-  /** Upper bound on workers the prime agent may create. */
+  /** Upper bound on simultaneous slot-holding workers in one prime family. */
   maxWorkers: number;
+  /**
+   * Optional admission cap shared by every prime family. Zero means no global cap, preserving
+   * the historical per-family-only behavior. This limits worker admission only; it does not
+   * queue ordinary prompts, switch Goal work, or evict workers that are already running.
+   */
+  globalMaxWorkers?: number;
   /** Permit self-contained calls when browser evidence cannot identify their conversation. */
   allowUnattributedCalls: boolean;
+  /** Default-deny local tools to exact trusted conversations. */
+  strictChatAllowlist?: boolean;
   /**
    * Reopen/reload chats that are not Goal/Loop driven — workers, primes, plain chats that have
    * called tools — once when their tab disappears or goes silent. Goal/Loop chats are always

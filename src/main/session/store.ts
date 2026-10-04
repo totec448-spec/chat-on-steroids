@@ -40,7 +40,7 @@ import type {
   StoredText,
   ToolEditReview
 } from '../../shared/session.js';
-import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
+import { committedResumeAncestorsFromSummary, continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle } from './title.js';
@@ -321,6 +321,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     userMessages: 0,
     toolCalls: 0,
     lastToolCallAt: null,
+    lastToolActivity: null,
     lastAssistantFinalAt: null,
     lastTurnEndAt: null,
     lastFinishReportAt: null,
@@ -415,6 +416,24 @@ function enqueueSessionOperation<T>(entry: OpenSession, label: string, operation
     (err: Error) => logError(`session ${label} failed: ${err.message}`)
   );
   return work;
+}
+
+/**
+ * Serializes an external durable policy mutation against session ownership changes.
+ *
+ * `rebindSession()` uses the same per-session queue. Callers that need to validate the current
+ * ChatGPT conversation and then await a different durable store (for example trusted-chats)
+ * must keep that validation and write in one fence, otherwise Compact & Resume can commit A -> B
+ * between them and turn stale intent for A into authority inherited by B.
+ *
+ * The summary is read-only by contract; mutate session state only through store primitives.
+ */
+export async function withSessionMutationFence<T>(
+  id: string,
+  operation: (summary: Readonly<SessionSummary>) => Promise<T>
+): Promise<T> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'external policy fence', () => operation(entry.summary));
 }
 
 /**
@@ -828,6 +847,7 @@ async function rebuildSummaryFromHistory(
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
         lastToolCallAt: rebuilt.lastToolCallAt,
+        lastToolActivity: rebuilt.lastToolActivity,
         lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
         lastTurnEndAt: rebuilt.lastTurnEndAt,
         lastFinishReportAt: rebuilt.lastFinishReportAt,
@@ -1002,7 +1022,16 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
-    summary.lastToolCallAt = Math.max(summary.lastToolCallAt ?? 0, event.time);
+    const priorToolAt = summary.lastToolCallAt ?? 0;
+    summary.lastToolCallAt = Math.max(priorToolAt, event.time);
+    // Attribution repair can append an older call after newer activity. Keep the projection
+    // aligned with lastToolCallAt rather than letting append order make an old action look latest.
+    if (event.time >= priorToolAt) {
+      summary.lastToolActivity = {
+        kind: event.call.summary.kind,
+        title: event.call.summary.title.slice(0, 200)
+      };
+    }
     if (event.call.endsActivity === true) {
       summary.lastFinishReportAt = Math.max(summary.lastFinishReportAt ?? 0, event.time);
     }
@@ -2272,6 +2301,7 @@ export async function rewriteUnattributedToolCalls(
       userMessages: 0,
       toolCalls: 0,
       lastToolCallAt: null,
+      lastToolActivity: null,
       lastAssistantFinalAt: null,
       lastTurnEndAt: null,
       lastFinishReportAt: null,
@@ -2333,6 +2363,14 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         !/^[a-zA-Z0-9 ._-]{1,80}$/.test(selected.model) || !Number.isFinite(selected.observedAt))) {
       delete publicSummary.selectedModel;
     }
+    const lastToolActivity = publicSummary.lastToolActivity;
+    if (lastToolActivity !== undefined && lastToolActivity !== null && (
+      typeof lastToolActivity !== 'object' ||
+      typeof lastToolActivity.title !== 'string' ||
+      lastToolActivity.title.length === 0 ||
+      lastToolActivity.title.length > 200 ||
+      !/^(?:edit|create|delete|move|read|search|browse|run|process|screen|input|clipboard|session|agent|other)$/.test(lastToolActivity.kind)
+    )) delete publicSummary.lastToolActivity;
     const finish = publicSummary.finishTurn;
     if (finish !== undefined && finish !== null && (!finish || typeof finish !== 'object' ||
         typeof finish.turnId !== 'string' || !Number.isFinite(finish.startedAt) ||
@@ -2369,6 +2407,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
           typeof publicSummary.lastToolCallAt === 'number' && Number.isFinite(publicSummary.lastToolCallAt)
             ? publicSummary.lastToolCallAt
             : null,
+        lastToolActivity: publicSummary.lastToolActivity ?? null,
         lastAssistantFinalAt:
           typeof publicSummary.lastAssistantFinalAt === 'number' && Number.isFinite(publicSummary.lastAssistantFinalAt)
             ? publicSummary.lastAssistantFinalAt
@@ -2925,6 +2964,21 @@ export async function conversationAttachment(
   const current = await findSessionByConversation(conversationId, { requireUnique: true });
   if (current) return 'current';
   return (await conversationWasSuperseded(conversationId)) ? 'superseded' : 'unknown';
+}
+
+/**
+ * Durable Compact & Resume ancestry for the conversation currently attached to a session.
+ *
+ * The production store has only two rebind paths: the initial null -> chat attachment and
+ * continuation commit. `lastCommittedResumeHandoffId` is written atomically with the latter,
+ * while `chatIds` retains every frontend oldest-first. Therefore a current chat with committed
+ * resume provenance can safely inherit policy from its historical predecessors without keeping
+ * the short-lived continuation WAL around. Ambiguous/non-current lookups fail closed.
+ */
+export async function committedResumeAncestors(conversationId: string): Promise<string[]> {
+  if (!conversationId) return [];
+  const summary = await findSessionByConversation(conversationId, { requireUnique: true });
+  return summary ? committedResumeAncestorsFromSummary(summary, conversationId) : [];
 }
 
 /**
@@ -3780,7 +3834,30 @@ export async function readHandoff(sessionId: string, handoffId: string): Promise
   try {
     const raw = await fs.readFile(path.join(sessionDir(sessionId), 'handoffs', `${handoffId}.json`), 'utf8');
     const parsed = JSON.parse(raw) as Handoff;
-    return typeof parsed?.text === 'string' ? parsed : null;
+    if (typeof parsed?.text !== 'string') return null;
+    // Legacy files had no version/provenance and remain readable. New files fail closed if
+    // identity metadata is malformed; recovery must never repair a transaction from guessed
+    // provenance.
+    if (parsed.version !== undefined || parsed.provenance !== undefined) {
+      const provenance = parsed.provenance;
+      if (
+        parsed.version !== 1 ||
+        parsed.id !== handoffId ||
+        parsed.sessionId !== sessionId ||
+        !provenance ||
+        (provenance.sourceConversationId !== null &&
+          (typeof provenance.sourceConversationId !== 'string' ||
+            provenance.sourceConversationId.length === 0 ||
+            provenance.sourceConversationId.length > 256)) ||
+        (provenance.sourceGeneration !== null &&
+          (!Number.isSafeInteger(provenance.sourceGeneration) || provenance.sourceGeneration < 1)) ||
+        (provenance.sourceTurnId !== null &&
+          (typeof provenance.sourceTurnId !== 'string' || provenance.sourceTurnId.length > 256)) ||
+        (provenance.continuationId !== null &&
+          (typeof provenance.continuationId !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(provenance.continuationId)))
+      ) return null;
+    }
+    return parsed;
   } catch {
     return null;
   }

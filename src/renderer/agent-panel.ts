@@ -2,7 +2,7 @@ import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
-import { el, icon } from './dom.js';
+import { compactNumber, el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 
 /** A read-only second pane. Its selection never changes the main chat's composer. */
@@ -49,7 +49,9 @@ export function createAgentPanel(options: {
     };
     for (const active of [true, false]) {
       const group = workers.filter(worker => isActive(worker) === active);
-      body.append(el('h3', '', () => `${active ? t("Active") : t("History")} · ${group.length}`));
+      const failed = active ? 0 : group.filter(worker => options.agent?.(worker)?.state === 'failed').length;
+      body.append(el('h3', '', () =>
+        `${active ? t("Active") : t("History")} · ${group.length}${failed ? ` · ${t('{0} failed', [failed])}` : ''}`));
       if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
       for (const worker of group) {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');
@@ -85,9 +87,19 @@ export function createAgentPanel(options: {
           if (health.health === 'degraded') return t('Degraded');
           return t('Unknown');
         });
+        const actionMeta = t('{0} actions · {1}', [compactNumber(worker.toolCalls ?? 0), elapsed]);
         meta.append(document.createTextNode(`${t(statusLabel[state] ?? state)} · `), healthText,
-          document.createTextNode(` · ${elapsed}`));
-        content.append(heading, el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`), meta);
+          document.createTextNode(` · ${actionMeta}`));
+        const activity = worker.lastToolActivity
+          ? el('span', 'agent-card-activity', worker.lastToolActivity.title)
+          : null;
+        if (activity) activity.dataset.kind = worker.lastToolActivity!.kind;
+        content.append(
+          heading,
+          el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`),
+          ...(activity ? [activity] : []),
+          meta
+        );
         row.append(avatar, content);
         row.title = task || original;
         row.onclick = () => void open(worker.id); body.append(row);

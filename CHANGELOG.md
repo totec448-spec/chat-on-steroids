@@ -9,6 +9,61 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.26] — New chats and long runs stay on track
+
+Your first message lands, your long runs keep going, and the app tells you what it's doing. This release fixes the lost first answers in new chats and the sends that failed in existing chats, and stops the false stalls and reload loops in long Goal, Loop and worker runs. You can now also watch a new chat's first answer take shape.
+
+### ✨ Highlights
+
+- **No more lost first answers.** When ChatGPT is slow, a new chat's first answer used to show up above your question, without Copy or Export, and the app reported "Stopped waiting for delivery confirmation". Your first message now always gets its turn.
+- **Sending into existing chats works again.** ChatGPT changed its page, and sends failed with "Requested model or reasoning could not be confirmed". Fixed.
+- **Watch the first answer take shape.** While ChatGPT works on a new chat's first answer, the app shows what the model writes between its steps, instead of nothing until the end.
+- **Long runs stay on track.** Messages you send while ChatGPT works no longer look like a stall, broken connections no longer block compaction forever, and Goal, workers and Continue recover on their own. One user ran 10+ hours without a single stop.
+
+### 🛠 Fixed
+
+- **No reloads in the middle of work.** A message you send while ChatGPT is answering joins that answer instead of making the app think the chat stalled.
+- **No more "Reload failed" while ChatGPT is answering.** When ChatGPT resumes an interrupted answer by itself, the app now says it's waiting for the answer to finish.
+- **Compaction no longer waits forever.** When ChatGPT shows "Connection interrupted" with its Stop button still visible, the app reloads the chat after a minute and compacts.
+- **Compact & resume continues after an answer that broke off.**
+- **No Continue loop on a finished answer.**
+- **Answers are kept when ChatGPT hides their question.**
+- **Goal's helper works reliably.** It answers without calling tools, and its answer is always picked up, also after a send that timed out.
+- **Workers start reliably,** even when several open at once, and a worker woken up again gets the messages meant for it.
+- **Commands keep running across turns.**
+- **The model you already picked is used directly,** without clicking through other model versions.
+- **Each round of work ends with its own summary** in the timeline, also after a reload.
+- **Documents ChatGPT is still writing** show properly instead of as raw `:::writing` text.
+- **Setup keeps the browser step done** while no ChatGPT tab is open.
+
+### ✨ New
+
+- **Default model for new chats.** Pick the model and reasoning that new chats start with. "Automatic" keeps today's behavior, and a chat you continue keeps its own model.
+- **Follow new output.** The app and the ChatGPT page stay at the end of the chat while answers grow. Scroll up to pause it. On by default.
+- **Choose whether your messages mention Chat On Steroids Core.** The mention makes sure ChatGPT can use the app in every chat. Turn it off if plain questions start with an unneeded tool call; workers, Goal, Loop and Continue always keep it.
+- **The window remembers its size and place,** and opens maximized if you left it that way.
+- **Search all OpenRouter models** in Goal's model list.
+- **Русский и Tiếng Việt.** The app now speaks Russian and Vietnamese.
+- **The extension speaks your language.** Its popup and its controls on ChatGPT follow the app's language, now also in Korean and Portuguese.
+- **Optional cleanup of sleeping workers.** Ends their background processes; their chats stay reusable. Off by default.
+
+### 💅 Polish
+
+- **Clearer settings.** Contrast, Colors, the default model, unattributed calls, Goal/Loop timing and Session finish now say in plain words what they do. Switches that are off dim their options, and the Read-only button explains what it changes.
+- **A simpler connection menu:** status, then Connect or Disconnect.
+- **Small windows look right,** in every language.
+- **Numbers in your language** in Usage, and a quieter Activity log.
+- **Extension settings survive a reinstall.**
+- **Worker health** in the sub-agent overview, and **installed Skill revisions** in the Skills library.
+- **ChatGPT knows your current permissions,** so it tries fewer tools that would be refused.
+- **Canary builds.** Every change to main is also published as a rolling "canary" test build. Canary builds have no release notes and no support, and reports are only accepted for problems that also happen on a stable release.
+
+### 💛 Thank you
+
+To **@Haz4rdovisk** for tracking down the lost first turns and sends, the round recaps, the Core mention, the Setup browser step and the simpler connection menu. To **@xuan2261** for the window memory, new-chat defaults, OpenRouter search, worker health, Skill revisions, sleeping-worker cleanup, permission summary, the command fix and Vietnamese. To **@ferrarinobrakes** for measuring the page change that broke model confirmation, **@redzrush101** for the model confirmation fix, **@lavalava45** for Russian, and **@mahadansar** and **@tude91979059-byte** for the detailed long-run reports and logs.
+
+**Updating?** The extension updates itself once no chat is busy. If it stays on the old version, reload it once in `chrome://extensions`. Coming from 2.1.18 or older: if it doesn't connect, click its icon once.
+
 ## [2.1.25] — Chats keep going on their own
 
 This update is about chats that stopped and waited for you to type "continue". Answers sent with the Chat On Steroids mention are recorded properly again, resumed Project chats are followed correctly, and an automatic Continue no longer gets stuck in the message box.
