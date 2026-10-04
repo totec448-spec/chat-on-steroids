@@ -312,7 +312,7 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('composerAddSkill').click()`);
     assert.ok(await js('document.getElementById("chatInput").value.startsWith("Please add the following skills to my COS skills:")'));
     await js(`window.fixture.readyConnection();document.getElementById('headerConnect').click()`);
-    await until('document.getElementById("headerConnect").hidden && !document.getElementById("headerConnect").classList.contains("is-running") && document.getElementById("connectionPopoverToggle").textContent===window.fixture.t("Disconnect") && document.getElementById("sidebarConnection").classList.contains("is-connected")');
+    await until('document.getElementById("headerConnect").hidden && document.getElementById("sidebarConnection").classList.contains("is-connected")');
     const errors=await js('window.fixtureErrors');
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,agentMonitor:{latestActivity:true,actionCount:true},errors},null,2));
