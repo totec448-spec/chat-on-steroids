@@ -10960,6 +10960,18 @@
     return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
   }
 
+  /**
+   * Why a wake is still waiting, for the app's timeout message (#882): the page is not ready yet or has
+   * no usable message box, the chat is still answering, or the box holds text. Null once it is ready.
+   */
+  function revivalWaitReason(target) {
+    if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return 'revival-editor';
+    if (generating || CLF_DOM.generating() || CLF_DOM.stopButton?.() ||
+        pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy)) return 'revival-busy';
+    if (!CLF_DOM.composerWritable?.()) return 'revival-editor';
+    return CLF_DOM.composerSubmitReady?.() ? null : 'revival-draft';
+  }
+
   /** Everything revivalSubmitReady requires except an empty editor. */
   function revivalReadyButForDraft(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
@@ -10975,7 +10987,7 @@
    * command and no half-inserted revival text exists to recover. A replacement document can make
    * the same readiness proof and race for the one durable redeem later.
    */
-  function waitForRevivalSubmitReady(target, attempt) {
+  function waitForRevivalSubmitReady(target, attempt, report = () => undefined) {
     if (!target || attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return Promise.resolve(false);
     return new Promise((resolve) => {
       let observer = null;
@@ -10994,7 +11006,8 @@
         // #882: an earlier wake that ChatGPT restored as this chat's draft is the only thing in the
         // way. Reclaim it once everything else is ready; the mutation it causes runs check again.
         if (!revivalSubmitReady(target) && revivalReadyButForDraft(target)) CLF_DOM.clearRevivalResidue?.();
-        if (!revivalSubmitReady(target) || flushingReadyBoundary) return;
+        if (!revivalSubmitReady(target)) { report(revivalWaitReason(target)); return; }
+        if (flushingReadyBoundary) return;
         // Snapshot exactly what this already-finished turn left in page custody. Later observations
         // are allowed to exist independently; they must not turn this into an unbounded "queue must
         // be globally empty" condition. Object identity is stable until the durable flush path
@@ -11212,11 +11225,15 @@
       // can put the same marker back in front of this exact chat. The prime's text stays solely in
       // the app-side command until the later redeem succeeds.
       if (!(await waitForDeferredRevivalCustody(id, openedConversation, attempt))) return;
-      // Told to the app so a wake that never gets here can say why (#882: a restored draft).
-      if (!revivalSubmitReady(openedConversation)) {
-        void ask({ type: 'command_step', id, client: RUN_ID, step: 'revival-waiting' }).catch(() => undefined);
-      }
-      if (!(await waitForRevivalSubmitReady(openedConversation, attempt))) return;
+      // Told to the app, and again whenever it changes, so a wake that never gets here can say why
+      // (#882: a restored draft, a chat still answering, a page that never showed its message box).
+      let reportedReason = null;
+      const reportWait = (reason) => {
+        if (!reason || reason === reportedReason) return;
+        reportedReason = reason;
+        void ask({ type: 'command_step', id, client: RUN_ID, step: reason }).catch(() => undefined);
+      };
+      if (!(await waitForRevivalSubmitReady(openedConversation, attempt, reportWait))) return;
     }
     if (attempt?.cancelled) return;
 

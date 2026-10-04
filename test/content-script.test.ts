@@ -15960,6 +15960,8 @@ describe('the fresh chat the app opened', () => {
       expect(redeemCalls).toBe(0);
       expect(sends).toBe(0);
       expect(composerText(live.document)).toContain('My own note for this worker');
+      // The app's timeout message can then say why the wake waited (#882).
+      expect(live.sent.filter((message) => message.type === 'command_step').map((message) => message.step)).toEqual(['revival-draft']);
     }
   });
 
