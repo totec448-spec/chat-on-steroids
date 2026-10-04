@@ -21,12 +21,16 @@ const POINTER_INTERVAL_MS = 50;
 // proximity, and only the interactive overlay receives renderer mouse events.
 const FORWARDS_IGNORED_MOUSE_MOVES = process.platform === 'darwin';
 const SUPPORTS_WINDOW_SHAPE = process.platform === 'win32' || process.platform === 'linux';
-const MAX_HIT_REGIONS = 64;
+// One visible pet can publish its body plus temporary scene props. The library can expose the
+// builtin pet plus up to 100 bundled and 100 imported packages, so 1024 covers every supported
+// visible scene region while still bounding an arbitrary renderer payload.
+const MAX_HIT_REGIONS = 1024;
 
 let ownerWindow: (() => BrowserWindow | null) | null = null;
 let activateOwner: (() => void) | null = null;
 let overlay: BrowserWindow | null = null;
 let overlayReady = false;
+let overlayShapeReady = false;
 let overlayFocus: PetWindowFocus | null = null;
 let overlayInteractive: boolean | null = null;
 let globallyVisible = true;
@@ -51,7 +55,12 @@ function activePets(): number { return library.pets.filter(pet => pet.enabled).l
 function shouldShow(): boolean { return globallyVisible && library.pets.some(pet => pet.enabled && !dismissedPetIds.has(pet.id)); }
 
 export function petOverlayControlState(): PetOverlayControlState {
-  return { visible: shouldShow(), ready: !shouldShow() || overlayReady, activeCount: activePets(), activityCount: activities.length };
+  return {
+    visible: shouldShow(),
+    ready: !shouldShow() || (overlayReady && (process.platform !== 'win32' || overlayShapeReady)),
+    activeCount: activePets(),
+    activityCount: activities.length
+  };
 }
 
 function snapshot(): PetOverlaySnapshot {
@@ -91,14 +100,19 @@ function sendLibrary(): void {
 }
 function bounds(): PetOverlayBounds {
   const display = screen.getPrimaryDisplay();
-  return { width: display.workArea.width, height: display.workArea.height, scaleFactor: display.scaleFactor };
+  return {
+    width: display.workArea.width,
+    height: display.workArea.height,
+    scaleFactor: display.scaleFactor,
+    boundedIdleShape: process.platform === 'win32'
+  };
 }
 
-function validHitRegions(value: unknown, win: BrowserWindow): PetOverlayHitRegion[] {
+function validHitRegions(value: unknown, win: BrowserWindow, limit = MAX_HIT_REGIONS): PetOverlayHitRegion[] {
   if (!Array.isArray(value)) return [];
   const area = win.getContentBounds();
   const regions: PetOverlayHitRegion[] = [];
-  for (const raw of value.slice(0, MAX_HIT_REGIONS)) {
+  for (const raw of value.slice(0, limit)) {
     if (!raw || typeof raw !== 'object') continue;
     const candidate = raw as Record<string, unknown>;
     const x = candidate.x, y = candidate.y, width = candidate.width, height = candidate.height;
@@ -113,6 +127,14 @@ function validHitRegions(value: unknown, win: BrowserWindow): PetOverlayHitRegio
   return regions;
 }
 
+function maybeShowOverlay(win: BrowserWindow): void {
+  if (overlay !== win || win.isDestroyed() || !overlayReady || !shouldShow() || win.isVisible()) return;
+  if (process.platform === 'win32' && !overlayShapeReady) return;
+  win.showInactive();
+  startPointerTracking(overlayInteractive === true);
+  sendControl(true);
+}
+
 function setInteractive(interactive: boolean, requestedRegions?: unknown): void {
   const win = overlay;
   if (!win || win.isDestroyed()) return;
@@ -125,25 +147,38 @@ function setInteractive(interactive: boolean, requestedRegions?: unknown): void 
     if (SUPPORTS_WINDOW_SHAPE) {
       if (regions.length === 0) return;
       win.setShape(regions);
+      if (process.platform === 'win32') overlayShapeReady = true;
     }
     if (changed) win.setIgnoreMouseEvents(false);
     overlayInteractive = true;
   } else {
-    // Restore click-through before the full visual shape. On Windows this deliberately omits
+    // Restore click-through before changing the visual shape. On Windows this deliberately omits
     // `forward`: forwarding makes the overlay and the underlying app race to set the OS cursor.
     if (changed) {
       if (FORWARDS_IGNORED_MOUSE_MOVES) win.setIgnoreMouseEvents(true, { forward: true });
       else win.setIgnoreMouseEvents(true);
     }
     if (SUPPORTS_WINDOW_SHAPE) {
-      const area = win.getContentBounds();
-      win.setShape([{ x: 0, y: 0, width: area.width, height: area.height }]);
+      if (process.platform === 'win32') {
+        // Keep Windows' transparent top-level window bounded to the visible pet UI even while
+        // click-through. Re-expanding it to the full work area leaves Chromium a fullscreen
+        // occluder to classify when hit-testing is re-enabled, despite Win32 already reporting
+        // the later bounded region. Renderer animation keeps these regions synchronized.
+        if (regions.length > 0) {
+          win.setShape(regions);
+          overlayShapeReady = true;
+        }
+      } else {
+        const area = win.getContentBounds();
+        win.setShape([{ x: 0, y: 0, width: area.width, height: area.height }]);
+      }
     }
     overlayInteractive = false;
   }
   // macOS forwarding parks the native poll while ignored. Windows/Linux keep one native cursor
   // owner; shaped interactive windows also poll so leaving the shape restores click-through.
   if (changed && shouldShow() && overlayReady) startPointerTracking(interactive);
+  if (process.platform === 'win32' && overlayShapeReady) maybeShowOverlay(win);
 }
 
 function stopPointerTracking(): void {
@@ -304,6 +339,7 @@ async function ensureOverlay(): Promise<BrowserWindow> {
   if (overlay && !overlay.isDestroyed()) return overlay;
   const area = screen.getPrimaryDisplay().workArea;
   overlayReady = false;
+  overlayShapeReady = false;
   const win = new BrowserWindow({
     x: area.x, y: area.y, width: area.width, height: area.height,
     // Windows Chromium consumes left-button down (MA_NOACTIVATEANDEAT) on a
@@ -334,13 +370,13 @@ async function ensureOverlay(): Promise<BrowserWindow> {
     lastSnapshotSent = null;
     win.webContents.send('pet-overlay:bounds', bounds());
     sendLibrary(); sendSnapshot(true);
-    if (shouldShow()) { win.showInactive(); startPointerTracking(overlayInteractive === true); }
+    maybeShowOverlay(win);
     sendControl(true);
   });
   const gone = (): void => {
     if (overlay !== win) return;
     overlayFocus?.dispose(); overlayFocus = null;
-    stopPointerTracking(); overlayReady = false; overlayInteractive = null; overlay = null; lastSnapshotSent = null; sendControl();
+    stopPointerTracking(); overlayReady = false; overlayShapeReady = false; overlayInteractive = null; overlay = null; lastSnapshotSent = null; sendControl();
   };
   win.on('closed', gone);
   win.webContents.on('render-process-gone', gone);
@@ -376,8 +412,9 @@ async function syncVisibility(): Promise<void> {
     if (overlay !== win || win.isDestroyed()) return;
     if (!shouldShow()) return void syncVisibility();
     sendLibrary(); sendSnapshot();
-    if (overlayReady && !win.isVisible()) win.showInactive();
-    startPointerTracking(overlayInteractive === true); sendControl();
+    maybeShowOverlay(win);
+    if (win.isVisible()) startPointerTracking(overlayInteractive === true);
+    sendControl();
   } catch (error) { logWarn(`pet overlay: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
@@ -422,7 +459,7 @@ export async function shutdownPetOverlay(): Promise<void> {
   screen.removeListener('display-metrics-changed', fitOverlay);
   screen.removeListener('display-added', fitOverlay);
   screen.removeListener('display-removed', fitOverlay);
-  const win = overlay; overlay = null; overlayReady = false; overlayInteractive = null;
+  const win = overlay; overlay = null; overlayReady = false; overlayShapeReady = false; overlayInteractive = null;
   if (win && !win.isDestroyed()) win.destroy();
   dismissedPetIds.clear();
   library = { pets: [] };
