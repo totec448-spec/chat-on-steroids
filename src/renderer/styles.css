@@ -217,7 +217,8 @@
   --card: #fff;
   --ink: #0c0c0e;
   --soft: #56565e;
-  --faint: #8b8b94;
+  /* Secondary text reaches WCAG AA (4.5:1) on card, sunk and page; #8b8b94 was 3.1–3.4:1. */
+  --faint: #6f6f78;
   --line: #e7e7ea;
   --hover: #f0f0f2;
   --sunk: #f7f7f8;

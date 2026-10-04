@@ -454,6 +454,13 @@ const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revi
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
 const REVIVAL_WAIT_STEPS = new Set<string>(['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor']);
 type CommandStep = typeof COMMAND_STEPS[number];
+/**
+ * How long an automatic handoff's page may stay at one step before it types anything. Choosing
+ * the model takes seconds; this leaves room for a throttled background tab.
+ */
+const RESUME_STEP_STALL_MS = 3 * 60_000;
+const RESUME_STALL_STEPS: ReadonlySet<CommandStep> = new Set(['composer', 'model', 'composer-after-model']);
+
 const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
   'revival-waiting': 'its chat was still answering or its message box was not empty',
   'revival-busy': 'its chat was still answering',
@@ -4190,7 +4197,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   // A page that redeemed a command saying how far it got. Step names only; see `commandProgress`.
-  // Advisory: it changes no lease, deadline or outcome, and a stale or foreign report is ignored.
+  // Advisory: it changes no lease or outcome, and a stale or foreign report is ignored. The one
+  // deadline it moves is an automatic handoff's, which ends sooner at a step that stalls before typing.
   if (route === '/commands/step' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -4205,6 +4213,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const allowed = step && REVIVAL_WAIT_STEPS.has(step) ? command?.owner === null : command?.owner != null && command.owner === body['client'];
     if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
+    if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
     return json(res, 200, { ok: true }, origin);
   }
   if (route === '/commands/ack' && req.method === 'POST') {
@@ -9269,7 +9278,14 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   if (command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic) {
     // One checkpoint, not a failure trigger. Expiry releases only this browser transport;
     // the auto-compaction ticket remains and the next 15-minute pickup may open it again.
-    return (command.claimedAt ?? command.createdAt) + COMPACTION_PICKUPS.opening.every - now;
+    const checkpoint = (command.claimedAt ?? command.createdAt) + COMPACTION_PICKUPS.opening.every;
+    // A page that stops at a step before typing anything is not about to finish. #882: one sat at
+    // "choosing the model" for the whole window while the prime, mid-transfer, refused its
+    // workers' calls; the next pickup's chat then finished in ten seconds. Its send was never
+    // attempted, so releasing it early is the same release, just sooner.
+    const { step, stepAt } = command.progress ?? {};
+    const stalled = step && stepAt !== undefined && RESUME_STALL_STEPS.has(step) ? stepAt + RESUME_STEP_STALL_MS : Infinity;
+    return Math.min(checkpoint, stalled) - now;
   }
   if (command.spec.type === 'resume' && command.owner !== null) {
     const continuation = continuationByToken(command.spec.token);
