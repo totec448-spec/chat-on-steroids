@@ -8,6 +8,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
 import { addProject, addProjectFolder, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, removeProjectFolder } from '../src/main/projects.js';
+import { createProjectChatFolder, listProjectChatFolders, removeProjectChatFolder, renameProjectChatFolder, setSessionChatFolder } from '../src/main/project-chat-folders.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -140,6 +141,49 @@ it('retains project ownership through restart, resume and exact worker origins',
   const stale = await createSession({ title: 'Stale source' });
   await inheritSessionProject(stale.id, 'prime-original');
   expect((await getSession(stale.id))?.projectId).toBeUndefined();
+});
+
+it('keeps chat-folder membership on the durable local session across restart and resume', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Grouped chat', conversationId: 'grouped-before-resume' });
+  await assignSessionProject(session.id, project.id);
+  const workspace = await getSessionProject(session.id);
+
+  const created = await createProjectChatFolder(project.id, 'Language study');
+  const folder = created.folders[0]!;
+  expect(created.assignments).toEqual({});
+  expect((await setSessionChatFolder(project.id, session.id, folder.id)).assignments).toEqual({ [session.id]: folder.id });
+  expect(await rebindSession(session.id, 'grouped-before-resume', 'grouped-after-resume')).toBe(true);
+
+  resetDurableForTests(); initDurableStore(directory); resetSessionStoreForTests();
+  expect(await listProjectChatFolders()).toEqual([{ projectId: project.id, folders: [folder], assignments: { [session.id]: folder.id } }]);
+  expect(await getSessionProject(session.id)).toEqual(workspace);
+
+  const renamed = await renameProjectChatFolder(project.id, folder.id, 'Languages');
+  expect(renamed.folders[0]).toMatchObject({ id: folder.id, name: 'Languages' });
+  expect((await setSessionChatFolder(project.id, session.id, null)).assignments).toEqual({});
+  expect((await removeProjectChatFolder(project.id, folder.id)).folders).toEqual([]);
+  expect((await getSession(session.id))?.conversationId).toBe('grouped-after-resume');
+  expect(await getSessionProject(session.id)).toEqual(workspace);
+});
+
+it('rejects chat-folder assignments outside the exact project and keeps workers with their parent', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const prime = await createSession({ title: 'Prime', conversationId: 'folder-prime' });
+  await assignSessionProject(prime.id, project.id);
+  const foreign = await createSession({ title: 'Foreign', conversationId: 'folder-foreign' });
+  await assignSessionProject(foreign.id, other.id);
+  const worker = await createSession({
+    title: 'Worker', conversationId: 'folder-worker',
+    origin: { kind: 'worker', fromSessionId: prime.id, agentId: 'worker-1', task: 'Inspect' }
+  });
+  const folder = (await createProjectChatFolder(project.id, 'Related')).folders[0]!;
+
+  await expect(setSessionChatFolder(project.id, foreign.id, folder.id)).rejects.toThrow(/does not belong/);
+  await expect(setSessionChatFolder(project.id, worker.id, folder.id)).rejects.toThrow(/parent chat/);
+  await expect(setSessionChatFolder(project.id, prime.id, randomUUID())).rejects.toThrow(/folder not found/i);
+  expect((await listProjectChatFolders())[0]?.assignments).toEqual({});
 });
 
 it('fails closed when explicit project permission is removed and follows approved root renames', async () => {
