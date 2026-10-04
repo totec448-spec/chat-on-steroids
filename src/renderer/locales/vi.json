@@ -1742,6 +1742,8 @@
   "Unknown": "Không xác định",
   "End background processes of workers asleep for more than 30 minutes": "Kết thúc tiến trình nền của worker đã ngủ hơn 30 phút",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Chat và lịch sử của worker vẫn có thể dùng lại. Mặc định tắt; mỗi lần dọn dẹp đều được ghi vào lịch sử của worker đó.",
+  "Use minimum effort: {0}": "Dùng mức suy luận thấp nhất: {0}",
+  "Use maximum effort: {0}": "Dùng mức suy luận cao nhất: {0}",
   "Automatic": "Tự động",
   "Default new-chat model": "Mô hình mặc định cho chat mới",
   "Default new-chat reasoning": "Mức suy luận mặc định cho chat mới",

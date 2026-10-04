@@ -3286,7 +3286,18 @@ the Goal row opens the objective editor, including before the first message. The
 and Loop pencils open that editor without switching automation; Save applies objective and mode,
 then closes the menu. The Plan toolbar toggle only arms planning, even over an existing draft;
 Send/Enter generates. Queued and prepared plan stages show up to three lines. The model menu lists
-every observed model separately and the effort slider only adjusts the selected model. Hidden
+every observed model separately behind its model-name disclosure; the compact popover leads
+with the selected effort and the slider only adjusts that model. Closing the popover resets
+the disclosure; Escape closes the list before the popover and returns focus to its trigger.
+The list expands/collapses through one CSS grid transition; hidden choices are inert immediately.
+Reduced motion makes the disclosure instantaneous. The model-name chevron uses the app's
+existing disclosure rotation, driven by that button's `aria-expanded` state.
+The lightning shortcut selects the current model's lowest observed effort; its brain icon
+then offers the highest observed effort, not the previous selection. It never switches models
+to obtain Instant or Pro. The existing hidden effort select owns the choice, and slider,
+session and catalog changes repaint the next action. Without two observed efforts it is disabled.
+Selection changes immediately; a finite, interruptible 200ms icon transition supplies feedback,
+using only opacity under reduced motion. It has no send, discovery or saved-setting side effect. Hidden
 native selects retain send admission; stale selections still require an explicit choice.
 Unverified saved model preferences show their status beside the model select.
 The composer dock measures its natural inner body and animates only transient height changes;

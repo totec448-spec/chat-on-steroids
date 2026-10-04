@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
     webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
   const errors = [];
   win.webContents.on('console-message', event => { if (event.level === 'error') errors.push(event.message); });
-  await win.loadURL('http://127.0.0.1:4420'); await pause(2200);
+  await win.loadURL('http://127.0.0.1:4420'); win.webContents.setZoomFactor(1); await pause(2200);
   await win.webContents.executeJavaScript(`document.querySelector('#sessionList [data-id="composer-preview"]').click()`);
   await pause(500);
   const js = source => win.webContents.executeJavaScript(source);
@@ -46,16 +46,103 @@ app.whenReady().then(async () => {
   };
   const click = async selector => { await js(`document.querySelector(${JSON.stringify(selector)}).click()`); await pause(200); };
   const type = async text => { await js(`(() => { const input = document.getElementById('chatInput'); input.value=${JSON.stringify(text)}; input.focus(); input.dispatchEvent(new Event('input', {bubbles:true})); })()`); await pause(260); };
-  const capture = async name => { fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
+  const capture = async name => { await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
+  const startDisclosureSample = () => js(`(()=>{window.__composerDisclosureSample=new Promise(resolve=>{const start=performance.now(),frames=[];const sample=()=>{frames.push({time:performance.now()-start,list:document.getElementById('composerModelChoices').getBoundingClientRect().height,popover:document.querySelector('#modelMenu > .composer-popover').getBoundingClientRect().height,chevron:getComputedStyle(document.querySelector('#composerModelToggle .picker-chevron')).transform});if(performance.now()-start>=320)resolve(frames);else requestAnimationFrame(sample)};sample()});return true})()`);
+  const sampleDisclosure = () => js(`window.__composerDisclosureSample`);
+  // Animation time follows rendered frames, not the hosted runner's wall clock.
+  const settleEffortShortcut = () => js(`Promise.all(document.getElementById('composerSpark').getAnimations({subtree:true}).map(animation=>animation.finished)).then(()=>true)`);
+  // Exercise both motion preferences explicitly; hosted macOS defaults to reduce.
+  win.webContents.debugger.attach('1.3');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
   await check('Renderer selected the fixture session', `document.getElementById('contextMeterCompact').textContent==='38%'`);
   await capture('composer');
   await click('#modelMenu > summary');
+  await check('Effort popover initially hides the model list', `document.getElementById('composerModelChoices').hidden&&document.getElementById('composerModelToggle').getAttribute('aria-expanded')==='false'`);
+  await capture('effort');
+  const closedHeight = await js(`document.querySelector('#modelMenu > .composer-popover').getBoundingClientRect().height`);
+  const modelPoint = await js(`(()=>{const r=document.getElementById('composerModelToggle').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+  await startDisclosureSample();
+  win.webContents.sendInputEvent({type:'mouseMove',...modelPoint});
+  win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...modelPoint});
+  win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...modelPoint});
+  const opening = await sampleDisclosure();
+  fs.writeFileSync(path.join(output,'disclosure-frames.json'),JSON.stringify(opening,null,2));
+  assert(opening.some(frame=>frame.popover>closedHeight+1&&frame.popover<opening.at(-1).popover-1),'Popover height has intermediate frames while growing');
+  assert(opening.some(frame=>frame.chevron!==opening[0].chevron&&frame.chevron!==opening.at(-1).chevron),'Model-name chevron has intermediate rotation frames while opening');
+  await check('Native model-name click opens the list without changing the selection', `!document.getElementById('composerModelChoices').hidden&&document.getElementById('composerModelToggle').getAttribute('aria-expanded')==='true'&&document.getElementById('composerModel').value==='gpt-6-sol'`);
+  await startDisclosureSample();
+  await js(`document.getElementById('composerModelToggle').click()`);
+  await check('Closing revokes model-list input immediately', `document.getElementById('composerModelChoices').inert`);
+  const closing = await sampleDisclosure();
+  assert(closing.some(frame=>frame.popover>closing.at(-1).popover+1&&frame.popover<closing[0].popover-1),'Popover height has intermediate frames while shrinking');
+  assert(closing.some(frame=>frame.chevron!==closing[0].chevron&&frame.chevron!==closing.at(-1).chevron),'Model-name chevron has intermediate rotation frames while closing');
+  await js(`window.__composerShortcutPair={model:document.getElementById('composerModel').value,effort:document.getElementById('composerReasoning').value};document.getElementById('chatInput').value='Keep this draft';document.getElementById('composerSpark').focus();document.getElementById('composerSpark').click()`);
+  await check('Lightning immediately selects the lowest effort and offers maximum effort', `document.getElementById('composerReasoning').value==='low'&&document.getElementById('composerPowerTitle').textContent==='Low'&&document.getElementById('composerSpark').dataset.action==='max'&&document.getElementById('composerSpark').getAttribute('aria-label')==='Use maximum effort: Ultra'&&document.querySelector('#composerPowerChoices input').value==='0'`);
+  await check('Effort shortcut preserves model, draft, open picker and button focus', `document.getElementById('composerModel').value===window.__composerShortcutPair.model&&document.getElementById('chatInput').value==='Keep this draft'&&document.getElementById('modelMenu').open&&document.activeElement.id==='composerSpark'&&!document.querySelector('.toast')`);
+  await settleEffortShortcut();
+  await check('Brain is the settled icon at minimum effort', `getComputedStyle(document.querySelector('.spark-brain')).opacity==='1'&&getComputedStyle(document.querySelector('.spark-lightning')).opacity==='0'&&getComputedStyle(document.querySelector('.spark-brain'),'::before').content!=='none'`);
+  await capture('minimum-effort');
+  await js(`document.getElementById('composerSpark').click()`);
+  await check('Brain selects the highest effort instead of restoring the previous High', `window.__composerShortcutPair.effort==='high'&&document.getElementById('composerReasoning').value==='ultra'&&document.getElementById('composerPowerTitle').textContent==='Ultra'&&document.getElementById('composerSpark').dataset.action==='min'&&document.querySelector('#composerPowerChoices input').value==='5'`);
+  await settleEffortShortcut();
+  await check('Lightning is the settled icon at maximum effort', `getComputedStyle(document.querySelector('.spark-brain')).opacity==='0'&&getComputedStyle(document.querySelector('.spark-lightning')).opacity==='1'`);
+  await capture('maximum-effort');
+  await js(`for(let i=0;i<10;i++)document.getElementById('composerSpark').click()`);
+  await check('Rapid effort clicks keep at most two animations and land on the correct endpoint', `document.getElementById('composerReasoning').value==='ultra'&&document.getElementById('composerModel').value===window.__composerShortcutPair.model&&document.getElementById('composerSpark').getAnimations({subtree:true}).length<=2`);
+  await settleEffortShortcut();
+  await check('Effort shortcut settles without background animation', `document.getElementById('composerSpark').getAnimations({subtree:true}).length===0`);
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  await js(`document.getElementById('composerModelToggle').click();document.getElementById('composerSpark').click()`);
+  await check('Reduced motion preserves effort changes without disclosure or spatial icon motion', `matchMedia('(prefers-reduced-motion: reduce)').matches&&getComputedStyle(document.getElementById('composerModelChoices')).transitionDuration==='0s'&&getComputedStyle(document.querySelector('#composerModelToggle .picker-chevron')).transitionDuration==='0s'&&document.getElementById('composerReasoning').value==='low'&&document.getElementById('composerSpark').getAnimations({subtree:true}).every(animation=>animation.effect.getKeyframes().every(frame=>!frame.transform))`);
+  await js(`document.getElementById('composerModelToggle').click();document.getElementById('composerReasoning').value=window.__composerShortcutPair.effort;document.getElementById('composerReasoning').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('chatInput').value=''`); await pause(300);
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]});
+  await js(`window.__composerSelection={model:document.getElementById('composerModel').value,effort:document.getElementById('composerReasoning').value}`);
+  const { result: appearanceWindow } = await win.webContents.debugger.sendCommand('Runtime.evaluate', { expression: 'window' });
+  for (const width of [1440, 900]) for (const zoom of [1, 1.25]) for (const theme of ['dark', 'light']) for (const language of ['en', 'pt-BR', 'ja']) {
+    win.setContentSize(width, 960); win.webContents.setZoomFactor(zoom);
+    // CDP arguments carry data without constructing executable code from string values.
+    const appearance = await win.webContents.debugger.sendCommand('Runtime.callFunctionOn', {
+      objectId: appearanceWindow.objectId, arguments: [{ value: theme }, { value: language }], awaitPromise: true,
+      functionDeclaration: `async function(theme, language) {
+        window.__composerAppearanceCase = { theme, language };
+        const select = document.getElementById('uiLanguage'); select.value = language;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const { data } = await window.api.getState();
+        await window.api.saveSettings({ patch: { ui: { ...data.config.ui, theme, language } } });
+      }`
+    });
+    assert(!appearance.exceptionDetails, 'Theme/language fixture update succeeded');
+    await pause(100);
+    await check('Effort text contrast '+[theme,language].join('/'), `(()=>{const luminance=color=>{const c=color.match(/[\\d.]+/g).slice(0,3).map(Number).map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4});return c[0]*.2126+c[1]*.7152+c[2]*.0722},rgb=color=>{const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=canvas.height=1;ctx.fillStyle=color;ctx.fillRect(0,0,1,1);return 'rgb('+[...ctx.getImageData(0,0,1,1).data].slice(0,3).join(',')+')'},background=luminance(rgb(getComputedStyle(document.querySelector('#modelMenu > .composer-popover')).backgroundColor));return ['composerPowerTitle','composerModelToggle'].every(id=>{const ink=luminance(rgb(getComputedStyle(document.getElementById(id)).color));return (Math.max(ink,background)+.05)/(Math.min(ink,background)+.05)>=4.5})})()`);
+    await check('Effort layout '+[width,zoom,theme,language].join('/'), `(()=>{const p=document.querySelector('#modelMenu > .composer-popover'),r=p.getBoundingClientRect(),track=document.querySelector('.power-track'),s=track.getBoundingClientRect(),title=document.getElementById('composerPowerTitle'),model=document.getElementById('composerModelToggle');return document.documentElement.lang===window.__composerAppearanceCase.language&&document.documentElement.dataset.theme===window.__composerAppearanceCase.theme&&r.left>=0&&r.right<=innerWidth+.5&&r.top>=0&&r.bottom<=innerHeight&&p.scrollWidth<=p.clientWidth+1&&title.scrollWidth<=title.clientWidth+1&&model.scrollWidth<=model.clientWidth+1&&s.height>=28&&document.getElementById('composerModel').value===window.__composerSelection.model&&document.getElementById('composerReasoning').value===window.__composerSelection.effort})()`);
+    if (zoom===1&&width===1440&&language==='en') await capture('effort-'+theme);
+    if (zoom===1.25&&width===900&&theme==='dark'&&language==='pt-BR') await capture('effort-narrow-pt-BR');
+  }
+  await win.webContents.debugger.sendCommand('Runtime.releaseObject', { objectId: appearanceWindow.objectId });
+  win.webContents.debugger.detach();
+  win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
+  await js(`(async()=>{const language=document.getElementById('uiLanguage');language.value='en';language.dispatchEvent(new Event('change',{bubbles:true}));const {data}=await window.api.getState();await window.api.saveSettings({patch:{ui:{...data.config.ui,theme:'dark',language:'en'}}})})()`); await pause(150);
+  await click('#composerModelToggle');
+  await check('Model name opens the observed list without changing the selection', `!document.getElementById('composerModelChoices').hidden&&document.getElementById('composerModelToggle').getAttribute('aria-expanded')==='true'&&document.getElementById('composerModel').value==='gpt-6-sol'`);
   await check('Every account model is offered', `document.querySelectorAll('#composerModelChoices .model-choice').length===5`);
   await click('[data-model="gpt-5.5"]');
   await check('Model click preserves open menu and exact identity', `document.getElementById('modelMenu').open&&document.getElementById('composerModel').value==='gpt-5.5'`);
   await js(`{const input=document.querySelector('#composerPowerChoices input');input.value='0';input.dispatchEvent(new Event('input',{bubbles:true}));}`);
   await check('Effort changes only the selected model', `document.getElementById('composerModel').value==='gpt-5.5'&&document.getElementById('composerReasoning').value==='low'`);
-  await capture('model'); await click('#chatInput');
+  await check('Header names the chosen model and effort', `document.getElementById('composerPowerTitle').textContent==='Low'&&document.getElementById('composerPowerModel').textContent==='GPT-5.5'`);
+  await capture('model');
+  await js(`document.querySelector('[data-model="gpt-5.5"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await check('Escape closes list and returns to model name', `document.getElementById('modelMenu').open&&document.getElementById('composerModelChoices').hidden&&document.activeElement.id==='composerModelToggle'`);
+  await js(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await check('Second Escape closes popover and returns to composer trigger', `!document.getElementById('modelMenu').open&&document.activeElement===document.querySelector('#modelMenu > summary')`);
+  await click('#modelMenu > summary');
+  await check('Reopening resets the model disclosure', `document.getElementById('composerModelChoices').hidden&&document.getElementById('composerModelToggle').getAttribute('aria-expanded')==='false'`);
+  await js(`document.querySelector('#composerPowerChoices input').focus()`);
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Right'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Right'}); await pause(200);
+  await check('Native keyboard steps the slider without submitting', `document.getElementById('composerModel').value==='gpt-5.5'&&document.getElementById('composerReasoning').value==='medium'`);
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Home'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Home'}); await pause(200);
+  await check('Native Home restores the first observed effort', `document.getElementById('composerReasoning').value==='low'`);
+  await click('#chatInput');
   await click('#composerSettings > summary'); await capture('modes');
   await click('[data-mode="goal"]'); await pause(350);
   await check('Goal uses native controller and appears in dock', `composerFixture.controls.automation==='goal'&&!document.getElementById('activeGoalRow').hidden&&!document.getElementById('composerSettings').open`);

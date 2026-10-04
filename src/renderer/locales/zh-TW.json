@@ -1737,6 +1737,8 @@
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "它的最後一個回合失敗了，之後也沒有後續。在那裡傳送一則訊息即可開始新的回合。",
   "Recovery stopped": "恢復已停止",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "瀏覽器沒有接手這個聊天的修復，因此應用程式已停止重試。重新開啟它的分頁即可繼續恢復。",
+  "Use minimum effort: {0}": "使用最低思考強度：{0}",
+  "Use maximum effort: {0}": "使用最高思考強度：{0}",
   "Healthy": "正常",
   "Degraded": "降級",
   "Unknown": "未知",

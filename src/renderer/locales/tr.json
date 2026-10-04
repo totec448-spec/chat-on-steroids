@@ -1737,6 +1737,8 @@
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Son turu başarısız oldu ve ardından hiçbir şey gelmedi. Yeni bir tur başlatmak için oraya bir mesaj gönderin.",
   "Recovery stopped": "Kurtarma durduruldu",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Tarayıcı bu sohbetin onarımını almadı, bu yüzden uygulama yeniden denemeyi bıraktı. Sekmesini yeniden açın, kurtarma devam eder.",
+  "Use minimum effort: {0}": "En düşük akıl yürütme düzeyini kullan: {0}",
+  "Use maximum effort: {0}": "En yüksek akıl yürütme düzeyini kullan: {0}",
   "Healthy": "Sağlıklı",
   "Degraded": "Bozulmuş",
   "Unknown": "Bilinmiyor",

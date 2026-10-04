@@ -1742,6 +1742,8 @@
   "Unknown": "Неизвестно",
   "End background processes of workers asleep for more than 30 minutes": "Завершать фоновые процессы воркеров, которые спят больше 30 минут",
   "The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.": "Чат и история воркера остаются доступными для повторного использования. По умолчанию выключено; каждая очистка записывается в историю этого воркера.",
+  "Use minimum effort: {0}": "Использовать минимальный уровень рассуждений: {0}",
+  "Use maximum effort: {0}": "Использовать максимальный уровень рассуждений: {0}",
   "Automatic": "Автоматически",
   "Default new-chat model": "Модель по умолчанию для нового чата",
   "Default new-chat reasoning": "Рассуждение по умолчанию для нового чата",

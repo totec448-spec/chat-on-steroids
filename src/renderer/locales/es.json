@@ -1737,6 +1737,8 @@
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Su último turno falló y no siguió nada más. Envía un mensaje allí para iniciar un turno nuevo.",
   "Recovery stopped": "Recuperación detenida",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "El navegador no recogió la reparación de este chat, así que la app dejó de intentarlo. Vuelve a abrir su pestaña y la recuperación continuará.",
+  "Use minimum effort: {0}": "Usar el esfuerzo mínimo: {0}",
+  "Use maximum effort: {0}": "Usar el esfuerzo máximo: {0}",
   "Healthy": "Saludable",
   "Degraded": "Degradado",
   "Unknown": "Desconocido",
