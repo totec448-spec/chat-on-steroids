@@ -1,4 +1,4 @@
-import { cp, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, copyFile, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -32,17 +32,30 @@ export function firefoxManifest(source) {
   return manifest;
 }
 
-function safeOutput(output) {
+async function safeOutput(output) {
   const resolved = path.resolve(output);
   const relative = path.relative(releaseRoot, resolved);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Firefox extension staging must stay inside ${releaseRoot}`);
   }
+  // A lexical descendant can still traverse a junction/symlink outside release.
+  // Check the release directory itself and every existing destination component before removal.
+  let current = releaseRoot;
+  for (const part of ['', ...relative.split(path.sep)]) {
+    current = path.join(current, part);
+    let entry;
+    try { entry = await lstat(current); }
+    catch (error) {
+      if (error.code === 'ENOENT') break;
+      throw error;
+    }
+    if (entry.isSymbolicLink()) throw new Error('Firefox extension staging cannot traverse a symbolic link or junction');
+  }
   return resolved;
 }
 
 export async function stageFirefoxExtension(output = defaultOutput) {
-  const target = safeOutput(output);
+  const target = await safeOutput(output);
   const sourceManifest = JSON.parse(await readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
 
   await mkdir(releaseRoot, { recursive: true });

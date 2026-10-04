@@ -3753,6 +3753,10 @@ shape, carries the shared runtime bytes/build stamp, and joins the ordinary rele
 post-publish asset verification. A valid staged ZIP is packaging evidence only. Firefox runtime,
 background lifecycle and browser-API support require separate live Gecko validation before the
 product can claim Firefox support.
+Before replacing staged files, the stager rejects a destination outside `release` and any
+existing symbolic link or junction in the release/destination path. This preflight keeps a
+linked output ancestor from redirecting recursive replacement into another folder; it is not
+an OS-level guarantee against a concurrent filesystem actor swapping paths after validation.
 The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
 privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
