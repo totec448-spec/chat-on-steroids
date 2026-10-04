@@ -3766,6 +3766,18 @@ keeps a redacted 500-entry ring and bounded async `app.log` batches with rotatio
 overload omissions, a two-second final flush and separate `.crash` snapshot. Logs are human
 diagnostics, not restart authority; secrets must never be printed to investigate a connection.
 
+Activity › Diagnostics report (`diagnostics:saveReport`, `diagnostics-report.ts`) saves one plain-text
+file for bug reports: versions, bridge/companion state, the connection self-test, settings,
+pending commands/workers and the newest 3 MB of `app.log`, then reveals it so the user reads
+it first. Everything passes `report-scrub.ts`: credentials, emails, `KEY=value`/`Bearer`, private
+hosts and IPs are masked; the home folder becomes `~`; every other path segment becomes a stable
+`<p:xxxx>` tag that keeps its extension (ids, dated session ids and structural/app folder names stay
+readable); known personal values (project paths/names, chat titles, worker tasks/labels/results,
+approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only booleans, numbers
+and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
+dropped unless the value is a number or boolean. Never add message, task or title text to a section.
+Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
+
 ## 20. Build, installation, updater and release
 
 Source, bundle, package, installed bytes and live behavior are separate gates (§3). The app id
