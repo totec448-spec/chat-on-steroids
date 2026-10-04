@@ -1049,6 +1049,23 @@ leave the mention off the user's own prompts, which on other accounts start plai
 probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep it, because they need
 the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
 
+One ChatGPT account used on several computers needs one connector set per computer, and the sets
+cannot share a name. `connectorSuffix` (Settings › Setup, "Several computers, one ChatGPT account";
+top-level config, never part of a setup profile) names this install's set: "Windows" gives
+"Chat On Steroids Core (Windows)", "… Desktop (Windows)" and "… Plugins (Windows)"; empty keeps the
+plain names. ChatGPT records a connector's calls under the exact name typed (call path,
+`invocation.server` and `invoked_resource.app_name`, measured 2026-10-04), so:
+- `surfaceDefinition()` reads the suffix on every call: Setup cards, server instructions,
+  protected-resource metadata and plugin refresh use the suffixed names without a restart.
+- The `/status` reply carries `connectorNames`; the extension keeps the last valid set in local
+  storage and hands it to pages with `status`. Pages recognize exactly these names (plus the legacy
+  `TobisComputer`), never a prefix, so one computer never records or attributes the other's calls.
+- `usage.js` reports every Core-like app from the page's system hints; the content script mentions
+  the one with this install's exact name, and none when it is missing or ambiguous.
+- Plugin refresh treats any "Chat On Steroids Plugins (…)" as the Plugins kind for its action limits.
+- Allowed suffix: up to 32 letters, digits, spaces, `.`, `_`, `-`. The settings save refuses
+  anything else; a damaged stored value loads as no suffix. Diagnostics reports leave it out.
+
 | Delivery choice | Eligibility and behavior |
 | --- | --- |
 | Immediate / `auto` | In an exact active non-Pro turn before its first MCP call, **Send directly** claims that original turn, stops its native generation, then uses normal browser Send. **Inject now** is a separate choice, including before the first call: authored `delivery: tool` captures the exact turn, waits visibly in the existing outbox, and only enters that turn's eligible outer MCP result. It never falls back to browser Send and fails visibly if its turn ends before delivery. After the first MCP call, injection remains available; Pro (including Astra) keeps injection throughout. A new turn resets eligibility; old tool history does not count. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |

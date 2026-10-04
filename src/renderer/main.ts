@@ -1,4 +1,5 @@
 import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
+import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
@@ -581,6 +582,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   const chatPatch = chatSettingsPatch(previous);
   const selectedBridgePort = $<HTMLSelectElement>('browserBridgePort').value;
   const patch: SettingsPatch = {
+    connectorSuffix: connectorSuffixDraft(previous),
     capabilities,
     readOnly,
     commandAllowlist,
@@ -643,6 +645,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
       return before !== after;
     });
   const base: SettingsPatch = {
+    connectorSuffix: previous.connectorSuffix ?? '',
     capabilities: previous.capabilities,
     readOnly: previous.readOnly,
     commandAllowlist: previous.commandAllowlist,
@@ -770,6 +773,22 @@ function currentSetupMissingStep(next: AppState): { step: string; text: string }
     tunnelId: $<HTMLInputElement>('tunnelId').value.trim(),
     hasApiKey: next.hasApiKey || (next.secureStorage?.available !== false && key.value !== '')
   });
+}
+
+/**
+ * This computer's connector name suffix as typed, checked here so one invalid character cannot
+ * reject the whole settings save it rides in. Invalid keeps the saved value and says why.
+ */
+function connectorSuffixValid(): string | null {
+  const input = $<HTMLInputElement>('connectorSuffix');
+  const value = input.value.trim().replace(/\s+/g, ' ');
+  const valid = value.length <= CONNECTOR_SUFFIX_MAX && CONNECTOR_SUFFIX_PATTERN.test(value);
+  input.setAttribute('aria-invalid', String(!valid));
+  $('connectorSuffixError').hidden = valid;
+  return valid ? value : null;
+}
+function connectorSuffixDraft(previous: Config): string {
+  return connectorSuffixValid() ?? previous.connectorSuffix ?? '';
 }
 
 interface RootRenameState {
@@ -1243,6 +1262,9 @@ function apply(next: AppState): void {
   );
   ui($('methodHint'), 'textContent', () => t(METHOD_HINT[config.tunnel.kind] ?? ''));
   applyValue($<HTMLInputElement>('tunnelId'), config.tunnel.tunnelId, previousState?.config.tunnel.tunnelId);
+  applyValue($<HTMLInputElement>('connectorSuffix'), config.connectorSuffix ?? '', previousState?.config.connectorSuffix ?? '');
+  // A computer that has a name shows it, so the cards' suffixed names never come unexplained.
+  if (config.connectorSuffix && !previousState?.config.connectorSuffix) $<HTMLDetailsElement>('connectorSuffixField').open = true;
   applyValue(
     $<HTMLInputElement>('desktopTunnelId'),
     config.tunnel.desktopTunnelId,
@@ -2068,10 +2090,12 @@ for (const id of [
   'privacyScreenshots',
   'tunnelKind',
   'tunnelId',
-  'desktopTunnelId'
+  'desktopTunnelId',
+  'connectorSuffix'
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;

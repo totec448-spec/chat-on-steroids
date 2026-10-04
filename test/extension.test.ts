@@ -5054,3 +5054,47 @@ it('replaces the usage observer of an open tab only once it is not streaming', a
   expect(executed.map(options => options.files ?? 'flag')).toEqual(['flag', ['usage.js']]);
   expect(executed.every(options => options.world === 'MAIN')).toBe(true);
 });
+
+describe('this install\'s connector names', () => {
+  const windows = {
+    core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)'
+  };
+  const paired = { port: 8765, token: 'paired-token' };
+  it('keeps the app\'s names across a worker restart, refuses foreign ones and hands them to pages', async () => {
+    // One ChatGPT account on two computers: pages recognize this install's calls by these names.
+    // A restarted worker that fell back to the plain names would claim the other computer's calls.
+    const local = new FakeStorageArea(paired);
+    const session = new FakeStorageArea();
+    let names: unknown = windows;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') return response(200, { connectorNames: names });
+      return response(200, {});
+    });
+    const worker = loadWorker({ local, session, fetch });
+    expect((await worker.send({ type: 'status' }) as any).connectorNames).toBeNull();
+    await worker.fireAlarm();
+    expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
+    expect(local.data.connectorNames).toEqual(windows);
+
+    const quiet = vi.fn(async (input: string) => new URL(input).pathname === '/hello'
+      ? response(200, { app: 'chat-on-steroids', paired: true }) : response(200, {}));
+    const restarted = loadWorker({ local, session, fetch: quiet });
+    expect((await restarted.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
+
+    for (const foreign of [
+      { ...windows, core: 'Chat On Steroids Backup' },
+      { ...windows, core: 'Chat On Steroids Desktop (Windows)' },
+      { ...windows, plugins: 'Chat On Steroids Plugins (Win/VM)' },
+      'Chat On Steroids Core'
+    ]) {
+      names = foreign;
+      await worker.fireAlarm();
+      expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
+    }
+    names = { core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins' };
+    await worker.fireAlarm();
+    expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(names);
+  });
+});

@@ -2627,9 +2627,33 @@ var CLF_DOM = (() => {
     const host = composerBox() || composerActions()?.host;
     return host ? [...host.querySelectorAll('button[aria-label]')].map(composerFileName).filter(Boolean).slice(0, 20).sort() : [];
   }
+  /**
+   * This install's connector names in ChatGPT (core, desktop, plugins), as the app reports them.
+   *
+   * A computer that shares its ChatGPT account with another names its connectors with a suffix,
+   * "Chat On Steroids Core (Windows)", and recognizes exactly its own names; the other computer's
+   * calls run there. Null until the app has said, which keeps the plain names. Every ask to the
+   * page-world helper carries them, so it never judges traffic by names it was not told.
+   */
+  const PLAIN_CONNECTORS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins'];
+  const SUFFIXED_CONNECTOR = /^Chat On Steroids (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
+  let ownConnectors = null;
+  function setConnectorNames(names) {
+    if (!names || typeof names !== 'object') return false;
+    const list = [names.core, names.desktop, names.plugins];
+    const words = ['Core', 'Desktop', 'Plugins'];
+    if (!list.every((name, at) => typeof name === 'string' && (name === PLAIN_CONNECTORS[at] || SUFFIXED_CONNECTOR.exec(name)?.[1] === words[at]))) return false;
+    ownConnectors = list;
+    return true;
+  }
+  /** This install's three names, or the plain ones while the app has not said. */
+  const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
+  /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
+  const pluginsConnectorName = (name) => name === PLAIN_CONNECTORS[2] || SUFFIXED_CONNECTOR.exec(typeof name === 'string' ? name : '')?.[1] === 'Plugins';
+
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
-    const externalPlugins = connectorName === 'Chat On Steroids Plugins';
+    const externalPlugins = pluginsConnectorName(connectorName);
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2638,7 +2662,7 @@ var CLF_DOM = (() => {
         if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce }, location.origin);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames() }, location.origin);
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
@@ -2762,7 +2786,7 @@ var CLF_DOM = (() => {
       };
       const timer = setTimeout(() => finish(null), 1500);
       window.addEventListener('message', receive);
-      window.postMessage({ source: 'clf-picker-ask', nonce }, location.origin);
+      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames() }, location.origin);
     });
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
@@ -3169,6 +3193,8 @@ var CLF_DOM = (() => {
     hasComposerAttachments,
     composerAttachmentNames,
     pluginRefreshView,
+    setConnectorNames,
+    connectorNames,
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
