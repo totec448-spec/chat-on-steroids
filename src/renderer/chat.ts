@@ -33,6 +33,7 @@ import type { InputImage, InputAttachment, InputAutomation } from '../shared/inp
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
+import type { ProjectChatFolder, ProjectChatFolderState } from '../shared/project-chat-folders.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 /**
  * Desktop chat workspace: recorded prose/tool truth, exact-session controls and a composer.
@@ -133,6 +134,7 @@ let deps: Deps;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
+let projectChatFolders: ProjectChatFolderState[] = [];
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -563,6 +565,30 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     actions.push(open);
   }
 
+  const projectId = projectGroup(summary.projectId);
+  const folderState = projectId ? projectChatFolders.find(state => state.projectId === projectId) : undefined;
+  if (projectId && summary.origin?.kind !== 'worker' && folderState?.folders.length) {
+    const picker = document.createElement('select'); picker.className = 'sess-folder-select';
+    picker.dataset.sidebarFocus = `chat-folder:${summary.id}`;
+    ui(picker, 'title', () => t('Move chat to folder'));
+    ui(picker, 'aria-label', () => t('Move chat to folder'));
+    const root = document.createElement('option'); root.value = ''; ui(root, 'textContent', () => t('Project root'));
+    picker.append(root, ...folderState.folders.map(folder => {
+      const option = document.createElement('option'); option.value = folder.id; option.textContent = folder.name; option.setAttribute('translate', 'no'); return option;
+    }));
+    picker.value = folderState.assignments[summary.id] ?? '';
+    picker.addEventListener('click', event => event.stopPropagation());
+    picker.addEventListener('change', async event => {
+      event.stopPropagation(); const previous = folderState.assignments[summary.id] ?? ''; picker.disabled = true;
+      try {
+        const next = await run(api.setSessionChatFolder(projectId, summary.id, picker.value || null));
+        if (next) { replaceProjectChatFolderState(next); paintSessions(); }
+        else picker.value = previous;
+      } finally { picker.disabled = false; }
+    });
+    actionBar.append(picker);
+  }
+
   actionBar.append(...actions, remove);
   row.append(top, actionBar);
   return row;
@@ -638,11 +664,14 @@ function mergeSessionRows(rows: SessionSummary[]): void {
  */
 async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<void> {
   const generation = ++sessionsLoadGeneration;
-  const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
+  const [list, catalog, chatFolders] = await Promise.all([
+    run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects()), run(api.listProjectChatFolders())
+  ]);
   if (!list || generation !== sessionsLoadGeneration) return;
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
+  if (chatFolders) projectChatFolders = chatFolders;
   // Once older pages have been requested, a hot refresh only replaces/updates the newest page.
   // Throwing the older rows away here would make scrolling history vanish every 400 ms while a
   // live chat is recording. Before pagination begins, replacing the first page is cheaper and
@@ -715,6 +744,60 @@ function maybePageSessions(): void {
 
 let diagnosticsExpanded = false;
 
+function replaceProjectChatFolderState(next: ProjectChatFolderState): void {
+  projectChatFolders = [
+    ...projectChatFolders.filter(state => state.projectId !== next.projectId),
+    ...(next.folders.length || Object.keys(next.assignments).length ? [next] : [])
+  ];
+}
+
+function askChatFolderName(title: string, initial = ''): Promise<string | null> {
+  document.getElementById('chatFolderDialog')?.remove();
+  const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const box = document.createElement('dialog'); box.id = 'chatFolderDialog'; box.className = 'plugin-dialog chat-folder-dialog';
+  const head = el('div', 'plugin-dialog-head'); const heading = el('h2', '', title); heading.id = 'chatFolderDialogTitle';
+  box.setAttribute('aria-labelledby', heading.id); head.append(heading);
+  const form = document.createElement('form'); form.className = 'plugin-dialog-body'; form.method = 'dialog';
+  const field = el('label', 'plugin-field'); field.append(el('span', '', () => t('Chat folder name')));
+  const input = document.createElement('input'); input.type = 'text'; input.maxLength = 80; input.required = true; input.value = initial; field.append(input);
+  const actions = el('div', 'plugin-actions');
+  const cancel = el('button', 'btn', () => t('Cancel')) as HTMLButtonElement; cancel.type = 'button'; cancel.addEventListener('click', () => box.close());
+  const save = el('button', 'btn btn-solid', () => t('Save')) as HTMLButtonElement; save.type = 'submit'; actions.append(cancel, save);
+  form.append(field, actions); box.append(head, form); document.body.append(box);
+  return new Promise(resolve => {
+    box.addEventListener('close', () => {
+      const value = box.returnValue === 'save' ? input.value.trim() : '';
+      box.remove(); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); resolve(value || null);
+    }, { once: true });
+    form.addEventListener('submit', event => { event.preventDefault(); if (!input.reportValidity()) return; box.returnValue = 'save'; box.close(); });
+    box.showModal(); input.focus(); input.select();
+  });
+}
+
+async function createChatFolder(projectId: string): Promise<void> {
+  const name = await askChatFolderName(t('New chat folder'));
+  if (!name) return;
+  const next = await run(api.createProjectChatFolder(projectId, name));
+  if (next) { replaceProjectChatFolderState(next); expandedProjects.add(projectId); paintSessions(); }
+}
+
+async function renameChatFolder(projectId: string, folder: ProjectChatFolder): Promise<void> {
+  const name = await askChatFolderName(t('Rename chat folder'), folder.name);
+  if (!name || name === folder.name) return;
+  const next = await run(api.renameProjectChatFolder(projectId, folder.id, name));
+  if (next) { replaceProjectChatFolderState(next); paintSessions(); }
+}
+
+async function removeChatFolder(projectId: string, folder: ProjectChatFolder): Promise<void> {
+  const next = await run(api.removeProjectChatFolder(projectId, folder.id));
+  if (next) {
+    replaceProjectChatFolderState(next); paintSessions();
+    [...document.querySelectorAll<HTMLElement>('[data-sidebar-focus]')]
+      .find(control => control.dataset.sidebarFocus === `chat-folder-add:${projectId}`)?.focus({ preventScroll: true });
+    toast(t('Chat folder removed; chats moved to project root'));
+  }
+}
+
 function projectSortEntries(): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
   for (const entry of sessions) {
@@ -733,6 +816,7 @@ function paintSessions(): void {
   // Activity replaces sidebar nodes. Keep an actively focused project disclosure
   // attached to its exact project, without moving focus from the composer or settings.
   const focused = document.activeElement;
+  const focusedSidebarControl = focused instanceof HTMLElement && projectList.contains(focused) ? focused.dataset.sidebarFocus : undefined;
   const focusedProject = focused instanceof HTMLElement && projectList.contains(focused) && focused.matches('.project-heading')
     ? focused.closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
   const children = new Map<string, SessionSummary[]>();
@@ -745,7 +829,7 @@ function paintSessions(): void {
   }
   const rows: HTMLElement[] = [];
   // A task and its expanded workers are one sidebar item for project pagination.
-  const projectRows = new Map<string, Array<{ rows: HTMLElement[]; selected: boolean }>>();
+  const projectRows = new Map<string, Array<{ id: string; rows: HTMLElement[]; selected: boolean }>>();
   const diagnostics: SessionSummary[] = [];
   const group = (key: string, workers: SessionSummary[], parentRow?: HTMLElement, target = rows): void => {
     const button = el('button', 'worker-toggle');
@@ -771,7 +855,7 @@ function paintSessions(): void {
     const workers = children.get(entry.id); if (workers) group(entry.id, workers, row, target);
     if (projectId) {
       const tasks = projectRows.get(projectId) ?? [];
-      tasks.push({ rows: target, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
+      tasks.push({ id: entry.id, rows: target, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
       projectRows.set(projectId, tasks);
     }
   }
@@ -895,11 +979,40 @@ function paintSessions(): void {
         } finally { addFolder.disabled = false; }
       });
       folderList.append(addFolder); section.append(folderList);
+
+      const chatFolderTools = el('div', 'project-chat-folder-tools');
+      const addChatFolder = el('button', 'btn project-chat-folder-add') as HTMLButtonElement; addChatFolder.type = 'button';
+      addChatFolder.dataset.sidebarFocus = `chat-folder-add:${id}`;
+      addChatFolder.append(icon('i-plus'), el('span', '', () => t('New chat folder')));
+      ui(addChatFolder, 'aria-label', () => t('New chat folder in {0}', [project.name])); ui(addChatFolder, 'title', () => t('New chat folder'));
+      addChatFolder.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); void createChatFolder(id); });
+      chatFolderTools.append(addChatFolder); section.append(chatFolderTools);
     }
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
-    section.append(...shown.flatMap(task => task.rows));
+    const folderState = projectChatFolders.find(state => state.projectId === id);
+    const knownFolders = new Set(folderState?.folders.map(folder => folder.id) ?? []);
+    for (const folder of folderState?.folders ?? []) {
+      const group = el('section', 'project-chat-folder'); group.dataset.chatFolderId = folder.id;
+      const folderHead = el('div', 'project-chat-folder-head');
+      const folderName = el('span', 'project-chat-folder-name', folder.name); folderName.setAttribute('translate', 'no');
+      const edit = el('button', 'btn project-chat-folder-action') as HTMLButtonElement; edit.type = 'button'; edit.append(icon('i-pencil'));
+      edit.dataset.sidebarFocus = `chat-folder-rename:${id}:${folder.id}`;
+      ui(edit, 'aria-label', () => t('Rename chat folder {0}', [folder.name])); ui(edit, 'title', () => t('Rename chat folder'));
+      edit.addEventListener('click', event => { event.stopPropagation(); void renameChatFolder(id, folder); });
+      const remove = el('button', 'btn project-chat-folder-action') as HTMLButtonElement; remove.type = 'button'; remove.append(icon('i-trash'));
+      remove.dataset.sidebarFocus = `chat-folder-remove:${id}:${folder.id}`;
+      ui(remove, 'aria-label', () => t('Remove chat folder {0}; chats move to project root', [folder.name]));
+      ui(remove, 'title', () => t('Remove chat folder; chats move to project root'));
+      remove.addEventListener('click', event => { event.stopPropagation(); void removeChatFolder(id, folder); });
+      folderHead.append(icon('i-folder'), folderName, edit, remove); group.append(folderHead);
+      group.append(...shown.filter(task => folderState?.assignments[task.id] === folder.id).flatMap(task => task.rows));
+      section.append(group);
+    }
+    section.append(...shown.filter(task => {
+      const assigned = folderState?.assignments[task.id]; return !assigned || !knownFolders.has(assigned);
+    }).flatMap(task => task.rows));
     if (shown.length < tasks.length) {
       const more = el('button', 'btn project-show-more', () => t("Show more")) as HTMLButtonElement;
       more.type = 'button'; ui(more, 'aria-label', () => t("Show more tasks in {0}", [project?.name ?? t("this project")]));
@@ -920,7 +1033,9 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
-  if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
+  if (focusedSidebarControl) [...projectList.querySelectorAll<HTMLElement>('[data-sidebar-focus]')]
+    .find(control => control.dataset.sidebarFocus === focusedSidebarControl)?.focus({ preventScroll: true });
+  else if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   filePanel?.update(selectedLocalProject());

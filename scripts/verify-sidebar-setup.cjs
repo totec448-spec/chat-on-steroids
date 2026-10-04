@@ -35,13 +35,20 @@ app.whenReady().then(async () => {
       update:{current:'2.0.9',latest:null,stage:'idle',error:null,checkedAt:null}};
     const project = {id:'demo-project',name:'VideoClipper',path:'C:/demo',additionalPaths:['C:/shared'],createdAt:1};
     const projects = [project, {id:'second-project',name:'Documentation',path:'C:/docs',createdAt:2}];
+    let chatFolderStates=[]; let chatFolderSerial=0;
     const rows = Array.from({length:22},(_,i)=>({id:'task-'+i,title:'Project chat '+(i+1),projectId:project.id,
       conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:100-i,endedAt:2,events:0,userMessages:0,
       toolCalls:0,lastToolCallAt:null,processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,
       estimatedTokens:0,contextTokens:0,lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:null,activeTurnId:null,agents:[],origin:null}));
+    rows.push({...rows[0],id:'worker-child',title:'Worker child',conversationId:'worker-chat',chatIds:['worker-chat'],updatedAt:99.5,
+      origin:{kind:'worker',fromSessionId:'task-1',agentId:'worker-1',task:'Fixture worker'}});
     const ok=data=>Promise.resolve({ok:true,data});
     window.api = new Proxy({ getState:()=>ok(state),getLog:()=>ok([]),
-      listProjects:()=>ok(projects),listSessions:()=>ok({sessions:rows,total:22,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      listProjects:()=>ok(projects),listProjectChatFolders:()=>ok(chatFolderStates),listSessions:()=>ok({sessions:rows,total:23,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      createProjectChatFolder:(projectId,name)=>{const state={projectId,folders:[{id:'chat-folder-'+(++chatFolderSerial),name,createdAt:Date.now()}],assignments:{}};chatFolderStates=[...chatFolderStates.filter(row=>row.projectId!==projectId),state];return ok(state)},
+      renameProjectChatFolder:(projectId,folderId,name)=>{const state=chatFolderStates.find(row=>row.projectId===projectId);state.folders=state.folders.map(folder=>folder.id===folderId?{...folder,name}:folder);return ok({...state,assignments:{...state.assignments}})},
+      removeProjectChatFolder:(projectId,folderId)=>{const state=chatFolderStates.find(row=>row.projectId===projectId);state.folders=state.folders.filter(folder=>folder.id!==folderId);state.assignments=Object.fromEntries(Object.entries(state.assignments).filter(([,value])=>value!==folderId));return ok({...state,assignments:{...state.assignments}})},
+      setSessionChatFolder:(projectId,sessionId,folderId)=>{const state=chatFolderStates.find(row=>row.projectId===projectId);if(folderId)state.assignments[sessionId]=folderId;else delete state.assignments[sessionId];return ok({...state,assignments:{...state.assignments}})},
       getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]}),
       saveSettings:patch=>{state.config={...state.config,...patch};return ok(state)},
@@ -57,8 +64,12 @@ app.whenReady().then(async () => {
     const still=document.createElement('style'); still.textContent='*,*::before,*::after{animation:none!important;transition:none!important}'; document.head.append(still);
     window.fixtureReady=true;
   `;
+  // A worktree may share node_modules through a junction. Serve only these two pinned font
+  // files outside the fixture root; do not disable Vite's filesystem boundary or expose a parent.
+  const fontFiles = [['regular','Phosphor.woff2'],['fill','Phosphor-Fill.woff2']].map(([family,file]) =>
+    fs.realpathSync(path.join(path.dirname(require.resolve('@phosphor-icons/web/'+family)),file)));
   const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'),
-    server:{host:'127.0.0.1',port:0}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
+    server:{host:'127.0.0.1',port:0,fs:{allow:[root,...fontFiles]}}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request,response) => {
         const source = fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8')
           .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>', '<script type="module">'+fixture+'</script></body>');
@@ -78,6 +89,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     };
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group > .sess").length === 5'));i++) await new Promise(r=>setTimeout(r,25));
+    const iconFonts = await js(`(async () => {
+      await document.fonts.ready;
+      return { faces:[...document.fonts].filter(face=>face.family.includes('CoS Phosphor')).map(face=>({family:face.family,status:face.status})),
+        resources:performance.getEntriesByType('resource').filter(entry=>entry.name.includes('.woff')).map(entry=>({url:entry.name,status:entry.responseStatus})) };
+    })()`);
+    assert.ok(iconFonts.faces.length===2 && iconFonts.faces.every(face=>face.status==='loaded'),
+      'Sidebar icon font did not load: '+JSON.stringify(iconFonts));
     await js(`window.disclosureEvents=[]; for(const type of ['keydown','keypress','keyup','click']) document.addEventListener(type,e=>window.disclosureEvents.push({type,key:e.key,tag:e.target.tagName,cls:e.target.className,open:document.querySelector('.project-group')?.open}),true)`);
     // Project groups start closed. Exercise native summary activation before the
     // existing visible-row geometry, drag ordering and pagination checks.
@@ -140,6 +158,32 @@ app.whenReady().then(async () => {
     win.webContents.setZoomFactor(1);
     await js(`document.querySelector('.project-show-more').click()`);
     assert.equal(await js(`document.querySelectorAll('.project-group > .sess').length`),13);
+    await js(`{const button=document.querySelector('.project-chat-folder-add');button.focus();button.click()}`);
+    assert.equal(await js(`document.getElementById('chatFolderDialog')?.open`),true);
+    await js(`document.querySelector('#chatFolderDialog input').value='Research';document.querySelector('#chatFolderDialog form').requestSubmit()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Research'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder-name')?.textContent`),'Research');
+    assert.equal(await js(`document.activeElement?.dataset.sidebarFocus`),'chat-folder-add:demo-project');
+    const moveControl = await js(`(() => { const select=document.querySelector('.project-group > .sess .sess-folder-select'); return {label:select?.getAttribute('aria-label'), options:[...select.options].map(option=>option.textContent)}; })()`);
+    assert.match(moveControl.label,/folder/i); assert.deepEqual(moveControl.options,['Project root','Research']);
+    await js(`(() => {const select=document.querySelector('.project-group > .sess .sess-folder-select');select.focus();select.value='chat-folder-1';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder .sess')?.dataset.id==='task-1'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder .sess')?.dataset.id`),'task-1');
+    assert.equal(await js(`document.activeElement?.classList.contains('sess-folder-select')`),true);
+    await js(`document.querySelector('.project-chat-folder .worker-toggle').click()`);
+    assert.equal(await js(`document.querySelector('.project-chat-folder .worker-group .sess')?.dataset.id`),'worker-child');
+    assert.equal(await js(`document.querySelector('.project-chat-folder .worker-group .sess-folder-select')===null`),true);
+    await screenshot('chat-folders.png');
+    await js(`{const button=document.querySelector('.project-chat-folder-action');button.focus();button.click()}`);
+    await js(`document.querySelector('#chatFolderDialog input').value='Sources';document.querySelector('#chatFolderDialog form').requestSubmit()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Sources'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder-name')?.textContent`),'Sources');
+    assert.match(await js(`document.activeElement?.dataset.sidebarFocus??''`),/^chat-folder-rename:/);
+    await js(`{const button=document.querySelectorAll('.project-chat-folder-action')[1];button.focus();button.click()}`);
+    for(let i=0;i<100 && (await js(`document.querySelector('.project-chat-folder')!==null`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.querySelector('.project-chat-folder')===null`),true);
+    assert.equal(await js(`document.activeElement?.dataset.sidebarFocus`),'chat-folder-add:demo-project');
+    assert.equal(await js(`document.querySelector('.project-group > .sess')?.dataset.id`),'task-1');
     await js(`document.querySelector('[data-tab="setup"]').click(); document.getElementById('wizExpand').click()`);
     assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),true);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`),true);

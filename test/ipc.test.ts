@@ -63,6 +63,7 @@ const {
   swarmStateForCaller
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
+const { assignSessionProject } = await import('../src/main/projects.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
@@ -504,6 +505,32 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(await handlers.get('sessions:toolEditReview')!(null, {
     sessionId: first.data.id, callId: 'not-a-uuid', changeIndex: 0
   })).toMatchObject({ ok: false });
+});
+
+it('validates the project chat-folder IPC boundary and moves only an exact project session', async () => {
+  const folder = path.join(dir, 'chat-folder-project');
+  await fs.mkdir(folder, { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'chat-folders', path: folder }] });
+  await writeDurableNow('projects', []);
+  const { addProject } = await import('../src/main/projects.js');
+  const project = await addProject(folder);
+  const session = await createSession({ title: 'Grouped', conversationId: 'ipc-chat-folder-session' });
+  await assignSessionProject(session.id, project.id);
+
+  const created = await handlers.get('projectChatFolders:create')!(null, { projectId: project.id, name: 'Research' }) as any;
+  expect(created).toMatchObject({ ok: true, data: { projectId: project.id, folders: [{ name: 'Research' }] } });
+  const folderId = created.data.folders[0].id;
+  expect(await handlers.get('projectChatFolders:setSession')!(null, { projectId: project.id, sessionId: session.id, folderId }))
+    .toMatchObject({ ok: true, data: { assignments: { [session.id]: folderId } } });
+  expect(await handlers.get('projectChatFolders:rename')!(null, { projectId: project.id, folderId, name: 'References' }))
+    .toMatchObject({ ok: true, data: { folders: [{ id: folderId, name: 'References' }] } });
+  expect(await handlers.get('projectChatFolders:list')!(null, undefined)).toMatchObject({ ok: true, data: [{ projectId: project.id }] });
+  expect(await handlers.get('projectChatFolders:setSession')!(null, { projectId: project.id, sessionId: session.id, folderId: null }))
+    .toMatchObject({ ok: true, data: { assignments: {} } });
+  expect(await handlers.get('projectChatFolders:remove')!(null, { projectId: project.id, folderId }))
+    .toMatchObject({ ok: true, data: { folders: [], assignments: {} } });
+  expect(await handlers.get('projectChatFolders:create')!(null, { projectId: project.id, name: '', extra: true }))
+    .toMatchObject({ ok: false });
 });
 
 it('does not install a stale Git watch after a newer Files project watch', async () => {

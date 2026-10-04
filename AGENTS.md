@@ -755,6 +755,20 @@ inputs and workers keep their durable project association; their chats return to
 sidebar list. Adding that same folder again restores grouping. It does not delete files,
 sessions or the approved root. A local project is distinct from a ChatGPT project route.
 
+`project-chat-folders.ts` owns a separate durable, sidebar-only catalog for named chat folders
+inside a grouped project. Folder ids are UUIDs; membership is keyed by the exact local `projectId`
+and durable local session id. Creating, renaming, removing or assigning one never changes project
+filesystem membership, roots, cwd, project instructions, Skill scope or ChatGPT routes. Removing a
+chat folder moves its member chats back to the project root. A worker chat is never assigned on its
+own: it stays rendered with its exact parent session, so worker-family grouping is preserved.
+Compact & Resume keeps the same local session id, so its chat-folder membership survives frontend
+conversation replacement without copying membership to a new identity.
+Read and write use the same catalog validation, including 64 folders and 10,000 assignments per
+project and at most 200 project rows. A rejected over-capacity mutation never reaches the durable
+write owner; moving or clearing an existing assignment and removing a folder remain usable at the
+limit. The five `projectChatFolders:*` IPC/preload operations expose this owner, not filesystem
+folder operations.
+
 `workspace.ts` is learned/inherited cwd, keyed to the proven chat or permitted transport request.
 Explicit session project binding takes precedence at kernel entry. Workers inherit only their
 exact prime's project/workspace. Different primes may each own `worker-1` in different folders.

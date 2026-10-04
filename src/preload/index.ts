@@ -8,6 +8,7 @@ import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
+import type { ProjectChatFolderState } from '../shared/project-chat-folders.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
@@ -236,6 +237,11 @@ const api = {
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   addProjectFolder: (id: string) => call<LocalProject | null>('projects:addFolder', { id }),
   removeProjectFolder: (id: string, path: string) => call<LocalProject>('projects:removeFolder', { id, path }),
+  listProjectChatFolders: () => call<ProjectChatFolderState[]>('projectChatFolders:list'),
+  createProjectChatFolder: (projectId: string, name: string) => call<ProjectChatFolderState>('projectChatFolders:create', { projectId, name }),
+  renameProjectChatFolder: (projectId: string, folderId: string, name: string) => call<ProjectChatFolderState>('projectChatFolders:rename', { projectId, folderId, name }),
+  removeProjectChatFolder: (projectId: string, folderId: string) => call<ProjectChatFolderState>('projectChatFolders:remove', { projectId, folderId }),
+  setSessionChatFolder: (projectId: string, sessionId: string, folderId: string | null) => call<ProjectChatFolderState>('projectChatFolders:setSession', { projectId, sessionId, folderId }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {
