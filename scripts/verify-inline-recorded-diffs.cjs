@@ -22,7 +22,7 @@ const fixture = `(() => {
  const methods={
   getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);return r;},
   listSessions:()=>ok({sessions:[f.summary],activeId:f.summary.id,pressure:[]}),
-  getToolEditReview:()=>ok({callId:'00000000-0000-4000-8000-000000000004',changeIndex:0,path:'src/app.ts',added:1,removed:1,baseText:'const value = 1;\\n',currentText:'const value = 2;\\n'}),
+  getToolEditReview:()=>ok({callId:'00000000-0000-4000-8000-000000000004',changeIndex:0,path:'src/app.ts',added:1,removed:1,baseText:'const value = "before";\\n',currentText:'const value = "after";\\n'}),
   writeClipboard:value=>{window.capturedClipboard=value;return ok(true);},
   getSession:id=>id==='worker-local'?ok({summary:worker,events:[{seq:1,time:now,source:'extension',kind:'assistant_message',messageId:'synthetic-worker-result',message:stored('Build verified. No regressions found.'),final:true,state:'final'}],total:1,nextFrom:2}):old.getSession(id)
  };
@@ -46,7 +46,8 @@ app.whenReady().then(async()=>{
   await until(`document.querySelectorAll('.diff-line.is-added').length===1`);
   assert.equal(await js(`document.querySelector('.diff-line.is-added .diff-gutter:nth-child(2)').textContent`),'1');
   await js(`document.querySelector('.edit-card .tool-copy').click()`);
-  assert.equal(await js('capturedClipboard'),'const value = 2;\n');
+  assert.equal(await js(`document.querySelector('.edit-card .tool-copy').textContent`),'Copy file');
+  assert.equal(await js('capturedClipboard'),'const value = "after";\n');
   await js(`document.querySelectorAll('.edit-card .tool-copy')[1].click()`);
   assert.equal(await js(`document.querySelector('.edit-card').classList.contains('is-expanded')`),true);
  }
@@ -54,6 +55,13 @@ app.whenReady().then(async()=>{
  await pause(150);
  fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,before?'before.png':'after.png'),(await win.webContents.capturePage()).toPNG());
  if(!before){
+  assert.equal(await js(`getComputedStyle(document.querySelector('.diff-code .tok-string')).color`),'rgb(195, 232, 141)','Dark diff uses the dark syntax palette');
+  await js(`const theme=document.getElementById('appearanceTheme');theme.value='light';theme.dispatchEvent(new Event('change',{bubbles:true}))`);
+  await until(`document.documentElement.dataset.theme==='light' && getComputedStyle(document.documentElement).getPropertyValue('--page').trim()!=='#191919'`);
+  await js(`document.getAnimations().forEach(a=>{if(a.effect.getTiming().iterations!==Infinity)a.finish()})`);await pause(150);
+  assert.equal(await js(`getComputedStyle(document.querySelector('.diff-code .tok-string')).color`),'rgb(4, 120, 87)','Light diff uses the light syntax palette');
+  assert.equal(await js(`getComputedStyle(document.querySelector('.unified-diff')).getPropertyValue('--syntax-string').trim()`),await js(`getComputedStyle(document.querySelector('.file-panel')).getPropertyValue('--syntax-string').trim()`),'Diff and file viewer share the selected theme palette');
+  fs.writeFileSync(path.join(output,'light.png'),(await win.webContents.capturePage()).toPNG());
   win.setContentSize(760,960);await until('innerWidth===760');await pause(150);
   assert.equal(await js(`document.getElementById('chatBody').scrollWidth<=document.getElementById('chatBody').clientWidth+1`),true,'Diff stays within the narrow chat viewport');
   assert.equal(await js(`getComputedStyle(document.querySelector('.edit-card .tool-copy')).opacity`),'1','Copy remains visible outside hover');

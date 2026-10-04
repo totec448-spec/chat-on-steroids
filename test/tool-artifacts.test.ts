@@ -27,6 +27,7 @@ it('loads exact recorded snapshots on demand and copies their text without inter
   await vi.waitFor(() => expect(card.querySelector('.is-added .diff-code')?.textContent).toBe('<script>new</script>'));
   expect(load).toHaveBeenCalledWith('local-session', call.callId, 0);
   expect(card.querySelector('script')).toBeNull();
+  expect(card.querySelector('.tool-copy')!.textContent).toBe('Copy file');
   card.querySelector<HTMLButtonElement>('.tool-copy')!.click();
   expect(window.api.writeClipboard).toHaveBeenCalledWith(snapshot.currentText);
   card.open = false; open(card);
@@ -58,4 +59,43 @@ it('keeps oversized assets visibly unavailable with copying disabled', async () 
   open(card);
   await vi.waitFor(() => expect(card.textContent).toContain('Recorded edit is unavailable.'));
   expect(card.querySelector<HTMLButtonElement>('.tool-copy')!.disabled).toBe(true);
+});
+
+async function toggle(card: HTMLDetailsElement, expanded: boolean): Promise<void> {
+  const changed = new Promise<void>(resolve => card.addEventListener('toggle', () => resolve(), { once: true }));
+  card.open = expanded;
+  await changed;
+}
+
+it.each(['failed', 'callId', 'changeIndex', 'path', 'size'] as const)('retries an unavailable %s read only when reopened', async failure => {
+  const first = failure === 'failed' ? { ok: false, error: 'Fixture read failed' } : { ok: true, data: {
+    ...snapshot,
+    ...(failure === 'size' ? { currentText: 'x'.repeat(512 * 1024) } : { [failure]: failure === 'changeIndex' ? 1 : 'another-owner' })
+  } };
+  const load = vi.fn().mockResolvedValueOnce(first).mockResolvedValue({ ok: true, data: snapshot });
+  const card = mount(load);
+  await toggle(card, true);
+  await vi.waitFor(() => expect(card.textContent).toContain('Recorded edit is unavailable.'));
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(card.querySelector<HTMLButtonElement>('.tool-copy')!.disabled).toBe(true);
+  expect(card.querySelector('.diff-line')).toBeNull();
+  await toggle(card, false); await toggle(card, true);
+  await vi.waitFor(() => expect(card.querySelector('.is-added .diff-code')?.textContent).toBe('<script>new</script>'));
+  expect(load).toHaveBeenCalledTimes(2);
+  card.querySelector<HTMLButtonElement>('.tool-copy')!.click();
+  expect(window.api.writeClipboard).toHaveBeenCalledWith(snapshot.currentText);
+  await toggle(card, false); await toggle(card, true);
+  expect(load).toHaveBeenCalledTimes(2);
+});
+
+it('does not duplicate a pending read when the card closes and reopens', async () => {
+  let resolve!: (reply: unknown) => void;
+  const load = vi.fn(() => new Promise(done => { resolve = done; }));
+  const card = mount(load);
+  await toggle(card, true); await toggle(card, false); await toggle(card, true);
+  expect(load).toHaveBeenCalledTimes(1);
+  resolve({ ok: true, data: snapshot });
+  await vi.waitFor(() => expect(card.querySelector('.is-added .diff-code')).not.toBeNull());
+  await toggle(card, false); await toggle(card, true);
+  expect(load).toHaveBeenCalledTimes(1);
 });

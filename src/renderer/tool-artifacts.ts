@@ -13,7 +13,7 @@ export function renderEditCards(call: ToolCallRecord, sessionId: string, current
     if (change.approximate) header.append(el('span', 'meta', () => t(' (approx.)')));
     const path = el('div', 'edit-card-path', change.path);
     const controls = el('div', 'edit-card-controls');
-    const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement; copy.type = 'button'; copy.disabled = true;
+    const copy = el('button', 'tool-copy', () => t('Copy file')) as HTMLButtonElement; copy.type = 'button'; copy.disabled = true;
     const expand = el('button', 'tool-copy', () => t('Expand')) as HTMLButtonElement; expand.type = 'button';
     expand.onclick = () => { const full = card.classList.toggle('is-expanded'); expand.setAttribute('aria-pressed', String(full)); };
     expand.setAttribute('aria-pressed', 'false');
@@ -22,25 +22,29 @@ export function renderEditCards(call: ToolCallRecord, sessionId: string, current
     ui(viewport, 'aria-label', () => t('Diff for {0}', [change.path]));
     const body = el('div', 'edit-card-body'); body.append(path, controls, viewport); card.append(header, body);
     let loaded = false;
+    function unavailable(message: string): void {
+      loaded = false;
+      copy.disabled = true;
+      viewport.replaceChildren(el('p', 'meta', () => t(message)));
+    }
     card.addEventListener('toggle', async () => {
       if (!card.open || loaded || !card.isConnected || !current()) return;
       loaded = true;
       viewport.replaceChildren(el('p', 'meta', () => t('Loading edit…')));
       if (!change.reviewAssetId) {
-        viewport.replaceChildren(el('p', 'meta', () => t(change.reviewUnavailable === 'too-large'
-          ? 'Diff unavailable: this edit was too large to keep' : 'Diff unavailable: this edit was not kept'))); return;
+        unavailable(change.reviewUnavailable === 'too-large'
+          ? 'Diff unavailable: this edit was too large to keep' : 'Diff unavailable: this edit was not kept'); return;
       }
       const reply = await run(window.api.getToolEditReview(sessionId, call.callId, index));
       if (!current() || !card.isConnected) return;
       if (!reply || reply.callId !== call.callId || reply.changeIndex !== index || reply.path !== change.path) {
-        viewport.replaceChildren(el('p', 'meta', () => t('Recorded edit is unavailable.'))); return;
+        unavailable('Recorded edit is unavailable.'); return;
+      }
+      if (reply.baseText.length + reply.currentText.length > 512 * 1024) {
+        unavailable('Recorded edit is unavailable.'); return;
       }
       copy.disabled = false;
       copy.onclick = () => { if (current() && card.isConnected) void run(window.api.writeClipboard(reply.currentText)); };
-      if (reply.baseText.length + reply.currentText.length > 512 * 1024) {
-        viewport.replaceChildren(el('p', 'meta', () => t('Recorded edit is unavailable.')));
-        copy.disabled = true; return;
-      }
       const module = await import('./unified-diff.js');
       if (!current() || !card.isConnected) return;
       await module.renderUnifiedDiff(viewport, change.path, reply.baseText, reply.currentText, () => current() && card.isConnected);

@@ -3413,8 +3413,11 @@ Recorded successful edits also expose lazy inline diff cards under their exact t
 use the existing getToolEditReview IPC and immutable snapshots, never the current filesystem or
 patch intent. Each reply must match call id, change index and path, and retain its captured session
 generation through syntax loading. Cards cap files at 32 and preview lines at 600; unavailable
-assets stay explicit. Copy uses the recorded resulting text and Expand increases only the bounded
-viewport. The existing Review dock remains available.
+assets stay explicit. Copy file copies the entire recorded resulting file and Expand increases
+only the bounded viewport. Unavailable reads reset lazy-load admission so closing and reopening
+retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
+file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
+surfaces. The existing Review dock remains available.
 
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
