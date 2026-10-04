@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
+import { connectorName } from '../shared/connector-names.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
@@ -1230,6 +1231,15 @@ export function agentForFinishCaller(caller: Caller): string | null {
  * stranger, it is an agent whose identity this app could not read, so it is told that in
  * those words rather than being handed a credential to carry instead.
  */
+/**
+ * This install's Core connector, named in agent protocol text when a computer name is set (#1091).
+ * One ChatGPT account then holds several computers' Cores, and a worker told only "the agents
+ * tool" reported to the other computer's Core (seen live, 2026-10-04: refused there as "no run").
+ */
+export function ownCoreHint(): string {
+  return getConfig().connectorSuffix ? ` of ${connectorName('core', getConfig().connectorSuffix)}` : '';
+}
+
 function requireMember(caller: Caller): Agent {
   caller = exactCaller(caller);
   const run = runForCaller(caller);
@@ -1238,7 +1248,8 @@ function requireMember(caller: Caller): Agent {
   if (!run && runs.size > 0) throw new AgentsBusyError();
   if (!run) {
     throw new AgentError(
-      'No sub-agent run is active. The chat that calls agents action=spawn becomes the prime agent of a new run.'
+      `No sub-agent run is active in ${connectorName('core', getConfig().connectorSuffix)}. ` +
+        'The chat that calls agents action=spawn becomes the prime agent of a new run.'
     );
   }
   const agent = resolve(caller);
@@ -3277,7 +3288,7 @@ function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
     (body || 'The prime agent has more work for you; check your inbox on the next tool result.') +
     `\n\n(Chat On Steroids: you are still ${agent.info.id} in the same run, and this is the prime agent talking to ` +
     'you again in the chat you already know. Pick up from what you did here before rather than starting over. ' +
-    'Report with agents action=message to="prime" as you go and action=finish when this piece is done.)';
+    `Report with ${ownCoreHint() ? `the agents tool${ownCoreHint()}: ` : 'agents '}action=message to="prime" as you go and action=finish when this piece is done.)`;
   return { text, messageIds: waiting.map((message) => message.id) };
 }
 
