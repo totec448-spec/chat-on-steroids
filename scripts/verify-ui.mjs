@@ -43,7 +43,9 @@ const reasonFor = outcome => {
 };
 for (const name of scripts) {
   if (skip.has(name)) { console.log(`SKIP  ${name}  (needs a real GPU and display timing; run it locally)`); continue; }
-  const how = special[name] ?? { command: electron, args: [] };
+  // The app starts in the system language on a first start. Checks assert English text, so pin the
+  // locale; otherwise they fail on any machine whose system language the app also speaks.
+  const how = special[name] ?? { command: electron, args: ['--lang=en-US'] };
   const started = Date.now();
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   const run = () => new Promise(resolve => {
