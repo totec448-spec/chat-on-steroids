@@ -2263,7 +2263,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
-      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'));
+      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null);
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
@@ -8977,10 +8977,51 @@ const REPAIR_FAIL_REASONS: Record<string, string> = {
   error: 'Chrome refused the action'
 };
 
+/**
+ * What exactly changed, as the browser reports it (#1086). A long run logged "the page changed
+ * before the action" ten times in a row while nothing else happened, and nothing said which
+ * check moved. Unknown values are dropped, never echoed.
+ */
+const REPAIR_CHANGE_DETAILS: Record<string, string> = {
+  navigating: 'the tab was navigating',
+  'other-chat': 'the tab showed another chat',
+  'new-document': 'the page was reloaded or replaced',
+  'woke-up': 'the suspended tab woke up',
+  'first-unanswered': 'the page did not answer the first check',
+  'changed-turn': 'a new answer started',
+  'changed-question': 'a new message was sent',
+  'changed-unknown': 'the answer changed',
+  unknown: 'the page gave no reason'
+};
+/** Where the page saw the answer move, for `changed-progress:<source>`. */
+const REPAIR_PROGRESS_SOURCES: Record<string, string> = {
+  adopted: 'the page took over a running answer',
+  sent: 'a message was sent',
+  'page-call': 'the page showed a new tool call',
+  'page-step': 'the page showed a new step',
+  'page-text': 'the answer text grew',
+  'tool-resumed': 'a tool call resumed the answer',
+  'app-tool_call': 'the app recorded a tool call',
+  'app-page_tool': 'the app recorded a ChatGPT step',
+  'app-progress': 'the app recorded a status note',
+  'app-assistant_message': 'the app recorded answer text'
+};
+
+function repairChangeDetail(detail: string | null): string | null {
+  if (!detail) return null;
+  if (Object.hasOwn(REPAIR_CHANGE_DETAILS, detail)) return REPAIR_CHANGE_DETAILS[detail]!;
+  if (Object.hasOwn(REPAIR_HOLD_REASONS, detail)) return REPAIR_HOLD_REASONS[detail]!;
+  const progress = /^changed-progress(?::(.+))?$/.exec(detail);
+  if (!progress) return null;
+  const source = progress[1] && Object.hasOwn(REPAIR_PROGRESS_SOURCES, progress[1]) ? REPAIR_PROGRESS_SOURCES[progress[1]] : null;
+  return `the answer made progress${source ? ` (${source})` : ''}`;
+}
+
 async function failRepairAttempt(
   token: string,
   action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
-  why: string | null = null
+  why: string | null = null,
+  changeDetail: string | null = null
 ): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;
@@ -8991,7 +9032,8 @@ async function failRepairAttempt(
       if (!repair.awaitingStream)
         logInfo(`bridge: ChatGPT is answering again in ${conversationId}; the ${repair.reason} repair waits until it finishes`);
     } else {
-      const detail = why && Object.hasOwn(REPAIR_FAIL_REASONS, why) ? `: ${REPAIR_FAIL_REASONS[why]}` : '';
+      const exact = why === 'changed' ? repairChangeDetail(changeDetail) : null;
+      const detail = why && Object.hasOwn(REPAIR_FAIL_REASONS, why) ? `: ${REPAIR_FAIL_REASONS[why]}${exact ? ` — ${exact}` : ''}` : '';
       logWarn(`bridge: the browser reported failed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'}${detail})`);
     }
     repair.awaitingStream = streaming;
