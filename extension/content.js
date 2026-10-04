@@ -12205,6 +12205,18 @@
         CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser)) &&
       (!message.directTurn || sendAttempted || (CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser &&
         (!turnId || turnId === sourceTurn)));
+    // Which onTarget condition failed, in its order, for the release report (#820). A pickup that
+    // kept being withdrawn for 17 minutes could not say whether its page moved or its chat changed (#882).
+    const offTarget = () => {
+      if (!alive) return 'page-closed';
+      if (epoch !== forEpoch || CLF_DOM.conversationId() !== target) return 'left-chat';
+      if (message.recovery && !sendAttempted && stopRequestedAt) return 'stop-requested';
+      const newUser = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
+      if ((sourceQuiet || message.directTurn) && !sendAttempted && newUser) return 'new-user-message';
+      if ((sourceQuiet || message.directTurn) && !sendAttempted && turnId && turnId !== sourceTurn) return 'turn-changed';
+      if (sourceQuiet && !sendAttempted && turnProgressRevision !== sourceActivity) return 'turn-progressed';
+      return 'off-target';
+    };
     if (!onTarget()) return false;
     if (message.recovery && (!sourceUser || sourceUser !== message.recovery.questionId || stopRequestedAt)) return false;
     if (message.recovery) {
@@ -12269,6 +12281,7 @@
     // The first reason this attempt ended before Send, reported with its release (#820).
     let withdrawReason = null;
     const noteWithdraw = (why) => { withdrawReason ??= why; };
+    const withdrawWhy = (why) => noteWithdraw(why === 'lease-lost' && !onTarget() ? offTarget() : why);
     const writableComposer = () => CLF_DOM.composerVisible() && CLF_DOM.composerWritable() && CLF_DOM.composer();
     try {
       // Registration may precede React mounting the composer. Observe that same document
@@ -12300,7 +12313,8 @@
       const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true });
       const input = reply?.data?.input;
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
-      if (!input || !onTarget()) return false;
+      if (!input) return false;
+      if (!onTarget()) { noteWithdraw(offTarget()); return false; }
       withdrawableRecoveryDraft = Boolean(input.recovery) && !(input.images || []).length && !(input.attachments || []).length;
       const fail = async (error) => { await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error }); return false; };
       // ChatGPT restores its shared home draft even in a newly opened input tab.
@@ -12410,7 +12424,7 @@
       for (const attachment of input.attachments || []) {
         const parts = [];
         for (let offset = 0; offset < attachment.size; offset += 524288) {
-          if (!onTarget()) return false;
+          if (!onTarget()) { noteWithdraw(offTarget()); return false; }
           const response = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, attachmentId: attachment.id, offset });
           const chunk = response?.data?.chunk;
           if (typeof chunk !== 'string' || chunk.length > 699052) return fail(t(
@@ -12453,12 +12467,12 @@
       // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
-        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), noteWithdraw)) return false;
+        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
         const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
-        if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw('lease-lost'); return false; }
-        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), noteWithdraw)) return false;
+        if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }
+        if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         sendAttempted = true;
         return true;
       }, (user, conversation) => {
