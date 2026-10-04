@@ -1979,7 +1979,11 @@ input[readonly] {
 .sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
 .sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
 .sess-action { padding: 3px; border: 0; background: transparent; }
-.sess-folder-select { max-width: 108px; height: 25px; padding: 2px 5px; border: 1px solid var(--edge); border-radius: 6px; background: var(--sunk); color: var(--ink); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
+.sess:has(> .sess-actions > .sess-folder-select):is(:hover, :focus-within) { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+.sess:has(> .sess-actions > .sess-folder-select) > .sess-top { grid-column: 1; grid-row: 1; }
+.sess:has(> .sess-actions > .sess-folder-select) > .worker-toggle { grid-column: 2; grid-row: 1; }
+.sess:has(> .sess-actions > .sess-folder-select) > .sess-actions { grid-column: 1 / -1; grid-row: 2; margin-left: 0; min-width: 0; }
+.sess-folder-select { flex: 1; min-width: 0; height: 25px; padding: 2px 5px; border: 1px solid var(--edge); border-radius: 6px; background: var(--sunk); color: var(--ink); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
 .sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }

@@ -118,7 +118,8 @@ app.whenReady().then(async () => {
         primaryRemove:!!rows[0].querySelector('.project-folder-remove'), removeCount:group.querySelectorAll('.project-folder-remove').length,
         removeLabel:group.querySelector('.project-folder-remove')?.getAttribute('aria-label')??'',
         addLabel:group.querySelector('.project-folder-add')?.getAttribute('aria-label')??'' }; })()`);
-    assert.deepEqual(folders.paths,['C:/demo','C:/shared']); assert.deepEqual(folders.roles,['listitem','listitem']);
+    assert.deepEqual(folders.paths,['C:/demo','C:/shared'],'Project folder paths: '+JSON.stringify(folders));
+    assert.deepEqual(folders.roles,['listitem','listitem'],'Project folder roles: '+JSON.stringify(folders));
     assert.equal(folders.primaryRemove,false); assert.equal(folders.removeCount,1);
     assert.match(folders.removeLabel,/C:\/shared/); assert.match(folders.addLabel,/VideoClipper/);
     await js(`document.querySelector('.project-heading').focus()`);
@@ -147,7 +148,8 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...points[2],y:points[2].y+12});
     await new Promise(r=>setTimeout(r,40));
     const moved=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>row.dataset.id)`);
-    assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4']);
+    assert.deepEqual(moved,['task-1','task-2','task-0','task-3','task-4'],
+      'Native chat drag: '+JSON.stringify({moved,points,geometry}));
     assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
     await new Promise(r=>setTimeout(r,200));
     await screenshot('sidebar.png');
@@ -178,6 +180,15 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.project-chat-folder .worker-toggle').click()`);
     assert.equal(await js(`document.querySelector('.project-chat-folder .worker-group .sess')?.dataset.id`),'worker-child');
     assert.equal(await js(`document.querySelector('.project-chat-folder .worker-group .sess-folder-select')===null`),true);
+    const folderRow = await js(`(() => {
+      const row=document.querySelector('.project-chat-folder > .sess');
+      const title=row.querySelector('.sess-top b'), actions=row.querySelector('.sess-actions');
+      const titleBounds=title.getBoundingClientRect(), actionBounds=actions.getBoundingClientRect(), bounds=row.getBoundingClientRect();
+      return {titleWidth:title.clientWidth,titleContent:title.scrollWidth,titleBottom:titleBounds.bottom,actionsTop:actionBounds.top,actionsRight:actionBounds.right,rowRight:bounds.right};
+    })()`);
+    assert.ok(folderRow.titleWidth>=Math.min(folderRow.titleContent,120),'Folder controls must leave the chat title readable: '+JSON.stringify(folderRow));
+    assert.ok(folderRow.actionsTop>=folderRow.titleBottom-1,'Folder actions belong below the title');
+    assert.ok(folderRow.actionsRight<=folderRow.rowRight+1,'Folder actions must remain inside the row');
     await screenshot('chat-folders.png');
     await js(`{const button=document.querySelector('.project-chat-folder-action');button.focus();button.click()}`);
     await js(`document.querySelector('#chatFolderDialog input').value='Sources';document.querySelector('#chatFolderDialog form').requestSubmit()`);
@@ -307,4 +318,8 @@ app.whenReady().then(async () => {
     await screenshot('project-order-restored.png');
     console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,projectOrder:{pointer:true,keyboard:true,restored:true},showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
-}).catch(error=>{console.error(error);app.exit(1)});
+}).catch(error=>{
+  // Keep the actual assertion values in the bounded CI summary, which otherwise prints [Array].
+  console.error('UI assertion error: '+JSON.stringify({message:error.message,actual:error.actual,expected:error.expected,stack:error.stack?.split('\n').slice(0,4)}));
+  app.exit(1);
+});
