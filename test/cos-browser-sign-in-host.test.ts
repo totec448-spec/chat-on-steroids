@@ -219,3 +219,23 @@ it('sends a signed-out sign-in click to ChatGPT login in the open ChatGPT tab, a
   expect(navigate).toHaveBeenCalledTimes(1);
   expect(show).toHaveBeenCalledTimes(1);
 });
+
+it('tells its owner when the user puts a shown window away, never when the app hides it', () => {
+  const onUserHide = vi.fn();
+  const host = new CosBrowser({ preloadDir: 'unused', rendererUrl: () => null, rendererDir: 'unused', onUserHide }) as any;
+  const windowId = host.model.createWindow({ type: 'normal', state: 'normal' });
+  let visible = true;
+  const base = { hide: vi.fn(() => { visible = false; }), isVisible: () => visible, isFocused: () => false };
+  host.frames.set(windowId, { id: windowId, base, shown: true });
+  // The extension or the app minimizing it is not the user closing it: no notice.
+  host.hideWindow(windowId);
+  expect(onUserHide).not.toHaveBeenCalled();
+  // Closing a window already put away says nothing either.
+  host.userHide(windowId);
+  expect(onUserHide).not.toHaveBeenCalled();
+  visible = true;
+  host.frames.get(windowId).shown = true;
+  host.userHide(windowId);
+  expect(base.hide).toHaveBeenCalledTimes(2);
+  expect(onUserHide).toHaveBeenCalledTimes(1);
+});

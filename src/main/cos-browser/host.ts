@@ -158,7 +158,11 @@ export class CosBrowser {
   private browserEpoch = 0;
   private importingSignIn = false;
 
-  constructor(private readonly assets: { preloadDir: string; rendererUrl: () => string | null; rendererDir: string }) {
+  constructor(private readonly assets: {
+    preloadDir: string; rendererUrl: () => string | null; rendererDir: string;
+    /** The user closed or minimized a shown window: it hides to the tray and goes on running. */
+    onUserHide?: () => void;
+  }) {
     cosSignInTransfer.onChange(change => this.signInEnded(change));
   }
 
@@ -423,9 +427,9 @@ export class CosBrowser {
     base.on('close', event => {
       if (this.stopping || this.quitting) return;
       event.preventDefault();
-      this.hideWindow(id);
+      this.userHide(id);
     });
-    base.on('minimize', () => this.hideWindow(id));
+    base.on('minimize', () => this.userHide(id));
     this.layout(id);
     return frame;
   }
@@ -462,6 +466,13 @@ export class CosBrowser {
     this.model.setWindowState(id, frame.base.isMaximized() ? 'maximized' : 'normal');
     this.layout(id);
     this.notify();
+  }
+
+  private userHide(id: number): void {
+    const frame = this.frames.get(id);
+    const shown = frame !== undefined && (frame.shown || frame.base.isVisible());
+    this.hideWindow(id);
+    if (shown) this.assets.onUserHide?.();
   }
 
   private hideWindow(id: number): void {

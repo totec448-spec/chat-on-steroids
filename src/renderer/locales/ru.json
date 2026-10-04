@@ -1949,5 +1949,8 @@
   "{0} unchanged lines": "Неизменённых строк: {0}",
   "More edited files are available in the recording.": "Другие изменённые файлы доступны в записи.",
   "1 sub-agent in this round": "Подагент в этом раунде: 1",
-  "{0} sub-agents in this round": "Подагенты в этом раунде: {0}"
+  "{0} sub-agents in this round": "Подагенты в этом раунде: {0}",
+  "The Chat On Steroids browser is still running": "Браузер Chat On Steroids продолжает работать",
+  "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "Ваши чаты продолжаются. Чтобы вернуть его, выберите «Показать браузер» в меню значка в трее.",
+  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Ваши чаты продолжаются. Чтобы вернуть его, выберите «Показать браузер» в меню значка в строке меню."
 }

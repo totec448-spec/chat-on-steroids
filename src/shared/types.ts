@@ -165,6 +165,8 @@ export interface UiPrefs {
    * reinstalled extension, which starts with empty storage under a new id, gets them back.
    */
   browserPreferences?: { overwrite: boolean; durations: boolean };
+  /** Set once the notice that the CoS browser hid to the tray, still running, was shown. */
+  cosBrowserTrayHint?: boolean;
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
