@@ -5165,7 +5165,8 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
     if (entry.error === 'Requested model or reasoning could not be confirmed') {
       const selection = await ensureComposerModel(true);
       if (generation !== selectionGeneration || cancelledStarts.has(args.id)) return;
-      if (!selection) { toast(t("Model refresh could not confirm your selection. Choose an available model, then retry the plan.")); return; }
+      // This message asked for an exact model; Automatic would quietly replace it (#864).
+      if (!selection?.model) { toast(t("Model refresh could not confirm your selection. Choose an available model, then retry the plan.")); return; }
       Object.assign(args, selection);
     }
     startingInputs.set(args.id, { ...args, state: 'queued', owner: null, createdAt: args.dueAt, conversationId: null });

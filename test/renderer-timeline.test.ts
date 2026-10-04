@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -196,7 +196,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }) },
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }),
+      ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -223,7 +224,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   const api: any = new Proxy(
     {
       getState: () => ok(state),
-      getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] },
+      getChatModels: () => options.noModels ? ok({ state: 'unavailable', requestedAt: 1, observedAt: null, models: [] }) : ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] },
         ...(options.astra ? [{ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'] }] : [])] }),
       getSessionControls: (id: string) => ok({ sessionId: id, conversationId: 'chat-a', automation: live.automation, activeTurnId: 'held-turn', finishHeld: live.finishHeld, blocked: '', job: live.compacting ? { busy: true } : null }),
       releaseSessionFinish: (id: string, turn: string) => { live.controlCalls.push({ id, action: `release:${turn}` }); live.finishHeld = false; return ok({}); },
@@ -1706,8 +1707,24 @@ it('Share a folder creates a sidebar project and keeps it when an older list ref
   expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: project.id, text: 'Work in this folder' });
 });
 
-it('preserves the draft and refuses send while model discovery has no confirmed choices', async () => {
-  const { w, live } = await boot([], false);
+it('sends a new chat at once with Automatic when no model list is readable and none was asked for (#864)', async () => {
+  // ChatGPT Go and Free show no model picker, so Send used to wait two minutes for a list that never came.
+  const { w, live } = await boot([], false, [], [], { noModels: true });
+  const discover = vi.fn(async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: null, models: [] } }));
+  (w as any).api.requestChatModels = discover;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  expect(w.document.getElementById('composerModelLabel')!.textContent).toBe('Automatic');
+  input.value = 'Hello from a Go account';
+  (w.document.getElementById('chatSend') as HTMLButtonElement).click();
+  await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'Hello from a Go account', model: null, reasoningEffort: null });
+  expect(discover).not.toHaveBeenCalled();
+});
+
+it('preserves the draft and refuses send while model discovery cannot confirm the default model', async () => {
+  // The default is an exact request: without a list it is never replaced by Automatic (#864).
+  const { w, live } = await boot([], false, [], [], { defaultChatModel: 'gpt-6' });
   const discover = vi.fn(async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: null, models: [] } }));
   (w as any).api.requestChatModels = discover;
   (w.document.getElementById('refreshComposerModels') as HTMLButtonElement).click();
