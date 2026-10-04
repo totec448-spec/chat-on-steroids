@@ -4093,6 +4093,35 @@ describe('through the MCP endpoint', () => {
     expect(foreignWorker).toMatch(/destination prime/i);
   });
 
+  it('rolls back a cross-prime message on a failed durable write and accepts exactly one retry', async () => {
+    const peer = { conversationId: 'mcp-peer-durability' };
+    spawn({ caller: prime, workers: [{ task: 'A worker' }] });
+    const b = spawn({ caller: peer, workers: [{ task: 'B worker' }] });
+    onSwarmPersistNow(async () => { throw new Error('injected peer write failure'); });
+
+    const failed = await asChat(PRIME_CHAT, 'message', { target_run_id: b.runId, text: 'audit parser' });
+    expect(failed).toContain('Nothing was queued; retry the same message request. (injected peer write failure)');
+    expect(offerMessagesForConversation(peer.conversationId)?.messages).toEqual([]);
+    expect(snapshotSwarm()?.activeRuns?.find(run => run.runId === b.runId)
+      ?.agents.find(agent => agent.info.id === PRIME_ID)?.queue).toEqual([]);
+
+    onSwarmPersistNow(async () => undefined);
+    const retried = await asChat(PRIME_CHAT, 'message', { target_run_id: b.runId, text: 'audit parser' });
+    expect(retried).toContain(`Queued for prime family ${b.runId}`);
+    expect(offerMessagesForConversation(peer.conversationId)?.messages.map(message => message.text)).toEqual(['audit parser']);
+  });
+
+  it('refuses a cross-prime message if its destination disappears during the durable write', async () => {
+    spawn({ caller: prime, workers: [{ task: 'A worker' }] });
+    const b = spawn({ caller: { conversationId: 'mcp-peer-retired' }, workers: [{ task: 'B worker' }] });
+    onSwarmPersistNow(async () => { clearAgent(PRIME_ID, b.runId); });
+
+    const failed = await asChat(PRIME_CHAT, 'message', { target_run_id: b.runId, text: 'late handoff' });
+    expect(failed).toContain('TARGET_RUN_UNAVAILABLE: the destination prime family changed before acceptance. Nothing was queued.');
+    expect(currentRunId('mcp-peer-retired')).toBeNull();
+    expect(swarmStateForCaller(prime).agents.find(agent => agent.id === PRIME_ID)?.pending).toBe(0);
+  });
+
   it('keeps an unacknowledged cross-prime reply address valid across more than eight source incarnations', async () => {
     const primeB: Caller = { conversationId: 'mcp-peer-reply-prime-b' };
     const a = spawn({ caller: prime, workers: [{ task: 'A worker' }] });
