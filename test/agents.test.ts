@@ -28,7 +28,7 @@ vi.mock('electron', () => ({
   shell: { openExternal: async () => undefined }
 }));
 
-const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const {
   AgentError,
   PRIME_ID,
@@ -4711,5 +4711,19 @@ describe('simultaneous independent prime families', () => {
     staged.commit();
     expect(offerMessagesForConversation(PRIME_CHAT)?.messages.map(m => m.text).join('')).toContain('A durable report');
     expect(offerMessagesForConversation(primeB.conversationId)?.messages).toEqual([]);
+  });
+});
+
+describe('one ChatGPT account on several computers', () => {
+  it('names this computer\'s Core when it refuses a call for a run it does not have', async () => {
+    // Seen live (2026-10-04): a Windows worker reported through the Mac's Core, which answered only
+    // "No sub-agent run is active". Naming the connector lets the model see it called the wrong one.
+    const stranger: Caller = { conversationId: 'a-chat-of-another-computer' };
+    expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat On Steroids Core. ');
+    const previous = getConfig();
+    await saveConfig({ ...previous, connectorSuffix: 'Windows' });
+    try {
+      expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat On Steroids Core (Windows). ');
+    } finally { await saveConfig(previous); }
   });
 });
