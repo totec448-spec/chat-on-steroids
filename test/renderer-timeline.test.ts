@@ -1596,6 +1596,31 @@ it('picks and clears project color without changing project membership', async (
   expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
 });
 
+it('names project colors in the interface language and keeps focus on the color button after a pick', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
+  const group = (): HTMLElement => w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  // The menu is already named "Change project color"; each choice is the color itself, in words
+  // a screen reader can say, never the internal value.
+  const blue = group().querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
+  expect(blue.getAttribute('aria-label')).toBe('Blue');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(blue.getAttribute('aria-label')).toBe('Blau');
+  expect(blue.title).toBe('Blau');
+  setLanguage('en');
+
+  // Picking repaints the sidebar. Focus must come back to the new color button, not fall to the page.
+  group().querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
+  group().querySelector<HTMLButtonElement>('[data-project-color-choice="teal"]')!.click(); await settle();
+  expect(api.setProjectColor).toHaveBeenCalledWith(project.id, 'teal');
+  const button = group().querySelector<HTMLButtonElement>('.project-color')!;
+  expect(button.dataset.color).toBe('teal');
+  expect(w.document.activeElement).toBe(button);
+});
+
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;

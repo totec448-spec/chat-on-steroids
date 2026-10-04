@@ -151,6 +151,10 @@ const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
+/** A project color as people say it, in the interface language. */
+function projectColorName(color: ProjectColor): string {
+  return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
+}
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
@@ -839,8 +843,9 @@ function paintSessions(): void {
         option.type = 'button'; option.dataset.projectColorChoice = choice ?? ''; option.dataset.color = choice ?? '';
         option.setAttribute('role', 'menuitemradio');
         option.setAttribute('aria-checked', String((project.color ?? null) === choice));
-        const label = choice ? `${t('Change project color')}: ${choice}` : t('None');
-        option.setAttribute('aria-label', label); option.title = label;
+        // The menu is named "Change project color"; each choice says the color itself.
+        const label = (): string => choice ? projectColorName(choice) : t('None');
+        ui(option, 'aria-label', label); ui(option, 'title', label);
         if (!choice) option.textContent = t('None');
         option.addEventListener('click', async event => {
           event.preventDefault(); event.stopPropagation();
@@ -858,6 +863,9 @@ function paintSessions(): void {
           ++sessionsLoadGeneration;
           projects = projects.map(row => row.id === id ? updated : row);
           paintSessions();
+          // The repaint replaced this menu; give focus to the project's new color button.
+          [...document.querySelectorAll<HTMLElement>('.project-group')].find(group => group.dataset.projectId === id)
+            ?.querySelector<HTMLButtonElement>('.project-color')?.focus();
         });
         menu.append(option);
       }
