@@ -166,7 +166,12 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.activeElement?.dataset.sidebarFocus`),'chat-folder-add:demo-project');
     const moveControl = await js(`(() => { const select=document.querySelector('.project-group > .sess .sess-folder-select'); return {label:select?.getAttribute('aria-label'), options:[...select.options].map(option=>option.textContent)}; })()`);
     assert.match(moveControl.label,/folder/i); assert.deepEqual(moveControl.options,['Project root','Research']);
-    await js(`(() => {const select=document.querySelector('.project-group > .sess .sess-folder-select');select.focus();select.value='chat-folder-1';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await js(`(() => {
+      const select=document.querySelector('.project-group > .sess .sess-folder-select');
+      select.closest('.sess').querySelector('.sess-top').focus();select.focus();
+      if(document.activeElement!==select)throw new Error('Move control must have keyboard focus before the change');
+      select.value='chat-folder-1';select.dispatchEvent(new Event('change',{bubbles:true}));
+    })()`);
     for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder .sess')?.dataset.id==='task-1'`));i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.querySelector('.project-chat-folder .sess')?.dataset.id`),'task-1');
     assert.equal(await js(`document.activeElement?.classList.contains('sess-folder-select')`),true);
@@ -179,11 +184,25 @@ app.whenReady().then(async () => {
     for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Sources'`));i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.querySelector('.project-chat-folder-name')?.textContent`),'Sources');
     assert.match(await js(`document.activeElement?.dataset.sidebarFocus??''`),/^chat-folder-rename:/);
+    await js(`(() => {
+      const select=document.querySelector('.project-chat-folder .sess-folder-select');
+      select.closest('.sess').querySelector('.sess-top').focus();select.focus();
+      if(document.activeElement!==select)throw new Error('Move control must have keyboard focus before the change');
+      select.value='';select.dispatchEvent(new Event('change',{bubbles:true}));
+      document.getElementById('newChat').focus();
+    })()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-group > .sess')?.dataset.id==='task-1'`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.activeElement?.id`),'newChat');
     await js(`{const button=document.querySelectorAll('.project-chat-folder-action')[1];button.focus();button.click()}`);
     for(let i=0;i<100 && (await js(`document.querySelector('.project-chat-folder')!==null`));i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.querySelector('.project-chat-folder')===null`),true);
     assert.equal(await js(`document.activeElement?.dataset.sidebarFocus`),'chat-folder-add:demo-project');
     assert.equal(await js(`document.querySelector('.project-group > .sess')?.dataset.id`),'task-1');
+    await js(`document.querySelector('.project-chat-folder-add').click();document.querySelector('#chatFolderDialog input').value='Temporary';document.querySelector('#chatFolderDialog form').requestSubmit()`);
+    for(let i=0;i<100 && !(await js(`document.querySelector('.project-chat-folder-name')?.textContent==='Temporary'`));i++) await new Promise(r=>setTimeout(r,10));
+    await js(`{const button=document.querySelectorAll('.project-chat-folder-action')[1];button.focus();button.click();document.getElementById('newChat').focus()}`);
+    for(let i=0;i<100 && (await js(`document.querySelector('.project-chat-folder')!==null`));i++) await new Promise(r=>setTimeout(r,10));
+    assert.equal(await js(`document.activeElement?.id`),'newChat');
     await js(`document.querySelector('[data-tab="setup"]').click(); document.getElementById('wizExpand').click()`);
     assert.equal(await js(`document.getElementById('wizard').classList.contains('is-tidy')`),true);
     assert.equal(await js(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`),true);

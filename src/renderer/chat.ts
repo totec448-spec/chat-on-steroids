@@ -579,12 +579,21 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     picker.value = folderState.assignments[summary.id] ?? '';
     picker.addEventListener('click', event => event.stopPropagation());
     picker.addEventListener('change', async event => {
-      event.stopPropagation(); const previous = folderState.assignments[summary.id] ?? ''; picker.disabled = true;
+      event.stopPropagation(); const previous = folderState.assignments[summary.id] ?? '';
+      const hadFocus = document.activeElement === picker;
+      picker.disabled = true;
       try {
         const next = await run(api.setSessionChatFolder(projectId, summary.id, picker.value || null));
-        if (next) { replaceProjectChatFolderState(next); paintSessions(); }
+        if (next) {
+          const restoreFocus = hadFocus && (document.activeElement === picker || document.activeElement === document.body);
+          replaceProjectChatFolderState(next); paintSessions();
+          if (restoreFocus) focusSidebarControl(`chat-folder:${summary.id}`);
+        }
         else picker.value = previous;
-      } finally { picker.disabled = false; }
+      } finally {
+        picker.disabled = false;
+        if (picker.isConnected && hadFocus && document.activeElement === document.body) focusSidebarControl(`chat-folder:${summary.id}`);
+      }
     });
     actionBar.append(picker);
   }
@@ -744,6 +753,15 @@ function maybePageSessions(): void {
 
 let diagnosticsExpanded = false;
 
+function focusSidebarControl(key: string): void {
+  const control = [...$('projectList').querySelectorAll<HTMLElement>('[data-sidebar-focus]')]
+    .find(candidate => candidate.dataset.sidebarFocus === key);
+  // The row reveals its action bar through :focus-within. A newly painted picker is hidden
+  // until the row's existing keyboard target receives focus, so focus that target first.
+  control?.closest('.sess')?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
+  control?.focus({ preventScroll: true });
+}
+
 function replaceProjectChatFolderState(next: ProjectChatFolderState): void {
   projectChatFolders = [
     ...projectChatFolders.filter(state => state.projectId !== next.projectId),
@@ -789,10 +807,13 @@ async function renameChatFolder(projectId: string, folder: ProjectChatFolder): P
 }
 
 async function removeChatFolder(projectId: string, folder: ProjectChatFolder): Promise<void> {
+  const previousFocus = document.activeElement;
+  const returnToAdd = previousFocus instanceof HTMLElement && previousFocus.closest<HTMLElement>('.project-chat-folder')?.dataset.chatFolderId === folder.id;
   const next = await run(api.removeProjectChatFolder(projectId, folder.id));
   if (next) {
+    const restoreFocus = returnToAdd && document.activeElement === previousFocus;
     replaceProjectChatFolderState(next); paintSessions();
-    [...document.querySelectorAll<HTMLElement>('[data-sidebar-focus]')]
+    if (restoreFocus) [...document.querySelectorAll<HTMLElement>('[data-sidebar-focus]')]
       .find(control => control.dataset.sidebarFocus === `chat-folder-add:${projectId}`)?.focus({ preventScroll: true });
     toast(t('Chat folder removed; chats moved to project root'));
   }
@@ -1033,8 +1054,7 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
-  if (focusedSidebarControl) [...projectList.querySelectorAll<HTMLElement>('[data-sidebar-focus]')]
-    .find(control => control.dataset.sidebarFocus === focusedSidebarControl)?.focus({ preventScroll: true });
+  if (focusedSidebarControl) focusSidebarControl(focusedSidebarControl);
   else if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
