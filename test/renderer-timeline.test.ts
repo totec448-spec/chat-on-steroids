@@ -4631,6 +4631,38 @@ it('opens round participants in the existing dock without moving the prime reade
 
 });
 
+it('keeps round inspection at the tail during a dock-induced viewport resize', async () => {
+  const observers: Array<{ targets: Set<Element>; notify: () => void }> = [];
+  vi.stubGlobal('ResizeObserver', class {
+    targets = new Set<Element>();
+    constructor(callback: () => void) { observers.push({ targets: this.targets, notify: callback }); }
+    observe(target: Element): void { this.targets.add(target); }
+    unobserve(target: Element): void { this.targets.delete(target); }
+    disconnect(): void { this.targets.clear(); }
+  });
+  try {
+    const rows: SessionEvent[] = [toolCall(1, 'round-resize'), { kind: 'agent_message', seq: 2, time: T0 + 2000,
+      source: 'app', from: 'worker-1', to: 'prime', messageId: 'resize-report', delivery: 'delivered', message: text('Verified') }];
+    const prime = summary(rows);
+    const worker = { ...summary([]), id: 'resize-worker', origin: { kind: 'worker' as const, fromSessionId: prime.id, agentId: 'worker-1', task: 'Verify' } };
+    const { w } = await boot(rows, true, [], [], { sessions: [prime, worker] });
+    const pane = w.document.getElementById('chatBody')!;
+    let height = 400;
+    Object.defineProperties(pane, { clientHeight: { get: () => height }, scrollHeight: { value: 2000 } });
+    const resize = observers.find(observer => observer.targets.size === 1 && observer.targets.has(pane))!;
+    expect(resize).toBeDefined();
+    resize.notify();
+    // Chromium clamps the initial follow to the tail; inspection there is still an explicit read.
+    pane.scrollTop = 1600; pane.dispatchEvent(new w.Event('scroll'));
+    (w.document.querySelector('#timeline .activity-workers') as HTMLButtonElement).click();
+    height = 350; resize.notify();
+    expect(pane.scrollTop).toBe(1600);
+    (w.document.getElementById('jumpLatest') as HTMLButtonElement).click();
+    height = 300; resize.notify();
+    expect(pane.scrollTop).toBe(pane.scrollHeight);
+  } finally { vi.unstubAllGlobals(); }
+});
+
 it.each([
   { setting: undefined, reader: 'moved', follows: true },
   { setting: undefined, reader: 'wheel', follows: false },

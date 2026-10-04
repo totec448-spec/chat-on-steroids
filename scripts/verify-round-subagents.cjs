@@ -99,6 +99,9 @@ app.whenReady().then(async () => {
   assert.equal(await js(`workerReads.length`),0,'Opening the highlighted overview is lazy');
   assert.equal(await js(`document.querySelectorAll('#timeline .tool-group')[2].open`),false,'Indicator does not expand its round');
   assert.ok(Math.abs(await js(`document.getElementById('chatBody').scrollTop`)-readerTop)<=2,'Opening the dock keeps the reader: '+JSON.stringify({before:readerTop,after:await js(`document.getElementById('chatBody').scrollTop`)}));
+  const [inspectionWidth, inspectionHeight] = win.getContentSize();
+  win.setContentSize(inspectionWidth, inspectionHeight - 80); await settle();
+  assert.ok(Math.abs(await js(`document.getElementById('chatBody').scrollTop`)-readerTop)<=2,'Inspection survives a viewport-height change without following the tail');
   await capture('after-inspection.png');
   await js(`document.querySelectorAll('#timeline .activity-workers')[1].click()`);
   assert.deepEqual(await js(`[...document.querySelectorAll('#workDockRight .is-round-worker')].map(r=>r.dataset.workerSession)`),['worker-local-1']);
