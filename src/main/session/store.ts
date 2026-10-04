@@ -40,7 +40,7 @@ import type {
   StoredText,
   ToolEditReview
 } from '../../shared/session.js';
-import { committedResumeAncestorsFromSummary, continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
+import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle } from './title.js';
@@ -2964,21 +2964,6 @@ export async function conversationAttachment(
   const current = await findSessionByConversation(conversationId, { requireUnique: true });
   if (current) return 'current';
   return (await conversationWasSuperseded(conversationId)) ? 'superseded' : 'unknown';
-}
-
-/**
- * Durable Compact & Resume ancestry for the conversation currently attached to a session.
- *
- * The production store has only two rebind paths: the initial null -> chat attachment and
- * continuation commit. `lastCommittedResumeHandoffId` is written atomically with the latter,
- * while `chatIds` retains every frontend oldest-first. Therefore a current chat with committed
- * resume provenance can safely inherit policy from its historical predecessors without keeping
- * the short-lived continuation WAL around. Ambiguous/non-current lookups fail closed.
- */
-export async function committedResumeAncestors(conversationId: string): Promise<string[]> {
-  if (!conversationId) return [];
-  const summary = await findSessionByConversation(conversationId, { requireUnique: true });
-  return summary ? committedResumeAncestorsFromSummary(summary, conversationId) : [];
 }
 
 /**

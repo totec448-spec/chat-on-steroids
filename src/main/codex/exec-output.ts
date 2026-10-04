@@ -30,18 +30,6 @@ export interface ExecToolCallOutput {
   timedOut: boolean;
 }
 
-/** `ExecToolCallOutput::default`. */
-export function defaultExecToolCallOutput(): ExecToolCallOutput {
-  return {
-    exitCode: 0,
-    stdout: newStreamOutput(''),
-    stderr: newStreamOutput(''),
-    aggregatedOutput: newStreamOutput(''),
-    durationMs: 0,
-    timedOut: false
-  };
-}
-
 /** `build_content_with_timeout`: prepends a timeout notice when the command was killed. */
 export function buildContentWithTimeout(output: ExecToolCallOutput): string {
   if (output.timedOut) {

@@ -26,18 +26,10 @@ import sharp from 'sharp';
 import { getMetadata, readFile } from './filesystem.js';
 import { imageMime, validateImageStructure, formatBytes, MAX_IMAGE_BYTES, type SupportedImageMime } from '../fsops.js';
 
-export const VIEW_IMAGE_TOOL_NAME = 'view_image';
-
 export const VIEW_IMAGE_DESCRIPTION =
   'View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.';
 
 export const VIEW_IMAGE_PATH_DESCRIPTION = 'Local filesystem path to an image file.';
-
-export const VIEW_IMAGE_DETAIL_DESCRIPTION =
-  'Image detail level. Defaults to `high`; use `original` to preserve exact resolution.';
-
-export const VIEW_IMAGE_UNSUPPORTED_MESSAGE =
-  'view_image is not allowed because you do not support image inputs';
 
 export const VIEW_IMAGE_INVALID_MESSAGE = 'unable to process image: invalid or unsupported image data';
 
@@ -87,19 +79,6 @@ export interface ViewImageOptions {
 export const DEFAULT_VIEW_IMAGE_OPTIONS: ViewImageOptions = {
   canRequestOriginalImageDetail: false
 };
-
-/**
- * The handler's detail parsing. Codex keeps accepting `high` and `original` after they disappear
- * from the advertised schema, and rejects anything else.
- */
-export function parseViewImageDetail(detail: string | undefined | null): ImageDetail | null {
-  if (detail === undefined || detail === null) return null;
-  if (detail === 'high') return 'high';
-  if (detail === 'original') return 'original';
-  throw new ViewImageError(
-    `view_image.detail only supports \`high\` or \`original\`; omit \`detail\` for default high resized behavior, got \`${detail}\``
-  );
-}
 
 /** `data_url_from_bytes`. */
 export function dataUrlFromBytes(mime: string, base64: string): string {
