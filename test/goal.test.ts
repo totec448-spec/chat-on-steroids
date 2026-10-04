@@ -900,6 +900,29 @@ describe('the reply', () => {
     expect(view.reply).toBe('');
   });
 
+  it('keeps "the goal is met" as the run outcome for the app window after the page acts on it', async () => {
+    const sessionId = await seed('c-met');
+    globalThis.fetch = (async () => stream([delta('NO_REPLY'), 'data: [DONE]\n'])) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met', turnId: 'g-1' });
+    const view = await settled('c-met');
+    expect(goal.goalOutcomeFor('c-met'), 'nothing to report before the page acts on it').toBeNull();
+    expect(goal.ackGoalDraft('c-met', view.token)).toBe(true);
+    // The page is done with it, so its own view goes quiet...
+    expect(goal.goalViewFor('c-met')).toBeNull();
+    // ...but the window still learns that this run ended with the goal met.
+    expect(goal.goalOutcomeFor('c-met')).toMatchObject({ stage: 'no-reply', turnId: 'g-1', reply: '' });
+  });
+
+  it('reports no outcome for a typed continuation the page has acted on', async () => {
+    const sessionId = await seed('c-typed');
+    globalThis.fetch = (async () => decision('continue', 'what about the tests')) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-typed', turnId: 'g-1' });
+    const view = await settled('c-typed');
+    expect(view.stage).toBe('ready');
+    expect(goal.ackGoalDraft('c-typed', view.token)).toBe(true);
+    expect(goal.goalOutcomeFor('c-typed')).toBeNull();
+  });
+
   /** Protocol words are never safe composer prose; ambiguity stops instead of self-prompting. */
   it('fails closed when legacy output wraps NO_REPLY in scratchpad prose', async () => {
     const sessionId = await seed('c-mentions');
