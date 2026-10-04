@@ -648,6 +648,50 @@ function chatHeldElsewhere(conversationId: string, browser: string | null): bool
   return holders.length > 0 && !holders.includes(browser);
 }
 
+/**
+ * "Open in ChatGPT" for a chat this app knows, shown by the extension instead of the OS.
+ *
+ * The OS hands a URL to whichever browser window last had focus. On #882 (2026-10-04) that was a
+ * second Chrome signed in to another ChatGPT account and without this extension, so the user got
+ * "you don't have access to this conversation". A browser running the extension focuses the
+ * chat's tab or opens it there. It goes to the browser already holding the chat, else to the
+ * first one that asks. Extensions that predate this say nothing about it in their /status body
+ * and are never handed one; the caller then opens the URL through the OS as before.
+ */
+const REVEAL_COLLECT_MS = 4_000;
+const revealBrowsers = new Map<string, number>();
+const pendingReveals: Array<{ conversationId: string; settle: (shown: boolean) => void }> = [];
+
+function revealCapable(): boolean {
+  const now = Date.now();
+  return [...revealBrowsers.values()].some(at => now - at < OPENING_CUSTODY_MS);
+}
+
+/** Resolves true once a browser took the chat, false when the caller should open it itself. */
+export function revealChatInBrowser(conversationId: string): Promise<boolean> {
+  if (!browserWakeConnected() || !revealCapable()) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const entry = { conversationId, settle: (shown: boolean) => { clearTimeout(timer); resolve(shown); } };
+    const timer = setTimeout(() => {
+      const index = pendingReveals.indexOf(entry);
+      if (index >= 0) pendingReveals.splice(index, 1);
+      resolve(false);
+    }, REVEAL_COLLECT_MS);
+    timer.unref?.();
+    pendingReveals.push(entry);
+    wakeBrowserWork();
+  });
+}
+
+function takeReveals(browser: string | null): string[] {
+  const taken = pendingReveals.filter(entry => !chatHeldElsewhere(entry.conversationId, browser));
+  for (const entry of taken) {
+    pendingReveals.splice(pendingReveals.indexOf(entry), 1);
+    entry.settle(true);
+  }
+  return [...new Set(taken.map(entry => entry.conversationId))];
+}
+
 /** An input goes to the browser holding its chat or, when none does, to the first one handed it. */
 function inputHeldElsewhere(input: { id: string; conversationId: string | null }, browser: string | null): boolean {
   if (input.conversationId && chatHolders(input.conversationId).length > 0) return chatHeldElsewhere(input.conversationId, browser);
@@ -2151,8 +2195,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const live = liveConversations();
     let openConversations: string[] = [];
     let stalledConversations: string[] = [];
+    let revealRequested = false;
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
@@ -2163,6 +2208,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
       stalledConversations = (body.stalledConversations ?? []) as string[];
       noteExtensionUpdateHold(body.updateHold);
+      revealRequested = body.canReveal === true;
     }
     const openSet = new Set(openConversations);
     const tabPolicy = await browserTabPolicy(openSet);
@@ -2196,6 +2242,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const browser = browserOf(req);
     if (browser) browserSeenAt.set(browser, Date.now());
     if (browser && req.method === 'POST') browserChats.set(browser, openSet);
+    const canReveal = req.method === 'POST' && revealRequested;
+    if (canReveal) revealBrowsers.set(browser ?? '', Date.now());
     const pendingInputs = await pendingBrowserInputs();
     const pendingIds = new Set(pendingInputs.map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
@@ -2225,6 +2273,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         revival,
         revivals,
         placement: pendingBrowserPlacement(null, browser),
+        ...(canReveal ? { reveals: takeReveals(browser) } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
         repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser),
@@ -10050,6 +10099,8 @@ export function resetBridgeForTests(): void {
   lastSeenAt = null;
   browserSeenAt.clear();
   browserChats.clear();
+  revealBrowsers.clear();
+  for (const entry of pendingReveals.splice(0)) entry.settle(false);
   openingCustody.clear();
   extensionVersion = null;
   announcedExtensions.clear();
