@@ -1394,6 +1394,10 @@ it('counts a plugin ChatGPT used or listed in an earlier run, so a restart does 
   mounted.push(listed);
   expect(chatgpt.classList.contains('is-done')).toBe(true);
   expect(doc.getElementById('wizChatgpt')!.textContent).toMatch(/plugin is in your ChatGPT/);
+
+  // Deleted in ChatGPT: the plugins list no longer names it, the proof goes and the step reopens.
+  mounted.push(structuredClone(restarted));
+  expect(chatgpt.classList.contains('is-done')).toBe(false);
 });
 
 it('keeps folder access discoverable after setup and navigates without granting access', async () => {

@@ -7,7 +7,8 @@ import {
   initConnectorProofPath,
   loadConnectorProof,
   noteConnectorUse,
-  notePluginInstalled
+  notePluginInstalled,
+  notePluginMissing
 } from '../src/main/connector-proof.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -72,4 +73,25 @@ it('keeps ChatGPT listing the plugin as proof it exists, before any call', async
   await connectorProofWritten();
   await loadConnectorProof();
   expect(connectorProof('core')).toEqual({ requestAt: null, toolCallAt: null, installedAt: 5_000 });
+});
+
+it('takes the proof back when ChatGPT\'s plugins list no longer names Core, and only Core\'s', async () => {
+  const TUNNEL_C = 'tunnel_cccccccccccccccccccccccccccccccc';
+  const config = defaultConfig();
+  await saveConfig({ ...config, tunnel: { ...config.tunnel, kind: 'openai', tunnelId: TUNNEL_C, desktopTunnelId: 'tunnel_dddddddddddddddddddddddddddddddd' } });
+  await loadConnectorProof();
+  noteConnectorUse('core', 'tool', 1_000);
+  notePluginInstalled('core', 2_000);
+  noteConnectorUse('desktop', 'request', 3_000);
+  expect(connectorProof('core')).not.toBeNull();
+  // Deleted or disconnected in ChatGPT: what earlier runs saw no longer holds.
+  notePluginMissing('core');
+  expect(connectorProof('core')).toBeNull();
+  expect(connectorProof('desktop')).toEqual({ requestAt: 3_000, toolCallAt: null, installedAt: null });
+  await connectorProofWritten();
+  await loadConnectorProof();
+  expect(connectorProof('core')).toBeNull();
+  // Created again: listed once more, the proof comes back.
+  notePluginInstalled('core', 4_000);
+  expect(connectorProof('core')).toEqual({ requestAt: null, toolCallAt: null, installedAt: 4_000 });
 });

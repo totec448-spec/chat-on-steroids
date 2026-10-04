@@ -117,6 +117,20 @@ export function notePluginInstalled(surface: SurfaceId, at = Date.now()): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * ChatGPT's complete plugins list no longer has this connector's plugin: it was deleted or
+ * disconnected there. That outranks everything earlier runs saw, so the proof for the current
+ * tunnel goes; a request or tool call in this run records it again.
+ */
+export function notePluginMissing(surface: SurfaceId): void {
+  const tunnel = connectorTunnelKey(getConfig(), surface);
+  const known = proofs.get(surface);
+  if (!tunnel || !known || known.tunnel !== tunnel) return;
+  proofs.delete(surface);
+  persist();
+  for (const listener of listeners) listener();
+}
+
 /** The newest lasting evidence for this connector on the tunnel it uses now, or null. */
 export function connectorProof(surface: SurfaceId): { requestAt: number | null; toolCallAt: number | null; installedAt: number | null } | null {
   const proof = proofs.get(surface);
