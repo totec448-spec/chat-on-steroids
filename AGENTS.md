@@ -3770,6 +3770,16 @@ the package preserves userData. Synchronize package/main/extension versions deli
 a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
+`stage-firefox-extension.mjs` can manually derive a Firefox test tree from that same canonical
+extension: it changes only the Gecko manifest packaging shape and carries the shared runtime bytes.
+`npm run extension:firefox:stage` is developer/testing tooling only. Stable release planning,
+checksums, candidate assembly, publishing and post-publish verification intentionally omit a
+Firefox ZIP until live Gecko validation proves the background lifecycle, tabs/windows and bridge.
+A valid staged tree is packaging evidence only and does not establish Firefox runtime support.
+Before replacing staged files, the stager rejects a destination outside `release` and any
+existing symbolic link or junction in the release/destination path. This preflight keeps a
+linked output ancestor from redirecting recursive replacement into another folder; it is not
+an OS-level guarantee against a concurrent filesystem actor swapping paths after validation.
 The macOS afterPack hook removes Electron's unused camera, microphone and audio-capture
 privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
@@ -3805,7 +3815,7 @@ path, development does not stage. Explicit install may relaunch; ordinary quit d
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
-assembles installers, extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
+assembles installers, the Chromium extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
 is dispatched **at the reviewed version tag**, calls that reusable build in the same run,
 requires `docs/release-notes/vX.Y.Z.md`, rechecks versions/privacy/hashes and refuses an existing
 release. A tag alone does not build/publish. An unpublished candidate can be built separately,

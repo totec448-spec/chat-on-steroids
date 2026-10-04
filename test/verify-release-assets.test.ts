@@ -18,14 +18,16 @@ afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = 
 /** A complete, correct release folder; `change` edits it before the checksums are written. */
 function release(change: { manifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void } = {}) {
   dir = mkdtempSync(path.join(tmpdir(), 'release-'));
-  const entries: Record<string, Uint8Array> = {
+  const extensionEntries: Record<string, Uint8Array> = {
     'manifest.json': strToU8(JSON.stringify(change.manifest ?? { version: '2.1.21' }))
   };
-  if (change.stamp !== null) entries['build-stamp.txt'] = strToU8(change.stamp ?? '7b3057119b13\n');
-  for (const name of EXTENSION_FILES) entries[name] = strToU8(name);
+  if (change.stamp !== null) {
+    extensionEntries['build-stamp.txt'] = strToU8(change.stamp ?? '7b3057119b13\n');
+  }
+  for (const name of EXTENSION_FILES) extensionEntries[name] = strToU8(name);
   const sums: string[] = [];
   for (const name of RELEASE_FILES) {
-    const bytes = name === 'Chat-On-Steroids-Extension.zip' ? zipSync(entries) : Buffer.from(`contents of ${name}`);
+    const bytes = name === 'Chat-On-Steroids-Extension.zip' ? zipSync(extensionEntries) : Buffer.from(`contents of ${name}`);
     sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${name}`);
     if (name !== change.omit) writeFileSync(path.join(dir, name), bytes);
   }
@@ -35,6 +37,7 @@ function release(change: { manifest?: object; stamp?: string | null; omit?: stri
 }
 
 it('accepts a complete release whose files match their checksums and whose extension is the tagged build', async () => {
+  expect(RELEASE_FILES).not.toContain('Chat-On-Steroids-Firefox.zip');
   expect(await verifyReleaseAssets({ dir: release(), tag: 'v2.1.21' })).toEqual([]);
 });
 
@@ -45,7 +48,7 @@ it('reports a file whose bytes differ from the published checksum', async () => 
   ]);
 });
 
-it('reports a missing file and an extension that is not the tagged version or has no build stamp', async () => {
+it('reports missing files and a Chromium extension whose version or build stamp is wrong', async () => {
   expect(await verifyReleaseAssets({ dir: release({ omit: 'Chat-On-Steroids-Linux-arm64.deb' }), tag: 'v2.1.21' }))
     .toEqual(['Chat-On-Steroids-Linux-arm64.deb is missing from the release.']);
   rmSync(dir, { recursive: true, force: true });
