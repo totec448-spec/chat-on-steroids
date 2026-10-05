@@ -1492,6 +1492,33 @@ it('highlights missing required setup fields while respecting drafts and a store
   expect(mounted.calls).toEqual([]);
 });
 
+it('names every connector ChatGPT never called, joined in the UI language', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  const surface = (id: string, connectorName: string, optional: boolean, called: boolean) => ({
+    id, connectorName, description: '', cardSummary: '', optional, available: true, localUrl: null, publicUrl: null, tools: ['read'],
+    state: 'live', detail: '', lastRequestAt: called ? Date.now() - 60_000 : null, lastToolCallAt: called ? Date.now() - 60_000 : null, proof: null
+  });
+  const state = structuredClone(mounted.state);
+  state.status.state = 'connected';
+  state.status.lastRequestAt = Date.now() - 60_000;
+  state.status.lastToolCallAt = Date.now() - 60_000;
+  state.status.surfaces = [surface('core', 'Core', false, true), surface('desktop', 'Desktop', true, false), surface('plugins', 'Plugins', true, false)];
+  mounted.push(state);
+  const note = () => doc.getElementById('wizChatgpt')!.textContent!;
+  expect(note()).toContain('“Desktop” and “Plugins” have never been called — create them in ChatGPT');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    // One language throughout: no English "and", and the plural grammar.
+    expect(note()).toContain('“Desktop” und “Plugins” wurden noch nie aufgerufen – lege sie in ChatGPT an');
+  } finally { setLanguage('en'); }
+  const single = structuredClone(state);
+  single.status.surfaces = [surface('core', 'Core', false, true), surface('desktop', 'Desktop', true, false)];
+  mounted.push(single);
+  expect(note()).toContain('“Desktop” has never been called — create it in ChatGPT');
+});
+
 it('counts a plugin ChatGPT used in an earlier run, so a restart does not reopen Setup', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
