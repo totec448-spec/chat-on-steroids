@@ -866,6 +866,29 @@ describe('surface boundaries', () => {
     }
   });
 
+  it('reads the user\'s own Skills read-only through /user-skills, and nothing else in their homes', async () => {
+    everything();
+    const home = path.join(base, 'user-skills-home');
+    await fs.mkdir(path.join(home, '.claude/skills/review'), { recursive: true });
+    await fs.writeFile(path.join(home, '.claude/skills/review/SKILL.md'), '---\nname: Review\n---\nRead the whole diff first.');
+    await fs.mkdir(path.join(home, '.codex'), { recursive: true });
+    await fs.writeFile(path.join(home, '.codex/auth.json'), '{"token":"secret-token"}');
+    vi.stubEnv('HOME', home); vi.stubEnv('USERPROFILE', home); vi.stubEnv('CLAUDE_CONFIG_DIR', ''); vi.stubEnv('CODEX_HOME', '');
+    try {
+      const reply = await core('tools/call', { name: 'read', arguments: { paths: ['/user-skills/claude/skills/review/SKILL.md'] } });
+      expect(reply.body.result?.isError).toBeFalsy();
+      expect(JSON.stringify(reply.body.result?.content)).toContain('Read the whole diff first.');
+      const listing = await core('tools/call', { name: 'read', arguments: { paths: ['/user-skills/claude/skills'] } });
+      expect(JSON.stringify(listing.body.result?.content)).toContain('review');
+      const secret = await core('tools/call', { name: 'read', arguments: { paths: ['/user-skills/codex/auth.json'] } });
+      expect(JSON.stringify(secret.body.result?.content)).not.toContain('secret-token');
+      const patch = '*** Begin Patch\n*** Update File: /user-skills/claude/skills/review/SKILL.md\n@@\n-Read the whole diff first.\n+Skip the diff.\n*** End Patch';
+      const patched = await core('tools/call', { name: 'apply_patch', arguments: { patch } });
+      expect(patched.body.result?.isError).toBe(true);
+      expect(await fs.readFile(path.join(home, '.claude/skills/review/SKILL.md'), 'utf8')).toContain('Read the whole diff first.');
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
     everything();
     const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
