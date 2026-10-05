@@ -121,6 +121,43 @@ describe('durable user input ownership', () => {
     resetInputForTests();
     expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
   });
+  it('marks the person\'s own request for a picture to go out without the Core mention, and nothing else', async () => {
+    binding.finishEnabled = false;
+    const claim = async (args: Partial<InputArgs>) => {
+      const row = await enqueueInput(input(args));
+      const claimed = await claimBrowserInput(row.id, 'page', binding.conversationId);
+      await acknowledgeBrowserInput(row.id, 'page', binding.conversationId, `m-${row.id}`).catch(() => undefined);
+      return claimed as (InputEntry & { coreMention?: false }) | null;
+    };
+    expect(await claim({ text: 'Create an image of a fox in a misty forest' })).toMatchObject({ coreMention: false });
+    expect(await claim({ text: 'Fix the failing test in src/app.ts' })).not.toHaveProperty('coreMention');
+    // Generated openings and workers keep the mention.
+    expect(await claim({ text: 'Create an image of a fox', authoredSource: 'objective' })).not.toHaveProperty('coreMention');
+    binding.origin = 'worker';
+    try { expect(await claim({ text: 'Create an image of a fox' })).not.toHaveProperty('coreMention'); }
+    finally { binding.origin = 'desktop'; }
+    // "make it brighter" changes a picture only right after ChatGPT made one.
+    expect(await claim({ text: 'make it brighter' })).not.toHaveProperty('coreMention');
+    const store = await import('../src/main/session/store.js');
+    const original = vi.mocked(store.readRecentEvents).getMockImplementation()!;
+    vi.mocked(store.readRecentEvents).mockImplementation(async (id, count, options) => options?.kinds?.includes('native_image') ? [
+      { kind: 'user_message', seq: 1, time: now, source: 'extension', messageId: 'q', message: { text: 'draw a fox', chars: 10, truncated: false } },
+      { kind: 'native_image', seq: 2, time: now, source: 'extension', messageId: 'a', providerStatus: 'finished_successfully' }
+    ] as never : original(id, count, options));
+    try { expect(await claim({ text: 'make it brighter' })).toMatchObject({ coreMention: false }); }
+    finally { vi.mocked(store.readRecentEvents).mockImplementation(original); }
+    // One failed edit in between ("image generation is unavailable") still leaves the picture current.
+    const turns = (...kinds: string[]) => vi.mocked(store.readRecentEvents).mockImplementation(async (id, count, options) => options?.kinds?.includes('native_image')
+      ? kinds.map((kind, seq) => kind === 'q' ? { kind: 'user_message', seq, time: now, source: 'extension', messageId: `q${seq}`, message: { text: 'q', chars: 1, truncated: false } }
+        : { kind: 'native_image', seq, time: now, source: 'extension', messageId: `a${seq}`, providerStatus: 'finished_successfully' }) as never
+      : original(id, count, options));
+    try {
+      turns('q', 'image', 'q');
+      expect(await claim({ text: 'make the boat red' })).toMatchObject({ coreMention: false });
+      turns('q', 'image', 'q', 'q');
+      expect(await claim({ text: 'make the boat red' })).not.toHaveProperty('coreMention');
+    } finally { vi.mocked(store.readRecentEvents).mockImplementation(original); }
+  });
   it('preserves messages beyond the former composer limit through admission, restart and browser claim', async () => {
     binding.finishEnabled = false;
     const text = 'Long user request. '.repeat(2000);
@@ -1724,6 +1761,14 @@ describe('one silence delivery for a correction and its next checkpoint', () => 
     now = listenUntil;
     return { head, later, correction };
   }
+
+  it('keeps the Core mention on a picture request that goes out together with a queued checkpoint', async () => {
+    // The combined message also carries the next instruction, which may need the app.
+    const { correction } = await bundle({ text: 'Create an image of a red cube' });
+    const claim = await claimBrowserInput(correction.id, 'first-page', binding.conversationId, true);
+    expect(claim?.text).toBe('Create an image of a red cube\n\nNext queued instruction:\nCheck geometry');
+    expect(claim).not.toHaveProperty('coreMention');
+  });
 
   it('claims only the next checkpoint, restores exact bytes, and records one combined native receipt', async () => {
     const { head, later, correction } = await bundle();
