@@ -19863,6 +19863,47 @@ describe('the goal loop', () => {
     expect(new Set(acks(live).map(message => `${message.conversationId}:${message.token}`)).size).toBe(1);
   });
 
+  /**
+   * The page inserts a Goal reply, and ChatGPT stores inserted text Markdown-escaped, so the
+   * stored copy of "Run `echo two`" reads "Run \\`echo two\\`". Compared raw, the send receipt never
+   * matched, and the turn opened only if the page saw the question before the app held it; when
+   * the app was first, the question read as history, no turn opened and Goal waited forever
+   * (live on 2026-10-05, 3 of 4 runs).
+   */
+  it.each([
+    ['as typed', 'Run `echo two` with the connector'],
+    ['Markdown-escaped', 'Run \\`echo two\\` with the connector']
+  ])('opens the turn of a sent Goal reply whose stored copy is %s, even once the app holds it', async (_case, stored) => {
+    const reply = 'Run `echo two` with the connector';
+    let draft: unknown = readyDraft(reply);
+    let anchors = [{ seq: 1, time: 1_700_000_000_000, messageId: 'm-prior-question' }];
+    let user: HTMLElement;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null, activeTurnId: null,
+        userAnchors: anchors, goal: { enabled: true, hasKey: true, model: MODEL, draft } } }),
+      goal_ack: () => { draft = null; return { ok: true, data: { acknowledged: true } }; }
+    }, (document) => {
+      userTurn(document, 'prior-question', 'first question', { sent: false });
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        // The app learns of the question (from ChatGPT's own record) before this page shows it.
+        anchors = [...anchors, { seq: 2, time: 1_700_000_001_000, messageId: 'm-goal-question' }];
+      });
+    });
+    await live.hook.pullActivity();
+    await settle();
+    await live.hook.pullActivity();
+    await settle();
+    user = userTurn(live.document, 'goal-question', reply, { sent: false });
+    await bindFiberTurns([{ section: user, turn: { turnId: 'goal-question', conversationId: CHAT,
+      messages: [{ role: 'user', stable: true, messageId: 'm-goal-question', rawMessageId: 'm-goal-question', rawText: stored }] } }]);
+    startGenerating(live.document, { send: false });
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
   /** A conversation that moved on by itself is its own answer: the draft is about the past. */
   it('drops a ready draft when ChatGPT has started talking again', async () => {
     let sends = () => 0;

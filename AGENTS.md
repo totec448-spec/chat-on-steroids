@@ -1259,6 +1259,12 @@ While an exact send receipt still has a bounded evidence reader, the existing ob
 requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
 remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
 source needed to recognize its Send. Route, epoch and stable message identity still decide acceptance.
+ChatGPT stores text the page inserted Markdown-escaped (`` \`code\` ``, `\#`, `\<newline>`). A Goal
+reply's receipt is therefore marked `inserted` (`rememberUserSend(true)`; the page's own click and
+submit listeners that record the same Send again keep the mark) and is matched like a bootstrap:
+raw, then one unescape. A person's own typing stays an exact raw comparison. Compared raw, a reply
+with `code` never matched, so its turn opened only when the page saw the question before the app
+held it as an anchor; otherwise no turn opened and Goal waited forever (2026-10-05).
 
 Page-reply waits are bounded: reuse/close observations get three seconds; New Chat preparation
 gets fifteen seconds. Missing preparation replies retain the elected tab and grant no fallback.
