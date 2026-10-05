@@ -8768,6 +8768,38 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 
+  it('says why silence recovery waits on a running call of unknown chat, and recovers once it ends (#1086)', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = 'waits-on-unknown-call';
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Review the changes', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+      const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+      // Another chat's call that no page has claimed yet: it counts as possibly this chat's work.
+      await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+        caller: { conversationId: null, requestId: 'unknown-chat-call', transportKey: null } }, async () => {
+        for (let pass = 0; pass < 3; pass++) {
+          await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+          await sweepStaleSwarm(Date.now());
+          expect(await maintenance()).toBeNull();
+        }
+      });
+      const why = getLog().filter(entry => entry.message.includes(`silence recovery for ${chat}`)).map(entry => entry.message);
+      expect(why).toEqual([expect.stringContaining('a tool call whose chat is not known yet is running')]);
+      // The call ended: the next pass recovers the chat.
+      await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
   it.each(['normal', 'pro'] as const)('keeps the %s silence countdown and reload valid across same-turn corrections', async model => {
     const previous = getConfig();
     await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
@@ -8839,6 +8871,9 @@ describe('unattributed activity recovery', () => {
         expect((await sessionControlsFor(session.id)).recovery).toEqual([]);
       }
       expect(getLog().filter(entry => entry.message.includes('asking the browser to reload') && entry.message.includes(chat))).toEqual([]);
+      // It says why, once, however often the sweep passes (#1086: these exits used to be silent).
+      const why = getLog().filter(entry => entry.message.includes(`silence recovery for ${chat}`)).map(entry => entry.message);
+      expect(why).toEqual([expect.stringContaining('spent: the silent work is no longer this chat\'s current turn')]);
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 
