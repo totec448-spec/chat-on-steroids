@@ -9,7 +9,7 @@ import { listSkills, readSkill, readSkillTextSnapshot, skillCatalogSnapshot, ski
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
-import type { CodexPluginRuntimeEntry, CodexPluginSkillProvenance, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
+import type { ClaudePluginSkillProvenance, CodexPluginRuntimeEntry, CodexPluginSkillProvenance, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
 import type { SkillRoutingMetadata } from '../shared/skill-routing.js';
 
 export interface SkillLibraryScope {
@@ -23,7 +23,8 @@ export interface SkillLibraryScope {
   managedFromCatalog?: boolean;
 }
 type CodexPluginCandidate = Omit<CodexPluginSkillProvenance, 'skillPath'>;
-type Candidate = { file: string; scope: SkillScope; source: SkillSource; codexPlugin?: CodexPluginCandidate };
+type ClaudePluginCandidate = Omit<ClaudePluginSkillProvenance, 'skillPath'>;
+type Candidate = { file: string; scope: SkillScope; source: SkillSource; codexPlugin?: CodexPluginCandidate; claudePlugin?: ClaudePluginCandidate; skipTop?: string };
 export interface SkillLibraryRuntime {
   codexPlugins: (codexHome: string, cwd: string) => Promise<CodexPluginRuntimeEntry[]>;
 }
@@ -151,14 +152,17 @@ async function interfaceFor(directory: string, managed: boolean, errors: string[
   }
 }
 
-async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]; configs: string[]; codexHome: string }> {
+async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]; configs: string[]; codexHome: string; claudeHome: string; projectReal: string | null }> {
   const home = path.resolve((process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME) || os.homedir());
   const codex = path.resolve(process.env.CODEX_HOME?.trim() || path.join(home, '.codex'));
+  const claude = path.resolve(process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(home, '.claude'));
+  let projectReal: string | null = null;
   const admin = process.platform === 'win32' ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'OpenAI', 'Codex') : '/etc/codex';
   const roots: Candidate[] = [];
   const configs = [path.join(admin, 'config.toml'), path.join(codex, 'config.toml')];
   if (scope.projectPath) {
     const project = await approved(scope.projectPath);
+    projectReal = project.real;
     let directory = project.real;
     const ancestors = [directory];
     // Never scan outside approved roots merely because a .git marker might exist above them.
@@ -178,14 +182,35 @@ async function locations(scope: SkillLibraryScope): Promise<{ roots: Candidate[]
       configs.push(path.join(folder, '.codex', 'config.toml'));
     }
     roots.push({ file: path.join(project.real, '.codex', 'skills'), scope: 'repo', source: 'project-codex' });
+    roots.push({ file: path.join(project.real, '.claude', 'skills'), scope: 'repo', source: 'project-claude' });
   }
   roots.push(
     { file: path.join(home, '.agents', 'skills'), scope: 'user', source: 'user-agents' },
     { file: path.join(codex, 'skills'), scope: 'user', source: 'codex-home' },
+    // `skills/synced/<organization>_<account>` holds claude.ai Skills per signed-in account; only the
+    // current account's folder is added below, so older sign-ins do not list their copies twice.
+    { file: path.join(claude, 'skills'), scope: 'user', source: 'claude-home', skipTop: 'synced' },
     { file: path.join(codex, 'skills', '.system'), scope: 'system', source: 'bundled' },
     { file: path.join(admin, 'skills'), scope: 'admin', source: 'admin' }
   );
-  return { roots, configs, codexHome: codex };
+  const synced = await claudeSyncedSkills(claude);
+  if (synced) roots.push({ file: synced, scope: 'user', source: 'claude-home' });
+  return { roots, configs, codexHome: codex, claudeHome: claude, projectReal };
+}
+
+const CLAUDE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The signed-in Claude account's synced Skills folder, from Claude Code's own `.claude.json`. */
+async function claudeSyncedSkills(claude: string): Promise<string | null> {
+  const file = process.env.CLAUDE_CONFIG_DIR?.trim() ? path.join(claude, '.claude.json') : path.join(path.dirname(claude), '.claude.json');
+  try {
+    const text = await readOptionalApproved(file);
+    if (!text) return null;
+    const account = (JSON.parse(text) as { oauthAccount?: { organizationUuid?: unknown; accountUuid?: unknown } }).oauthAccount;
+    const organization = account?.organizationUuid, user = account?.accountUuid;
+    if (typeof organization !== 'string' || typeof user !== 'string' || !CLAUDE_UUID.test(organization) || !CLAUDE_UUID.test(user)) return null;
+    return path.join(claude, 'skills', 'synced', `${organization}_${user}`);
+  } catch { return null; }
 }
 
 async function routingRules(scope: SkillLibraryScope): Promise<{
@@ -275,6 +300,94 @@ async function codexPluginCandidates(codexHome: string, plugins: CodexPluginRunt
   return result;
 }
 
+const CLAUDE_PLUGIN_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/** `enabledPlugins` from one Claude Code settings file; a missing or unreadable file adds nothing. */
+async function claudeEnabledPlugins(file: string, into: Map<string, boolean>, addError: (message: string) => void): Promise<void> {
+  let text: string | null;
+  try { text = await readOptionalApproved(file); } catch { return; }
+  if (!text) return;
+  try {
+    const enabled = (JSON.parse(text) as { enabledPlugins?: unknown }).enabledPlugins;
+    if (!enabled || typeof enabled !== 'object' || Array.isArray(enabled)) return;
+    for (const [id, value] of Object.entries(enabled)) if (typeof value === 'boolean') into.set(id, value);
+  } catch (error) { addError(`Claude Code settings ${path.basename(file)}: ${errorText(error)}`); }
+}
+
+/**
+ * Skills from the Claude Code plugins that are installed and enabled, read from Claude Code's own
+ * files: `plugins/installed_plugins.json` says where each installed version lives, and
+ * `enabledPlugins` in the user's (then the project's) settings says which are switched on. Nothing
+ * is executed. A plugin's package must sit in Claude Code's plugin cache inside an approved folder.
+ */
+async function claudePluginCandidates(claudeHome: string, projectReal: string | null, addError: (message: string) => void): Promise<Candidate[]> {
+  let installed: string | null;
+  try { installed = await readOptionalApproved(path.join(claudeHome, 'plugins', 'installed_plugins.json')); }
+  catch { return []; }
+  if (!installed) return [];
+  let plugins: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(installed) as { plugins?: unknown };
+    if (!parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) throw new Error('installed_plugins.json has no plugins list');
+    plugins = parsed.plugins as Record<string, unknown>;
+  } catch (error) { addError(`Claude Code plugins: ${errorText(error)}`); return []; }
+  const enabled = new Map<string, boolean>();
+  await claudeEnabledPlugins(path.join(claudeHome, 'settings.json'), enabled, addError);
+  if (projectReal) for (const name of ['settings.json', 'settings.local.json']) {
+    await claudeEnabledPlugins(path.join(projectReal, '.claude', name), enabled, addError);
+  }
+  let cache: Awaited<ReturnType<typeof approvedDirectory>>;
+  try { cache = await approvedDirectory(path.join(claudeHome, 'plugins', 'cache')); } catch { return []; }
+  if (!cache) return [];
+  const result: Candidate[] = [];
+  for (const [pluginId, entries] of Object.entries(plugins).slice(0, 128)) {
+    if (enabled.get(pluginId) !== true || !Array.isArray(entries)) continue;
+    const [pluginName, marketplaceName, extra] = pluginId.split('@');
+    if (extra !== undefined || !pluginName || !marketplaceName || !CLAUDE_PLUGIN_SEGMENT.test(pluginName) || !CLAUDE_PLUGIN_SEGMENT.test(marketplaceName)) continue;
+    // One installation per plugin: the user-wide one, or this project's own.
+    const entry = (entries as Array<Record<string, unknown>>).find(row => row && typeof row === 'object' && typeof row.installPath === 'string' &&
+      (row.scope === 'user' || ((row.scope === 'project' || row.scope === 'local') && typeof row.projectPath === 'string' &&
+        projectReal !== null && samePath(row.projectPath, projectReal))));
+    if (!entry) continue;
+    try {
+      const packageDirectory = path.resolve(entry.installPath as string);
+      const checked = await approvedDirectory(packageDirectory);
+      if (!checked || !samePath(checked.real, packageDirectory) || !isContained(cache.real, checked.real)) throw new Error('installed package is not in Claude Code\'s plugin cache');
+      // Claude Code names a plugin by its marketplace entry; the package manifest may use another name.
+      const skills = path.join(checked.real, 'skills');
+      const checkedSkills = await approvedDirectory(skills);
+      if (!checkedSkills || !samePath(checkedSkills.real, skills)) continue;
+      const version = typeof entry.version === 'string' && entry.version.length <= 160 ? entry.version : path.basename(checked.real);
+      result.push({ file: checkedSkills.real, scope: 'user', source: 'claude-plugin', claudePlugin: { pluginId, pluginName, marketplaceName, version } });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') addError(`Claude Code plugin ${pluginId}: ${errorText(error)}`);
+    }
+  }
+  return result;
+}
+
+function claudePluginSkillIdentity(plugin: ClaudePluginCandidate, skillPath: string): string {
+  return `claude\0${plugin.marketplaceName}\0${plugin.pluginName}\0${skillPath.replaceAll('\\', '/')}`;
+}
+
+/**
+ * A link that points into another approved discovery root lists nothing new: that root is read on its own.
+ * Claude Code users often link `~/.claude/skills/<name>` to `~/.agents/skills/<name>`.
+ */
+async function linkIntoDiscoveryRoot(link: string, roots: Candidate[]): Promise<boolean> {
+  try {
+    const target = await fs.realpath(link);
+    const here = await fs.realpath(path.dirname(link));
+    for (const root of roots) {
+      // Only a root this library is allowed to read; a link into an unapproved one stays reported.
+      let real: string;
+      try { real = (await approved(root.file)).real; } catch { continue; }
+      if (isContained(real, target) && !isContained(real, here)) return true;
+    }
+  } catch { /* A dangling link is reported like any other. */ }
+  return false;
+}
+
 export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: SkillLibraryRuntime = DEFAULT_RUNTIME): Promise<SkillLibrary> {
   const managed = scope.managedFromCatalog
     ? skillCatalogSnapshot().map(({ revision: _revision, ...summary }) => summary)
@@ -287,7 +400,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
   const config: SkillConfiguration = { rules: [] };
   const configurationFingerprint = createHash('sha256');
   let invalidConfiguration = false;
-  const search = effectiveCapabilities(getConfig()).read ? await locations(scope) : { roots: [], configs: [], codexHome: '' };
+  const search = effectiveCapabilities(getConfig()).read ? await locations(scope) : { roots: [], configs: [], codexHome: '', claudeHome: '', projectReal: null };
   for (const file of [...new Set(search.configs)]) {
     try { await approved(file, true); } catch { continue; }
     try {
@@ -333,6 +446,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
       }
     }
   }
+  if (search.claudeHome && !inspectedPluginSnapshot) search.roots.push(...await claudePluginCandidates(search.claudeHome, search.projectReal, addError));
   if (inspectedPluginSnapshot) {
     // The explicit CLI wait may outlive a config/home/permission change. Re-enter the
     // cache-only read once; it revalidates current metadata without another CLI launch.
@@ -401,11 +515,13 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
             if (enabled(metadata.name, document.real)) {
               const skillPath = path.relative(resolved.real, current.directory).split(path.sep).join('/');
               const codexPlugin = candidate.codexPlugin ? { ...candidate.codexPlugin, skillPath } : undefined;
-              const hash = createHash('sha256').update(codexPlugin ? pluginSkillIdentity(candidate.codexPlugin!, skillPath) : identity(document.real)).digest('hex').slice(0, 12);
+              const claudePlugin = candidate.claudePlugin ? { ...candidate.claudePlugin, skillPath } : undefined;
+              const hash = createHash('sha256').update(codexPlugin ? pluginSkillIdentity(candidate.codexPlugin!, skillPath)
+                : claudePlugin ? claudePluginSkillIdentity(candidate.claudePlugin!, skillPath) : identity(document.real)).digest('hex').slice(0, 12);
               const stem = path.basename(current.directory).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35) || 'skill';
-              const id = `${stem}--${codexPlugin ? 'codex' : candidate.scope}-${hash}`;
+              const id = `${stem}--${codexPlugin ? 'codex' : claudePlugin ? 'claude' : candidate.scope}-${hash}`;
               library.skills.push({ id, ...metadata, path: document.virtual, ...await interfaceFor(current.directory, false, library.errors),
-                scope: candidate.scope, source: candidate.source, managed: false, ...(codexPlugin ? { codexPlugin } : {}) });
+                scope: candidate.scope, source: candidate.source, managed: false, ...(codexPlugin ? { codexPlugin } : {}), ...(claudePlugin ? { claudePlugin } : {}) });
               seen.add(identity(document.real));
             }
           }
@@ -414,8 +530,9 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
         for await (const entry of await fs.opendir(current.directory)) {
           if (++entries > 4096) break;
           if (entry.name.startsWith('.') || current.depth >= 6) continue;
+          if (current.depth === 0 && candidate.skipTop === entry.name) continue;
           if (entry.isDirectory() && !entry.isSymbolicLink()) queue.push({ directory: path.join(current.directory, entry.name), depth: current.depth + 1 });
-          else if (entry.isSymbolicLink()) addError(`${candidate.source}: linked entry ignored`);
+          else if (entry.isSymbolicLink() && !await linkIntoDiscoveryRoot(path.join(current.directory, entry.name), search.roots)) addError(`${candidate.source}: linked entry ignored`);
         }
       } catch (error) { addError(`${candidate.source}: ${errorText(error)}`); }
     }
@@ -436,7 +553,8 @@ export async function readLibrarySkill(id: string, scope: SkillLibraryScope = {}
   // Commands are derived from canonical paths, not catalog ordering or mutable names.
   const hash = createHash('sha256').update(selected.codexPlugin
     ? pluginSkillIdentity(selected.codexPlugin, selected.codexPlugin.skillPath)
-    : identity(document.real)).digest('hex').slice(0, 12);
+    : selected.claudePlugin ? claudePluginSkillIdentity(selected.claudePlugin, selected.claudePlugin.skillPath)
+      : identity(document.real)).digest('hex').slice(0, 12);
   if (!id.endsWith(`-${hash}`)) throw new Error('The selected Skill changed location');
   return { summary: selected, text: document.text };
 }
