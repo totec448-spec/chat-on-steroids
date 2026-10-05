@@ -461,6 +461,12 @@ read-only without approving their homes (below). No new root authority or implic
 references are not recursively treated as another catalog. External command IDs derive from
 canonical paths and remain stable when similarly named packages appear. `skill-metadata.ts` owns
 bounded YAML/TOML parsing and layered configuration. Invalid policy never enables implicit use.
+`skillLibraryInstructions` writes the model-facing index within `max_context_tokens` (2000 by
+default). Sources take turns (the user's own/repo/managed Skills, `~/.agents`, Codex home, Codex
+plugins, Claude's own, Claude plugins), so one large source cannot crowd the others out. Rows are
+grouped under their folder, written once, as `<entry>: /<id> — description` (descriptions cut at
+110 characters). Each Skill is `<folder>/<entry>/SKILL.md`. Skills that do not fit are counted in
+one closing line saying the user can pick them with `/`.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
 When `CODEX_HOME` has a plugin cache (approved or as a user Skill area), that same read-only
