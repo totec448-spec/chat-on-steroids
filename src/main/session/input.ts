@@ -90,6 +90,10 @@ const entrySchema = inputArgs.extend({
   toolTurnId: z.string().min(1).max(256).optional(),
   sendAuthorizedAt: z.number().optional(),
   requiresAuthorization: z.boolean().optional(),
+  /** A browser pickup timeout is safely replayable only before Send authorization. */
+  pickupFailedAt: z.number().optional(),
+  /** One automatic retry is permitted for an exact, never-authorized browser pickup. */
+  pickupRetryCount: z.number().int().nonnegative().optional(),
   cancelledByUser: z.literal(true).optional(),
   error: z.string().max(200).optional(),
   owner: z.string().nullable(),
@@ -112,6 +116,8 @@ const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
 /** A confirmed send receipt lands in seconds. This only bounds one that is never reported. */
 const UNCERTAIN_SEND_MS = 15 * 60_000;
+const UNCLAIMED_PICKUP_RETRY_MIN_MS = 2 * 60_000;
+const UNCLAIMED_PICKUP_RETRY_MAX_AGE_MS = 30 * 60_000;
 /**
  * The same bound for the sends the one above leaves in custody: an automatic Continue, a new
  * chat's first message and a combined delivery. Their own paths normally settle them in seconds
@@ -486,7 +492,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         !row.error?.startsWith('Message queued. ') &&
         Date.now() - Math.max(row.createdAt, row.dueAt) >= 60_000)
-      return { ...row, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
+      return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of
     // how long ChatGPT takes to assign its durable conversation identity.
@@ -524,6 +530,40 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
       logInfo(`input ${row.id}: ${row.error ?? 'Automatic Continue wait retired after its session left the chat.'} conversation=${row.conversationId} turn=${row.silenceBoundary?.turnId}`);
   }
   return entries!;
+}
+/** Requeue the same durable row once when the browser never claimed it. */
+export function retryUnclaimedInput(id: string): Promise<InputEntry | null> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    const now = Date.now();
+    if (!row || row.state !== 'failed' || row.error !== 'Not sent: the browser did not pick up this message within 60 seconds.' ||
+        !Number.isFinite(row.pickupFailedAt) || (row.pickupRetryCount !== undefined && row.pickupRetryCount !== 0) ||
+        now - row.pickupFailedAt! < UNCLAIMED_PICKUP_RETRY_MIN_MS || now - row.pickupFailedAt! > UNCLAIMED_PICKUP_RETRY_MAX_AGE_MS ||
+        now < row.createdAt || now - row.createdAt > UNCLAIMED_PICKUP_RETRY_MAX_AGE_MS || row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined ||
+        row.mode !== 'auto' || row.transportIntent !== 'browser' || row.purpose === 'decision' || row.opening || row.requiresAuthorization ||
+        row.cancelledByUser || row.recovery || row.silenceBoundary || row.finishOwner || row.directTurn || row.queuedTurn ||
+        row.companionInputId || row.attachments?.length || row.images?.length || row.toolImages?.length || row.delivery ||
+        row.attachmentDelivery || row.toolTurnId || row.automation || row.objective || row.stages?.length || row.loopAfterTurn ||
+        !row.sessionId || !row.conversationId) return null;
+    const session = await getSession(row.sessionId);
+    const activity = session ? deliveryHooks?.activity?.(session) ?? { possible: !!session.activeTurnId, exact: !!session.activeTurnId } : null;
+    if (!session || session.conversationId !== row.conversationId || activity?.possible || activity?.exact ||
+        deliveryHooks?.recoveryAllowed?.(row.sessionId, row.conversationId) !== true ||
+        session.browserRecoveryDismissedAt !== undefined || isChatBlocked(row.conversationId) ||
+        await conversationWasSuperseded(row.conversationId) || inFlightToolCalls(row.conversationId) > 0) return null;
+    const [boundary] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
+    if (boundary?.kind !== 'turn_end' || boundary.time > row.createdAt || boundary.outcome === 'stopped') return null;
+    const [newerMessage] = await readRecentEvents(row.sessionId, 1, { kinds: ['user_message'] });
+    if (newerMessage && newerMessage.time > row.createdAt) return null;
+    if (current.some(other => other.id !== row.id && other.sessionId === row.sessionId &&
+        (!terminal(other) || other.createdAt > row.createdAt))) return null;
+    const next: InputEntry = { ...row, state: 'queued', owner: null, dueAt: now, offeredAt: undefined,
+      completedTurnId: undefined, error: undefined, pickupFailedAt: undefined, pickupRetryCount: 1 };
+    await commit(current.map(entry => entry.id === row.id ? next : entry));
+    logInfo(`input ${row.id}: requeued the same browser message after one proven pre-Send pickup timeout`);
+    return next;
+  });
 }
 async function commit(next: InputEntry[]): Promise<void> {
   // A temporary planner keeps only ownership metadata across restart, never its task or answer.
