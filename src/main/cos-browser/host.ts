@@ -7,7 +7,7 @@
  * into the model. Windows belong to the app, so a window the extension keeps in the background is
  * simply never shown: nothing appears in a taskbar or dock on any platform.
  */
-import { BaseWindow, BrowserWindow, WebContentsView, app, session, shell, type Session, type WebContents } from 'electron';
+import { BaseWindow, BrowserWindow, WebContentsView, app, nativeImage, session, shell, type NativeImage, type Session, type WebContents } from 'electron';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { defaultAppearance, paletteTokens } from '../../shared/appearance.js';
@@ -137,6 +137,18 @@ const WINDOW_CONTROLS = process.platform === 'darwin' ? { left: 78, right: 8 } :
 /** Chromium's own user agent: some sign-in providers refuse one that names an embedder. */
 function chromiumUserAgent(agent: string): string {
   return agent.replace(/\s(?:Electron|chat-on-steroids|Chat On Steroids)\/\S+/gi, '');
+}
+
+/**
+ * An installed browser's icon. On macOS 27, Electron's app.getFileIcon ends the whole app
+ * (SIGTRAP on a worker thread, for any path), so macOS asks Quick Look for the app bundle's
+ * icon instead; other systems keep the file icon.
+ */
+export function browserIcon(executable: string, platform: NodeJS.Platform = process.platform): Promise<NativeImage> {
+  if (platform !== 'darwin') return app.getFileIcon(executable, { size: 'large' });
+  const bundle = executable.match(/^(.*?\.app)(?:\/|$)/)?.[1];
+  if (!bundle) return Promise.reject(new Error(`${executable} is not inside an app bundle`));
+  return nativeImage.createThumbnailFromPath(bundle, { width: 64, height: 64 });
 }
 
 export class CosBrowser {
@@ -683,7 +695,7 @@ export class CosBrowser {
     view.webContents.focus();
     // Each browser's own icon, as the person knows it from the taskbar.
     for (const browser of panel.browsers) {
-      void app.getFileIcon(browser.executable, { size: 'large' }).then(icon => {
+      void browserIcon(browser.executable).then(icon => {
         if (this.signIn !== panel || icon.isEmpty()) return;
         browser.icon = icon.toDataURL();
         this.paintSignIn();
