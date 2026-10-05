@@ -1,8 +1,7 @@
 name: Canary
 
-# Test builds of main, published as one rolling Canary prerelease. Each candidate is first
-# published under its own canary-<sha> tag; only after verification are older canaries retired.
-# Every push to main that can change the app builds one; it can also be started by hand:
+# Test builds of main, published as one rolling prerelease at the fixed `canary` tag. Every push
+# to main that can change the app builds one; it can also be started by hand:
 #   gh workflow run canary.yml --ref main
 #
 # Not a release. It builds the same candidate as publish.yml (release.yml) and attaches it
@@ -25,9 +24,9 @@ on:
 permissions:
   contents: read
 
-# Never cancel a run in progress. Publication creates and verifies the next canary before cleanup,
-# and GitHub keeps only the newest waiting run in the group, so a burst of merges still converges
-# on one build of the latest app-relevant main.
+# Never cancel a run in progress: a replacement is staged and verified as a private draft before
+# the fixed public canary is swapped. GitHub keeps only the newest waiting run in the group, so a
+# burst of merges still converges on one build of the latest app-relevant main.
 concurrency:
   group: canary
   cancel-in-progress: false
@@ -98,14 +97,13 @@ jobs:
           mv SHA256SUMS.canary.txt SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      # Publish the complete next canary before retiring the previous one. A stale run whose target
-      # GitHub refuses therefore cannot destroy the last known-good public canary.
+      # Stage and verify the complete replacement before touching the fixed public canary. A stale
+      # run or a failed upload therefore leaves the previous /releases/tag/canary intact.
       - name: Replace the canary prerelease
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
           short="${GITHUB_SHA::12}"
-          candidate_tag="canary-${GITHUB_SHA}"
           cat > canary-notes.md <<NOTES
           Test build of \`main\` at ${short}, after ${version}. **Not a release.**
           Built for the platforms most installs use: Windows x64, macOS on Apple silicon and Linux x64.
@@ -116,33 +114,106 @@ jobs:
           NOTES
           # Whatever the candidate packaged, without the native sources archive a release keeps.
           mapfile -t assets < <(find publish -maxdepth 1 -name 'Chat-On-Steroids-*' ! -name '*Native-Sources*' | sort)
-          if ! gh release view "$candidate_tag" >/dev/null 2>&1; then
-            gh release create "$candidate_tag" \
-              "${assets[@]}" \
-              publish/SHA256SUMS.txt \
-              --prerelease --latest=false --target "$GITHUB_SHA" \
-              --title "Canary ${short} (not a release)" \
-              --notes-file canary-notes.md
-          fi
 
-          tag_sha="$(git ls-remote --exit-code origin "refs/tags/${candidate_tag}" | cut -f1)"
-          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
-            echo "Published canary tag $candidate_tag resolves to $tag_sha, not $GITHUB_SHA." >&2
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$GITHUB_SHA" != "$main_sha" ]; then
+            echo "Skipping stale canary run at $GITHUB_SHA; main is now $main_sha."
+            exit 0
+          fi
+          staging_tag="canary-staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          draft_id=""
+          swap_started=false
+          staging_promoted=false
+
+          github_get_status() {
+            local url="$1"
+            local output="$2"
+            local status
+            if ! status="$(curl --silent --show-error --location \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --output "$output" \
+              --write-out '%{http_code}' \
+              "$url")"; then
+              echo "GitHub API curl transport failed for $url." >&2
+              return 1
+            fi
+            case "$status" in
+              200|404) printf '%s' "$status" ;;
+              *) echo "Unexpected GitHub API status $status for $url." >&2; return 1 ;;
+            esac
+          }
+
+          cleanup_staging_ref() {
+            local status
+            status="$(github_get_status \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/${staging_tag}" \
+              staging-ref.json)" || return 1
+            if [ "$status" = "200" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${staging_tag}" >/dev/null
+            fi
+          }
+
+          cleanup_staging() {
+            local original_status=$?
+            local cleanup_status=0
+            trap - EXIT
+            if [ -n "$draft_id" ] && [ "$swap_started" != "true" ] && [ "$staging_promoted" != "true" ]; then
+              local release_status
+              if release_status="$(github_get_status \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${draft_id}" \
+                staging-release.json)"; then
+                if [ "$release_status" = "200" ]; then
+                  gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" >/dev/null || cleanup_status=$?
+                fi
+              else
+                cleanup_status=$?
+              fi
+            fi
+            cleanup_staging_ref || cleanup_status=$?
+            if [ "$original_status" -ne 0 ]; then
+              exit "$original_status"
+            fi
+            exit "$cleanup_status"
+          }
+
+          draft_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$staging_tag" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="Canary ${short} (not a release)" \
+            -f body="$(cat canary-notes.md)" \
+            -F draft=true \
+            -F prerelease=true \
+            -f make_latest=false \
+            --jq .id)"
+          if ! [[ "$draft_id" =~ ^[0-9]+$ ]]; then
+            echo "GitHub did not return a draft release id." >&2
             exit 1
           fi
-          target="$(gh release view "$candidate_tag" --json targetCommitish --jq .targetCommitish)"
-          if [ "$target" != "$GITHUB_SHA" ]; then
-            echo "Published canary target $target does not match candidate $GITHUB_SHA." >&2
-            exit 1
-          fi
-          prerelease="$(gh release view "$candidate_tag" --json isPrerelease --jq .isPrerelease)"
-          if [ "$prerelease" != "true" ]; then
-            echo "Published canary is not a prerelease." >&2
-            exit 1
-          fi
-          draft="$(gh release view "$candidate_tag" --json isDraft --jq .isDraft)"
-          if [ "$draft" != "false" ]; then
-            echo "Published canary is still a draft." >&2
+          trap cleanup_staging EXIT
+
+          upload_asset() {
+            local file="$1"
+            local name
+            name="$(basename "$file")"
+            curl --fail-with-body --silent --show-error --location \
+              --request POST \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --header 'Content-Type: application/octet-stream' \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${draft_id}/assets?name=${name}" \
+              --data-binary "@${file}" >/dev/null
+          }
+          for asset in "${assets[@]}"; do upload_asset "$asset"; done
+          upload_asset publish/SHA256SUMS.txt
+
+          draft_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" --jq .tag_name)"
+          draft_target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" --jq .target_commitish)"
+          draft_state="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" --jq '[.draft,.prerelease] | @tsv')"
+          if [ "$draft_tag" != "$staging_tag" ] || [ "$draft_target" != "$GITHUB_SHA" ] || [ "$draft_state" != $'true\ttrue' ]; then
+            echo "Temporary canary draft metadata does not match its candidate." >&2
             exit 1
           fi
 
@@ -150,7 +221,7 @@ jobs:
             for asset in "${assets[@]}"; do basename "$asset"; done
             echo SHA256SUMS.txt
           } | sort > expected-canary-assets.txt
-          gh release view "$candidate_tag" --json assets --jq '.assets[].name' | sort > actual-canary-assets.txt
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" --jq '.assets[].name' | sort > actual-canary-assets.txt
           diff -u expected-canary-assets.txt actual-canary-assets.txt
 
           {
@@ -160,43 +231,71 @@ jobs:
             manifest_hash="$(sha256sum publish/SHA256SUMS.txt | cut -d' ' -f1)"
             printf 'SHA256SUMS.txt\tsha256:%s\n' "$manifest_hash"
           } | sort > expected-canary-digests.txt
-          gh release view "$candidate_tag" --json assets \
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" \
             --jq '.assets[] | "\(.name)\t\(.digest)"' \
             | sort > actual-canary-digests.txt
           diff -u expected-canary-digests.txt actual-canary-digests.txt
 
-          mapfile -t old_tags < <(
-            gh release list --limit 100 --json tagName,isPrerelease,name \
-              --jq '.[] | select(.isPrerelease == true and (.name | startswith("Canary ")) and (.tagName == "canary" or (.tagName | test("^canary-[0-9a-f]{40}$")))) | .tagName' \
-              | grep -vxF "$candidate_tag" || true
-          )
-          for tag in "${old_tags[@]}"; do
-            gh release delete "$tag" --cleanup-tag --yes
-          done
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$GITHUB_SHA" != "$main_sha" ]; then
+            echo "Skipping stale canary run after staging at $GITHUB_SHA; main is now $main_sha."
+            exit 0
+          fi
 
-          # A release deletion can succeed before its tag deletion fails. Release listing would no
-          # longer expose that orphan, so reconcile the remote canary refs themselves as the final
-          # cleanup owner. Only legacy `canary` and our own canary-<sha> namespace are eligible.
-          mapfile -t orphan_tags < <(
-            git ls-remote --tags origin refs/tags/canary 'refs/tags/canary-*' \
-              | awk '$2 !~ /\^\{\}$/ { sub("^refs/tags/", "", $2); print $2 }' \
-              | grep -E '^(canary|canary-[0-9a-f]{40})$' \
-              | grep -vxF "$candidate_tag" || true
-          )
-          for tag in "${orphan_tags[@]}"; do
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"
-          done
+          canary_release_status="$(github_get_status \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/canary" \
+            canary-release.json)"
+          canary_ref_status="$(github_get_status \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/canary" \
+            canary-ref.json)"
+          swap_started=true
+          if [ "$canary_release_status" = "200" ]; then
+            gh release delete canary --yes
+          fi
+          if [ "$canary_ref_status" = "200" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/canary" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref=refs/tags/canary -f sha="$GITHUB_SHA" >/dev/null
+          fi
 
-          mapfile -t remaining_tags < <(
-            git ls-remote --tags origin refs/tags/canary 'refs/tags/canary-*' \
-              | awk '$2 !~ /\^\{\}$/ { sub("^refs/tags/", "", $2); print $2 }' \
-              | grep -E '^(canary|canary-[0-9a-f]{40})$' \
-              | sort
-          )
-          if [ "${#remaining_tags[@]}" -ne 1 ] || [ "${remaining_tags[0]}" != "$candidate_tag" ]; then
-            echo "Canary cleanup did not converge on only $candidate_tag." >&2
-            printf 'Remaining canary tags: %s\n' "${remaining_tags[*]}" >&2
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" \
+            -f tag_name=canary \
+            -f name="Canary ${short} (not a release)" \
+            -f body="$(cat canary-notes.md)" \
+            -F draft=false \
+            -F prerelease=true \
+            -f make_latest=false >/dev/null
+          staging_promoted=true
+
+          tag_sha="$(git ls-remote --exit-code origin refs/tags/canary | cut -f1)"
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "Published canary tag resolves to $tag_sha, not $GITHUB_SHA." >&2
             exit 1
           fi
-          gh release view "$candidate_tag" --json url,isPrerelease,targetCommitish \
-            --jq '"\(.url) prerelease=\(.isPrerelease) target=\(.targetCommitish)"'
+          fixed_target="$(gh release view canary --json targetCommitish --jq .targetCommitish)"
+          fixed_state="$(gh release view canary --json isDraft,isPrerelease --jq '[.isDraft,.isPrerelease] | @tsv')"
+          fixed_url="$(gh release view canary --json url --jq .url)"
+          if [ "$fixed_target" != "$GITHUB_SHA" ] || [ "$fixed_state" != $'false\ttrue' ]; then
+            echo "Published fixed-tag canary metadata does not match its candidate." >&2
+            exit 1
+          fi
+          case "$fixed_url" in
+            */releases/tag/canary) ;;
+            *) echo "Published canary URL is not the fixed /releases/tag/canary path." >&2; exit 1 ;;
+          esac
+          gh release view canary --json assets --jq '.assets[].name' | sort > actual-fixed-canary-assets.txt
+          diff -u expected-canary-assets.txt actual-fixed-canary-assets.txt
+          gh release view canary --json assets \
+            --jq '.assets[] | "\(.name)\t\(.digest)"' \
+            | sort > actual-fixed-canary-digests.txt
+          diff -u expected-canary-digests.txt actual-fixed-canary-digests.txt
+          bad_downloads="$(gh release view canary --json assets \
+            --jq '[.assets[] | select((.url | contains("/releases/download/canary/")) | not)] | length')"
+          if [ "$bad_downloads" != "0" ]; then
+            echo "Published canary assets do not use the fixed /releases/download/canary/ path." >&2
+            exit 1
+          fi
+
+          printf '%s prerelease=true target=%s\n' "$fixed_url" "$fixed_target"

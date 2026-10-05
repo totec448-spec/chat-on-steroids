@@ -196,41 +196,96 @@ describe('cross-platform packaging targets', () => {
     expect(steps.indexOf(narrow!)).toBeLessThan(steps.indexOf(publish!));
   });
 
-  it('publishes and verifies the next canary before retiring the previous one', () => {
+  it('skips a stale canary run before staging a replacement', () => {
     const canary = yamlFile('.github/workflows/canary.yml');
     const steps = canary.jobs.publish.steps as Array<Record<string, any>>;
     const publish = steps.find((step) => step.name === 'Replace the canary prerelease');
     const script = String(publish?.run ?? '');
 
-    const uniqueTag = script.indexOf('candidate_tag="canary-${GITHUB_SHA}"');
-    const reuseCandidate = script.indexOf('if ! gh release view "$candidate_tag"');
-    const createRelease = script.indexOf('gh release create "$candidate_tag"');
-    const verifyTag = script.indexOf('refs/tags/${candidate_tag}');
-    const verifyTarget = script.indexOf('--json targetCommitish');
+    const headCheck = script.indexOf('gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha');
+    const stagingTag = script.indexOf('staging_tag="canary-staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"');
+    const draftCreate = script.indexOf('gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"');
+    expect(headCheck).toBeGreaterThanOrEqual(0);
+    expect(stagingTag).toBeGreaterThan(headCheck);
+    expect(draftCreate).toBeGreaterThan(stagingTag);
+    expect(script).toContain('if [ "$GITHUB_SHA" != "$main_sha" ]; then');
+    expect(script).toContain('Skipping stale canary run');
+    expect(script).toContain('exit 0');
+    expect(script).toContain('-f tag_name="$staging_tag"');
+    expect(script).toContain('-F draft=true');
+    expect(script).not.toContain('git ls-remote --exit-code origin refs/heads/main');
+  });
+
+  it('verifies a temporary draft before swapping the fixed canary tag', () => {
+    const canary = yamlFile('.github/workflows/canary.yml');
+    const steps = canary.jobs.publish.steps as Array<Record<string, any>>;
+    const publish = steps.find((step) => step.name === 'Replace the canary prerelease');
+    const script = String(publish?.run ?? '');
+
+    const headChecks = [...script.matchAll(/gh api "repos\/\$\{GITHUB_REPOSITORY\}\/commits\/main" --jq \.sha/g)]
+      .map((match) => match.index ?? -1);
+    const createDraft = script.indexOf('gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"');
     const verifyAssets = script.indexOf('diff -u expected-canary-assets.txt actual-canary-assets.txt');
     const verifyDigests = script.indexOf('diff -u expected-canary-digests.txt actual-canary-digests.txt');
-    const cleanup = script.indexOf('gh release delete "$tag" --cleanup-tag --yes');
-    const reconcileRefs = script.indexOf('gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"');
-    const finalRefs = script.lastIndexOf("git ls-remote --tags origin refs/tags/canary 'refs/tags/canary-*'");
-    expect(uniqueTag).toBeGreaterThanOrEqual(0);
-    expect(reuseCandidate).toBeGreaterThan(uniqueTag);
-    expect(createRelease).toBeGreaterThan(reuseCandidate);
-    expect(verifyTag).toBeGreaterThan(createRelease);
-    expect(verifyTarget).toBeGreaterThan(createRelease);
-    expect(verifyAssets).toBeGreaterThan(verifyTarget);
+    const swapStarted = script.indexOf('swap_started=true');
+    const deleteOld = script.indexOf('gh release delete canary --yes');
+    const repointTag = script.indexOf('git/refs/tags/canary');
+    const publishDraft = script.lastIndexOf('gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${draft_id}"');
+    const markPromoted = script.indexOf('staging_promoted=true');
+    const verifyFixed = script.indexOf('gh release view canary --json');
+
+    expect(headChecks).toHaveLength(2);
+    const firstHeadCheck = headChecks[0]!;
+    const secondHeadCheck = headChecks[1]!;
+    expect(createDraft).toBeGreaterThan(firstHeadCheck);
+    expect(verifyAssets).toBeGreaterThan(createDraft);
     expect(verifyDigests).toBeGreaterThan(verifyAssets);
-    expect(cleanup).toBeGreaterThan(verifyDigests);
-    expect(reconcileRefs).toBeGreaterThan(cleanup);
-    expect(finalRefs).toBeGreaterThan(reconcileRefs);
-    expect(script).toContain('--target "$GITHUB_SHA"');
-    expect(script).toContain('--json isDraft');
-    expect(script).toContain('.tagName == "canary"');
-    expect(script).toContain('^canary-[0-9a-f]{40}$');
-    expect(script).toContain("grep -E '^(canary|canary-[0-9a-f]{40})$'");
-    expect(script).toContain("manifest_hash=\"$(sha256sum publish/SHA256SUMS.txt | cut -d' ' -f1)\"");
-    expect(script).not.toContain('gh release upload canary');
+    expect(secondHeadCheck).toBeGreaterThan(verifyDigests);
+    expect(swapStarted).toBeGreaterThan(secondHeadCheck);
+    expect(deleteOld).toBeGreaterThan(secondHeadCheck);
+    expect(deleteOld).toBeGreaterThan(swapStarted);
+    expect(repointTag).toBeGreaterThan(deleteOld);
+    expect(publishDraft).toBeGreaterThan(repointTag);
+    expect(markPromoted).toBeGreaterThan(publishDraft);
+    expect(verifyFixed).toBeGreaterThan(markPromoted);
+    expect(script).toContain('-F draft=true');
+    expect(script).toContain('-f target_commitish="$GITHUB_SHA"');
+    expect(script).toContain('-f tag_name=canary');
+    expect(script).toContain('-F draft=false');
+    expect(script).toContain('-F prerelease=true');
+    expect(script).toContain('releases/${draft_id}/assets?name=${name}');
+    expect(script).toContain('/releases/download/canary/');
+    expect(script).not.toContain('candidate_tag="canary-${GITHUB_SHA}"');
     expect(script).not.toContain('--clobber');
-    expect(script).not.toContain('git ls-remote --exit-code origin refs/heads/main');
+  });
+
+  it('fails closed on canary existence-probe errors and cleans temporary state', () => {
+    const canary = yamlFile('.github/workflows/canary.yml');
+    const steps = canary.jobs.publish.steps as Array<Record<string, any>>;
+    const publish = steps.find((step) => step.name === 'Replace the canary prerelease');
+    const script = String(publish?.run ?? '');
+
+    const secondHeadCheck = script.lastIndexOf('gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha');
+    const releaseProbe = script.indexOf('canary_release_status="$(github_get_status', secondHeadCheck);
+    const refProbe = script.indexOf('canary_ref_status="$(github_get_status', secondHeadCheck);
+    const deleteOld = script.indexOf('gh release delete canary --yes');
+    expect(releaseProbe).toBeGreaterThan(secondHeadCheck);
+    expect(refProbe).toBeGreaterThan(releaseProbe);
+    expect(deleteOld).toBeGreaterThan(refProbe);
+    expect(script).toContain("case \"$status\" in");
+    expect(script).toContain('200|404) printf');
+    expect(script).toContain('Unexpected GitHub API status');
+    expect(script).toContain('curl transport failed');
+    expect(script).toContain('if [ "$canary_release_status" = "200" ]; then');
+    expect(script).toContain('if [ "$canary_ref_status" = "200" ]; then');
+    expect(script).toContain('trap cleanup_staging EXIT');
+    expect(script).toContain('cleanup_staging_ref');
+    expect(script).toContain('gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}"');
+    expect(script).toContain('[ "$swap_started" != "true" ]');
+    expect(script).toContain('gh release delete canary --yes');
+    expect(script).not.toContain('gh release delete canary --cleanup-tag');
+    expect(script).not.toContain('if gh release view canary');
+    expect(script).not.toContain('if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/canary"');
   });
 
   it('assembles every platform artifact in the reusable release workflow', () => {
