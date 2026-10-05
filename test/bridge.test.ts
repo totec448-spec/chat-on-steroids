@@ -10942,6 +10942,32 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('says a Goal waits for the closed chat to open again, instead of "Answer settling"', async () => {
+    const chat = 'a2222222-1111-4111-8111-000000000091';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('closed-goal-turn')]);
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      const { setSessionAutomation } = await import('../src/main/bridge.js');
+      await setSessionAutomation(sessionId, 'loop', true);
+      await attributed(chat, false, Date.now());
+      await vi.advanceTimersByTimeAsync(1000);
+      await events(chat, [{ kind: 'assistant_message', messageId: 'closed-goal-final', turnId: 'closed-goal-turn', time: Date.now(),
+        text: 'Done.', final: true, state: 'final', activeNow: true, goalEligible: true }, endTurn('closed-goal-turn', 'completed')]);
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'settling' });
+      // The person closes the tab before the page asked for a decision: the turn stays owed,
+      // and browser recovery waits for the page, so nothing is settling any more.
+      await request('POST', '/closed', { body: { conversationId: chat, manual: true } });
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'closed' });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'closed' });
+      // The page returns: the owed turn is collected there again.
+      await request('GET', `/activity?conversationId=${chat}`);
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'settling' });
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['pro', 'other'] as const)('retires silence recovery on the full final and ignores late pre-final calls for %s', async model => {
     const chat = model === 'pro' ? 'a2222222-1111-4111-8111-000000000081' : 'a2222222-1111-4111-8111-000000000082';
     vi.useFakeTimers();

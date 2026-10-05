@@ -1168,6 +1168,7 @@
   "Waiting before recovery reload": "복구 새로고침 전 대기 중",
   "ChatGPT resumed work · waiting before retry": "ChatGPT가 작업 재개 · 재시도 전 대기 중",
   "Answer settling": "답변 완료 확인 중",
+  "Paused until this chat is open in the browser": "이 채팅이 브라우저에서 열릴 때까지 일시 중지됨",
   "Browser and desktop control": "브라우저 및 데스크톱 제어",
   "Background browser tabs, DOM, console and network; native windows and input where supported.": "백그라운드 브라우저 탭, DOM, 콘솔, 네트워크를 제어하며 지원되는 환경에서는 네이티브 창과 입력도 다룹니다.",
   "Browser tabs, DOM, screenshots, console and network; native windows where supported.": "브라우저 탭, DOM, 스크린샷, 콘솔, 네트워크를 다루며 지원되는 환경에서는 네이티브 창도 제어합니다.",
