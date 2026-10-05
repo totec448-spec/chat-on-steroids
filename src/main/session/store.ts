@@ -43,7 +43,7 @@ import type {
 import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
-import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle } from './title.js';
+import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
@@ -2363,6 +2363,9 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         : {};
     }
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
+    const auto = publicSummary.autoTitle;
+    if (auto !== undefined && (publicSummary.titleSource !== 'manual' || !auto || typeof auto !== 'object' ||
+        typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) delete publicSummary.autoTitle;
     const selected = publicSummary.selectedModel;
     if (selected !== undefined && (!selected || typeof selected !== 'object' ||
         typeof selected.conversationId !== 'string' || typeof selected.model !== 'string' ||
@@ -3116,6 +3119,24 @@ export async function reopenSession(id: string, pageObservedAt?: number): Promis
 export async function renameSession(id: string, title: string, source: SessionSummary['titleSource'] = 'manual', conversationId?: string): Promise<void> {
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'rename', async () => {
+    if (source !== 'manual' && entry.summary.titleSource === 'manual') {
+      // The user's name stays; ChatGPT's newer title is kept for when the name is cleared.
+      // The same rules as an unnamed chat: worker and helper chats keep their origin's title, a
+      // chat this app opened is named by its request, and a project page title is never a name.
+      if (source === undefined || (conversationId && entry.summary.conversationId !== conversationId)) return;
+      if (entry.summary.origin && entry.summary.origin.kind !== 'desktop') return;
+      const auto = entry.summary.autoTitle;
+      if (source === 'fallback' && auto?.source === 'provider') return;
+      if (source === 'provider' && (providerTitleIgnored(entry.summary) || projectPageTitle(title))) return;
+      const next = { title: title.slice(0, 120), source };
+      if (auto?.title === next.title && auto.source === next.source) return;
+      entry.summary.autoTitle = next;
+      await writeMeta(entry);
+      return;
+    }
+    if (source === 'manual' && entry.summary.titleSource !== 'manual') {
+      entry.summary.autoTitle = { title: entry.summary.title, source: entry.summary.titleSource === 'provider' ? 'provider' : 'fallback' };
+    }
     if (source !== 'manual') {
       if (conversationId && entry.summary.conversationId !== conversationId) return;
       if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values()))) return;
@@ -3125,6 +3146,23 @@ export async function renameSession(id: string, title: string, source: SessionSu
     if (entry.summary.title === title.slice(0, 120) && entry.summary.titleSource === source) return;
     entry.summary.title = title.slice(0, 120);
     entry.summary.titleSource = source;
+    await writeMeta(entry);
+  });
+}
+
+/**
+ * Drops the user's own name for a chat and shows the title the app would show without it: ChatGPT's
+ * current title when one was seen, else the one from the first message (#1107).
+ */
+export async function clearSessionName(id: string): Promise<void> {
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'rename', async () => {
+    if (entry.summary.titleSource !== 'manual') return;
+    const auto = entry.summary.autoTitle;
+    const first = firstTitleMessage(entry.messages.values());
+    entry.summary.title = auto?.title || (first ? userTitle(first.message.text, first.authoredText) : '') || 'ChatGPT session';
+    entry.summary.titleSource = auto?.source ?? 'fallback';
+    delete entry.summary.autoTitle;
     await writeMeta(entry);
   });
 }
@@ -3177,7 +3215,10 @@ export async function setSessionOrigin(id: string, origin: SessionOrigin, title:
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'origin write', async () => {
     if (inheritedProject && entry.summary.projectId && entry.summary.projectId !== inheritedProject) throw new Error('Session origin belongs to another project');
-    const staged = { ...entry.summary, origin, title: title.slice(0, 120), ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    // A name the user gave the chat stays; the origin's title becomes the one clearing it restores.
+    const named = entry.summary.titleSource === 'manual';
+    const staged = { ...entry.summary, origin, ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
+      ...(inheritedProject ? { projectId: inheritedProject } : {}) };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);

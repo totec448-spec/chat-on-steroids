@@ -331,6 +331,8 @@ const api = {
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   /** Chats matching every word of `query`, by title first, then by what was said in them. */
   searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
+  /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
+  renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
   unpairExtension: () => call<AppState>('bridge:unpair'),
