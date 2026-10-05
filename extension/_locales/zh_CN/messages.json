@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "应用无法保存任务。请检查可用磁盘空间，然后重试保存。"
   },
+  "popup_sign_in_transfer": {
+    "message": "将会话带到 CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie 访问被拒绝。请再次点击。"
+  },
+  "popup_sign_in_imported": {
+    "message": "会话已转移"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "你已登录 CoS browser。"
+  },
+  "popup_sign_in_failed": {
+    "message": "失败。请从 CoS 重新开始登录。"
+  },
   "popup_app_not_running_help": {
     "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
   }

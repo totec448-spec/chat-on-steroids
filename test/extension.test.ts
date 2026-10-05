@@ -458,6 +458,9 @@ class FakeStorageArea {
 }
 
 interface WorkerHarness {
+  sendPopup(message: Record<string, unknown>): Promise<any>;
+  /** Fires tabs.onUpdated with the tab Chrome passes alongside. */
+  updateTab(tabId: number, changeInfo: { url?: string; status?: string }, tab: Record<string, unknown>): void;
   send(message: Record<string, unknown>, tabId?: number, documentId?: string, senderUrl?: string): Promise<any>;
   /** Fires Chrome's real tab-close lifecycle event. */
   closeTab(tabId: number): Promise<void>;
@@ -505,6 +508,9 @@ function response(status: number, data: unknown) {
 function loadWorker(options: {
   local: FakeStorageArea;
   session: FakeStorageArea;
+  cookies?: { getAllCookieStores(): Promise<any[]>; getAll(filter: unknown): Promise<any[]> };
+  permissions?: { contains(filter: unknown): Promise<boolean> };
+  action?: Record<string, (...args: any[]) => Promise<unknown>>;
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
   tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>;
   tabsQuery?: () => Promise<
@@ -516,7 +522,7 @@ function loadWorker(options: {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
   const tabCreatedListeners: Array<(tab: { id?: number; url?: string; pendingUrl?: string }) => void> = [];
-  const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }) => void> = [];
+  const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }, tab?: Record<string, unknown>) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
   const knownTabs = new Map<
@@ -553,8 +559,16 @@ function loadWorker(options: {
   };
   const event = () => ({ addListener: () => undefined });
   const chrome = {
+    cookies: options.cookies,
+    permissions: options.permissions,
+    action: options.action,
     storage: { local: options.local, session: options.session },
     runtime: {
+      id: 'abcdefghijklmnopabcdefghijklmnop',
+      getURL: (file: string) => {
+        if (file === 'build-stamp.txt') throw new Error('No packaged stamp in this fixture');
+        return `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${file}`;
+      },
       getManifest: () => ({ version: '1.6.0' }),
       onMessage: {
         addListener(fn: typeof listener) {
@@ -603,7 +617,7 @@ function loadWorker(options: {
         }
       },
       onUpdated: {
-        addListener(fn: (tabId: number, changeInfo: { url?: string; status?: string }) => void) {
+        addListener(fn: (tabId: number, changeInfo: { url?: string; status?: string }, tab?: Record<string, unknown>) => void) {
           tabUpdatedListeners.push(fn);
         }
       }
@@ -626,6 +640,10 @@ function loadWorker(options: {
   if (!listener) throw new Error('background.js did not register a message listener');
 
   return {
+    updateTab: (tabId, changeInfo, tab) => { for (const fn of tabUpdatedListeners) fn(tabId, changeInfo, tab); },
+    sendPopup: message => new Promise(resolve => {
+      listener!(message, { id: chrome.runtime.id, url: chrome.runtime.getURL('popup.html') }, resolve);
+    }),
     tabsCreate,
     tabsQuery,
     tabsUpdate,
@@ -739,6 +757,206 @@ function loadWorker(options: {
     }
   };
 }
+
+describe('popup-only ChatGPT session transfer', () => {
+  const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const sessionCookie = { name: '__Secure-next-auth.session-token', value: 'synthetic-test-session',
+    domain: '.chatgpt.com', path: '/', secure: true, httpOnly: true, hostOnly: false, sameSite: 'lax', storeId: 'normal' };
+  function fixture(permission = true, action?: Record<string, (...args: any[]) => Promise<unknown>>) {
+    const requests: any[] = [];
+    const cookies = {
+      getAllCookieStores: vi.fn(async () => [{ id: 'normal', tabIds: [41] }, { id: 'incognito', tabIds: [42] }]),
+      getAll: vi.fn(async () => [sessionCookie, { ...sessionCookie, name: 'unrelated-cookie', value: 'not-for-transfer' }])
+    };
+    const permissions = { contains: vi.fn(async () => permission) };
+    const fetch = vi.fn(async (input: string, init?: Record<string, unknown>) => {
+      if (input.endsWith('/hello')) return response(200, { app: 'chat-on-steroids', paired: true });
+      if (input.endsWith('/cos-browser/sign-in')) {
+        if (init?.method === 'POST') { requests.push(JSON.parse(String(init.body))); return response(200, { ok: true, imported: true }); }
+        return response(200, { offer: { id, browser: 'brave' } });
+      }
+      return response(404, {});
+    });
+    const tab = { id: 41, url: 'https://chatgpt.com/', active: true };
+    const tabsGet = vi.fn(async (_tabId: number): Promise<Record<string, unknown>> => tab);
+    const worker = loadWorker({ local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(), cookies, permissions, fetch, action,
+      tabsQuery: async () => [tab], tabsGet });
+    return { worker, cookies, permissions, requests, tab, tabsGet };
+  }
+  it('opens the popup only once ChatGPT confirms the watched login, sending a logout back to the login form once', async () => {
+    const action = { openPopup: vi.fn(async () => undefined), setBadgeText: vi.fn(async () => undefined),
+      setBadgeBackgroundColor: vi.fn(async () => undefined) };
+    const cookies = { getAllCookieStores: vi.fn(async () => []), getAll: vi.fn(async () => []) };
+    let offer: unknown = { id, browser: 'edge' };
+    const fetch = vi.fn(async (input: string) => input.endsWith('/hello') ? response(200, { app: 'chat-on-steroids', paired: true })
+      : input.endsWith('/cos-browser/sign-in') ? response(200, { offer }) : response(404, {}));
+    const worker = loadWorker({ local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      cookies, action, fetch });
+    // ChatGPT's own answer about this tab's session, asked inside the tab.
+    let signedIn = false;
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: signedIn }]);
+    const tab = (url: string) => ({ id: 41, windowId: 7, url });
+    const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+    const visit = (url: string) => worker.updateTab(41, { url, status: 'loading' }, tab(url));
+    const land = () => worker.updateTab(41, { status: 'complete' }, tab('https://chatgpt.com/'));
+    const toLogin = () => worker.tabsUpdate.mock.calls.filter(call => call[0] === 41 && call[1]?.url === 'https://chatgpt.com/auth/login');
+
+    // A plain visit to ChatGPT is not a login.
+    land();
+    await settle();
+    expect(action.openPopup).not.toHaveBeenCalled();
+    expect(worker.scriptingExecuteScript).not.toHaveBeenCalled();
+
+    // auth/login -> auth/logout -> ChatGPT signed out: no popup; back to the login form, once.
+    visit('https://chatgpt.com/auth/login');
+    visit('https://chatgpt.com/auth/logout');
+    visit('https://chatgpt.com/');
+    land();
+    await settle();
+    expect(action.openPopup).not.toHaveBeenCalled();
+    expect(toLogin()).toHaveLength(1);
+    visit('https://chatgpt.com/auth/login');
+    land();
+    await settle();
+    expect(action.openPopup).not.toHaveBeenCalled();
+    expect(toLogin()).toHaveLength(1);
+
+    // The person signs in: ChatGPT confirms the session, and only then the popup opens.
+    signedIn = true;
+    for (const url of ['https://auth.openai.com/log-in', 'https://accounts.google.com/o/oauth2/v2/auth']) visit(url);
+    land();
+    await settle();
+    expect(action.openPopup).toHaveBeenCalledExactlyOnceWith({ windowId: 7 });
+    // Opening the popup reads no cookie; only its button transfers.
+    expect(cookies.getAll).not.toHaveBeenCalled();
+
+    // Without an offer, a finished login opens nothing and is not checked.
+    offer = null;
+    worker.scriptingExecuteScript.mockClear();
+    visit('https://auth.openai.com/log-in');
+    land();
+    await settle();
+    expect(action.openPopup).toHaveBeenCalledTimes(1);
+    expect(worker.scriptingExecuteScript).not.toHaveBeenCalled();
+  });
+
+  it('offers the transfer button only while ChatGPT confirms a signed-in account in the active tab', async () => {
+    const { worker, tab } = fixture();
+    // Unknown (the check could not run): no button.
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toBeNull();
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: false }]);
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toBeNull();
+    // The login form is not a finished login, whatever the session says.
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: true }]);
+    tab.url = 'https://chatgpt.com/auth/login';
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toBeNull();
+    tab.url = 'https://chatgpt.com/';
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toEqual({ id, browser: 'brave' });
+  });
+
+  it('offers and transfers the watched login even when another window has focus', async () => {
+    // The CoS browser opens its login in a window of its own; the last focused window's active
+    // tab can be any other page, and the popup must still show and use the finished login.
+    const { worker, requests, cookies, tabsGet } = fixture(true, { openPopup: vi.fn(async () => undefined) });
+    const login = { id: 41, windowId: 7, url: 'https://chatgpt.com/' };
+    const elsewhere = { id: 50, windowId: 3, url: 'https://example.com/', active: true };
+    worker.tabsQuery.mockImplementation(async (query: Record<string, unknown>) => query?.active ? [elsewhere] : []);
+    tabsGet.mockImplementation(async (tabId: number) => tabId === 41 ? login : elsewhere);
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: true }]);
+    // Nothing watched yet: the focused page is not ChatGPT, so no button.
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toBeNull();
+    worker.updateTab(41, { url: 'https://auth.openai.com/log-in', status: 'loading' }, { ...login, url: 'https://auth.openai.com/log-in' });
+    worker.updateTab(41, { url: 'https://chatgpt.com/', status: 'complete' }, login);
+    for (let i = 0; i < 20; i++) await new Promise(resolve => setTimeout(resolve, 0));
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toEqual({ id, browser: 'brave' });
+    expect(await worker.sendPopup({ type: 'cos_sign_in_transfer', id })).toEqual({ ok: true, imported: true });
+    expect(cookies.getAll).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', storeId: 'normal' });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('reports the browser presence with ChatGPT’s answer, asking once per page load', async () => {
+    const presence: unknown[] = [];
+    const fetch = vi.fn(async (input: string, init?: Record<string, unknown>) => {
+      if (input.endsWith('/hello')) return response(200, { app: 'chat-on-steroids', paired: true });
+      if (input.endsWith('/browser/presence')) { presence.push(JSON.parse(String(init?.body))); return response(200, { ok: true }); }
+      if (input.endsWith('/cos-browser/sign-in')) return response(200, { offer: { id, browser: 'chrome' } });
+      return response(404, {});
+    });
+    const page = { id: 41, windowId: 7, url: 'https://chatgpt.com/', status: 'complete' };
+    const worker = loadWorker({ local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      fetch, action: { openPopup: vi.fn(async () => undefined) }, tabsQuery: async () => [page], tabsGet: async () => page });
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: true }]);
+    const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+    await settle();
+    presence.length = 0;
+    worker.scriptingExecuteScript.mockClear();
+    // A login lands: the watcher and the presence report both want ChatGPT's answer.
+    worker.updateTab(41, { url: 'https://auth.openai.com/log-in', status: 'loading' }, { ...page, url: 'https://auth.openai.com/log-in', status: 'loading' });
+    worker.updateTab(41, { url: 'https://chatgpt.com/', status: 'loading' }, { ...page, status: 'loading' });
+    worker.updateTab(41, { status: 'complete' }, page);
+    await settle();
+    expect(presence.at(-1)).toEqual({ chatGptSignedIn: true });
+    expect(worker.scriptingExecuteScript).toHaveBeenCalledTimes(1);
+    // The popup is a person looking: it asks again.
+    expect((await worker.sendPopup({ type: 'status' })).signInOffer).toEqual({ id, browser: 'chrome' });
+    expect(worker.scriptingExecuteScript).toHaveBeenCalledTimes(2);
+    // A new page is a new answer: a sign-out reaches the report.
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: false }]);
+    worker.updateTab(41, { url: 'https://chatgpt.com/', status: 'loading' }, { ...page, status: 'loading' });
+    worker.updateTab(41, { status: 'complete' }, page);
+    await settle();
+    expect(presence.at(-1)).toEqual({ chatGptSignedIn: false });
+  });
+
+  it('closes only the watched login tab once its session is transferred', async () => {
+    const action = { openPopup: vi.fn(async () => undefined) };
+    const { worker } = fixture(true, action);
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, result: true }]);
+    const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+    // Signed in by hand in a tab the flow never watched: transferring leaves it open.
+    expect(await worker.sendPopup({ type: 'cos_sign_in_transfer', id })).toEqual({ ok: true, imported: true });
+    await new Promise(resolve => setTimeout(resolve, 1700));
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
+    // The CoS flow's own login tab: watched through auth, finished on ChatGPT, then transferred.
+    worker.updateTab(41, { url: 'https://auth.openai.com/log-in', status: 'loading' }, { id: 41, windowId: 7, url: 'https://auth.openai.com/log-in' });
+    worker.updateTab(41, { url: 'https://chatgpt.com/', status: 'complete' }, { id: 41, windowId: 7, url: 'https://chatgpt.com/' });
+    await settle();
+    expect(action.openPopup).toHaveBeenCalledTimes(1);
+    expect(await worker.sendPopup({ type: 'cos_sign_in_transfer', id })).toEqual({ ok: true, imported: true });
+    // The popup's receipt shows first.
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
+    await new Promise(resolve => setTimeout(resolve, 1700));
+    expect(worker.tabsRemove).toHaveBeenCalledExactlyOnceWith(41);
+  });
+
+  it('reads only the active normal profile and sends only session cookies through authenticated HTTP', async () => {
+    const { worker, cookies, requests } = fixture();
+    await worker.sendPopup({ type: 'status' });
+    expect(cookies.getAll).not.toHaveBeenCalled();
+    const reply = await worker.sendPopup({ type: 'cos_sign_in_transfer', id });
+    expect(reply).toEqual({ ok: true, imported: true });
+    expect(cookies.getAll).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', storeId: 'normal' });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].cookies).toHaveLength(1);
+    expect(requests[0].cookies[0]).not.toHaveProperty('storeId');
+    expect(JSON.stringify(reply)).not.toContain(sessionCookie.value);
+  });
+  it('rejects content-script requests and denied permission before reading cookies', async () => {
+    const { worker, cookies } = fixture(false);
+    expect(await worker.send({ type: 'cos_sign_in_transfer', id })).toEqual({ ok: false, error: 'forbidden_transfer' });
+    expect(await worker.sendPopup({ type: 'cos_sign_in_transfer', id })).toEqual({ ok: false, error: 'permission_denied' });
+    expect(cookies.getAllCookieStores).not.toHaveBeenCalled();
+    expect(cookies.getAll).not.toHaveBeenCalled();
+  });
+  it('fails closed for a departed ChatGPT tab without transferring any cookie', async () => {
+    const { worker, cookies, requests, tab } = fixture();
+    tab.url = 'https://accounts.google.com/';
+    expect(await worker.sendPopup({ type: 'cos_sign_in_transfer', id })).toEqual({ ok: false, error: 'chatgpt_tab_required' });
+    expect(cookies.getAll).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(0);
+  });
+});
 
 function journalOf(session: FakeStorageArea): any[] {
   const value = session.data.journal;

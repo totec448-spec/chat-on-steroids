@@ -137,6 +137,7 @@
   margin: 0;
   font-size: calc(13.5px * var(--text-scale, 1));
 }
+.connector-badges { display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .connector .field > .row-inline input {
   font-size: calc(11.5px * var(--text-scale, 1));
 }
@@ -350,7 +351,6 @@
 .setup-optional > summary::-webkit-details-marker { display: none; }
 details.connector[open] > summary .connector-chevron { transform: rotate(90deg); }
 .lede .btn { flex: none; min-height: 34px; }
-.step.is-current { border-color: var(--accent-edge); }
 .step-mark::before { content: counter(setup-step); }
 .step.is-done .step-mark::before { display: none; }
 .step.is-done .step-mark .tick { display: block; }
@@ -362,7 +362,7 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 }
 .worker-toggle .disclosure-chevron { width: 12px; height: 12px; }
 .worker-toggle[aria-expanded="true"] .disclosure-chevron { transform: rotate(90deg); }
-:where(.plugin-about, .plugin-legal, .setup-optional, .session-diagnostics, .connection-runtime)[open] > summary .details-chevron { transform: rotate(90deg); }
+:where(.plugin-about, .plugin-legal, .setup-optional, .session-diagnostics, .connection-runtime, .browser-picture-help, .extension-help)[open] > summary .details-chevron { transform: rotate(90deg); }
 
 /* Animate the sidebar replacement at the Settings boundary. Chat and libraries
    share the same visible sidebar, so switching between them must not restart it. */

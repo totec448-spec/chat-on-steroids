@@ -19,7 +19,17 @@ function drawnGlyphs(): Set<string> {
   for (const value of vocabulary.values()) {
     glyphs.add(value.startsWith('fill:') ? `ph-fill:${value.slice(5)}` : `ph:${value.split(' ')[0]}`);
   }
-  for (const [, family, name] of html.matchAll(/class="[^"]*\b(ph|ph-fill) ph-([a-z0-9-]+)/g)) glyphs.add(`${family}:${name}`);
+  // Every page, not only the main window: the CoS browser's toolbar and sign-in card draw glyphs
+  // too, and a mapping one of them still uses must not look unused.
+  const renderer = new URL('../src/renderer/', import.meta.url);
+  const pages = readdirSync(renderer).filter(name => name.endsWith('.html')).map(name => readFileSync(new URL(name, renderer), 'utf8'));
+  for (const page of [html, ...pages]) {
+    for (const [, family, name] of page.matchAll(/class="[^"]*\b(ph|ph-fill) ph-([a-z0-9-]+)/g)) glyphs.add(`${family}:${name}`);
+  }
+  // And class names the pages' own scripts write, such as 'ico ph ph-sign-out'.
+  for (const file of readdirSync(renderer).filter(name => name.endsWith('.ts'))) {
+    for (const [, family, name] of readFileSync(new URL(file, renderer), 'utf8').matchAll(/['"`](?:[a-z-]+ )*(ph|ph-fill) ph-([a-z0-9-]+)/g)) glyphs.add(`${family}:${name}`);
+  }
   return glyphs;
 }
 
@@ -48,19 +58,19 @@ it('maps exactly the glyphs the renderer draws, at the codepoints the bundled Ph
   }
 });
 
-it('draws every interface icon with the font instead of a hand-drawn SVG', () => {
+it('uses the icon font except for explicitly authored interface drawings', () => {
   // Allowed SVG: the sprite, the product mark, language flags, the context ring, and the one authored
   // disclosure chevron, which must rotate around its drawn centre (a font caret sits on a baseline).
   for (const [, tag, rest] of html.matchAll(/(<svg\b[^>]*>)([\s\S]{0,80})/g)) {
-    const allowed = /class="(sprite|language-flag|disclosure-chevron\b[^"]*)"/.test(tag!) || /^<use href="#i-mark"/.test(rest!) ||
+    const allowed = /class="(sprite|language-flag|setup-folder-icon|setup-connect-icon|disclosure-chevron\b[^"]*)"/.test(tag!) || /^<use href="#i-mark"/.test(rest!) ||
       /^<circle class="context-track"/.test(rest!.trim());
     expect(allowed, tag).toBe(true);
   }
   const renderer = new URL('../src/renderer/', import.meta.url);
   const drawing = readdirSync(renderer).filter(name => name.endsWith('.ts') &&
     readFileSync(new URL(name, renderer), 'utf8').includes("createElementNS('http://www.w3.org/2000/svg', 'svg')"));
-  // dom.ts draws the disclosure chevron; the setup guide draws a connector line across its screenshot.
-  expect(drawing).toEqual(['dom.ts', 'setup-guide.ts']);
+  // dom.ts draws the disclosure chevron; nothing else draws inline SVG.
+  expect(drawing).toEqual(['dom.ts']);
 });
 
 it('keeps only the bespoke product mark in the inline sprite', () => {

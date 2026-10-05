@@ -327,6 +327,7 @@ const configSchema = z.object({
     mentionCore: z.boolean().optional().default(true),
     language: z.enum(UI_LANGUAGES).optional(),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
+    cosBrowserTrayHint: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
@@ -546,7 +547,10 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     readOnly: false,
     commandAllowlist: { ...DEFAULT_COMMAND_ALLOWLIST, rules: [] },
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, autoSelectSkills: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, autoSelectSkills: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
+      // The built-in browser is opt-in: Chrome with the companion stays the default for new and
+      // existing installs alike, and the built-in one runs only once someone chooses it.
+      chatBrowser: 'chrome' },
     sessions: { ...DEFAULT_SESSIONS },
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
@@ -570,7 +574,8 @@ function conservativeRecoveryConfig(): Config {
     capabilities: { ...DEFAULT_CAPABILITIES },
     readOnly: true,
     multiAgent: { ...DEFAULT_MULTI_AGENT },
-    ui: { ...defaultConfig().ui, autoContinue: false },
+    // Damage is not a choice of browser either: keep the one every older config reads as.
+    ui: { ...defaultConfig().ui, autoContinue: false, chatBrowser: 'chrome' },
     // A config file that could not be trusted is not consent to have a second model typing
     // into the user's chat, whatever the unreadable file said.
     goal: { ...DEFAULT_GOAL }

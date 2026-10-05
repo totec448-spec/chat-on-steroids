@@ -1387,14 +1387,14 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     const receipts = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/browser/preferences').map(([, init]) => JSON.parse(String(init?.body)));
     expect(receipts).toEqual([expect.objectContaining({ nonce: firstId, values: { overwrite: false, durations: true } }), expect.objectContaining({ nonce: firstId, values: { overwrite: false, durations: true } })]);
     await h.applyRequestedBrowserPreferences({ nonce: secondId, expiresAt: Date.now() + 60000, patch: {} });
-    expect(JSON.parse(String(h.fetch.mock.calls.at(-1)?.[1]?.body)).values).toEqual({ overwrite: true, durations: true });
+    expect(JSON.parse(String(h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/browser/preferences').at(-1)?.[1]?.body)).values).toEqual({ overwrite: true, durations: true });
   });
   it('does not replay a preference write interrupted after its durable reservation', async () => {
     const h = await worker([]);
     h.saved.browserPreferenceReceipt = { nonce: firstId, values: null, error: 'Write was interrupted' };
     await h.applyRequestedBrowserPreferences({ nonce: firstId, expiresAt: Date.now() + 60000, patch: { durations: true } });
     expect(h.local.set).not.toHaveBeenCalled();
-    expect(JSON.parse(String(h.fetch.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ values: null, error: 'Write was interrupted' });
+    expect(JSON.parse(String(h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/browser/preferences').at(-1)?.[1]?.body))).toMatchObject({ values: null, error: 'Write was interrupted' });
   });
   it('accepts only a requested document observation and keeps the helper open', async () => {
     const h = await worker([]);

@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "應用程式無法儲存任務。請檢查可用磁碟空間後再試一次。"
   },
+  "popup_sign_in_transfer": {
+    "message": "將工作階段帶到 CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie 存取遭拒。請再按一下。"
+  },
+  "popup_sign_in_imported": {
+    "message": "工作階段已轉移"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "你已登入 CoS browser。"
+  },
+  "popup_sign_in_failed": {
+    "message": "失敗。請從 CoS 重新開始登入。"
+  },
   "popup_app_not_running_help": {
     "message": "請確認 Chat On Steroids 已在這台電腦上開啟。擴充功能會自動連線。"
   }
