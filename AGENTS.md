@@ -1082,7 +1082,7 @@ the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
 ChatGPT switches its own image tool off for a message that mentions an app (measured
 2026-10-05: per message, also as a follow-up in a chat whose first message had the mention). So a
 person's own message (`authoredSource` text, not `decision`/recovery/`finishOwner`, not a worker or
-helper chat) that `session/image-request.ts` `asksForImage` reads as asking for a picture is claimed
+helper chat, not combined with a queued checkpoint) that `session/image-request.ts` `asksForImage` reads as asking for a picture is claimed
 with `coreMention: false`, and the page sends it without the mention; every other message keeps the
 setting. `asksForImage` matches the person's prose (no leading `/command`, code or links) in all
 app languages: a creating verb near a picture noun, "a picture of …", drawing verbs, wishes ("I

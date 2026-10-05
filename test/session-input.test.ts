@@ -1751,6 +1751,14 @@ describe('one silence delivery for a correction and its next checkpoint', () => 
     return { head, later, correction };
   }
 
+  it('keeps the Core mention on a picture request that goes out together with a queued checkpoint', async () => {
+    // The combined message also carries the next instruction, which may need the app.
+    const { correction } = await bundle({ text: 'Create an image of a red cube' });
+    const claim = await claimBrowserInput(correction.id, 'first-page', binding.conversationId, true);
+    expect(claim?.text).toBe('Create an image of a red cube\n\nNext queued instruction:\nCheck geometry');
+    expect(claim).not.toHaveProperty('coreMention');
+  });
+
   it('claims only the next checkpoint, restores exact bytes, and records one combined native receipt', async () => {
     const { head, later, correction } = await bundle();
     const history = vi.fn(async (_row: Readonly<InputEntry>) => true);
