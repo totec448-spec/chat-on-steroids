@@ -9699,6 +9699,25 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(order.indexOf('bind')).toBeLessThan(order.indexOf('events'));
   });
 
+  it('does not take an adopted turn\'s existing tool calls for new progress after a reload (#1086)', async () => {
+    // 2.1.27, live: after the prime's turn, every Goal pickup reloaded the chat and was then refused
+    // with "the page showed a new tool call" for seven minutes. The reloaded page's first look at the
+    // turn's existing calls counted as progress between the repair's two checks.
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    live = await harness(`https://chatgpt.com/c/${conversationId}`, { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) }, midTurn);
+    live.hook.observe(); await settle();
+    const check = (expected?: unknown) => live!.runtimeMessage({ type: 'clf-repair-check', conversationId, expected });
+    const before = await check();
+    const section = live.document.querySelector<HTMLElement>('[data-turn-id="turn-live"]')!;
+    const call = (messageId: string) => ({ messageId, requestId: `request-${messageId}`, tool: 'exec_command', order: 0, answered: true });
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('before-reload-1'), call('before-reload-2')] } }]);
+    live.hook.observe(); await settle();
+    expect(await check(before)).not.toMatchObject({ changed: 'progress' });
+    // A call this document then sees appear is real progress.
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('before-reload-1'), call('before-reload-2'), call('after-reload')] } }]);
+    expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
+  });
+
   it.each([true, false])('binds a separate final section only within the exact adopted question (same question: %s)', async sameQuestion => {
     const source = 'g-split-final-source';
     live = await harness(undefined, {

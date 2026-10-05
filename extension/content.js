@@ -4504,7 +4504,15 @@
         return true;
       });
       if (fresh.length > 0) {
-        if (generating && index === activeTurnIndex) noteTurnProgress(turnId, 'page-call');
+        // Same rule as the turn's messages below: an adopted document's first view of the turn is
+        // history, not new work. After a reload every existing call is new to this document, and
+        // counting them made each repair look overtaken by progress, so Goal pickups reloaded the
+        // chat again and again (#1086). A call is progress once this document already knew the turn.
+        const knownTurn = previousFiberTurns.some(previous => previous.conversationId === turn.conversationId &&
+          ((previous.turnId && previous.turnId === turn.turnId) ||
+            (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
+        const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
+        if (generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
         emit({
           kind: 'tool_evidence',
           ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
