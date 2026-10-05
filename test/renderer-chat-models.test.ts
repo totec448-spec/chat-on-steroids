@@ -269,8 +269,24 @@ it('disambiguates duplicate account model labels by their observed lane', async 
   const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
   initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
   const labels = [...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.textContent);
-  expect(labels).toEqual(['5.6 · Instant', '5.6 · Reasoning', '5.5 · Instant', '5.5 · Reasoning']);
-  expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.value)).toEqual(models.map(model => model.id));
+  expect(labels).toEqual(['Automatic', '5.6 · Instant', '5.6 · Reasoning', '5.5 · Instant', '5.5 · Reasoning']);
+  expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.value)).toEqual(['', ...models.map(model => model.id)]);
+});
+
+it('shows a sub-agent default that was never chosen as Automatic, which is what workers then use', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [{ id: 'gpt-6', label: 'GPT-6', efforts: ['medium', 'high'] }, { id: 'gpt-5-6', label: '5.6', efforts: ['none'] }];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models } }) } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: { defaultModel: '', defaultReasoning: '' }, goal: {} } as Config); await Promise.resolve();
+  const shown = (id: string) => { const select = dom.window.document.getElementById(id) as HTMLSelectElement; return [select.value, select.selectedOptions[0]?.textContent]; };
+  expect(shown('workerModel')).toEqual(['', 'Automatic']);
+  expect(shown('workerReasoning')).toEqual(['', 'Automatic']);
+  // A chosen default stays exactly that, with its own efforts.
+  applyChatModels({ multiAgent: { defaultModel: 'gpt-6', defaultReasoning: 'high' }, goal: {} } as Config); await Promise.resolve();
+  expect(shown('workerModel')).toEqual(['gpt-6', 'GPT-6']);
+  expect(shown('workerReasoning')).toEqual(['high', 'High']);
 });
 
 it('binds composer selection to the selected session across delayed catalog, user edits and A-B-A navigation', async () => {
@@ -612,7 +628,7 @@ it('preserves an observed saved execution slug together with its Pro reasoning',
   const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
   initChatModels(); applyChatModels({ multiAgent: { defaultModel: 'gpt-5-6-pro', defaultReasoning: 'pro' }, goal: {} } as Config); await Promise.resolve();
   const model = dom.window.document.getElementById('workerModel') as HTMLSelectElement;
-  expect(model.value).toBe('gpt-5-6-pro'); expect(model.options).toHaveLength(2);
+  expect(model.value).toBe('gpt-5-6-pro'); expect([...model.options].map(option => option.value)).toEqual(['', '5.6', 'gpt-5-6-pro']);
   expect((dom.window.document.getElementById('workerReasoning') as HTMLSelectElement).value).toBe('pro');
 });
 it('preserves worker execution aliases without inferring a different family effort', async () => {
