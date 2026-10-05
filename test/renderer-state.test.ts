@@ -697,6 +697,47 @@ it('searches chats from the sidebar: results replace the lists, matches are mark
   expect(field.value).toBe('');
 });
 
+it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as const)(
+  'focuses chat search with the primary shortcut on %s, never from the terminal, and says when results were capped', async (platform, primary, other) => {
+  vi.stubGlobal('navigator', { ...globalThis.navigator, platform });
+  try {
+    const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+      lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+      estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
+    const listed = { ...base, id: 'search-shortcut-0001', title: 'Listed chat', conversationId: 'search-shortcut-conversation' };
+    const mounted = await mountChat({}, [], {
+      listProjects: async () => ({ ok: true, data: [] }),
+      listSessions: async () => ({ ok: true, data: { sessions: [listed], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+      searchSessions: async () => ({ ok: true, data: { results: [{ id: 'search-shortcut-0001', title: 'Listed chat', projectId: null }],
+        indexed: 1, total: 1, limited: true } })
+    });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('chatSearch') as HTMLInputElement;
+    await vi.waitFor(() => expect(doc.querySelector('[data-id="search-shortcut-0001"]')).not.toBeNull());
+    const press = (target: EventTarget, modifier: string) =>
+      target.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'k', [modifier]: true, bubbles: true, cancelable: true }));
+    expect(press(doc.body, other)).toBe(true);
+    expect(doc.activeElement).not.toBe(field);
+    // Ctrl+K deletes to the end of the line in a shell; the terminal keeps it.
+    const terminal = doc.createElement('div');
+    terminal.className = 'xterm';
+    const input = terminal.appendChild(doc.createElement('textarea'));
+    doc.body.append(terminal);
+    input.focus();
+    expect(press(input, primary)).toBe(true);
+    expect(doc.activeElement).toBe(input);
+    expect(press(doc.body, primary)).toBe(false);
+    expect(doc.activeElement).toBe(field);
+
+    field.value = 'listed';
+    field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+    await vi.waitFor(() => expect(doc.getElementById('searchResults')!.textContent)
+      .toContain('Showing the first 1 matches. Add a word to narrow them down.'));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('shows an inherited Block ahead of Trust on a committed resumed row', async () => {
   const source = 'strict-resume-blocked-source-0001';
   const current = 'strict-resume-blocked-current-0001';

@@ -9,6 +9,7 @@
 import type { SessionSearchReply } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
 import { t, ui } from './i18n.js';
+import { isMac } from './shortcuts.js';
 
 const api = window.api;
 const TYPING_PAUSE_MS = 150;
@@ -82,6 +83,8 @@ export function initChatSearch(options: { select(id: string): void; selectedId()
       results.append(el('p', 'search-status', () => t("Searching message text… {0} of {1} chats", [reply.indexed, reply.total])));
     } else if (!reply.results.length) {
       results.append(el('p', 'empty search-status', () => t("No chats match")));
+    } else if (reply.limited) {
+      results.append(el('p', 'search-status', () => t("Showing the first {0} matches. Add a word to narrow them down.", [reply.results.length])));
     }
   };
 
@@ -128,6 +131,21 @@ export function initChatSearch(options: { select(id: string): void; selectedId()
     }
   });
   clear.addEventListener('click', () => { reset(); field.focus(); });
+  // ⌘K on macOS, Ctrl+K elsewhere, as in ChatGPT. Not inside the terminal, where Ctrl+K deletes
+  // to the end of the line.
+  const focusSearch = (): void => {
+    if (!field.offsetParent) $('sidebarToggle').click();
+    field.focus();
+    field.select();
+  };
+  document.addEventListener('keydown', (event) => {
+    if (event.key.toLowerCase() !== 'k' || event.shiftKey || event.altKey || event.repeat) return;
+    if (isMac() ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return;
+    if ((event.target as Element | null)?.closest?.('.xterm')) return;
+    event.preventDefault();
+    focusSearch();
+  });
+  $('searchMenuItem').addEventListener('click', focusSearch);
   results.addEventListener('keydown', (event) => {
     const rows = [...results.querySelectorAll<HTMLElement>('.search-result')];
     const at = rows.indexOf(document.activeElement as HTMLElement);

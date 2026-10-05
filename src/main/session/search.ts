@@ -25,15 +25,18 @@ const INDEX_VERSION = 1;
 
 
 /**
- * Lowercase that keeps every character's length, so match offsets in it are offsets in the original.
- * A few characters lowercase to two code units ("İ"); those keep their own form.
+ * Lowercase without accents ("Prüfung", "café" and "İstanbul" match "prufung", "cafe" and
+ * "istanbul") that keeps every character's length, so match offsets in it are offsets in the
+ * original. A character whose folded form would change length keeps a same-length form or itself.
  */
 export function foldCase(text: string): string {
-  const lower = text.toLowerCase();
-  if (lower.length === text.length) return lower;
-  let out = '';
-  for (const char of text) { const folded = char.toLowerCase(); out += folded.length === char.length ? folded : char; }
-  return out;
+  return text.replace(/[A-Z]+|[^\x00-\x7f]/gu, chunk => {
+    if (chunk.charCodeAt(0) < 0x80) return chunk.toLowerCase();
+    const lower = chunk.toLowerCase();
+    const base = lower.length === chunk.length ? lower : chunk;
+    const bare = base.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
+    return bare.length === chunk.length ? bare : base;
+  });
 }
 
 /** What makes an index current: the chat's last change and its event count. */
@@ -191,7 +194,8 @@ export async function searchSessions(query: string, limit = MAX_SEARCH_RESULTS):
     }
     if (byTitle.length + byText.length >= limit * 2) break;
   }
-  return { results: [...byTitle, ...byText].slice(0, limit), indexed, total: summaries.length };
+  const found = byTitle.length + byText.length;
+  return { results: [...byTitle, ...byText].slice(0, limit), indexed, total: summaries.length, ...(found > limit ? { limited: true } : {}) };
 }
 
 /** Waits for background indexing to finish; for tests. */
