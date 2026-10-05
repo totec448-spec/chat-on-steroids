@@ -15,16 +15,20 @@ const native = vi.hoisted(() => {
     constructor() { panels.push(this); }
   }
   return { panels, WebContentsView, open: vi.fn(async () => 'edge'),
-    icon: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })) };
+    icon: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })),
+    thumbnail: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })) };
 });
 vi.mock('electron', () => ({ BaseWindow: class {}, BrowserWindow: class {}, WebContentsView: native.WebContentsView,
-  app: { getFileIcon: native.icon }, session: {}, shell: {} }));
+  app: { getFileIcon: native.icon }, nativeImage: { createThumbnailFromPath: native.thumbnail }, session: {}, shell: {} }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { chatBrowser: 'cos', language: 'pt-BR' } }) }));
 vi.mock('../src/main/browser.js', () => ({
-  installedSignInBrowsers: () => [{ browser: 'chrome', executable: 'chrome.exe' }, { browser: 'edge', executable: 'msedge.exe' }],
+  installedSignInBrowsers: () => process.platform === 'darwin'
+    ? [{ browser: 'chrome', executable: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' },
+      { browser: 'edge', executable: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' }]
+    : [{ browser: 'chrome', executable: 'chrome.exe' }, { browser: 'edge', executable: 'msedge.exe' }],
   openBrowserSignIn: native.open, EXTERNAL_BROWSER_LABELS: { chrome: 'Chrome', edge: 'Edge', brave: 'Brave' }
 }));
-const { CosBrowser } = await import('../src/main/cos-browser/host.js');
+const { CosBrowser, browserIcon } = await import('../src/main/cos-browser/host.js');
 const { cosSignInTransfer } = await import('../src/main/cos-browser/sign-in-transfer.js');
 const { cosBrowserSignedIn, setCosBrowserSignedIn, onCosBrowserSignInChange } = await import('../src/main/cos-browser/sign-in.js');
 
@@ -33,7 +37,23 @@ afterEach(() => {
   native.open.mockReset();
   native.open.mockImplementation(async () => 'edge');
   native.panels.length = 0;
+  native.icon.mockClear();
+  native.thumbnail.mockClear();
   setCosBrowserSignedIn(null);
+});
+
+it('takes a browser\'s icon from its app bundle on macOS, where the file icon call ends the app', async () => {
+  // macOS 27: app.getFileIcon traps on a worker thread and the whole app quits (any path).
+  await browserIcon('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'darwin');
+  expect(native.thumbnail).toHaveBeenCalledWith('/Applications/Google Chrome.app', { width: 64, height: 64 });
+  await browserIcon('/Users/someone/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', 'darwin');
+  expect(native.thumbnail).toHaveBeenLastCalledWith('/Users/someone/Applications/Brave Browser.app', { width: 64, height: 64 });
+  await expect(browserIcon('/usr/local/bin/chromium', 'darwin')).rejects.toThrow('not inside an app bundle');
+  expect(native.icon).not.toHaveBeenCalled();
+  // Elsewhere the file icon stays: it is what the taskbar shows.
+  await browserIcon('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'win32');
+  expect(native.icon).toHaveBeenCalledWith('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', { size: 'large' });
+  expect(native.thumbnail).toHaveBeenCalledTimes(2);
 });
 
 function browserFixture(url = 'https://auth.openai.com/log-in') {
