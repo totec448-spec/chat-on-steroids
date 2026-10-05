@@ -1391,7 +1391,10 @@ inventing a native final or turn end. A completed final can start a browser deci
 mode enables after-turn delivery, or when the finish tool is disabled (§17).
 `automaticFinishEnabled()` is shared by generation and queued-input validity: only the effective
 per-chat Goal/Loop switch authorizes an automatic decision.
-A "goal met" decision (`no-reply`) ends the run but keeps the objective and the Goal switch. Once
+A "goal met" decision (`no-reply`) ends the run but keeps the objective and the Goal switch. It
+discharges its turn's reply obligation when it settles, without waiting for the page: nothing is
+left to type, and a page closed meanwhile would otherwise leave the turn owed until the ledger
+TTL. A typed continuation stays owed until the page acknowledges it. Once
 the page acknowledges it, `goalViewFor()` hides it from the page, while `goalOutcomeFor()` keeps it
 in the window's session controls until a newer turn replaces it: the Goal row then reads
 "Goal reached · <objective>" instead of "Pursuing goal", and the lifecycle row does not repeat it.
@@ -1558,7 +1561,12 @@ corresponding Goal attempt. A call started before the end, a new request or a St
 cannot be used as that proof. Finish-only calls do not reopen activity. A canonical native final with a provider message UUID
 settles its already-proven request even when another connector call starts afterwards. The shared
 `readCompletedFinal` check requires request proof preceding that final and still rejects new work
-or newer boundaries. Activity and composer settlement consume this verdict without a competing
+or newer boundaries. The turn's own question (`timelineTurns[turn].questionId`) re-reported
+`authoredNow` after the answer (a new chat's first message seen only after ChatGPT's redraw) is
+not new work; a new question has a new id. When ChatGPT reported a fast answer's end before the
+page opened its turn (#1099), the turn's first page-side `turn_start` after that final and the
+page's later `stalled` end of the same turn do not veto a native final (`final` with a provider
+message id); `failed`, `unknown`, other turns and app reopens still do. Activity and composer settlement consume this verdict without a competing
 timestamp rule; running local tools retain their independent delivery fence. After recorder
 restart, the latest ended boundary can recover its exact request ownership only from the
 durable request-turn index recorded before that boundary. A newer question or canonical final
@@ -3016,6 +3024,11 @@ UIs name the wait without inventing a countdown. `prepareNotice` returns before 
 that drafts the automatic decision and **releases** the hold rather than leaving it held, so the
 user's own answer is never stuck behind workers they did not ask about; the durable reply
 obligation survives and the pickup tree collects it later. A notice-only hold is untouched.
+For the window only, `sessionControlsFor` passes the session's `browserRecoveryDismissedAt`: a
+pending turn whose tab the person closed reports `closed` (after `tools`/`workers`), shown without
+spinner or countdown as "Paused until this chat is open in the browser". Recovery waits for that
+page, so "Answer settling" there spun until the obligation's TTL. `/activity` never sees `closed`:
+the page asking is the return that clears the dismissal.
 
 The wait cannot starve the reports it is waiting for: worker reports reach their prime through
 the kernel's caller offer, never through the browser outbox. `/goal/draft` needed no change; it

@@ -1280,6 +1280,7 @@
   "Waiting before recovery reload": "等待恢复重新加载",
   "ChatGPT resumed work · waiting before retry": "ChatGPT 已恢复工作 · 等待后重试",
   "Answer settling": "确认回答已结束",
+  "Paused until this chat is open in the browser": "已暂停，直到在浏览器中打开此聊天",
   "Image preview retained with this delivery; not yet saved to history.": "此图片预览随已送达的消息保留，尚未保存到历史记录。",
   "Skills": "技能",
   "Loading skills…": "正在加载技能…",

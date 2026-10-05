@@ -1388,6 +1388,7 @@
   "Waiting before recovery reload": "等待恢復重新載入",
   "ChatGPT resumed work · waiting before retry": "ChatGPT 已恢復工作 · 等待後重試",
   "Answer settling": "確認回答已結束",
+  "Paused until this chat is open in the browser": "已暫停，直到在瀏覽器中開啟此聊天",
   "Skills": "技能",
   "Close skills": "關閉技能",
   "Use reusable text instructions in this message.": "在此訊息中使用可重複使用的文字指令。",

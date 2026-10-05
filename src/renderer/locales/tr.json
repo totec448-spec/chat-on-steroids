@@ -1196,6 +1196,7 @@
   "Waiting before recovery reload": "Kurtarma için yeniden yüklemeden önce bekleniyor",
   "ChatGPT resumed work · waiting before retry": "ChatGPT çalışmaya devam etti · tekrar denemeden önce bekleniyor",
   "Answer settling": "Yanıtın bittiği doğrulanıyor",
+  "Paused until this chat is open in the browser": "Bu sohbet tarayıcıda açılana kadar duraklatıldı",
   "Browser and desktop control": "Tarayıcı ve masaüstü kontrolü",
   "Background browser tabs, DOM, console and network; native windows and input where supported.": "Arka plandaki tarayıcı sekmeleri, DOM, konsol ve ağ; desteklenen yerlerde yerel pencereler ve girdi.",
   "Browser tabs, DOM, screenshots, console and network; native windows where supported.": "Tarayıcı sekmeleri, DOM, ekran görüntüleri, konsol ve ağ; desteklenen yerlerde yerel pencereler.",

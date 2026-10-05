@@ -1196,6 +1196,7 @@
   "Waiting before recovery reload": "Esperando antes de recargar para recuperar",
   "ChatGPT resumed work · waiting before retry": "ChatGPT reanudó el trabajo · esperando antes de reintentar",
   "Answer settling": "Confirmando que la respuesta haya terminado",
+  "Paused until this chat is open in the browser": "En pausa hasta que este chat esté abierto en el navegador",
   "Browser and desktop control": "Control del navegador y del escritorio",
   "Background browser tabs, DOM, console and network; native windows and input where supported.": "Pestañas en segundo plano, DOM, consola y red; ventanas y entrada nativas cuando sean compatibles.",
   "Browser tabs, DOM, screenshots, console and network; native windows where supported.": "Pestañas, DOM, capturas, consola y red; ventanas nativas cuando sean compatibles.",
