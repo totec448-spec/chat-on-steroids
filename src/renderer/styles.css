@@ -2245,6 +2245,10 @@ input[readonly] {
 /* While a chat is being named, its field takes the actions' place (#1107). */
 .sess:has(.sess-rename) .sess-actions { display: none; }
 .sess-action { padding: 3px; border: 0; background: transparent; }
+/* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
+.sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
+.sess:hover .sess-pin-mark, .sess:focus-within .sess-pin-mark { display: none; }
+.sess-pin.is-pinned { color: var(--accent); }
 .sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }

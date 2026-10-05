@@ -78,6 +78,7 @@
 .ph.ph-monitor::before { content: '\e32e'; }
 .ph.ph-paw-print::before { content: '\e648'; }
 .ph.ph-pencil-simple::before { content: '\e3b4'; }
+.ph.ph-push-pin-simple::before { content: '\e65c'; }
 .ph.ph-play::before { content: '\e3d0'; }
 .ph.ph-plus::before { content: '\e3d4'; }
 .ph.ph-power::before { content: '\e3da'; }
@@ -98,4 +99,5 @@
 
 .ph-fill.ph-square-half::before { content: '\e462'; }
 .ph-fill.ph-square-half-bottom::before { content: '\eb16'; }
+.ph-fill.ph-push-pin-simple::before { content: '\e65c'; }
 .ph-fill.ph-star::before { content: '\e46a'; }

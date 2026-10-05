@@ -1,6 +1,6 @@
 // Exercise Pets with isolated userData against the built renderer or the live Vite dev renderer.
 // Run after `npm run build`; ELECTRON_RENDERER_URL=http://localhost:5173 also checks dev CSS loading.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, screen } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -30,6 +30,23 @@ app.setName('CoS Pets Render Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
 process.env.CLF_BRIDGE_PORTS = '0';
+
+// Windows production proximity is owned by screen.getCursorScreenPoint(). Substitute only that
+// boundary so this fixture exercises the real sampler -> renderer -> IPC path without moving the
+// user's OS cursor. verify-pet-toggle.cjs owns the separate physical-pointer acceptance probe.
+let sampledCursor = { x: -1_000_000, y: -1_000_000 };
+app.whenReady().then(() => {
+  if (process.platform === 'win32') screen.getCursorScreenPoint = () => sampledCursor;
+});
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function until(predicate, label, timeoutMs = 2500) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (await predicate()) return;
+    await sleep(40);
+  }
+  throw new Error(`Timed out: ${label}`);
+}
 
 let found = false;
 const timeout = setTimeout(() => { console.error(`Pets overlay did not load; userData=${userData}`); app.exit(1); }, 30_000);
@@ -119,8 +136,8 @@ function attachOverlay(win) {
         if (process.platform === 'win32') {
           assert.ok(ignoredMouseCalls.some(call => call.ignore),
             `The idle overlay must be click-through: ${JSON.stringify(ignoredMouseCalls)}`);
-          assert.equal(ignoredMouseCalls.some(call => call.ignore && call.forward), false,
-            `Windows must not forward ignored mouse movement to a second cursor owner: ${JSON.stringify(ignoredMouseCalls)}`);
+          assert.equal(win.isFocusable(), true,
+            'Windows Pets must remain focusable so explicit clicks survive hide/show.');
           const hoverOwner = BrowserWindow.getAllWindows().find(candidate => candidate !== win && candidate.getTitle() === 'Chat On Steroids');
           assert.ok(hoverOwner, 'The hover regression requires the visible owner behind Pets.');
           await hoverOwner.webContents.executeJavaScript(`(() => {
@@ -128,21 +145,53 @@ function attachOverlay(win) {
             window.__petBehindTicks = 0;
             window.__petBehindTimer = setInterval(() => window.__petBehindTicks++, 50);
           })()`);
-          const hoverX = Math.round(geometry.shell.x + geometry.shell.width / 2);
-          const hoverY = Math.round(geometry.shell.y + geometry.shell.height / 2);
-          win.webContents.sendInputEvent({ type: 'mouseMove', x: 10, y: 10 });
-          await new Promise(resolve => setTimeout(resolve, 50));
-          assert.equal(win.isFocusable(), false, 'Pointer outside pet content must keep the overlay click-through.');
+          const area = win.getContentBounds();
+          const outside = { x: area.x - 1000, y: area.y - 1000 };
+          sampledCursor = outside;
+          assert.equal(ignoredMouseCalls.at(-1)?.ignore, true,
+            `The initial outside sampled cursor must observe the overlay in click-through state: ${JSON.stringify(ignoredMouseCalls)}`);
+          assert.equal(win.isFocused(), false, 'Showing the focusable overlay must not focus it.');
+          const focusedBeforeHover = BrowserWindow.getFocusedWindow();
           const ticksBeforeHover = await hoverOwner.webContents.executeJavaScript('window.__petBehindTicks');
-          win.webContents.sendInputEvent({ type: 'mouseMove', x: hoverX, y: hoverY });
-          await new Promise(resolve => setTimeout(resolve, 500));
-          assert.equal(win.isFocusable(), false, 'Pet interaction must not activate an occluding desktop window.');
+          const hoverRect = await win.webContents.executeJavaScript('document.querySelector(".pet-shell").getBoundingClientRect().toJSON()');
+          const hoverX = Math.round(hoverRect.x + hoverRect.width / 2);
+          const hoverY = Math.round(hoverRect.y + hoverRect.height / 2);
+          const enterStart = ignoredMouseCalls.length;
+          const shapeStart = nativeShapes.length;
+          const zoom = win.webContents.getZoomFactor();
+          sampledCursor = { x: area.x + hoverX * zoom, y: area.y + hoverY * zoom };
+          await until(() => ignoredMouseCalls.slice(enterStart).some(call => call.ignore === false),
+            'sampled cursor entering pet hit region');
+          const interactiveShape = nativeShapes.slice(shapeStart).at(-1);
+          assert.ok(Array.isArray(interactiveShape) && interactiveShape.length > 0 && interactiveShape.length <= 1024,
+            `Interactive Pets must publish bounded native hit regions: ${JSON.stringify(interactiveShape)}`);
+          for (const region of interactiveShape) {
+            assert.ok(Number.isInteger(region.x) && Number.isInteger(region.y)
+              && Number.isInteger(region.width) && Number.isInteger(region.height)
+              && region.x >= 0 && region.y >= 0 && region.width > 0 && region.height > 0
+              && region.x + region.width <= area.width && region.y + region.height <= area.height,
+            `Pet hit region escaped the overlay bounds: ${JSON.stringify({ area, region })}`);
+          }
+          assert.equal(interactiveShape.length === 1
+            && interactiveShape[0].x === 0 && interactiveShape[0].y === 0
+            && interactiveShape[0].width === area.width && interactiveShape[0].height === area.height, false,
+          `Interactive Pets must not expose the full transparent desktop surface: ${JSON.stringify(interactiveShape)}`);
+          assert.ok(interactiveShape.some(region => hoverX >= region.x && hoverX < region.x + region.width
+            && hoverY >= region.y && hoverY < region.y + region.height),
+          `The sampled pet point must be inside a native hit region: ${JSON.stringify({ hoverX, hoverY, interactiveShape })}`);
+          await sleep(500);
+          assert.equal(win.isFocused(), false, 'Hovering a pet must not focus the overlay.');
+          if (focusedBeforeHover) assert.equal(BrowserWindow.getFocusedWindow(), focusedBeforeHover,
+            'Hovering a pet must not steal focus from the previously focused window.');
           const ticksAfterHover = await hoverOwner.webContents.executeJavaScript('window.__petBehindTicks');
           assert.ok(ticksAfterHover - ticksBeforeHover >= 4,
             `The owner behind an interactive pet must keep running; ticks=${ticksBeforeHover}->${ticksAfterHover}.`);
-          win.webContents.sendInputEvent({ type: 'mouseMove', x: 10, y: 10 });
-          await new Promise(resolve => setTimeout(resolve, 50));
-          assert.equal(win.isFocusable(), false, 'Leaving pet content must restore native click-through.');
+          const leaveStart = ignoredMouseCalls.length;
+          sampledCursor = outside;
+          await until(() => ignoredMouseCalls.slice(leaveStart).some(call => call.ignore === true),
+            'sampled cursor leaving pet hit region');
+          assert.equal(ignoredMouseCalls.some(call => call.ignore && call.forward), false,
+            `Windows must not forward ignored mouse movement to a second cursor owner: ${JSON.stringify(ignoredMouseCalls)}`);
         }
         console.log(JSON.stringify({ userData, shot, zoom: win.webContents.getZoomFactor(), geometry,
           alphaBounds: maxX < 0 ? null : { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } }, null, 2));
@@ -244,7 +293,7 @@ function attachOverlay(win) {
             return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.capy.v1') };
           })()`);
           assert.ok(Math.abs(moved.x - 333) < 2 && Math.abs(moved.y - 444) < 2,
-            `Native pointer drag did not move the pet: ${JSON.stringify(moved)}`);
+            `Electron input drag did not move the pet: ${JSON.stringify(moved)}`);
           console.log(`dragged=${JSON.stringify(moved)}`);
         }
         const owners = BrowserWindow.getAllWindows().filter(candidate => candidate !== win);

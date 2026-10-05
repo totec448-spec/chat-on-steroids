@@ -1964,5 +1964,8 @@
   "The Chat On Steroids browser is still running": "O navegador do Chat On Steroids continua em execução",
   "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "Seus chats continuam. Escolha “Mostrar navegador” no menu do ícone da bandeja para trazê-lo de volta.",
   "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Seus chats continuam. Escolha “Mostrar navegador” no menu do ícone da barra de menus para trazê-lo de volta.",
-  "Recent": "Recentes"
+  "Recent": "Recentes",
+  "Pinned": "Fixado",
+  "Unpin this chat": "Desafixar este chat",
+  "Pin this chat to the top of its list": "Fixar este chat no topo da lista"
 }
