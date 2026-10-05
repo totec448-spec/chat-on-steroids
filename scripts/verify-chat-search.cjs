@@ -127,8 +127,10 @@ app.whenReady().then(async () => {
     await until(`document.getElementById('searchDialog').open`);
     assert.deepEqual(await js(`(()=>{const f=document.getElementById('chatSearch');return [f.value,f.selectionStart,f.selectionEnd]})()`),['bridge',0,6]);
     // A click outside the dialog closes it.
-    win.webContents.sendInputEvent({type:'mouseDown',x:1260,y:780,button:'left',clickCount:1});
-    win.webContents.sendInputEvent({type:'mouseUp',x:1260,y:780,button:'left',clickCount:1});
+    // Near the page's own corner: a macOS window's title bar makes the page shorter than the window.
+    const [outsideX,outsideY]=await js(`[innerWidth-20,innerHeight-20]`);
+    win.webContents.sendInputEvent({type:'mouseDown',x:outsideX,y:outsideY,button:'left',clickCount:1});
+    win.webContents.sendInputEvent({type:'mouseUp',x:outsideX,y:outsideY,button:'left',clickCount:1});
     await until(`!document.getElementById('searchDialog').open`);
   }
 
