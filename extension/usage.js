@@ -133,11 +133,14 @@
       // The page asks for several hint lists (basic, custom agents, plugins) and only the plugins
       // list names Core, in whatever order they answer. A list without Core says nothing about it;
       // only two different apps with the same Core name make that name ambiguous.
-      if (!byName.size || byName.size > 16) return;
+      // Only the plugins list (`mode=plugins`, measured live) is complete about plugins: there a
+      // missing Core is news. Any other list without Core still says nothing about it.
+      const pluginList = url.searchParams.get('mode') === 'plugins';
+      if ((!byName.size && !pluginList) || byName.size > 16) return;
       const candidates = [...byName].map(([name, ids]) => ({ name, path: ids.size === 1 ? `app://${[...ids][0]}` : null }));
       const plain = candidates.find(candidate => candidate.name === CORE_APP_NAME);
       // `path`/`name` keep describing the plain Core for a content script from before suffixes.
-      coreMention = { type: 'cos-core-mention', path: plain?.path ?? null, name: plain?.path ? CORE_APP_NAME : null, candidates };
+      coreMention = { type: 'cos-core-mention', path: plain?.path ?? null, name: plain?.path ? CORE_APP_NAME : null, candidates, pluginList };
       post(coreMention, location.origin);
     } catch { /* An unreadable list proves nothing; prompts keep going without a mention. */ }
     finally { clearTimeout(timer); readers.delete(reader); void reader.cancel().catch(() => {}); }

@@ -1843,6 +1843,8 @@
   "Preview limited to 600 lines. Open Review for the complete edit.": "Xem trước giới hạn 600 dòng. Mở mục Xem lại để xem toàn bộ chỉnh sửa.",
   "{0} unchanged lines": "{0} dòng không đổi",
   "More edited files are available in the recording.": "Các tệp đã chỉnh sửa khác có trong bản ghi.",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Plugin đã có trong ChatGPT của bạn. Nó sẽ chạy khi một cuộc trò chuyện cần đến lần đầu.",
+  "Added in ChatGPT. Its tools have not run yet.": "Đã thêm vào ChatGPT. Các công cụ của nó chưa chạy lần nào.",
   "1 sub-agent in this round": "1 tác nhân phụ trong vòng này",
   "{0} sub-agents in this round": "{0} tác nhân phụ trong vòng này"
 }

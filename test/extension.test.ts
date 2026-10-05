@@ -889,6 +889,33 @@ describe('browser identity', () => {
   });
 });
 
+describe('ChatGPT\'s plugin list as proof', () => {
+  it('passes core_plugin to the app only from the current ChatGPT document of its tab', async () => {
+    const posted: unknown[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/core-plugin') posted.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true });
+      }
+    });
+    // A sender without a document identity is refused before anything reaches the app.
+    expect((await worker.send({ type: 'core_plugin', appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' }, 2, '')).ok).toBe(false);
+    expect(posted).toEqual([]);
+    await worker.registerTab(1);
+    expect((await worker.send({ type: 'core_plugin', appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' }, 1)).ok).toBe(true);
+    expect((await worker.send({ type: 'core_plugin', missing: true }, 1)).ok).toBe(true);
+    expect((await worker.send({ type: 'core_plugin', appId: 'app://not-an-id' }, 1)).ok).toBe(false);
+    expect(posted).toEqual([{ appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' }, { missing: true }]);
+    // The page that navigated away no longer speaks for this tab.
+    await worker.navigateTab(1, 'https://chatgpt.com/');
+    expect((await worker.send({ type: 'core_plugin', missing: true }, 1, 'document-1-0')).ok).toBe(false);
+    expect(posted).toHaveLength(2);
+  });
+});
+
 describe('automatic Continue shares scheduled reload custody', () => {
   it.each(['accepted', 'draft', 'navigated', 'rejected'] as const)('never reloads immediately after Stop (%s)', async outcome => {
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
