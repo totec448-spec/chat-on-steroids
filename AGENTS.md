@@ -3793,16 +3793,21 @@ browser attachment in both status and diagnosis. Stale connect/disconnect result
 a newer endpoint. Secret paths/tokens are not public diagnostics.
 
 Each actual tunnel lifetime keeps one in-memory loss-notice budget in `connection.ts`: a connected
-report arms it; the next offline/auth-failed/tunnel-unavailable report consumes it. Unknown health
-or retry/starting reports neither erase an established connection nor re-arm an outage. Core,
-Desktop and Plugins OpenAI tunnels are independent; whole-origin transports notify once for their
-shared Core tunnel. Initial failures stay silent. Existing generation and optional-lifetime fences
-keep Disconnect, shutdown, settings reconnect and retired reports silent. `setConnectionLossNotifier`
-injects presentation from `index.ts`, which skips focused/unsupported/quitting windows, localizes
-static safe text through `mainText`, and opens the app on click. A skipped or failed notice is not
-retried; notification failures never alter tunnel state or recovery. No raw tunnel detail or secret
-identifier enters the notice. `test/connection.test.ts` and `test/connection-notice.test.ts` cover the
-transition budget, intentional retirement and notification adapter.
+report arms it; the first offline/auth-failed/tunnel-unavailable report starts a 30-second grace
+timer, and only an outage that still has not recovered when that timer fires consumes the budget.
+A connected report cancels a pending timer and keeps the budget armed. Unknown health or
+retry/starting reports neither erase an established outage nor restart its timer. Core, Desktop and
+Plugins OpenAI tunnels are independent; whole-origin transports notify once for their shared Core
+tunnel. Initial failures stay silent. Existing generation and optional-lifetime fences retire the
+notice lifetime too, so Disconnect, shutdown, settings reconnect and retired reports cancel pending
+timers and cannot fire later. Electron `powerMonitor` suspend cancels pending timers without counting
+sleep; resume gives any still-active outage a fresh full grace window. `setConnectionLossNotifier`
+injects presentation from `index.ts`; `connection-loss-notice.ts` owns the testable Electron adapter,
+which skips focused/unsupported/quitting windows, localizes static safe text through `mainText`, and
+opens the app on click. A skipped or failed notice is not retried; notification failures never alter
+tunnel state or recovery. No raw tunnel detail or secret identifier enters the notice.
+`test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
+intentional retirement and notification presentation.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
 `/v1/health` (which also lists the routes this build serves), `/v1/status` and the read routes

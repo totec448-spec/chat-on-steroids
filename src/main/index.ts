@@ -6,12 +6,21 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, screen, session } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
-import { connect, disconnect, getStatus, onStatusChange, setConnectionLossNotifier, shutdownConnection } from './connection.js';
+import {
+  connect,
+  disconnect,
+  getStatus,
+  onStatusChange,
+  resumeConnectionLossNotices,
+  setConnectionLossNotifier,
+  shutdownConnection,
+  suspendConnectionLossNotices
+} from './connection.js';
 import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
@@ -94,6 +103,7 @@ import {
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
+import { showConnectionLossNotice } from './connection-loss-notice.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -293,21 +303,14 @@ setStuckNotifier((title, body, sessionId) => {
   notice.show();
   return true;
 });
-setConnectionLossNotifier(surface => {
-  if (quitting || window?.isFocused() || !Notification.isSupported()) return false;
-  const titles = {
-    core: 'Core connection lost',
-    desktop: 'Desktop connection lost',
-    plugins: 'Plugins connection lost'
-  } as const;
-  const notice = new Notification({
-    title: mainText(titles[surface]),
-    body: mainText('The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.')
-  });
-  notice.on('click', showWindow);
-  notice.show();
-  return true;
-});
+setConnectionLossNotifier(surface => showConnectionLossNotice(surface, {
+  isQuitting: () => quitting,
+  isFocused: () => window?.isFocused() ?? false,
+  isSupported: () => Notification.isSupported(),
+  text: mainText,
+  create: options => new Notification(options),
+  showWindow
+}));
 
 setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
@@ -381,6 +384,8 @@ void app.whenReady().then(async () => {
   // This guard is intentionally before even app.getPath/init* calls. A secondary instance, or a
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
+  powerMonitor.on('suspend', suspendConnectionLossNotices);
+  powerMonitor.on('resume', resumeConnectionLossNotices);
   const userData = app.getPath('userData');
   initLogFile(path.join(userData, 'app.log'));
   process.on('uncaughtExceptionMonitor', (error, origin) => {

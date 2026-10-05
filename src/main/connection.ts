@@ -32,7 +32,11 @@ let pendingTeardown: Promise<void> | null = null;
 let tunnel: TunnelHandle | null = null;
 /** Independent optional tunnel lifetimes on the OpenAI path. */
 type OptionalSurface = 'desktop' | 'plugins';
-const optionalTunnels = new Map<OptionalSurface, { handle: TunnelHandle | null; tunnelId: string }>();
+const optionalTunnels = new Map<OptionalSurface, {
+  handle: TunnelHandle | null;
+  tunnelId: string;
+  lossReporter: ConnectionLossReporter;
+}>();
 const optionalSurfaces: OptionalSurface[] = ['desktop', 'plugins'];
 const optionalTunnelId = (settings: TunnelSettings, id: OptionalSurface): string =>
   (id === 'desktop' ? settings.desktopTunnelId : settings.pluginsTunnelId) ?? '';
@@ -109,26 +113,86 @@ let connectionGeneration = 0;
 let shutdownRequested = false;
 
 let notifyConnectionLoss: ((surface: SurfaceId) => boolean | void) | null = null;
+const CONNECTION_LOSS_GRACE_MS = 30_000;
+const connectionLossReporters = new Set<ConnectionLossReporter>();
+let connectionLossNoticesSuspended = false;
+
+interface ConnectionLossReporter {
+  report(state: ConnectionState): void;
+  suspend(): void;
+  resume(): void;
+  retire(): void;
+}
 
 /** The main process owns desktop presentation; connection reports stay independent of Electron. */
 export function setConnectionLossNotifier(notifier: typeof notifyConnectionLoss): void {
   notifyConnectionLoss = notifier;
 }
 
-/** One notice budget per tunnel lifetime, driven only by its generation-fenced reports. */
-function connectionLossReporter(surface: SurfaceId): (state: ConnectionState) => void {
+/** One delayed notice budget per tunnel lifetime, driven only by its generation-fenced reports. */
+function connectionLossReporter(surface: SurfaceId): ConnectionLossReporter {
   let armed = false;
-  return state => {
-    if (state === 'connected') {
-      armed = true;
-      return;
-    }
-    // Unknown health/retry reports do not prove recovery or erase an established connection.
-    if (!armed || (state !== 'offline' && state !== 'auth-failed' && state !== 'tunnel-unavailable')) return;
-    // Consume even if focused, unsupported or refused: never defer/repeat the same outage.
-    armed = false;
-    try { notifyConnectionLoss?.(surface); } catch { /* A notice cannot change tunnel health. */ }
+  let outage = false;
+  let retired = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const cancelTimer = (): void => {
+    if (timer === null) return;
+    clearTimeout(timer);
+    timer = null;
   };
+  const schedule = (): void => {
+    if (retired || connectionLossNoticesSuspended || !armed || !outage || timer !== null) return;
+    timer = setTimeout(() => {
+      timer = null;
+      if (retired || connectionLossNoticesSuspended || !armed || !outage) return;
+      // Consume even if focused, unsupported or refused: never defer/repeat the same outage.
+      armed = false;
+      try { notifyConnectionLoss?.(surface); } catch { /* A notice cannot change tunnel health. */ }
+    }, CONNECTION_LOSS_GRACE_MS);
+  };
+
+  const reporter: ConnectionLossReporter = {
+    report: state => {
+      if (retired) return;
+      if (state === 'connected') {
+        outage = false;
+        cancelTimer();
+        armed = true;
+        return;
+      }
+      // Unknown health/retry reports do not prove recovery or erase an established outage.
+      if (!armed || (state !== 'offline' && state !== 'auth-failed' && state !== 'tunnel-unavailable')) return;
+      outage = true;
+      schedule();
+    },
+    suspend: () => cancelTimer(),
+    resume: () => schedule(),
+    retire: () => {
+      if (retired) return;
+      retired = true;
+      cancelTimer();
+      connectionLossReporters.delete(reporter);
+    }
+  };
+  connectionLossReporters.add(reporter);
+  return reporter;
+}
+
+function retireConnectionLossReporters(): void {
+  for (const reporter of [...connectionLossReporters]) reporter.retire();
+}
+
+/** Sleep never counts toward an outage grace period. Electron calls this on powerMonitor suspend. */
+export function suspendConnectionLossNotices(): void {
+  connectionLossNoticesSuspended = true;
+  for (const reporter of connectionLossReporters) reporter.suspend();
+}
+
+/** An outage that survived sleep gets a fresh full grace window after resume. */
+export function resumeConnectionLossNotices(): void {
+  connectionLossNoticesSuspended = false;
+  for (const reporter of connectionLossReporters) reporter.resume();
 }
 
 function enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
@@ -399,7 +463,7 @@ async function connectImpl(): Promise<void> {
           }
         }
         // A shared-origin transport has one tunnel/outage; optional cards are its projections.
-        if (generation === connectionGeneration) reportLoss(report.state);
+        if (generation === connectionGeneration) reportLoss.report(report.state);
       }
     });
     if (shutdownRequested) {
@@ -455,9 +519,9 @@ async function startOptionalTunnel(
   }
 
   updateSurface(id, { state: 'starting', detail: 'Connecting…' });
-  const lifetime = { handle: null as TunnelHandle | null, tunnelId };
+  const lossReporter = connectionLossReporter(id);
+  const lifetime = { handle: null as TunnelHandle | null, tunnelId, lossReporter };
   optionalTunnels.set(id, lifetime);
-  const reportLoss = connectionLossReporter(id);
   try {
     const started = await startTunnel({
       localUrl: endpoint.urls[id],
@@ -472,7 +536,7 @@ async function startOptionalTunnel(
           detail: report.detail,
           ...(report.publicUrl === undefined ? {} : { publicUrl: report.publicUrl })
         });
-        if (generation === connectionGeneration && optionalTunnels.get(id) === lifetime) reportLoss(report.state);
+        if (generation === connectionGeneration && optionalTunnels.get(id) === lifetime) lossReporter.report(report.state);
       }
     });
     if (shutdownRequested) {
@@ -485,6 +549,7 @@ async function startOptionalTunnel(
     lifetime.handle = started;
   } catch (err) {
     if (optionalTunnels.get(id) === lifetime) optionalTunnels.delete(id);
+    lossReporter.retire();
     if (shutdownRequested || generation !== connectionGeneration) {
       return;
     }
@@ -499,6 +564,7 @@ async function stopOptionalTunnel(id: OptionalSurface, detail: string): Promise<
   const current = optionalTunnels.get(id);
   if (!current) return;
   optionalTunnels.delete(id);
+  current.lossReporter.retire();
   await current.handle?.stop().catch(() => {});
   logInfo(`${id} connector unpublished`);
   updateSurface(id, { state: 'off', detail, publicUrl: null });
@@ -566,6 +632,7 @@ function disconnectImpl(endpointForceAfterMs?: number): Promise<void> {
 async function disconnectResources(endpointForceAfterMs?: number): Promise<void> {
   for (const surface of SURFACE_LIST) unpublishPluginSurface(surface.id);
   // Invalidate callbacks first; stopping a child can itself cause exit/health events.
+  retireConnectionLossReporters();
   connectionGeneration += 1;
   if (status.state !== 'disconnected') {
     setStatus({ state: 'disconnecting', detail: 'Disconnecting; waiting for accepted requests to finish…' });
@@ -613,6 +680,7 @@ export function connect(): Promise<void> {
 export function disconnect(): Promise<void> {
   if (pendingDisconnect) return pendingDisconnect;
   connectionGeneration += 1;
+  retireConnectionLossReporters();
   logInfo('disconnect requested');
   setStatus({ state: 'disconnecting', detail: 'Disconnecting; waiting for accepted requests to finish…' });
   pendingDisconnect = enqueueLifecycle(disconnectImpl).finally(() => { pendingDisconnect = null; });
@@ -629,6 +697,7 @@ export function shutdownConnection(): Promise<void> {
   // Ordinary disconnect does not set this flag, so Settings can still disconnect/reconnect.
   shutdownRequested = true;
   connectionGeneration += 1;
+  retireConnectionLossReporters();
   // Do not enqueue the force deadline behind the ordinary drain it must bound.
   void drainingEndpoint?.stop({ forceAfterMs: 30_000 }).catch(() => {});
   // Quit is terminal: it must not inherit an unfinished startup/keychain wait.

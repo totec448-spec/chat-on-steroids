@@ -1,34 +1,26 @@
-import { readFileSync } from 'node:fs';
-import vm from 'node:vm';
 import { expect, it, vi } from 'vitest';
+import { showConnectionLossNotice } from '../src/main/connection-loss-notice.js';
 
-// Exercise the production Electron adapter without starting the app or an OS notification daemon.
 function noticeFixture() {
-  const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
-  const adapter = source.slice(source.indexOf('setConnectionLossNotifier('), source.indexOf('\nsetBrowserWorkArea('))
-    .replaceAll(' as const', '');
-  let notify!: (surface: 'core' | 'desktop' | 'plugins') => boolean;
+  let quitting = false;
+  const state = { focused: false, supported: true };
   const show = vi.fn();
   const click = vi.fn();
-  const create = vi.fn();
+  const create = vi.fn(() => ({
+    on: (event: 'click', listener: () => void) => { expect(event).toBe('click'); click(listener); },
+    show
+  }));
   const showWindow = vi.fn();
-  const state = { focused: false, supported: true };
   const mainText = vi.fn((text: string) => `translated:${text}`);
-  const context = vm.createContext({
-    quitting: false,
-    window: { isFocused: () => state.focused },
-    setConnectionLossNotifier: (listener: typeof notify) => { notify = listener; },
-    mainText,
-    showWindow,
-    Notification: class {
-      static isSupported() { return state.supported; }
-      constructor(options: unknown) { create(options); }
-      on(event: string, listener: () => void) { expect(event).toBe('click'); click(listener); }
-      show = show;
-    }
+  const notify = (surface: 'core' | 'desktop' | 'plugins') => showConnectionLossNotice(surface, {
+    isQuitting: () => quitting,
+    isFocused: () => state.focused,
+    isSupported: () => state.supported,
+    text: mainText,
+    create,
+    showWindow
   });
-  vm.runInContext(adapter, context);
-  return { notify, state, context, create, show, click, showWindow, mainText };
+  return { notify, state, setQuitting: (value: boolean) => { quitting = value; }, create, show, click, showWindow, mainText };
 }
 
 it.each(['core', 'desktop', 'plugins'] as const)('localizes the %s loss notice and opens the app on click', surface => {
@@ -48,7 +40,7 @@ it.each(['focused', 'unsupported', 'quitting'])('suppresses the notice while %s'
   const fixture = noticeFixture();
   if (reason === 'focused') fixture.state.focused = true;
   if (reason === 'unsupported') fixture.state.supported = false;
-  if (reason === 'quitting') fixture.context.quitting = true;
+  if (reason === 'quitting') fixture.setQuitting(true);
   expect(fixture.notify('core')).toBe(false);
   expect(fixture.create).not.toHaveBeenCalled();
   expect(fixture.show).not.toHaveBeenCalled();

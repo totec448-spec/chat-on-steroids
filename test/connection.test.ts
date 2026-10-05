@@ -108,6 +108,7 @@ vi.mock('../src/main/tunnel/index.js', () => ({
 
 describe('connection surface state', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mocks.report = null;
     mocks.reports.clear();
     mocks.initialTunnelState = 'connected';
@@ -151,6 +152,7 @@ describe('connection surface state', () => {
   });
 
   it.each(['offline', 'auth-failed', 'tunnel-unavailable'])('notifies once when an established tunnel reports %s, and re-arms only on connected', async state => {
+    vi.useFakeTimers();
     const connection = await import('../src/main/connection.js');
     const notify = vi.fn();
     connection.setConnectionLossNotifier(notify);
@@ -161,15 +163,61 @@ describe('connection surface state', () => {
     report({ state, detail: 'Repeated health sample' });
     report({ state: 'connecting-tunnel', detail: 'Still retrying' });
     report({ state: 'offline', detail: 'Still offline' });
+    expect(notify).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify.mock.calls).toEqual([['core']]);
 
     report({ state: 'connected', detail: 'Recovered' });
     report({ state: 'offline', detail: 'Another outage' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify.mock.calls).toEqual([['core'], ['core']]);
     await connection.disconnect();
   });
 
+  it('cancels a brief outage and keeps the notice budget armed', async () => {
+    vi.useFakeTimers();
+    const connection = await import('../src/main/connection.js');
+    const notify = vi.fn();
+    connection.setConnectionLossNotifier(notify);
+    await connection.connect();
+    const report = mocks.reports.get('core')!;
+
+    report({ state: 'offline', detail: 'Short network blip' });
+    await vi.advanceTimersByTimeAsync(29_000);
+    report({ state: 'connected', detail: 'Recovered quickly' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(notify).not.toHaveBeenCalled();
+
+    report({ state: 'offline', detail: 'Persistent outage' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(notify).toHaveBeenCalledExactlyOnceWith('core');
+    await connection.disconnect();
+  });
+
+  it('does not count suspend time and gives an outage a fresh grace window after resume', async () => {
+    vi.useFakeTimers();
+    const connection = await import('../src/main/connection.js');
+    const notify = vi.fn();
+    connection.setConnectionLossNotifier(notify);
+    await connection.connect();
+    const report = mocks.reports.get('core')!;
+
+    report({ state: 'offline', detail: 'Network lost before sleep' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    connection.suspendConnectionLossNotices();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(notify).not.toHaveBeenCalled();
+
+    connection.resumeConnectionLossNotices();
+    await vi.advanceTimersByTimeAsync(29_000);
+    report({ state: 'connected', detail: 'Recovered after wake' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(notify).not.toHaveBeenCalled();
+    await connection.disconnect();
+  });
+
   it('remembers an established connection through temporary unknown health before a confirmed outage', async () => {
+    vi.useFakeTimers();
     const connection = await import('../src/main/connection.js');
     const notify = vi.fn();
     connection.setConnectionLossNotifier(notify);
@@ -178,6 +226,7 @@ describe('connection surface state', () => {
     report({ state: 'connecting-tunnel', detail: 'Metrics temporarily unavailable' });
     expect(notify).not.toHaveBeenCalled();
     report({ state: 'offline', detail: 'Confirmed network outage' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify).toHaveBeenCalledExactlyOnceWith('core');
     await connection.disconnect();
   });
@@ -199,6 +248,7 @@ describe('connection surface state', () => {
   });
 
   it.each(['disconnect', 'shutdownConnection'] as const)('stays silent from the instant %s is requested, including stop reports', async action => {
+    vi.useFakeTimers();
     const connection = await import('../src/main/connection.js');
     const notify = vi.fn();
     connection.setConnectionLossNotifier(notify);
@@ -210,10 +260,12 @@ describe('connection surface state', () => {
     await stopped;
     report({ state: 'connected', detail: 'Retired recovery' });
     report({ state: 'offline', detail: 'Retired outage' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify).not.toHaveBeenCalled();
   });
 
   it('keeps settings reconnect silent and cannot re-arm from the retired generation', async () => {
+    vi.useFakeTimers();
     const connection = await import('../src/main/connection.js');
     const notify = vi.fn();
     connection.setConnectionLossNotifier(notify);
@@ -228,11 +280,13 @@ describe('connection surface state', () => {
     expect(notify).not.toHaveBeenCalled();
     mocks.reports.get('core')!({ state: 'connected', detail: 'New connection' });
     mocks.reports.get('core')!({ state: 'offline', detail: 'New outage' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify).toHaveBeenCalledExactlyOnceWith('core');
     await connection.disconnect();
   });
 
   it('tracks Core, Desktop and Plugins outages independently', async () => {
+    vi.useFakeTimers();
     mocks.config.tunnel.kind = 'openai';
     mocks.config.tunnel.desktopTunnelId = 'desktop-test';
     mocks.config.tunnel.pluginsTunnelId = 'plugins-test';
@@ -246,15 +300,19 @@ describe('connection surface state', () => {
       report({ state: 'offline', detail: 'Lost' });
       report({ state: 'offline', detail: 'Repeated' });
     }
+    expect(notify).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify.mock.calls).toEqual([['core'], ['desktop'], ['plugins']]);
     mocks.reports.get('plugins')!({ state: 'connected', detail: 'Plugins recovered' });
     mocks.reports.get('plugins')!({ state: 'offline', detail: 'Plugins lost again' });
     mocks.reports.get('core')!({ state: 'offline', detail: 'Core still down' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify.mock.calls).toEqual([['core'], ['desktop'], ['plugins'], ['plugins']]);
     await connection.disconnect();
   });
 
   it('keeps optional settings replacement and removal silent without disturbing Core eligibility', async () => {
+    vi.useFakeTimers();
     mocks.config.tunnel.kind = 'openai';
     mocks.config.tunnel.pluginsTunnelId = 'plugins-before';
     const connection = await import('../src/main/connection.js');
@@ -277,6 +335,7 @@ describe('connection surface state', () => {
     replacement({ state: 'offline', detail: 'Removed tunnel report' });
     expect(notify).not.toHaveBeenCalled();
     mocks.reports.get('core')!({ state: 'offline', detail: 'Unrelated Core outage' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify).toHaveBeenCalledExactlyOnceWith('core');
     await connection.disconnect();
   });
@@ -298,6 +357,7 @@ describe('connection surface state', () => {
   });
 
   it('notifies once for a shared-origin tunnel even when optional surfaces are published', async () => {
+    vi.useFakeTimers();
     mocks.caps.screen = true;
     const connection = await import('../src/main/connection.js');
     const notify = vi.fn();
@@ -306,11 +366,13 @@ describe('connection surface state', () => {
     expect(connection.getStatus().surfaces.filter(surface => surface.state === 'live').map(surface => surface.id))
       .toEqual(['core', 'desktop', 'plugins']);
     mocks.reports.get('core')!({ state: 'tunnel-unavailable', detail: 'Process exited' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify).toHaveBeenCalledExactlyOnceWith('core');
     await connection.disconnect();
   });
 
   it.each(['declined', 'throws'])('consumes an outage when the notifier %s without changing connection behavior', async outcome => {
+    vi.useFakeTimers();
     const connection = await import('../src/main/connection.js');
     const notify = vi.fn(() => { if (outcome === 'throws') throw new Error('Notification unavailable'); return false; });
     connection.setConnectionLossNotifier(notify);
@@ -318,8 +380,10 @@ describe('connection surface state', () => {
     const report = mocks.reports.get('core')!;
     expect(() => report({ state: 'offline', detail: 'Lost' })).not.toThrow();
     expect(connection.getStatus().state).toBe('offline');
+    await vi.advanceTimersByTimeAsync(30_000);
     report({ state: 'connecting-tunnel', detail: 'Retry' });
     report({ state: 'offline', detail: 'Still down' });
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(notify).toHaveBeenCalledTimes(1);
     await connection.disconnect();
   });
