@@ -329,6 +329,8 @@ const api = {
   setSessionTrusted: (id: string, expectedConversationId: string, trusted: boolean) =>
     call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
+  /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
+  renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
   unpairExtension: () => call<AppState>('bridge:unpair'),
