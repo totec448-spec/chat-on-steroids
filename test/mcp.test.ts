@@ -873,7 +873,11 @@ describe('surface boundaries', () => {
     expect(tool?.inputSchema?.required).toEqual(['path']);
     const reply = await core('tools/call', { name: 'save_image', arguments: { path: '/workspace/out.png' } });
     expect(reply.body.result?.isError).toBe(true);
-    expect(JSON.stringify(reply.body.result?.content)).toContain('could not tell which chat this call came from');
+    const refusal = JSON.stringify(reply.body.result?.content);
+    expect(refusal).toContain('could not tell which chat this save_image call came from');
+    // It names the Core that answered, so a call sent to another computer's Core says so (#1097).
+    expect(refusal).toContain('Chat On Steroids Core could not tell');
+    expect(refusal).toContain('If the chat belongs to another computer');
   });
 
   it('keeps the worst-case no-query discovery of each surface small', async () => {
