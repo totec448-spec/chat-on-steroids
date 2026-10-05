@@ -88,6 +88,16 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('searchResults').hidden`),true);
   }
 
+  // ⌘K (macOS) or Ctrl+K focuses the field from anywhere, and the View menu names it the same way.
+  const mac = process.platform === 'darwin';
+  await js(`document.activeElement?.blur(); document.body.focus()`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'K', modifiers: [mac ? 'meta' : 'control'] });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'K', modifiers: [mac ? 'meta' : 'control'] });
+  await until(`document.activeElement?.id === 'chatSearch'`);
+  assert.equal(await js(`document.querySelector('#searchMenuItem kbd').textContent`), mac ? '⌘K' : 'Ctrl+K');
+  assert.equal(await js(`document.querySelector('#sidebarMenuToggle kbd').textContent`), mac ? '⌘B' : 'Ctrl+B');
+  assert.match(await js(`document.getElementById('sidebarToggle').title`), mac ? /\(⌘B\)$/ : /\(Ctrl\+B\)$/);
+
   // Keyboard: Down enters the results, Up returns to the field, Enter opens the first match.
   await js(`document.getElementById('chatSearch').focus()`);
   win.webContents.insertText('bridge');
@@ -108,6 +118,6 @@ app.whenReady().then(async () => {
   await capture('no-match.png');
   assert.ok((await js('searches')).length<=8,'Typing is debounced into few searches: '+JSON.stringify(await js('searches')));
   assert.deepEqual(errors,[]);
-  console.log('PASS: chat search layout in both themes, marked snippets, long titles, keyboard, word order, no match and Escape');
+  console.log('PASS: chat search layout in both themes, marked snippets, long titles, ⌘K/Ctrl+K and its labels, keyboard, word order, no match and Escape');
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});

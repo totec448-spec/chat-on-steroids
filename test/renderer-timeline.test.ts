@@ -3563,6 +3563,19 @@ it('says a Goal waits for its closed chat, without a spinner or a countdown', as
   expect(row.getAttribute('aria-busy')).toBe('false');
   expect(row.querySelector('.session-status.is-working')).toBeNull();
   expect(row.querySelector('[role="timer"]')).toBeNull();
+  // The row offers the way on: opening the chat, as its sidebar row does.
+  const opened: string[] = [];
+  api.openSessionChat = async (id: string) => { opened.push(id); return { ok: true, data: true }; };
+  const open = row.querySelector<HTMLButtonElement>('button.dock-action')!;
+  expect(open.getAttribute('aria-label')).toBe('Open this chat in your browser');
+  open.click();
+  await vi.waitFor(() => expect(opened).toHaveLength(1));
+  // Any other wait has no such button.
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship the release', blocked: '', job: null,
+    goalWait: { reason: 'settling' }, goalDraft: null } });
+  await append([]);
+  expect(row.textContent).toContain('Answer settling');
+  expect(row.querySelector('button.dock-action')).toBeNull();
 });
 
 it('follows the accepted New Chat receipt while preserving a typed follow-up', async () => {

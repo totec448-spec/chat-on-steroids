@@ -1,3 +1,6 @@
+import { t, ui } from './i18n.js';
+import { labelPrimaryShortcuts, primaryShortcut } from './shortcuts.js';
+
 /** A renderer-only layout preference, independent of chat selection and app config. */
 export function initSidebarResize(): void {
   const app = document.querySelector<HTMLElement>('.app')!;
@@ -73,6 +76,9 @@ export function initSidebarResize(): void {
     render();
     try { localStorage.setItem(`${key}.collapsed`, String(collapsed)); } catch { /* Optional persistence. */ }
   }
+  // The shortcut as this keyboard prints it: ⌘B on macOS, Ctrl+B (Strg+B) elsewhere.
+  ui(toggle, 'title', () => `${t('Toggle sidebar')} (${primaryShortcut('B')})`);
+  labelPrimaryShortcuts();
   toggle.addEventListener('click', toggleSidebar);
   document.getElementById('sidebarMenuToggle')!.addEventListener('click', toggleSidebar);
   document.addEventListener('keydown', (event) => {
