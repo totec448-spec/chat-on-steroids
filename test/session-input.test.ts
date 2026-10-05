@@ -146,6 +146,17 @@ describe('durable user input ownership', () => {
     ] as never : original(id, count, options));
     try { expect(await claim({ text: 'make it brighter' })).toMatchObject({ coreMention: false }); }
     finally { vi.mocked(store.readRecentEvents).mockImplementation(original); }
+    // One failed edit in between ("image generation is unavailable") still leaves the picture current.
+    const turns = (...kinds: string[]) => vi.mocked(store.readRecentEvents).mockImplementation(async (id, count, options) => options?.kinds?.includes('native_image')
+      ? kinds.map((kind, seq) => kind === 'q' ? { kind: 'user_message', seq, time: now, source: 'extension', messageId: `q${seq}`, message: { text: 'q', chars: 1, truncated: false } }
+        : { kind: 'native_image', seq, time: now, source: 'extension', messageId: `a${seq}`, providerStatus: 'finished_successfully' }) as never
+      : original(id, count, options));
+    try {
+      turns('q', 'image', 'q');
+      expect(await claim({ text: 'make the boat red' })).toMatchObject({ coreMention: false });
+      turns('q', 'image', 'q', 'q');
+      expect(await claim({ text: 'make the boat red' })).not.toHaveProperty('coreMention');
+    } finally { vi.mocked(store.readRecentEvents).mockImplementation(original); }
   });
   it('preserves messages beyond the former composer limit through admission, restart and browser claim', async () => {
     binding.finishEnabled = false;
