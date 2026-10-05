@@ -1,7 +1,11 @@
 {
+  "Clear search": "Limpar pesquisa",
   "Jump to latest": "Ir para o mais recente",
+  "No chats match": "Nenhum chat corresponde",
   "Previous source": "Fonte anterior",
   "Next source": "Próxima fonte",
+  "Search chats": "Pesquisar chats",
+  "Searching message text… {0} of {1} chats": "Pesquisando o texto das mensagens… {0} de {1} chats",
   "{0} more sources were not recorded with this reply.": "Outras {0} fontes não foram gravadas com esta resposta.",
   "Thinking": "Pensando",
   "Copy answer": "Copiar resposta",

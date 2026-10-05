@@ -1,7 +1,11 @@
 {
+  "Clear search": "검색 지우기",
   "Jump to latest": "최신으로 이동",
+  "No chats match": "일치하는 채팅이 없습니다",
   "Previous source": "이전 출처",
   "Next source": "다음 출처",
+  "Search chats": "채팅 검색",
+  "Searching message text… {0} of {1} chats": "메시지 내용 검색 중… 채팅 {1}개 중 {0}개",
   "{0} more sources were not recorded with this reply.": "이 답변에는 다른 출처 {0}개가 기록되지 않았습니다.",
   "Thinking": "생각 중",
   "Copy answer": "답변 복사",

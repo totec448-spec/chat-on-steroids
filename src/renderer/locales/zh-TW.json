@@ -1,7 +1,11 @@
 {
+  "Clear search": "清除搜尋",
   "Jump to latest": "跳到最新",
+  "No chats match": "沒有符合的聊天",
   "Previous source": "上一個來源",
   "Next source": "下一個來源",
+  "Search chats": "搜尋聊天",
+  "Searching message text… {0} of {1} chats": "正在搜尋訊息內容…已完成 {0}/{1} 個聊天",
   "{0} more sources were not recorded with this reply.": "此回覆未記錄另外 {0} 個來源。",
   "Thinking": "思考中",
   "Copy answer": "複製回答",
