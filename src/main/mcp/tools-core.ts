@@ -453,7 +453,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               'TOOL_DISABLED: view_image is disabled by the current Chat On Steroids permissions. Ask the user to enable reading in the app.'
             );
           }
-          const resolved = await resolveIn(ctx.roots, path);
+          const resolved = await resolveIn(ctx.roots, path, { access: 'read' });
           try {
             const image = await viewImage(resolved.real, null, undefined, resolved.virtual);
             logInfo(`tool view_image ${resolved.virtual} (${formatBytes(image.bytes)})`);
@@ -596,7 +596,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const deadline = Date.now() + 10_000;
           const scopes: Array<{ real: string; virtual: string }> = [];
           if (p) {
-            const resolved = await resolveIn(ctx.roots, p);
+            const resolved = await resolveIn(ctx.roots, p, { access: 'read' });
             const stat = await fs.stat(resolved.real);
             if (stat.isFile()) {
               const outcome = await searchOneFile(resolved.real, resolved.virtual, {
@@ -2135,7 +2135,7 @@ async function expandGlob(
   const rest = segments.slice(baseSegments.length).join('/');
   if (!rest) return { matches: [normalised], truncated: null };
 
-  const resolved = await resolveIn(roots, base);
+  const resolved = await resolveIn(roots, base, { access: 'read' });
   const info = await statInfo(resolved.real, resolved.virtual, { scanContent: false });
   if (info.type !== 'directory') throw new SandboxError(`${resolved.virtual} is not a folder, so it cannot be globbed`);
 
@@ -2226,7 +2226,7 @@ async function nearestFolderListing(roots: Root[], requested: string, err: unkno
     candidate = parent;
     let resolved;
     try {
-      resolved = await resolveIn(roots, candidate);
+      resolved = await resolveIn(roots, candidate, { access: 'read' });
     } catch (error) {
       if (error instanceof SandboxError && error.message.startsWith('Not found:')) continue;
       return '';
@@ -2268,7 +2268,7 @@ async function readOne(
       : `--- / — ${options.roots.length} entr${options.roots.length === 1 ? 'y' : 'ies'}, one level ---\n${options.roots.map(root => `d ${root.name}`).join('\n')}`;
     return { text, bytes: Buffer.byteLength(text, 'utf8') };
   }
-  const resolved = await resolveIn(options.roots, requested);
+  const resolved = await resolveIn(options.roots, requested, { access: 'read' });
   const info = await statInfo(resolved.real, resolved.virtual, { scanContent: !options.canRead });
 
   if (info.type === 'directory') {

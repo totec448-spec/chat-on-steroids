@@ -89,19 +89,27 @@ it('invalidates changed Codex config without a send-side refresh and coalesces e
   expect(runtime).toHaveBeenCalledTimes(2);
 });
 
-it('does not expose a cached plugin after read-root revocation or under another Codex home', async () => {
+it('keeps a cached plugin read-only without an approved Codex home, but never without Read files or under another home', async () => {
   runtime.mockResolvedValue(await installedPlugin());
   expect((await listSkillLibrary({ refreshCodexPlugins: true })).skills).toHaveLength(1);
   const permitted = getConfig();
+  // The Codex home is the user's own Skill area: unapproved, its plugin Skill is served read-only.
   await fs.mkdir(path.join(directory, 'unrelated'));
   await saveConfig({ ...permitted, roots: [{ name: 'limited', path: path.join(directory, 'unrelated') }] });
+  const unapproved = (await listSkillLibrary({ refreshCodexPlugins: true })).skills;
+  expect(unapproved).toHaveLength(1);
+  expect(unapproved[0]!.path).toMatch(/^\/user-skills\/codex\/plugins\/cache\/.+\/skills\/.+\/SKILL\.md$/);
+  const calls = runtime.mock.calls.length;
+  // Without the Read files permission nothing is listed, and the Codex CLI is not started.
+  await saveConfig({ ...permitted, capabilities: { ...permitted.capabilities, read: false } });
   expect((await listSkillLibrary({ refreshCodexPlugins: true })).skills).toEqual([]);
-  expect(runtime).toHaveBeenCalledTimes(1);
+  expect(runtime).toHaveBeenCalledTimes(calls);
+  // Another Codex home never shows this one's plugin.
   await saveConfig(permitted);
   vi.stubEnv('CODEX_HOME', path.join(directory, 'other-codex'));
   await fs.mkdir(path.join(directory, 'other-codex/plugins/cache'), { recursive: true });
   expect((await listSkillLibrary()).skills).toEqual([]);
-  expect(runtime).toHaveBeenCalledTimes(1);
+  expect(runtime).toHaveBeenCalledTimes(calls);
 });
 
 it.each(['configuration', 'home'] as const)('does not publish an old plugin selection when Codex %s changes during explicit refresh', async change => {

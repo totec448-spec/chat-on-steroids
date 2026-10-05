@@ -456,14 +456,20 @@ preserve order and deduplicate; prose/code later in a message is literal. Empty/
 states do not intercept Enter. Draft replacement, navigation, render generations and IME composition retire stale choices.
 
 `skill-library.ts` discovers repository `.agents/skills`, project `.codex/skills`, standard user,
-Codex, system and admin directories only within current approved roots. No new root authority or
-implicit cwd is granted. Depth, directory entries, catalog rows and errors are bounded; package
+Codex, system and admin directories within current approved roots, and the user's own Skill areas
+read-only without approving their homes (below). No new root authority or implicit cwd is granted. Depth, directory entries, catalog rows and errors are bounded; package
 references are not recursively treated as another catalog. External command IDs derive from
 canonical paths and remain stable when similarly named packages appear. `skill-metadata.ts` owns
 bounded YAML/TOML parsing and layered configuration. Invalid policy never enables implicit use.
+`skillLibraryInstructions` writes the model-facing index within `max_context_tokens` (2000 by
+default). Sources take turns (the user's own/repo/managed Skills, `~/.agents`, Codex home, Codex
+plugins, Claude's own, Claude plugins), so one large source cannot crowd the others out. Rows are
+grouped under their folder, written once, as `<entry>: /<id> — description` (descriptions cut at
+110 characters). Each Skill is `<folder>/<entry>/SKILL.md`. Skills that do not fit are counted in
+one closing line saying the user can pick them with `/`.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
-When `CODEX_HOME` is already inside an approved root and has a plugin cache, that same read-only
+When `CODEX_HOME` has a plugin cache (approved or as a user Skill area), that same read-only
 catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
 Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
 prompt preparation, follow-up selection and MCP instructions never start or await the CLI.
@@ -480,8 +486,8 @@ proof of the external CLI's current state. CoS does not infer state by enumerati
 marketplace and installed version select exactly
 `plugins/cache/<marketplace>/<plugin>/<version>`. That package must still pass the normal sandbox
 checks plus `plugin.json` (or compatibility `.codex-plugin/plugin.json`) identity validation before
-only its `skills/` root is scanned. Disabled plugins, unlisted stale cache entries, marketplace
-source checkouts and unapproved Codex homes remain invisible. The catalog carries the runtime's
+only its `skills/` root is scanned. Disabled plugins, unlisted stale cache entries and marketplace
+source checkouts remain invisible. The catalog carries the runtime's
 plugin/package source provenance. Plugin skill command identity is based on marketplace + plugin
 and package-relative Skill path so an installed version upgrade does not rename the command.
 The Windows npm shim is not executed through a shell: its JavaScript entry runs through the
@@ -497,11 +503,24 @@ installations with `scope`, `installPath`, `version`, and `projectPath` for proj
 filtered by `enabledPlugins` (`true` only) from the user `settings.json`, overridden by the
 project's `.claude/settings.json` and then `.claude/settings.local.json`. One installation per
 plugin counts: the user-scope one, or a project/local one whose `projectPath` is the current
-project. Its `installPath` must be an approved directory inside `<claude home>/plugins/cache`, a
+project. Its `installPath` must be a readable directory inside `<claude home>/plugins/cache`, a
 present `.claude-plugin/plugin.json` must name the same plugin, and only its `skills/` root is
 scanned. `LibrarySkill.claudePlugin` carries `{ pluginId, pluginName, marketplaceName, version,
 skillPath }`; the command id is `<stem>--claude-<hash>`, hashed from marketplace + plugin +
 package-relative Skill path so a plugin update keeps the command.
+
+`user-skills.ts`: the user's own Skill areas are `claude` (`CLAUDE_CONFIG_DIR` or `~/.claude`),
+`codex` (`CODEX_HOME` or `~/.codex`), `agents` (`~/.agents`) and `admin` (the Codex admin folder).
+Unapproved, they are readable at two levels. **Served** to read tools (`read`, `view_image`, search,
+glob) as `/user-skills/<area>/…`: only `skills/…` and cached plugin packages'
+`plugins/cache/<m>/<p>/<v>/skills/…`. **Discoverable** by the catalog only, never served: those plus
+Claude's `settings.json`, `plugins/installed_plugins.json` and account `.claude.json`, and Codex's home,
+`config.toml`, cached package folders and `plugin.json` manifests. Paths are checked by name and
+after following links; a link may land only in a tree of the same level (`~/.claude/skills/x →
+~/.agents/skills/x` works, links into the home or elsewhere are refused). `resolveIn` refuses
+`/user-skills` unless the call passes `access: 'read'`, so patches, writes, `save_image` and
+command folders never reach it, and it never becomes the chat's workspace. Credentials, history
+and other settings in those homes stay invisible. An approved home keeps its ordinary paths.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
@@ -1066,6 +1085,18 @@ Browser Send puts a Chat On Steroids Core app mention in front of the text, beca
 leave the mention off the user's own prompts, which on other accounts start plain questions with a
 probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep it, because they need
 the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
+ChatGPT switches its own image tool off for a message that mentions an app (measured
+2026-10-05: per message, also as a follow-up in a chat whose first message had the mention). So a
+person's own message (`authoredSource` text, not `decision`/recovery/`finishOwner`, not a worker or
+helper chat, not combined with a queued checkpoint) that `session/image-request.ts` `asksForImage` reads as asking for a picture is claimed
+with `coreMention: false`, and the page sends it without the mention; every other message keeps the
+setting. `asksForImage` matches the person's prose (no leading `/command`, code or links) in all
+app languages: a creating verb near a picture noun, "a picture of …", drawing verbs, wishes ("I
+want a poster"), verb-last orders, and CJK pairs; an edit of an attached picture or, within 300
+characters, of a picture one of the last two answers made (a finished `native_image` after the second-to-last question, so one failed edit in between still counts). Code,
+container/system images, web and git terms, picture-word identifiers ("image-fixes"), file
+handling, text about pictures (captions, ideas, lists) and charts or tables named first keep the
+mention. A miss leaves things as before; a false alarm drops the mention from one message.
 
 One ChatGPT account used on several computers needs one connector set per computer, and the sets
 cannot share a name. `connectorSuffix` (Settings › Setup, "Several computers, one ChatGPT account";
