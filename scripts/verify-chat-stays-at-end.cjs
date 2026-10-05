@@ -70,11 +70,41 @@ app.whenReady().then(async () => {
     // Shrink the window too, like opening the bottom terminal.
     win.setContentSize(1100,560); await pause(700);
     v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'stays at the end when the window shrinks: '+JSON.stringify(v));
-    // A reader who scrolled up keeps their place.
-    await js(`document.getElementById('chatBody').scrollTop=100`); await pause(300);
+    // A reader who scrolled up keeps their place. Only the reader's own scrolling counts as reading
+    // (a script setting scrollTop does not), so scroll with the wheel.
+    const pane=await js(`(()=>{const r=document.getElementById('chatBody').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+    for(let i=0;i<4;i++){win.webContents.sendInputEvent({type:'mouseWheel',x:pane.x,y:pane.y,deltaX:0,deltaY:240});await pause(120);}
+    await pause(500);
+    v=await view(); const place=v.top;
+    assert.ok(v.gap>200, 'scrolled up with the wheel: '+JSON.stringify(v));
     await js(`(()=>{const i=document.getElementById('chatInput');i.value='';i.dispatchEvent(new Event('input',{bubbles:true}));return 1})()`);
     await pause(700);
-    v=await view(); assert.ok(Math.abs(v.top-100)<=2, 'keeps a scrolled-up place: '+JSON.stringify(v));
-    console.log('PASS: the chat stays at its end when the message box or window shrinks, and keeps a scrolled-up reader in place.');
+    v=await view(); assert.ok(Math.abs(v.top-place)<=2, 'keeps a scrolled-up place: '+JSON.stringify({...v,place}));
+    // Agents & automation shows in the chat's own scroll pane. Reached the usual way (Settings opens
+    // Workspace first), it starts at its top without the chat's jump control, reading it is not
+    // reading the chat, and the chat comes back at its end, still following.
+    await js(`document.getElementById('jumpLatest').click()`); await pause(700);
+    v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'back at the end before Settings: '+JSON.stringify(v));
+    await js(`document.getElementById('workspaceSettings').click()`); await pause(300);
+    await js(`document.querySelector('#tabs button[data-tab="settings"]').click()`); await pause(700);
+    const agents=()=>js(`(()=>{const p=document.getElementById('chatBody');return {top:Math.round(p.scrollTop),max:p.scrollHeight-p.clientHeight,
+      jump:document.getElementById('jumpLatest').classList.contains('is-shown'),timeline:!document.getElementById('timelineContent').hidden}})()`);
+    let a=await agents();
+    assert.ok(a.max>200 && !a.timeline, 'Agents & automation fills the pane: '+JSON.stringify(a));
+    assert.equal(a.top,0,'Agents & automation opens at its top');
+    assert.equal(a.jump,false,'No jump-to-latest control over the settings');
+    const box=await js(`(()=>{const r=document.getElementById('chatBody').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+    for(const deltaY of [-240,-240,-240,240]){win.webContents.sendInputEvent({type:'mouseWheel',x:box.x,y:box.y,deltaX:0,deltaY});await pause(120);}
+    await pause(600);
+    a=await agents();
+    assert.ok(a.top>0 && a.top<a.max, 'the settings were scrolled to a middle: '+JSON.stringify(a));
+    assert.equal(a.jump,false,'Still no jump-to-latest control while reading the settings');
+    fs.writeFileSync(path.join(output,'agents-scrolled.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+    await js(`document.getElementById('backToChat').click()`); await pause(700);
+    v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'the chat comes back at its end: '+JSON.stringify(v));
+    win.setContentSize(1100,480); await pause(700);
+    v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'and still follows when its area shrinks: '+JSON.stringify(v));
+    console.log('PASS: the chat stays at its end when the message box or window shrinks, keeps a scrolled-up reader in place, and is not moved by Agents & automation.');
   } finally { win?.destroy(); await server.close(); app.quit(); }
-});
+// A failed assertion must fail the check: quitting alone exits 0 and reads as a pass.
+}).catch(error => { console.error(error); app.exit(1); });
