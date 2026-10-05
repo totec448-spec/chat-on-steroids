@@ -25,7 +25,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, deferSilenceInput, revokeSilenceInputs, endRecoveryInput } from './session/input.js';
+import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, retryUnclaimedInput } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -5307,8 +5307,12 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   if (staleSwarmTimer) clearInterval(staleSwarmTimer);
   staleSwarmTimer = setInterval(() => {
     void runStaleSwarmSweep().catch((err: Error) => logWarn(`stale swarm sweep failed: ${err.message}`));
+    void retryUnclaimedBrowserInputs().catch((err: Error) => logWarn(`unclaimed browser input recovery failed: ${err.message}`));
   }, STALE_SWARM_SWEEP_MS);
   staleSwarmTimer.unref?.();
+  // A failed pickup can predate bridge startup. Run one pass now as well as on the
+  // maintenance cadence; retryUnclaimedInput owns the exact same-row safety checks.
+  void retryUnclaimedBrowserInputs().catch((err: Error) => logWarn(`unclaimed browser input recovery failed: ${err.message}`));
   // The recorder decides when a call is Unattributed; this owns what that is worth.
   setCallAttributionListener(noteCallAttribution);
   // Restored obligations get their first pickup grace from serving startup,
@@ -5324,6 +5328,39 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   logInfo(`bridge listening on 127.0.0.1:${actual}`);
   changed();
   return actual;
+}
+
+let unclaimedInputSweep: Promise<void> | null = null;
+/** Recover only a fresh, confirmed pre-Send browser pickup timeout; never recreate a prompt. */
+function retryUnclaimedBrowserInputs(): Promise<void> {
+  if (unclaimedInputSweep) return unclaimedInputSweep;
+  const pass = (async () => {
+    const inputs = await listInputs();
+    for (const row of inputs) {
+      if (row.state !== 'failed' || row.error !== 'Not sent: the browser did not pick up this message within 60 seconds.' ||
+          !row.sessionId || !row.conversationId || !recoveryInputAllowed(row.sessionId, row.conversationId)) continue;
+      const retried = await retryUnclaimedInput(row.id);
+      if (!retried) continue;
+      logInfo(`recovery monitor: requeued the same never-authorized browser input ${row.id}`);
+      const stillOwned = async (): Promise<boolean> => {
+        if (!bridgeDesiredRunning || !server || !recoveryInputAllowed(row.sessionId!, row.conversationId!)) return false;
+        const [latestRows, session] = await Promise.all([listInputs(), getSession(row.sessionId!)]);
+        const latest = latestRows.find(entry => entry.id === row.id);
+        return !!session && session.conversationId === row.conversationId && latest?.state === 'queued' &&
+          latest.pickupRetryCount === 1 && latest.sendAuthorizedAt === undefined && latest.deliveredAt === undefined;
+      };
+      try {
+        await wakeBrowserUrl(`https://chatgpt.com/c/${encodeURIComponent(row.conversationId)}`, false,
+          getConfig().ui.backgroundChats === true, { current: stillOwned });
+      } catch (error) {
+        logWarn(`recovered browser input ${row.id} remains queued because its chat could not be opened: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  })();
+  unclaimedInputSweep = pass;
+  const clear = () => { if (unclaimedInputSweep === pass) unclaimedInputSweep = null; };
+  void pass.then(clear, clear);
+  return pass;
 }
 
 function drainBridgeListener(instance: http.Server): Promise<void> {

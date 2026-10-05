@@ -1062,7 +1062,14 @@ materializes that exact desktop session. Another New Chat may be admitted immedi
 delivery remains Queued. The existing browser election and exact claim still own native Send.
 Cancellation revokes both the outbox row and its transient startup controller; shutdown aborts
 startup and explicit retries before they can wake a browser later. Startup failure leaves the
-same queued input and an explicit retry action.
+same queued input and an explicit retry action. An ordinary automatic browser input that was
+never claimed within sixty seconds carries a pre-Send pickup-failure timestamp. The bridge's
+bounded recovery sweep may requeue that same UUID once, after two minutes and before the input is
+thirty minutes old, only when Automatic Continue still allows recovery, its exact session/chat
+binding is idle and no newer user input or competing row exists. Attachments, workflow/automation
+inputs, recovery tickets, authorization and any delivery receipt exclude this path. Historical
+failed rows without the timestamp are never replayed. A failed pickup is distinct from an
+authorized Send with a missing receipt; the latter remains ambiguous and is never retried.
 Explicit withdrawal of an opening also removes its empty, unbound local reservation when Send
 was provably never authorized. The cancelled outbox tombstone survives restart. Timeouts,
 startup failures, ambiguous sends, provider bindings and recorded history never grant deletion.
