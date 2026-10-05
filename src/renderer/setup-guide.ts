@@ -56,7 +56,7 @@ const guides: Record<string, Shot[]> = {
     ] },
     { src: new URL('./setup-images/plugin-new.png', import.meta.url).href, spots: [
       { text: 'Paste the name exactly', box: [3.3, 20, 93.3, 5.2] },
-      { text: 'Tunnel, then yours', box: [3.3, 38.7, 93.3, 15.1] },
+      { text: 'Tunnel, then your tunnel ID', box: [3.3, 38.7, 93.3, 15.1] },
       { text: 'No authentication', box: [3.3, 59.4, 93.3, 5.1] },
       { text: 'Accept, then Create', box: [84.3, 92, 12.4, 5.3] }
     ] },
