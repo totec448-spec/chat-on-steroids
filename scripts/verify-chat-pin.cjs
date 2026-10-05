@@ -55,6 +55,9 @@ app.whenReady().then(async () => {
   const before=await order();
   assert.equal(before.length,4,'Four chats: '+JSON.stringify(before));
   assert.equal(await js(`${row('other-chat-3')}.querySelector('button.sess-pin').getAttribute('aria-pressed')`),'false');
+  await js(`${row('other-chat-3')}.querySelector('.sess-top').focus()`);
+  await capture('before-pin.png');
+  await js(`document.activeElement.blur()`);
 
   // Pinning the last chat moves it to the top of its list, with a mark that stays visible.
   await pin('other-chat-3');
