@@ -63,6 +63,16 @@ it('keeps nothing for a tunnel whose address changes every run', () => {
     .toContain(TUNNEL_B);
 });
 
+it('keys the Plugins connector to its own tunnel, not Core\'s', () => {
+  // Plugins runs on its own Secure Tunnel ID. Keyed to Core's, its proof would survive a change
+  // of the Plugins tunnel and vanish with a change of Core's.
+  const config = defaultConfig();
+  const tunnel = { ...config.tunnel, kind: 'openai' as const, tunnelId: TUNNEL_A, pluginsTunnelId: TUNNEL_B };
+  expect(connectorTunnelKey({ tunnel }, 'plugins')).toContain(TUNNEL_B);
+  expect(connectorTunnelKey({ tunnel }, 'plugins')).not.toContain(TUNNEL_A);
+  expect(connectorTunnelKey({ tunnel: { ...tunnel, pluginsTunnelId: '' } }, 'plugins')).toBeNull();
+});
+
 it('keeps ChatGPT listing the plugin as proof it exists, before any call', async () => {
   await useTunnel(TUNNEL_B);
   await loadConnectorProof();
