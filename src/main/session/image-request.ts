@@ -94,6 +94,7 @@ const FILES = words(`
   file | files | folder | folders | directory | directories | datei\\p{L}* | ordner\\p{L}* | verzeichnis\\p{L}* | archivo\\p{L}* | carpeta\\p{L}* |
   fichier\\p{L}* | dossier\\p{L}* | repertoire | arquivo\\p{L}* | pasta\\p{L}* | файл\\p{L}* | папк\\p{L}* | dosya\\p{L}* | klasor\\p{L}* | tệp | thư mục`);
 // "… and save it to the folder": where the picture goes, not file work.
+const SAVE_VERB = /(?<![\p{L}])(?:save|store|download|export|speicher\p{L}*|herunterladen|exportier\p{L}*|guarda\p{L}*|descarga\p{L}*|enregistre\p{L}*|télécharge\p{L}*|salve|salvar|baixe|сохрани\p{L}*|скача\p{L}*|kaydet\p{L}*|indir|lưu|tải)(?![\p{L}])/u;
 const SAVE_CLAUSE = /(?<![\p{L}])(?:save|store|put|speicher\p{L}*|lege|guarda\p{L}*|enregistre\p{L}*|salve|salvar|сохрани\p{L}*|kaydet\p{L}*|lưu)(?![\p{L}]).*$/u;
 // Files and everyday work: they rule out reading a short follow-up as an image edit, not a clear request.
 const TASK = words(`
@@ -170,6 +171,11 @@ export function asksForImage(text: string, context: ImageRequestContext = {}): b
     if (has(notARequest)) continue;
     const processing = has(processRe) || CJK_PROCESS.test(sentence) || has(aboutRe) || CJK_ABOUT.test(sentence) || CJK_FILES.test(sentence.replace(/(?:保存|儲存|存到|保存して|저장).*$/u, '')) ||
       variants.some(form => filesRe.test(form.replace(SAVE_CLAUSE, '')));
+    // "Save the image you just generated as boat.png": saving comes first, so the picture exists and
+    // this is file work. "Create a picture …, then save it as …" creates first and still counts.
+    const firstAt = (re: RegExp): number => Math.min(...variants.map(form => form.search(re)).filter(at => at >= 0), Infinity);
+    const saveAt = firstAt(SAVE_VERB);
+    if (saveAt < Infinity && saveAt < Math.min(firstAt(createRe), firstAt(drawRe), firstAt(editRe))) continue;
     const picture = has(nounRe) || CJK_NOUN.test(sentence);
     // "Draw a diagram": a chart or diagram, unless a picture is named too, and named first
     // ("a table of the image sizes" makes a table; "an image of a chart" makes an image).
