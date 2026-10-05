@@ -7,7 +7,7 @@
  */
 
 import { connectorProof } from './connector-proof.js';
-import type { ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
+import type { ConnectionState, ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import { prewarmComputerHelper } from './computer/index.js';
 import { effectiveCapabilities, getConfig } from './config.js';
@@ -107,6 +107,29 @@ let connectionGeneration = 0;
  * briefly bringing a connector online while the app is already leaving.
  */
 let shutdownRequested = false;
+
+let notifyConnectionLoss: ((surface: SurfaceId) => boolean | void) | null = null;
+
+/** The main process owns desktop presentation; connection reports stay independent of Electron. */
+export function setConnectionLossNotifier(notifier: typeof notifyConnectionLoss): void {
+  notifyConnectionLoss = notifier;
+}
+
+/** One notice budget per tunnel lifetime, driven only by its generation-fenced reports. */
+function connectionLossReporter(surface: SurfaceId): (state: ConnectionState) => void {
+  let armed = false;
+  return state => {
+    if (state === 'connected') {
+      armed = true;
+      return;
+    }
+    // Unknown health/retry reports do not prove recovery or erase an established connection.
+    if (!armed || (state !== 'offline' && state !== 'auth-failed' && state !== 'tunnel-unavailable')) return;
+    // Consume even if focused, unsupported or refused: never defer/repeat the same outage.
+    armed = false;
+    try { notifyConnectionLoss?.(surface); } catch { /* A notice cannot change tunnel health. */ }
+  };
+}
 
 function enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
   const run = lifecycleQueue.then(operation, operation);
@@ -340,6 +363,7 @@ async function connectImpl(): Promise<void> {
       return;
     }
     activeCoreTransport = coreTransport(config.tunnel);
+    const reportLoss = connectionLossReporter('core');
     const startedTunnel = await startTunnel({
       localUrl: endpoint.url,
       settings: config.tunnel,
@@ -374,6 +398,8 @@ async function connectImpl(): Promise<void> {
             });
           }
         }
+        // A shared-origin transport has one tunnel/outage; optional cards are its projections.
+        if (generation === connectionGeneration) reportLoss(report.state);
       }
     });
     if (shutdownRequested) {
@@ -431,6 +457,7 @@ async function startOptionalTunnel(
   updateSurface(id, { state: 'starting', detail: 'Connecting…' });
   const lifetime = { handle: null as TunnelHandle | null, tunnelId };
   optionalTunnels.set(id, lifetime);
+  const reportLoss = connectionLossReporter(id);
   try {
     const started = await startTunnel({
       localUrl: endpoint.urls[id],
@@ -445,6 +472,7 @@ async function startOptionalTunnel(
           detail: report.detail,
           ...(report.publicUrl === undefined ? {} : { publicUrl: report.publicUrl })
         });
+        if (generation === connectionGeneration && optionalTunnels.get(id) === lifetime) reportLoss(report.state);
       }
     });
     if (shutdownRequested) {
