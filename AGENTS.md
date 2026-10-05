@@ -3017,6 +3017,11 @@ UIs name the wait without inventing a countdown. `prepareNotice` returns before 
 that drafts the automatic decision and **releases** the hold rather than leaving it held, so the
 user's own answer is never stuck behind workers they did not ask about; the durable reply
 obligation survives and the pickup tree collects it later. A notice-only hold is untouched.
+For the window only, `sessionControlsFor` passes the session's `browserRecoveryDismissedAt`: a
+pending turn whose tab the person closed reports `closed` (after `tools`/`workers`), shown without
+spinner or countdown as "Paused until this chat is open in the browser". Recovery waits for that
+page, so "Answer settling" there spun until the obligation's TTL. `/activity` never sees `closed`:
+the page asking is the return that clears the dismissal.
 
 The wait cannot starve the reports it is waiting for: worker reports reach their prime through
 the kernel's caller offer, never through the browser outbox. `/goal/draft` needed no change; it
