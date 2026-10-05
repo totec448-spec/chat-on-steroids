@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { logInfo, logWarn } from './logger.js';
+import { notePluginInstalled } from './connector-proof.js';
 import { surfaceDefinition } from './mcp/surfaces.js';
 import { APP_VERSION } from './version.js';
 import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
@@ -133,6 +134,11 @@ export function publishPluginSurface(surface: PluginSurface, connectorName: stri
   }
 }
 export function unpublishPluginSurface(surface: PluginSurface): void { publications.delete(surface); }
+/** The connectors whose plugin ChatGPT's own plugin page showed this app: they exist in ChatGPT. */
+export async function enrolledPluginSurfaces(): Promise<PluginSurface[]> {
+  try { return (await rows()).filter(row => row.appId !== null).map(row => row.surface); }
+  catch { return []; }
+}
 export function pluginRefreshPublications(): PluginPublication[] { return structuredClone([...publications.values()]); }
 /** One fresh browser attempt after an explicit Restart, only before any Refresh claim. */
 export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
@@ -213,6 +219,7 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
     row.appId = input.appId; row.attempted = true;
     delete row.error;
+    notePluginInstalled(row.surface);
     // Enrollment/migration may find the installed declaration already current. Record
     // that observation without clicking Refresh or manufacturing a new plugin version.
     if (input.alreadyCurrent) row.completedSchemaId = row.schemaId;
@@ -236,6 +243,7 @@ export function requireManualPluginRefresh(input: Identity & Enrollment & { erro
     if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools, row.surface)) return false;
     row.appId = input.appId;
     row.manual = true;
+    notePluginInstalled(row.surface);
     row.error = input.error.slice(0, 200);
     await writeDurableNow('plugin-refresh', current);
     logWarn(`plugin refresh requires manual action surface=${row.surface}: ${row.error}`);

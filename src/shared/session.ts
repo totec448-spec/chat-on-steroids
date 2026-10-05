@@ -622,6 +622,11 @@ export interface SessionSummary {
   nativeQuestion?: { messageId: string; origin: number } | null;
   /** Durable naming authority; absent only on legacy recordings. */
   titleSource?: 'fallback' | 'provider' | 'manual';
+  /**
+   * While the user's own name is shown (`titleSource: 'manual'`), the title the app would show
+   * otherwise, kept current, so clearing the name brings back ChatGPT's present title (#1107).
+   */
+  autoTitle?: { title: string; source: 'fallback' | 'provider' };
   /** Latest proven native picker selection; scoped to its frontend, never worker creation intent. */
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
@@ -1206,4 +1211,23 @@ export function tokenPressure(estimated: number, advisory: number, limit: number
     limit,
     level: estimated >= limit ? 'huge' : estimated >= advisory ? 'large' : 'ok'
   };
+}
+
+/** One chat found by `sessions:search` (#1107). */
+export interface SessionSearchResult {
+  id: string;
+  title: string;
+  projectId: string | null;
+  /** Where the query's words are in `title`, as ranges into it; absent when none are. */
+  titleMatches?: Array<[number, number]>;
+  /** A line of the chat around the first match, with match ranges into `text`; absent for a title match. */
+  snippet?: { text: string; matches: Array<[number, number]> };
+}
+export interface SessionSearchReply {
+  results: SessionSearchResult[];
+  /** Chats whose words are indexed so far, out of all chats; equal once indexing is done. */
+  indexed: number;
+  total: number;
+  /** More chats match than `results` holds. */
+  limited?: true;
 }

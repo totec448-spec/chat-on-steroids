@@ -70,7 +70,7 @@ app.whenReady().then(async () => {
       {text:'Disconnecting…',disabled:true,calls:1,title:'Disconnecting'});
     assert.equal(await js(`document.getElementById('connectionPopoverTitle').title`),'Closing connection…');
     assert.equal(await js(`document.getElementById('connectionPopoverVerified')`),null);
-    assert.equal(await js(`document.getElementById('wizConnect').textContent`),'Disconnecting…');
+    assert.equal(await js(`document.getElementById('wizConnectLabel').textContent`),'Disconnecting…');
     assert.equal(await js(`document.getElementById('wizConnect').disabled`),true);
     fs.mkdirSync(output,{recursive:true});
     assert.equal(await js(`document.getElementById('connectionPopover').checkVisibility()`),true);

@@ -491,6 +491,25 @@ code {
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
 /* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
 .sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
+/* Chat search (#1107): one field above Projects and Chats; results take their place while it holds a query. */
+.sidebar-search { position: relative; display: flex; align-items: center; margin: 0 0 6px; }
+.sidebar-search > .ico { position: absolute; left: 10px; --ico: 14px; color: var(--faint); pointer-events: none; }
+.sidebar-search input { flex: 1; min-width: 0; height: 30px; padding: 0 30px 0 30px; border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); outline: none; }
+.sidebar-search input::placeholder { color: var(--faint); }
+.sidebar-search input:focus { border-color: var(--accent); }
+.sidebar-search input::-webkit-search-cancel-button { display: none; }
+.sidebar-search-clear { position: absolute; right: 4px; padding: 4px; border: 0; background: transparent; color: var(--faint); }
+.sidebar-search-clear .ico { --ico: 13px; }
+.search-list { display: flex; flex-direction: column; }
+.search-result { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-height: 36px; padding: 7px 10px; margin: 2px 0;
+  border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.search-result:hover, .search-result.is-sel, .search-result:focus-visible { background: var(--hover); outline: none; }
+.search-result b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
+.search-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1)); line-height: 17px; overflow-wrap: anywhere; }
+.search-result mark { background: var(--accent-wash); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+.search-status { padding: 8px 10px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
 .sidebar-sessions h2 { font-size: calc(10px * var(--text-scale, 1)); padding: 10px 8px; }
 .sidebar-sessions .foot { border: 0; padding: 12px 8px; font-size: calc(10px * var(--text-scale, 1)); }
 .sidebar-bottom { border-top: 1px solid var(--line); padding-top: 10px; display: flex; align-items: center; gap: 4px; }
@@ -944,6 +963,10 @@ main {
 }
 
 #dismissPluginRefreshReminder { flex: none; }
+
+/* A state that blocks sending, not a tip: stated in weight, as `.hint.is-warn` does. */
+.notice.is-warn span { font-weight: 600; }
+.notice.is-warn .ico { color: var(--ink); }
 
 /* ------------------------------------------------------------- permissions */
 
@@ -1509,8 +1532,6 @@ main {
 .setup-instructions { max-width: 75ch; margin: 12px 0; padding-left: 22px; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.65; }
 .setup-instructions li + li { margin-top: 6px; }
 .setup-instructions strong { color: var(--ink); }
-.setup-subheading { margin: 20px 0 8px; font-size: calc(13px * var(--text-scale, 1)); }
-.step .setup-important { padding: 12px 14px; margin: 12px 0; border: 1px solid var(--accent-edge); border-radius: 10px; background: var(--accent-wash); color: var(--ink); font-weight: 600; }
 .setup-optional { margin-top: 20px; padding: 16px 0 0; border-top: 1px solid var(--line); }
 .setup-optional > summary { display: flex; align-items: center; gap: 7px; list-style: none; cursor: pointer; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; }
 .tag.is-optional { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); border-radius: var(--pill); padding: 2px 8px; white-space: nowrap; }
@@ -1518,25 +1539,276 @@ main {
 details.connector > summary { cursor: pointer; }
 details.connector > summary::before { content: '›'; font-size: calc(18px * var(--text-scale, 1)); color: var(--soft); }
 details.connector[open] > summary::before { rotate: 90deg; }
-.setup-guide { margin: 20px 0 24px; container-type: inline-size; }
-.setup-gallery { display: grid; gap: 24px; }
-.setup-gallery.has-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-.setup-figure { min-width: 0; width: 100%; max-width: 680px; margin: 0 auto; }
-.setup-shot { position: relative; width: 100%; margin: auto; container-type: inline-size; isolation: isolate; }
-.setup-shot.is-portrait { max-width: 420px; }
-.setup-shot img { display: block; width: 100%; height: auto; border-radius: 10px; outline: 1px solid var(--line); }
-.setup-target { position: absolute; border: 1.5px solid #7dd3fc; border-radius: 4px; pointer-events: none; }
-.setup-callout { position: absolute; width: max-content; padding: 5px 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #103248; color: #f0f9ff; font-size: clamp(9px, 2.2cqw, 13px); font-weight: 600; line-height: 1.3; box-shadow: 0 2px 5px #0005; pointer-events: none; }
-.setup-arrow { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: #7dd3fc; stroke-width: 1.5; pointer-events: none; }
-.setup-arrow path { vector-effect: non-scaling-stroke; }
-.setup-figure figcaption { margin: 12px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.55; }
-.setup-figure figcaption p { margin: 0; }
-.setup-enlarge { display: block; margin-top: 8px; padding: 4px 0; color: var(--blue); font-size: calc(11px * var(--text-scale, 1)); }
-@container (max-width: 510px) {
-  .setup-gallery.has-pair { grid-template-columns: minmax(0, 1fr); }
+/*
+ * The setup guide: a step's moves in a short numbered list, its pictures on a stage beside them.
+ * Pointing at a move lights its place on the picture, so the picture explains instead of prose.
+ * The host takes no box of its own: its list and stage are items of the step's grid.
+ */
+.setup-guide { display: contents; }
+.guide-moves { display: grid; gap: 2px; margin: 16px 0 6px; padding: 0; list-style: none; }
+.guide-move {
+  display: flex; align-items: center; gap: 11px; margin-left: -8px; padding: 7px 12px 7px 8px; border-radius: 10px;
+  color: var(--soft); font-size: calc(13.5px * var(--text-scale, 1)); line-height: 1.35; outline: none; cursor: default;
+  transition: background-color 140ms ease-out, color 140ms ease-out;
 }
-.step input.setup-required.is-empty:not(:disabled) { border-color: color-mix(in srgb, #60a5fa 55%, var(--line)); background: color-mix(in srgb, #60a5fa 9%, var(--card)); }
-.step input.setup-required.is-empty:not(:disabled):focus { border-color: #60a5fa; }
+.guide-move:hover, .guide-move.is-lit { background: var(--hover); color: var(--ink); }
+.guide-move:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.guide-pin, .phase-number, .browser-install-steps > li::before {
+  display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--ink);
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
+  transition: background-color 140ms ease-out, color 140ms ease-out, box-shadow 140ms ease-out;
+}
+.guide-move.is-lit .guide-pin { background: var(--accent); box-shadow: none; color: var(--page); }
+
+.guide-stage {
+  position: relative; display: grid; align-content: center; justify-items: center; gap: 14px; padding: 22px;
+  border-radius: 14px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line);
+}
+.guide-frame { position: relative; display: block; width: 100%; max-width: 360px; padding: 0; border: 0; border-radius: 10px; background: none; cursor: zoom-in; }
+/* Every picture holds the same cell, so the stage keeps its height when the picture changes. */
+.guide-frame { grid-area: 1 / 1; align-self: center; }
+.guide-frame[hidden] { display: block !important; visibility: hidden; }
+.guide-dots { grid-area: 2 / 1; }
+.guide-frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.guide-picture { position: relative; display: block; }
+.guide-picture img { display: block; width: 100%; height: auto; border-radius: 10px; box-shadow: 0 0 0 1px var(--line), 0 14px 34px -12px #000c; }
+.guide-spot {
+  position: absolute; border-radius: 6px; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 75%, transparent);
+  transition: opacity 160ms ease-out, box-shadow 160ms ease-out, background-color 160ms ease-out;
+}
+.guide-spot .guide-pin { position: absolute; top: -10px; right: -10px; width: 20px; height: 20px; background: var(--accent); box-shadow: 0 2px 6px #0008; color: var(--page); font-size: 10.5px; }
+.guide-spot .guide-pin[data-corner="top-left"] { right: auto; left: -10px; }
+.guide-spot .guide-pin[data-corner="bottom-left"] { top: auto; right: auto; bottom: -10px; left: -10px; }
+.guide-spot .guide-pin[data-corner="outside-left"] { top: 50%; right: calc(100% + 8px); left: auto; transform: translateY(-50%); }
+.guide-stage.has-lit .guide-spot:not(.is-lit) { opacity: .3; }
+.guide-spot.is-lit { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 0 0 2px var(--accent), 0 0 0 7px color-mix(in srgb, var(--accent) 20%, transparent); }
+.guide-zoom {
+  position: absolute; right: 10px; bottom: 10px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px;
+  background: color-mix(in srgb, var(--card) 90%, transparent); box-shadow: 0 2px 8px #0006; color: var(--ink);
+  opacity: 0; transition: opacity 140ms ease-out;
+}
+.guide-frame:hover .guide-zoom, .guide-frame:focus-visible .guide-zoom { opacity: 1; }
+.guide-dots { display: flex; gap: 6px; }
+.guide-dot { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 4px; background: var(--line); cursor: pointer; transition: background-color 180ms ease-out; }
+.guide-dot[aria-pressed="true"] { width: 20px; background: var(--accent); }
+.guide-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Full size, in the shared dialog: the same pins, named underneath. */
+.guide-large { display: grid; justify-items: center; gap: 16px; }
+.guide-large .guide-picture img { width: auto; max-width: 100%; max-height: calc(100vh - 170px); }
+.guide-large .guide-moves { margin: 0; grid-auto-flow: column; gap: 6px 18px; }
+.guide-large .guide-move { margin: 0; padding: 0; background: none; color: var(--soft); }
+
+/* A step with nothing to point at shows what it is about instead, so the card keeps its shape. */
+.step-art {
+  display: grid; place-items: center; min-height: 190px; border-radius: 14px;
+  background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line); color: var(--accent);
+}
+.step-art .ph {
+  display: grid; place-items: center; width: 88px; height: 88px; border-radius: 50%; font-size: 40px;
+  background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge);
+}
+.step-lead { max-width: 52ch; margin: 6px 0 0; color: var(--soft); font-size: calc(14px * var(--text-scale, 1)); line-height: 1.5; }
+/* One browser setup step with a quiet progress line and one task per stage. */
+.browser-phases { display: flex; align-items: center; gap: 24px; margin: 0 0 20px; padding: 0; list-style: none; }
+.browser-phases li { display: flex; align-items: center; gap: 8px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+.browser-phases li + li::before { content: ''; width: 28px; height: 1px; background: var(--line); margin-right: 12px; }
+.browser-phases [aria-current="step"] { color: var(--ink); font-weight: 650; }
+.browser-phases .is-complete .phase-number { color: var(--green); }
+.browser-stage { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(240px, .9fr); gap: 28px 44px; align-items: start; }
+.browser-stage-copy { min-width: 0; }
+#browserExtensionStage { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+#browserExtensionStage .step-lead { max-width: none; }
+.browser-stage .step-lead { max-width: 45ch; margin-top: 10px; line-height: 1.6; }
+.browser-stage h3:focus { outline: none; }
+.browser-setup-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; }
+.browser-setup-header .browser-phases { grid-column: 1; grid-row: 1; margin: 0; }
+.browser-setup-header h3 { grid-column: 1; grid-row: 2; margin: 0; }
+.browser-picker { display: contents; }
+.browser-picker .step-lead { grid-column: 2; grid-row: 1; margin: 0; max-width: none; text-align: center; }
+.browser-picker .browser-segments { grid-column: 2; grid-row: 2; }
+.browser-setup:has(#browserExtensionStage[hidden]) .browser-picker,
+.browser-setup:has(#browserExtensionStage[hidden]) #browserExtensionTitle { display: none; }
+.browser-setup:has(#browserExtensionStage[hidden]) .browser-setup-header { margin-bottom: 20px; }
+@media (max-width: 760px) {
+  .browser-setup-header { grid-template-columns: minmax(0, 1fr); }
+  .browser-picker .step-lead { grid-column: 1; grid-row: 3; }
+  .browser-picker .browser-segments { grid-column: 1; grid-row: 4; }
+}
+.browser-segments { display: flex; flex-wrap: wrap; gap: 6px; }
+.browser-segments button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--soft); font: inherit; font-size: calc(13px * var(--text-scale, 1)); cursor: pointer; }
+.browser-segments img { width: 24px; height: 24px; object-fit: contain; }
+.browser-segments button:hover { background: var(--hover); color: var(--ink); }
+.browser-segments button[aria-checked="true"] { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--ink); }
+.browser-segments button:focus-visible, .browser-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.browser-install-steps { list-style: none; counter-reset: install; padding: 0; margin: 32px 0 0; display: grid; gap: 18px; }
+.browser-install-steps > li { counter-increment: install; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; font-size: calc(13px * var(--text-scale, 1)); }
+.browser-install-steps > li::before { content: counter(install); }
+.browser-install-steps > li > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: start; }
+.browser-install-steps > li > div > .btn { grid-column: 2; grid-row: 1; margin: 0; }
+.browser-install-steps > li > div > :is(b, p) { grid-column: 1; }
+.browser-picture-help { grid-column: 1 / -1; margin-top: 0; color: var(--soft); font-size: inherit; }
+.browser-picture-help summary { width: fit-content; cursor: pointer; padding: 4px 0; }
+.browser-picture-help .browser-install-figure { max-width: 680px; margin: 16px 0; }
+.browser-install-steps b { display: block; padding: 0; line-height: 22px; color: var(--ink); font-weight: 600; }
+.browser-install-steps p { margin: 0; color: var(--soft); line-height: 1.5; }
+.browser-setup .btn-quiet { border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 6px 10px; gap: 8px; width: fit-content; max-width: 100%; white-space: normal; }
+.browser-setup .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
+.browser-setup .btn-solid { min-height: 40px; padding: 9px 18px; }
+#bridgeFolder, .setup-tunnel-open { min-width: 220px; min-height: 40px; padding: 9px 18px; justify-content: center; }
+.step:is([data-step="tunnel"], [data-step="key"], [data-step="chatgpt"]) .step-lead { margin-top: 10px; line-height: 1.6; }
+.step:is([data-step="tunnel"], [data-step="key"]) > .step-body > .step-actions { margin-top: 22px; }
+.step:is([data-step="tunnel"], [data-step="key"], [data-step="chatgpt"]) .guide-moves { margin: 18px 0 0; gap: 10px; }
+.step[data-step="chatgpt"] .step-main > .step-actions { margin-top: 22px; }
+.step:is([data-step="tunnel"], [data-step="key"]) .field { margin-top: 18px; }
+.browser-install-figure { min-width: 0; margin: 4px 0 0; align-self: center; }
+.browser-install-figure .setup-guide { display: grid; gap: 16px; }
+.browser-install-figure .guide-moves { order: 1; margin: 0; }
+.browser-setup .guide-move { min-width: 0; width: 100%; box-sizing: border-box; }
+.browser-setup .guide-move-text { min-width: 0; overflow-wrap: anywhere; }
+.browser-install-figure figcaption { display: grid; gap: 7px; margin-top: 16px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; color: var(--soft); }
+.browser-install-figure figcaption b { color: var(--ink); font-weight: 550; }
+.browser-stage-footer { grid-column: 1 / -1; }
+#browserExtensionStage > .browser-stage-footer { margin-top: 0; }
+.browser-stage-footer > .btn { flex: none; }
+.status-banner { display: grid; gap: 6px; }
+.status-banner-title { display: flex; align-items: center; gap: 8px; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; }
+.status-banner-title::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.status-banner[data-tone="ok"] .status-banner-title { color: var(--ink); }
+.status-banner[data-tone="ok"] .status-banner-title::before { background: var(--green); }
+.status-banner[data-tone="wait"] .status-banner-title::before { background: var(--amber, #c99846); }
+.status-banner-detail { padding-left: 15px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
+.extension-help { margin-top: 24px; font-size: calc(12px * var(--text-scale, 1)); color: var(--soft); }
+.extension-help summary { cursor: pointer; width: fit-content; padding: 5px 0; }
+:is(.browser-picture-help, .extension-help) > summary { display: flex; align-items: center; gap: 8px; list-style: none; }
+:is(.browser-picture-help, .extension-help) > summary::-webkit-details-marker { display: none; }
+.extension-meta { display: grid; gap: 8px; padding-top: 12px; }
+.extension-meta > .btn { justify-self: start; }
+.extension-folder { margin: 0; overflow-wrap: anywhere; color: var(--soft); font: calc(11px * var(--text-scale, 1))/1.6 var(--mono); }
+.extension-folder.is-warn { color: var(--red); }
+.browser-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.browser-option { display: grid; align-content: start; gap: 8px; position: relative; padding: 16px; min-width: 0; border: 0; border-radius: 14px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--soft); font: inherit; text-align: left; cursor: pointer; }
+.browser-option img { width: 30px; height: 30px; object-fit: contain; margin-bottom: 2px; }
+.browser-option b { color: var(--ink); font-size: calc(14px * var(--text-scale, 1)); font-weight: 600; }
+.browser-option em { font-size: calc(12px * var(--text-scale, 1)); font-style: normal; line-height: 1.55; }
+.browser-option::after { content: ''; position: absolute; top: 20px; right: 16px; width: 15px; height: 15px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--edge); }
+.browser-option:hover { background: var(--hover); }
+.browser-option[aria-checked="true"] { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.browser-option[aria-checked="true"]::after { box-shadow: inset 0 0 0 4px var(--accent); }
+.browser-action { display: grid; gap: 12px; margin-top: 24px; }
+.browser-action > .btn { justify-content: center; }
+.browser-action > .status-pill { background: none; box-shadow: none; padding: 0; color: var(--soft); font-weight: 500; }
+.browser-action > p { margin: 0; }
+.browser-connection-lost { margin-top: 20px; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
+.browser-stage > .setup-guide { display: grid; gap: 16px; align-self: center; }
+.browser-stage > .setup-guide > .guide-moves { order: 1; margin: 0; }
+#browserLocationStage .guide-picture { aspect-ratio: 1.9; }
+#browserLocationStage .guide-picture img { height: 100%; object-fit: fill; }
+@container (max-width: 760px) {
+  .browser-stage { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .browser-install-figure, .browser-stage > .setup-guide { width: 100%; max-width: 520px; justify-self: center; }
+}
+@container (max-width: 540px) {
+  .browser-install-steps > li > div { grid-template-columns: minmax(0, 1fr); }
+  .browser-install-steps > li > div > .btn { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 8px; }
+}
+@container (max-width: 440px) {
+  .browser-stage-footer { align-items: stretch; flex-direction: column; gap: 16px; }
+  .browser-phases { gap: 12px; }
+  .browser-phases li + li::before { width: 12px; margin-right: 0; }
+  .browser-choice { grid-template-columns: minmax(0, 1fr); }
+}
+
+.step-note { display: flex; align-items: flex-start; gap: 9px; max-width: 60ch; margin: 16px 0 0; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); line-height: 1.5; }
+.step-note .ico { flex: none; margin-top: 2px; color: var(--accent); }
+
+/*
+ * The step rail: every step side by side, joined by a line that fills in as they are done. It is
+ * where the user is, how far along, and a way to any step; the progress count sits at its end.
+ */
+.setup-track { display: flex; align-items: center; gap: 18px; margin: 10px 0 20px; }
+.setup-rail { flex: 1; min-width: 0; }
+.setup-rail ol { display: flex; margin: 0; padding: 0; list-style: none; counter-reset: setup-rail; }
+.setup-rail li { position: relative; flex: 1 1 0; min-width: 0; counter-increment: setup-rail; }
+.setup-rail li[hidden] { display: none; }
+.setup-rail li:not(:first-child)::before {
+  content: ''; position: absolute; top: 15px; right: calc(50% + 19px); left: calc(-50% + 19px); height: 2px; border-radius: 2px;
+  background: var(--line); transition: background-color 220ms ease-out;
+}
+.setup-rail li.is-done:not(:first-child)::before, .setup-rail li.is-current:not(:first-child)::before { background: var(--green-line); }
+.setup-rail button {
+  display: grid; justify-items: center; gap: 7px; width: 100%; padding: 2px 4px 6px; border: 0; border-radius: 10px;
+  background: none; color: var(--soft); cursor: pointer; font: inherit;
+}
+/* The rail is a <nav>, so it would take the sidebar's hover tile; its marks show hover instead. */
+.setup-rail button:hover { background: none; }
+.setup-rail button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.setup-rail-mark {
+  display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 50%;
+  background: var(--card); color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); font-weight: 650; font-variant-numeric: tabular-nums;
+  transition: border-color 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out, box-shadow 160ms ease-out;
+}
+.setup-rail-mark::before { content: counter(setup-rail); }
+.setup-rail-mark .ico { display: none; --ico: 15px; }
+.setup-rail-ready .setup-rail-mark::before { content: none; }
+.setup-rail-ready .setup-rail-mark .ico { display: block; }
+.setup-rail-label { max-width: 100%; overflow: hidden; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.setup-rail button:hover .setup-rail-mark { border-color: var(--accent-edge); color: var(--ink); }
+.setup-rail button:hover .setup-rail-label { color: var(--ink); }
+.setup-rail li.is-done .setup-rail-mark { border-color: var(--green-line); background: var(--green-wash); color: var(--green); }
+.setup-rail li.is-done .setup-rail-mark::before { content: none; }
+.setup-rail li.is-done .setup-rail-mark .ico { display: block; }
+.setup-rail li.is-current .setup-rail-mark { border-color: var(--accent-edge); background: var(--accent-wash); color: var(--ink); }
+.setup-rail button[aria-current="step"] .setup-rail-mark { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+.setup-rail button[aria-current="step"] .setup-rail-label { color: var(--ink); font-weight: 650; }
+.setup-track .setup-progress { flex: none; margin: 0 0 22px; }
+
+/*
+ * One step at a time. Until setup is finished (or folded into its summary), only the open step
+ * shows, as one card: its words and controls on the left, its pictures (or its icon) on the
+ * right, Back and Next along the bottom. The rail above already numbers it.
+ */
+.wizard { container-type: inline-size; }
+.wizard > .step:not(.is-open) { display: none; }
+.wizard > .step.is-open {
+  grid-template-columns: minmax(0, 1fr); padding: 30px 30px 22px;
+  animation: surface-in 220ms cubic-bezier(.16, 1, .3, 1);
+}
+.wizard > .step.is-open > .step-mark { display: none; }
+.wizard > .step.is-open h3 { color: var(--ink); margin: 0; font-size: calc(20px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.01em; }
+.wizard > .step.is-open > .step-body:has(> .setup-guide, > .step-art, > .extension-guide) {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 400px); column-gap: 36px; align-content: start;
+}
+.wizard > .step.is-open > .step-body > *,
+.wizard > .step.is-open > .step-body > .setup-guide > .guide-moves { grid-column: 1; }
+.wizard > .step.is-open > .step-body > .setup-guide > .guide-stage,
+.wizard > .step.is-open > .step-body > .step-art { grid-column: 2; grid-row: 1 / span 40; align-self: start; }
+.wizard > .step.is-open > .step-body > .extension-guide:not([hidden]) { grid-column: 2; grid-row: 1 / span 40; align-self: start; }
+.wizard > .step.is-open > .step-body > .step-nav { grid-column: 1 / -1; }
+.wizard > .step.is-open .field { max-width: 460px; }
+.setup-legacy .setup-guide { display: block; }
+.setup-legacy .guide-stage { max-width: 360px; margin-top: 4px; }
+.step-nav, .browser-stage-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
+.step-nav .btn, .browser-stage-footer .btn, .browser-back { display: inline-flex; align-items: center; gap: 7px; }
+.step-nav .step-next, .browser-stage-footer .step-next { margin-left: auto; }
+.step-nav.is-ready .step-next, .browser-stage-footer .step-next:not(:disabled) { border-color: var(--accent-edge); background: var(--accent-wash); color: var(--ink); }
+@container (max-width: 700px) {
+  .wizard > .step.is-open > .step-body:has(> .setup-guide, > .step-art, > .extension-guide) { grid-template-columns: minmax(0, 1fr); }
+  .wizard > .step.is-open > .step-body > .setup-guide > .guide-stage { grid-column: 1; grid-row: auto; margin-top: 12px; }
+  .wizard > .step.is-open > .step-body > .step-art { display: none; }
+  .wizard > .step.is-open > .step-body > .extension-guide:not([hidden]) { grid-column: 1; grid-row: auto; margin-top: 18px; }
+}
+@media (max-width: 760px) {
+  .setup-track { flex-direction: column; align-items: stretch; gap: 4px; }
+  .setup-track .setup-progress { margin: 0; }
+  .setup-rail-label { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wizard > .step.is-open { animation: none; }
+  .guide-spot, .guide-dot, .guide-move { transition: none; }
+}
 .setup-image-dialog { width: min(900px, calc(100vw - 40px)); max-height: calc(100vh - 40px); margin: auto; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); color: var(--ink); overflow: auto; }
 .setup-image-dialog::backdrop { background: #000b; }
 .tool-approval-notice { margin: 20px 0 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: transparent; }
@@ -1550,60 +1822,15 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .tool-approval-dialog .tool-approval-notice { margin: 0 0 14px; padding: 0; border: 0; }
 .tool-approval-dialog > button { display: block; margin-left: auto; }
 .setup-image-dialog > .btn { position: sticky; top: 0; display: block; margin: 0 0 12px auto; z-index: 2; }
-.setup-image-dialog .setup-figure { max-width: none; }
-.setup-image-dialog .setup-shot.is-portrait { max-width: 655px; }
 .step-body { min-width: 0; }
-.wizard.is-tidy .step-body > p, .wizard.is-tidy .setup-instructions, .wizard.is-tidy .setup-guide, .wizard.is-tidy .setup-subheading { display: none; }
-
 .sheet { width: 100%; max-width: 940px; margin: 0 auto; padding: 0; }
 
 .lede { font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 
 .lede p { max-width: 72ch; margin: 0; }
-
-/*
- * Once every step is done, the instructions have served their purpose and only get
- * in the way of the one line that still changes — whether ChatGPT is actually using
- * this. Finished steps shrink to their title; the last step stays open because it
- * carries the live status. "Show all steps" brings the instructions back.
- */
-.wizard.is-tidy .step.is-done { padding: 14px 20px; }
-
-.wizard.is-tidy .step.is-done .step-body > :not(h3):not(.step-heading) {
-  display: none;
-}
-
-.wizard.is-tidy .step.is-done[data-step='chatgpt'] {
-  padding: 14px 0;
-}
-
-/* Folder access remains editable after onboarding has finished. */
-.wizard.is-tidy .step.is-done[data-step='folder'] .step-body > .step-actions,
-.wizard.is-tidy .step.is-done[data-step='chatgpt'] .step-body > .step-actions {
-  display: flex;
-}
-
-/*
- * Exception to the collapse: a connector the app is publishing that ChatGPT has never
- * called is unfinished setup. Hiding its card would let an optional connector the user
- * switched on but never created look finished, which is the one state tidying must not
- * invent. The instructions still collapse — only the cards stay.
- */
-.wizard.is-tidy .step.is-done[data-step='chatgpt'] .step-body > .connectors.has-unfinished {
-  display: grid;
-}
-
-.wizard.is-tidy .step.is-done h3 {
-  margin-bottom: 0;
-}
-
 .wizard { list-style: none; padding: 0; display: grid; gap: 14px; counter-reset: setup-step; }
 
 .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 16px; padding: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); counter-increment: setup-step; }
-
-.step:first-child {
-  border-top: 0;
-}
 
 .step-mark { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--sunk); display: grid; place-items: center; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); font-weight: 650; }
 
@@ -1612,11 +1839,9 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .step:not(.is-done) .step-mark .tick { display: none; }
 .setup-progress { display: flex; align-items: center; gap: 14px; margin: 4px 0 10px; }
 .setup-progress-text { flex: none; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 600; }
-.setup-progress-track { position: relative; flex: 1; height: 4px; overflow: hidden; border-radius: 999px; background: var(--line); }
-.setup-progress-fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--ink); transition: width 220ms cubic-bezier(.16, 1, .3, 1); }
-.setup-progress.is-complete .setup-progress-fill { background: var(--green); }
-@media (prefers-reduced-motion: reduce) { .setup-progress-fill { transition: none; } }
+.setup-progress.is-complete .setup-progress-text { color: var(--green); }
 .step-mark .tick { width: 19px; height: 19px; font-size: 19px; display: none; }
+.step-mark[data-number]::before { content: attr(data-number); }
 
 .step.is-done .step-mark { background: var(--green-wash); border-color: var(--green-line); color: var(--green); }
 
@@ -1641,8 +1866,6 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .step-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 10px; }
 .step-heading h3 { margin: 0; }
 .step-heading .btn { flex-shrink: 0; }
-.wizard.is-tidy .step.is-done .step-heading { margin-bottom: 0; }
-
 .chosen {
   font-size: calc(12px * var(--text-scale, 1));
   color: var(--faint);
@@ -1706,6 +1929,12 @@ select {
   color: var(--ink);
 }
 
+.step input.setup-required { border-color: color-mix(in srgb, var(--ink) 20%, var(--edge)); color: var(--ink); }
+.step input.setup-required:focus { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent); }
+/* Still empty: the one field the step waits for stands out, in the theme's accent. */
+.step input.setup-required.is-empty:not(:disabled) { border-color: var(--accent-edge); background: var(--accent-wash); }
+.step input.setup-required.is-empty:not(:disabled):focus { border-color: var(--accent); }
+
 input[type='text']:focus,
 input[type='password']:focus,
 input[type='number']:focus,
@@ -1754,9 +1983,6 @@ input[readonly] {
 
 /* ---- connector cards (setup step 5) ------------------------------------ */
 
-.plugin-permission-step { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 12px; background: var(--hover); }
-.plugin-permission-step > strong { display: block; font-size: calc(15px * var(--text-scale, 1)); }
-.plugin-permission-step p { margin: 8px 0 0; }
 
 /* Description is long on purpose — it is the model's routing text, not a label. */
 
@@ -1970,6 +2196,9 @@ input[readonly] {
 .sess:hover, .sess.is-sel { background: var(--hover); }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
+.sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--card); color: var(--ink); font: inherit; font-size: calc(14px * var(--text-scale, 1)); line-height: 22px; outline: none;
+  cursor: text; user-select: text; }
 .session-status { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .session-status.is-active, .session-status.is-working { width: 12px; height: 12px; background: transparent; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: session-spin 900ms linear infinite; }
 @keyframes session-spin { to { transform: rotate(360deg); } }
@@ -1977,7 +2206,13 @@ input[readonly] {
 .session-status.is-failed { background: var(--red); }
 .sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
 .sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
+/* While a chat is being named, its field takes the actions' place (#1107). */
+.sess:has(.sess-rename) .sess-actions { display: none; }
 .sess-action { padding: 3px; border: 0; background: transparent; }
+/* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
+.sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
+.sess:hover .sess-pin-mark, .sess:focus-within .sess-pin-mark { display: none; }
+.sess-pin.is-pinned { color: var(--accent); }
 .sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
@@ -3873,6 +4108,225 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .tool-group[open] > summary > .activity-workers { display: none; }
 .agent-panel-row.is-round-worker { background: var(--accent-wash); box-shadow: inset 3px 0 var(--accent); }
 
+/*
+ * Ready: the closing step. A badge that turns green when every check passes, the checks as a
+ * two-column grid, and anything still open as a way back to its step. In the folded summary of a
+ * finished setup it leads the list, open, because it is the one thing worth reading there.
+ */
+.ready-hero { display: flex; align-items: center; gap: 18px; }
+.ready-badge {
+  display: grid; place-items: center; flex: none; width: 58px; height: 58px; border-radius: 50%; font-size: 28px;
+  background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--soft);
+}
+.step-ready.is-all-set .ready-badge { background: var(--green-wash); box-shadow: inset 0 0 0 1px var(--green-line); color: var(--green); }
+.step-ready.is-all-set.is-open .ready-badge { animation: ready-pop 520ms cubic-bezier(.16, 1, .3, 1); }
+@keyframes ready-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.ready-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 24px 0 6px; padding: 0; list-style: none; }
+.ready-check {
+  display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 14px; border-radius: 10px;
+  background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font-size: calc(13.5px * var(--text-scale, 1));
+}
+.ready-check.is-passed .ico { color: var(--green); }
+.ready-check:not(.is-passed) { padding: 0; box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.ready-go {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 0 14px; border: 0; border-radius: 10px;
+  background: none; color: var(--ink); cursor: pointer; font: inherit; text-align: left; transition: background-color 140ms ease-out;
+}
+.ready-go:hover { background: var(--hover); }
+.ready-go:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ready-go > .ico:last-child { margin-left: auto; color: var(--soft); }
+.ready-pending {
+  flex: none; padding: 2px 8px; border-radius: 999px; background: var(--accent-wash); color: var(--ink);
+  font-size: calc(11px * var(--text-scale, 1)); font-weight: 650; font-variant-numeric: tabular-nums;
+}
+.step-ready .step-actions { margin-top: 18px; }.setup-rail li.setup-rail-ready.is-done .setup-rail-mark { background: var(--green); border-color: var(--green); color: var(--page); }
+@container (max-width: 560px) { .ready-checks { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .step-ready.is-all-set.is-open .ready-badge { animation: none; } }
+
+/*
+ * State at a glance. A badge with a coloured dot says where a step stands (ok, waiting, failed or
+ * off) in two words; the sentence behind it only appears when something needs doing.
+ */
+.status-pill {
+  display: inline-flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; margin: 14px 0 0; padding: 6px 12px 6px 10px;
+  border-radius: 999px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 600; line-height: 1.2;
+}
+.status-pill:empty { display: none; }
+.status-pill::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.status-pill[data-tone="ok"] { background: var(--green-wash); box-shadow: inset 0 0 0 1px var(--green-line); color: var(--ink); }
+.status-pill[data-tone="ok"]::before { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent); }
+.status-pill[data-tone="wait"] { color: var(--ink); }
+.status-pill[data-tone="wait"]::before { background: #e0a43a; animation: pill-breathe 1.4s ease-in-out infinite; }
+.status-pill[data-tone="bad"] { background: var(--red-wash); box-shadow: inset 0 0 0 1px var(--red-line); color: var(--ink); }
+.status-pill[data-tone="bad"]::before { background: var(--red); }
+@keyframes pill-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.step-actions .status-pill { margin: 0; }
+.step .step-quiet { color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+
+/* The tunnel's one action, large: a ring that is the call to action when off and green when live. */
+.connect-art { min-height: 220px; }
+.connect-toggle {
+  display: grid; justify-items: center; gap: 14px; padding: 18px 28px; border: 0; border-radius: 18px;
+  background: none; color: var(--ink); cursor: pointer; font: inherit;
+}
+.connect-toggle:disabled { cursor: default; opacity: .5; }
+.setup-folder-icon, .setup-connect-icon { width: 42px; height: 42px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#wizAddFolder .connect-ring, #wizConnect .connect-ring { background: var(--sunk); color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+#wizAddFolder:hover:not(:disabled) .connect-ring, #wizConnect:hover:not(:disabled) .connect-ring { background: var(--hover); }
+.connect-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.connect-ring {
+  display: grid; place-items: center; width: 104px; height: 104px; border-radius: 50%; font-size: 44px;
+  background: var(--accent); color: var(--page); box-shadow: 0 14px 30px -12px color-mix(in srgb, var(--accent) 70%, transparent);
+  transition: transform 160ms cubic-bezier(.16, 1, .3, 1), background-color 200ms ease-out, box-shadow 200ms ease-out, color 200ms ease-out;
+}
+.connect-toggle:not(:disabled):hover .connect-ring { transform: scale(1.04); }
+.connect-toggle:not(:disabled):active .connect-ring { transform: scale(.97); }
+.connect-label { font-size: calc(15px * var(--text-scale, 1)); font-weight: 650; }
+.connect-toggle[data-tone="ok"] .connect-ring { background: var(--green-wash); color: var(--green); box-shadow: inset 0 0 0 2px var(--green-line), 0 0 0 8px color-mix(in srgb, var(--green) 10%, transparent); }
+.connect-toggle[data-tone="ok"] .connect-label { color: var(--soft); font-weight: 550; }
+.connect-toggle[data-tone="wait"] .connect-ring { background: var(--accent-wash); color: var(--ink); box-shadow: inset 0 0 0 2px var(--accent-edge); animation: connect-wait 1.6s ease-in-out infinite; }
+.connect-toggle[data-tone="bad"] .connect-ring { background: var(--red-wash); color: var(--red); box-shadow: inset 0 0 0 2px var(--red-line); }
+@keyframes connect-wait { 0%, 100% { box-shadow: inset 0 0 0 2px var(--accent-edge), 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); } 50% { box-shadow: inset 0 0 0 2px var(--accent-edge), 0 0 0 10px transparent; } }
+
+/* Shared folders: one path per line, never wrapped into each other. */
+.folder-list { display: grid; gap: 6px; max-width: 460px; margin: 14px 0 0; padding: 0; list-style: none; }
+.folder-list li {
+  display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px; border-radius: 10px;
+  background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font-size: calc(13px * var(--text-scale, 1));
+}
+.folder-list li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-list li .ico { flex: none; color: var(--soft); }
+.folder-list li.is-empty { background: none; box-shadow: none; padding: 0; min-height: 0; color: var(--faint); }
+@media (prefers-reduced-motion: reduce) {
+  .status-pill[data-tone="wait"]::before, .connect-toggle[data-tone="wait"] .connect-ring { animation: none; }
+}
+/* Narrow: pictures and icons give way, but Connect is the step itself and moves under the words. */
+@container (max-width: 700px) {
+  .wizard > .step.is-open > .step-body > .connect-art { display: grid; grid-column: 1; grid-row: auto; min-height: 0; margin-top: 16px; }
+}
+
+/*
+ * Start the tunnel: the button is the step's picture. It stands at the left of the words, the
+ * two centred on each other, so the card is as tall as its content and nothing floats.
+ */
+.wizard > .step.is-open > .step-body:has(> .connect-art) {
+  grid-template-columns: 156px minmax(0, 1fr); column-gap: 32px; align-items: center;
+}
+.wizard > .step.is-open > .step-body:has(> .connect-art) > * { grid-column: 2; }
+.wizard > .step.is-open > .step-body > .connect-art {
+  grid-column: 1; grid-row: 1 / span 5; align-self: center; min-height: 0;
+  background: none; box-shadow: none;
+}
+.wizard > .step.is-open > .step-body:has(> .connect-art) > .step-nav { grid-column: 1 / -1; }
+.step-body:has(> .connect-art) > .status-pill { margin-top: 18px; }
+.step-body:has(> .connect-art) > #wizStatus { margin-top: 10px; }
+.step-body:has(> .connect-art) > .step-quiet { margin: 12px 0 0; }
+.connect-toggle { padding: 8px 12px; }
+@container (max-width: 700px) {
+  .wizard > .step.is-open > .step-body:has(> .connect-art) { grid-template-columns: minmax(0, 1fr); }
+  .wizard > .step.is-open > .step-body:has(> .connect-art) > * { grid-column: 1; }
+  .wizard > .step.is-open > .step-body > .connect-art { grid-row: auto; justify-self: start; margin: 0 0 16px; }
+}
+/* Pick a folder: the list leads, and managing it is a quiet link under it. */
+.step-body:has(> .connect-art) > .folder-list { margin-top: 18px; }
+.step-body:has(> .connect-art) > .step-actions:has(> .step-link) { margin-top: 8px; }
+.btn.step-link { padding: 4px 0; border: 0; background: none; color: var(--soft); font-weight: 550; }
+.btn.step-link:hover { color: var(--ink); background: none; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Add it in ChatGPT: what to do on the left; the pictures and the cards to copy from on the right. */
+.wizard > .step.is-open > .step-body:has(> .step-side) {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); column-gap: 36px; align-items: start;
+}
+.wizard > .step.is-open > .step-body > .step-main { grid-column: 1; }
+.wizard > .step.is-open > .step-body > .step-side { grid-column: 2; display: grid; gap: 16px; align-content: start; }
+.wizard > .step.is-open > .step-body:has(> .step-side) > .step-nav { grid-column: 1 / -1; }
+.step-side > .setup-guide { display: block; }
+.step-side .connectors { margin: 0; }
+.step-main > #wizChatgpt { margin-top: 12px; }
+@container (max-width: 700px) {
+  .wizard > .step.is-open > .step-body:has(> .step-side) { grid-template-columns: minmax(0, 1fr); }
+  .wizard > .step.is-open > .step-body > .step-side { grid-column: 1; margin-top: 16px; }
+}
+
+/*
+ * The two action steps share one frame: the action large at the left, the words beside it, and
+ * the step's state (or its one secondary control) pinned to the card's top-right corner, so the
+ * right side of the card carries something instead of trailing off.
+ */
+.wizard > .step.is-open:has(.connect-art) { position: relative; }
+.step-body:has(> .connect-art) > .status-pill,
+.step-body:has(> .connect-art) > .step-actions:has(> .step-link) { position: absolute; top: 28px; right: 30px; margin: 0; }
+#wizStatusPill { width: max-content; white-space: nowrap; }
+.step-body:has(> .connect-art) > .step-lead { max-width: none; }
+.step-body:has(> .connect-art) > .folder-list {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); max-width: none; margin-top: 18px;
+}
+.step-body:has(> .connect-art) > .step-quiet { margin-top: 16px; }
+@container (max-width: 700px) {
+  .step-body:has(> .connect-art) > .status-pill,
+  .step-body:has(> .connect-art) > .step-actions:has(> .step-link) { position: static; margin-top: 14px; }
+}
+.btn.step-link { white-space: nowrap; }
+.step-main > .connectors { margin-top: 20px; }
+.step-side > .step-note { margin: 4px 0 0; }
+.step-side > .setup-legacy { margin-top: 0; }
+/* A connector's status line sits apart from the copy fields above it, not against their edge. */
+.connectors .connector > p.hint { margin-top: 12px; }
+.connectors .connector > .connector-head + p.hint { margin-top: 4px; }
+
+/* No folder yet: a dashed place to put one, as wide as the list it stands in for. */
+.folder-list li.is-empty { display: block; grid-column: 1 / -1; padding: 0; min-height: 0; background: none; box-shadow: none; }
+.folder-empty {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 96px; padding: 18px;
+  border: 1.5px dashed var(--line); border-radius: 12px; background: none; color: var(--soft); cursor: pointer; font: inherit;
+  font-size: calc(13.5px * var(--text-scale, 1)); transition: border-color 140ms ease-out, color 140ms ease-out, background-color 140ms ease-out;
+}
+.folder-empty:hover { border-color: var(--accent-edge); background: var(--accent-wash); color: var(--ink); }
+.folder-empty:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.folder-empty .ico { color: var(--accent); }
+
+/* Add it in ChatGPT: a shorter stage, then Core and Desktop side by side, then the legacy note. */
+.step-side .guide-stage { padding: 16px; }
+.step-side .guide-picture img { width: auto; max-width: 100%; max-height: 300px; margin: 0 auto; }
+.step-side .guide-frame { display: flex; justify-content: center; }
+.wizard > .step.is-open > .step-body:has(> .step-side) > .step-wide { grid-column: 1 / -1; }
+.wizard > .step.is-open > .step-body > #connectorCards {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 28px; align-items: start; margin: 26px 0 0;
+  padding-top: 22px; border-top: 1px solid var(--line);
+}
+.wizard > .step.is-open > .step-body > .setup-legacy.step-wide { margin-top: 18px; }
+@container (max-width: 700px) {
+  .wizard > .step.is-open > .step-body > #connectorCards { grid-template-columns: minmax(0, 1fr); }
+}
+/* Side by side, the stacked cards' divider would sit over one of them only. */
+.wizard > .step.is-open > .step-body > #connectorCards > .connector { margin: 0; padding-top: 0; border-top: 0; }
+/* Add it in ChatGPT: a taller stage, and spacing instead of rules between its blocks. */
+.step-side .guide-picture img { max-height: 380px; }
+.wizard > .step.is-open > .step-body > #connectorCards { padding-top: 0; border-top: 0; margin-top: 30px; }
+.wizard > .step.is-open > .step-body > .setup-legacy.step-wide { padding-top: 0; border-top: 0; margin-top: 22px; }
+/* The stage runs exactly as tall as the left column beside it; a rule sets off the cards below. */
+.wizard > .step.is-open > .step-body > .step-side { align-self: stretch; display: flex; flex-direction: column; }
+.step-side > .setup-guide { flex: 1; display: flex; }
+.step-side .guide-stage { flex: 1; min-height: 0; }
+.wizard > .step.is-open > .step-body > #connectorCards { margin-top: 28px; padding-top: 26px; border-top: 1px solid var(--line); }
+.step-side .guide-picture img { max-height: 340px; }
+
+/* Required and optional are one badge in two colours, not a label beside a badge. */
+.tag {
+  display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--line); border-radius: var(--pill);
+  background: var(--sunk); color: var(--soft); font-weight: 600; white-space: nowrap; line-height: 1.4;
+}
+.tag.is-optional { padding: 2px 8px; }
+
+/* Ready: the way into a chat sits in the card's top-right corner, beside the verdict. */
+.wizard > .step.step-ready.is-open { position: relative; }
+.step-ready .step-body > .step-actions:has(#readyStart) { position: absolute; top: 30px; right: 30px; margin: 0; }
+.step-ready .ready-hero { padding-right: 170px; }
+@container (max-width: 700px) {
+  .step-ready .step-body > .step-actions:has(#readyStart) { position: static; margin-top: 18px; }
+  .step-ready .ready-hero { padding-right: 0; }
+}
 /* Recorded edit previews, bounded within their owning tool call. */
 .edit-cards { display: grid; gap: 8px; min-width: 0; }
 .edit-card { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--page); }

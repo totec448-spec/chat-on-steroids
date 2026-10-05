@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
+  <link rel="stylesheet" href="./icons.css" />
+  <link rel="stylesheet" href="./cos-browser-sign-in.css" />
+  <title>Sign in with Google</title>
+</head>
+<body>
+  <div class="scrim" id="scrim"></div>
+  <section class="card" id="card" role="dialog" aria-modal="true" aria-labelledby="title" aria-describedby="lead" hidden>
+    <!-- The handoff: this app on the left, the person's browser on the right. -->
+    <div class="handoff" aria-hidden="true">
+      <span class="tile is-app"><img id="appIcon" alt="" hidden /><svg class="seal" viewBox="0 0 20 20"><path d="M5.5 10.5 8.6 13.5 14.5 7" /></svg></span>
+      <span class="path"><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="tile"><img id="browserIcon" alt="" hidden /><i class="ph ph-browser" id="browserGlyph"></i></span>
+    </div>
+
+    <h1 id="title"></h1>
+    <p class="lead" id="lead"></p>
+
+    <div class="options" id="options" role="group" aria-labelledby="title"></div>
+    <p class="hint" id="empty" hidden></p>
+    <p class="notice" id="notice" role="alert" hidden></p>
+
+    <footer class="foot" id="foot">
+      <button class="link" id="reopen" type="button" hidden></button>
+      <button class="link" id="back" type="button" hidden></button>
+      <button class="link" id="cancel" type="button"></button>
+    </footer>
+  </section>
+  <script type="module" src="./cos-browser-sign-in.ts"></script>
+</body>
+</html>

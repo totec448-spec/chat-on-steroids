@@ -5,6 +5,7 @@ import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initSkillsPath, importSkillPackage, listSkills, removeSkill } from '../src/main/skills.js';
 import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
+import type { LibrarySkill } from '../src/shared/skills.js';
 
 let root: string, project: string;
 const contents = (name: string, body = 'Keep all instructions.') => `---\nname: ${name}\ndescription: >-\n  Check the source\n  before editing.\n---\n${body}`;
@@ -75,19 +76,23 @@ it('honors layered config and both YAML policy styles while keeping package reso
   expect(library.errors).toEqual([]);
 });
 
-it('never discovers unapproved global files or follows a project package link out of scope', async () => {
+it('reads the user\'s own Skill folders read-only without approving their homes', async () => {
   await write(path.join(root, 'home/.agents/skills/private/SKILL.md'), contents('Private'));
   await write(path.join(root, 'codex/plugins/cache/team-market/private-pack/1.0.0/plugin.json'), JSON.stringify({ name: 'private-pack', version: '1.0.0' }));
   await write(path.join(root, 'codex/plugins/cache/team-market/private-pack/1.0.0/skills/private/SKILL.md'), contents('Private plugin'));
   await saveConfig({ ...getConfig(), roots: [{ name: 'project', path: project }] });
   const location = path.join(project, '.agents/skills'); await fs.mkdir(location, { recursive: true });
   await fs.symlink(path.join(root, 'home/.agents/skills/private'), path.join(location, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
-  let queried = false;
-  const library = await listSkillLibrary({ projectPath: project }, { codexPlugins: async () => { queried = true; return []; } });
-  expect(library.skills).toEqual([]);
-  expect(queried).toBe(false);
-  expect(library.roots.every(entry => !entry.path.includes('codex/plugins/cache'))).toBe(true);
-  expect(library.errors.join(' ')).toContain('linked');
+  const library = await listSkillLibrary({ projectPath: project }, { codexPlugins: async () => [] });
+  // ~/.agents is not approved, yet its Skill is listed once, under the read-only /user-skills path;
+  // the project's link to it lists nothing twice. A Codex plugin the runtime does not report stays out.
+  expect(library.skills.map(skill => [skill.name, skill.path])).toEqual([['Private', '/user-skills/agents/skills/private/SKILL.md']]);
+  expect((await readLibrarySkill(library.skills[0]!.id, { projectPath: project }, library)).text).toBe(contents('Private'));
+  expect(library.roots.every(entry => !entry.path.includes('plugins/cache'))).toBe(true);
+  expect(library.errors).toEqual([]);
+  // Without the Read files permission nothing is discovered.
+  await saveConfig({ ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } });
+  expect((await listSkillLibrary({}, { codexPlugins: async () => [] })).skills).toEqual([]);
 });
 
 it('discovers enabled Codex plugin skills from only the active installed version and keeps command identity across upgrades', async () => {
@@ -160,4 +165,114 @@ it('rejects linked package resources without publishing a partial SKILL.md', asy
   await expect(importSkillPackage(source)).rejects.toThrow(/links|linked/i);
   expect(await listSkills()).toEqual([]);
   await expect(fs.stat(path.join(root, 'skills/linked'))).rejects.toThrow();
+});
+
+it('discovers Skills from enabled Claude Code plugins and Claude\'s own Skills folders', async () => {
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude'));
+  const claude = path.join(root, 'claude');
+  const cache = path.join(claude, 'plugins/cache/team-market');
+  const installed = (name: string, version: string, extra: Record<string, unknown> = {}) =>
+    [{ scope: 'user', installPath: path.join(cache, name, version), version, ...extra }];
+  await write(path.join(cache, 'review-pack/1.2.0/.claude-plugin/plugin.json'), JSON.stringify({ name: 'review-pack' }));
+  await write(path.join(cache, 'review-pack/1.2.0/skills/audit/SKILL.md'), contents('Audit', 'Claude plugin instructions.'));
+  await write(path.join(cache, 'off-pack/1.0.0/skills/off/SKILL.md'), contents('Off'));
+  await write(path.join(cache, 'unlisted-pack/1.0.0/skills/unlisted/SKILL.md'), contents('Unlisted'));
+  await write(path.join(cache, 'wrong-name/1.0.0/.claude-plugin/plugin.json'), JSON.stringify({ name: 'something-else' }));
+  await write(path.join(cache, 'wrong-name/1.0.0/skills/wrong/SKILL.md'), contents('Wrong'));
+  await write(path.join(root, 'elsewhere/escape/1.0.0/skills/escape/SKILL.md'), contents('Escape'));
+  await write(path.join(cache, 'project-pack/1.0.0/skills/project-only/SKILL.md'), contents('ProjectOnly'));
+  await write(path.join(claude, 'plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+    'review-pack@team-market': installed('review-pack', '1.2.0'),
+    'off-pack@team-market': installed('off-pack', '1.0.0'),
+    'unlisted-pack@team-market': installed('unlisted-pack', '1.0.0'),
+    'wrong-name@team-market': installed('wrong-name', '1.0.0'),
+    'escape@team-market': [{ scope: 'user', installPath: path.join(root, 'elsewhere/escape/1.0.0'), version: '1.0.0' }],
+    'project-pack@team-market': installed('project-pack', '1.0.0', { scope: 'project', projectPath: project })
+  } }));
+  await write(path.join(claude, 'settings.json'), JSON.stringify({ enabledPlugins: {
+    'review-pack@team-market': true, 'off-pack@team-market': false, 'wrong-name@team-market': true,
+    'escape@team-market': true, 'project-pack@team-market': true
+  } }));
+  await write(path.join(claude, 'skills/personal/SKILL.md'), contents('Personal'));
+  await write(path.join(project, '.claude/skills/repo-skill/SKILL.md'), contents('RepoSkill'));
+
+  const library = await listSkillLibrary({ projectPath: project });
+  const names = library.skills.map(skill => skill.name).sort();
+  // A package manifest may name the plugin differently; Claude Code goes by the marketplace entry.
+  expect(names).toEqual(['Audit', 'Personal', 'ProjectOnly', 'RepoSkill', 'Wrong']);
+  const audit = library.skills.find(skill => skill.name === 'Audit')!;
+  expect(audit).toMatchObject({ source: 'claude-plugin', scope: 'user', managed: false,
+    claudePlugin: { pluginId: 'review-pack@team-market', pluginName: 'review-pack', marketplaceName: 'team-market', version: '1.2.0', skillPath: 'audit' } });
+  expect(audit.id).toMatch(/^audit--claude-[0-9a-f]{12}$/);
+  expect((await readLibrarySkill(audit.id, { projectPath: project }, library)).text).toBe(contents('Audit', 'Claude plugin instructions.'));
+  expect(library.skills.find(skill => skill.name === 'Personal')).toMatchObject({ source: 'claude-home', scope: 'user' });
+  expect(library.skills.find(skill => skill.name === 'RepoSkill')).toMatchObject({ source: 'project-claude', scope: 'repo' });
+  expect(library.errors.join(' ')).toContain('escape@team-market');
+
+  // A project's own settings can switch a plugin off, and a project-scoped install stays with its project.
+  await write(path.join(project, '.claude/settings.local.json'), JSON.stringify({ enabledPlugins: { 'review-pack@team-market': false } }));
+  expect((await listSkillLibrary({ projectPath: project })).skills.map(skill => skill.name)).not.toContain('Audit');
+  expect((await listSkillLibrary()).skills.map(skill => skill.name).sort()).toEqual(['Audit', 'Personal', 'Wrong']);
+});
+
+it('keeps a Claude plugin Skill\'s command across a plugin update', async () => {
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude'));
+  const claude = path.join(root, 'claude');
+  const cache = path.join(claude, 'plugins/cache/team-market/review-pack');
+  const install = async (version: string, body: string) => {
+    await write(path.join(cache, version, 'skills/audit/SKILL.md'), contents('Audit', body));
+    await write(path.join(claude, 'plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'review-pack@team-market': [{ scope: 'user', installPath: path.join(cache, version), version }] } }));
+  };
+  await write(path.join(claude, 'settings.json'), JSON.stringify({ enabledPlugins: { 'review-pack@team-market': true } }));
+  await install('1.0.0', 'First.');
+  const before = await listSkillLibrary();
+  await install('2.0.0', 'Updated.');
+  const after = await listSkillLibrary();
+  expect(after.skills.map(skill => skill.id)).toEqual(before.skills.map(skill => skill.id));
+  expect((await readLibrarySkill(before.skills[0]!.id, {}, after)).text).toBe(contents('Audit', 'Updated.'));
+});
+
+it('lists only the signed-in Claude account\'s synced Skills and stays quiet about links into ~/.agents/skills', async () => {
+  vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+  const home = path.join(root, 'home'), claude = path.join(home, '.claude');
+  const organization = '11111111-2222-3333-4444-555555555555', account = '66666666-7777-8888-9999-000000000000';
+  await write(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { organizationUuid: organization, accountUuid: account, emailAddress: 'x@example.invalid' } }));
+  await write(path.join(claude, `skills/synced/${organization}_${account}/pdf/SKILL.md`), contents('Pdf'));
+  await write(path.join(claude, 'skills/synced/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee_ffffffff-0000-1111-2222-333333333333/pdf/SKILL.md'), contents('OldAccountPdf'));
+  await write(path.join(home, '.agents/skills/shared/SKILL.md'), contents('Shared'));
+  await fs.symlink(path.join(home, '.agents/skills/shared'), path.join(claude, 'skills', 'shared'), process.platform === 'win32' ? 'junction' : 'dir');
+  const library = await listSkillLibrary();
+  expect(library.skills.map(skill => `${skill.name}:${skill.source}`).sort()).toEqual(['Pdf:claude-home', 'Shared:user-agents']);
+  expect(library.errors).toEqual([]);
+});
+
+it('shares the bounded Skills index across sources and writes each folder once', () => {
+  // Measured on a real Mac (2026-10-05): 21 ~/.agents and 5 Codex Skills filled the index first,
+  // and all 66 Claude Skills, plugin and synced, were left out.
+  const skill = (source: LibrarySkill['source'], folder: string, name: string, implicit = true): LibrarySkill => ({
+    id: `${name}--${source}`, name, description: `${name} does one careful thing well, with checks before and after every single step it takes.`,
+    path: `${folder}/${name}/SKILL.md`, scope: source === 'managed' ? 'managed' : 'user', source, managed: source === 'managed', allowImplicitInvocation: implicit });
+  const plugin = '/user-skills/claude/plugins/cache/claude-plugins-official/superpowers/6.4.1/skills';
+  const synced = '/user-skills/claude/skills/synced/26cc62c5-fb37-4985-a89b-dfd98481eecc_94f9fd01-b3be-4e08-804b-418e3fd927f7';
+  const skills = [
+    skill('managed', '/skills', 'clear-writing'),
+    ...Array.from({ length: 21 }, (_, index) => skill('user-agents', '/user-skills/agents/skills', `agents-${index}`)),
+    ...Array.from({ length: 5 }, (_, index) => skill('codex-home', '/user-skills/codex/skills', `codex-${index}`)),
+    ...Array.from({ length: 40 }, (_, index) => skill('claude-plugin', plugin, `plugin-${index}`)),
+    ...Array.from({ length: 26 }, (_, index) => skill('claude-home', synced, `synced-${index}`)),
+    skill('claude-plugin', plugin, 'hidden-helper', false)
+  ];
+  const text = skillLibraryInstructions({ skills, errors: [], roots: [], includeInstructions: true });
+  const listed = skills.filter(entry => text.includes(`/${entry.id}`));
+  expect(text.length).toBeLessThanOrEqual(2000 * 4 + 400);
+  expect(listed.length).toBeGreaterThanOrEqual(45);
+  for (const source of ['managed', 'user-agents', 'codex-home', 'claude-plugin', 'claude-home'] as const)
+    expect(listed.some(entry => entry.source === source), source).toBe(true);
+  expect(text).not.toContain('hidden-helper');
+  // Long shared folders appear once, as a heading the rows complete.
+  expect(text.split(plugin).length - 1).toBe(1);
+  expect(text.split(synced).length - 1).toBe(1);
+  expect(text).toContain(`${skills.length - 1 - listed.length} more Skills are installed`);
+  expect(text).toMatch(/pick (?:any of )?them with \//);
 });

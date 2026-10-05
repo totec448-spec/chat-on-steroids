@@ -3549,6 +3549,35 @@ it('names the wait for this chat’s own sub-agents without inventing a countdow
   expect(row.hidden).toBe(true);
 });
 
+it('says a Goal waits for its closed chat, without a spinner or a countdown', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  // The person closed the chat's tab before the Goal decided; nothing settles until it opens again.
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship the release', blocked: '', job: null,
+    goalWait: { reason: 'closed' }, goalDraft: null } });
+  await append([]);
+  const row = w.document.getElementById('goalLifecycle')!;
+  expect(row.hidden).toBe(false);
+  expect(row.textContent).toContain('Goal · Paused until this chat is open in the browser');
+  expect(row.textContent).not.toContain('Answer settling');
+  expect(row.getAttribute('aria-busy')).toBe('false');
+  expect(row.querySelector('.session-status.is-working')).toBeNull();
+  expect(row.querySelector('[role="timer"]')).toBeNull();
+  // The row offers the way on: opening the chat, as its sidebar row does.
+  const opened: string[] = [];
+  api.openSessionChat = async (id: string) => { opened.push(id); return { ok: true, data: true }; };
+  const open = row.querySelector<HTMLButtonElement>('button.dock-action')!;
+  expect(open.getAttribute('aria-label')).toBe('Open this chat in your browser');
+  open.click();
+  await vi.waitFor(() => expect(opened).toHaveLength(1));
+  // Any other wait has no such button.
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship the release', blocked: '', job: null,
+    goalWait: { reason: 'settling' }, goalDraft: null } });
+  await append([]);
+  expect(row.textContent).toContain('Answer settling');
+  expect(row.querySelector('button.dock-action')).toBeNull();
+});
+
 it('follows the accepted New Chat receipt while preserving a typed follow-up', async () => {
   const { w, live, append } = await boot([], false);
   const composer = w.document.getElementById('chatInput') as HTMLTextAreaElement;

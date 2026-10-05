@@ -113,8 +113,10 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         env:
           # Pixel comparisons, animation timing and a transparent overlay window need a real GPU; the
-          # hosted runner has none. They run with npm run verify:ui on a real machine.
-          VERIFY_UI_SKIP: verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-message-reactions.cjs
+          # hosted runner has none. They run with npm run verify:ui on a real machine. The built-in
+          # browser's sign-in check (local TLS sites behind a proxied session) exits within seconds on
+          # the hosted macOS runner, before its first step; it passes on Windows and locally.
+          VERIFY_UI_SKIP: verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-message-reactions.cjs,verify-cos-sign-in.cjs
           # The shared runner times out a different check now and then; one retry each, named as flaky.
           VERIFY_UI_RETRY: '1'
         run: npm run verify:ui

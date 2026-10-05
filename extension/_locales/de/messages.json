@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "Die App konnte die Aufgabe nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
   },
+  "popup_sign_in_transfer": {
+    "message": "Sitzung in den CoS browser übertragen"
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie-Zugriff abgelehnt. Erneut klicken."
+  },
+  "popup_sign_in_imported": {
+    "message": "Sitzung übertragen"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Sie sind im CoS browser angemeldet."
+  },
+  "popup_sign_in_failed": {
+    "message": "Fehlgeschlagen. Anmeldung in CoS neu starten."
+  },
   "popup_app_not_running_help": {
     "message": "Stelle sicher, dass Chat On Steroids auf diesem Computer geöffnet ist. Die Begleit-Erweiterung verbindet sich dann von selbst."
   }

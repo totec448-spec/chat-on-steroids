@@ -320,7 +320,7 @@ describe('projectLive', () => {
   });
 
   it('says why a goal has not moved yet, with the deadline only when there is one', () => {
-    for (const reason of ['tools', 'workers', 'quiet', 'silence', 'listening', 'native-busy', 'settling'] as const) {
+    for (const reason of ['tools', 'workers', 'quiet', 'silence', 'listening', 'native-busy', 'settling', 'closed'] as const) {
       expect(reads.projectLive(controls({ goalWait: { reason } })).goalWait).toEqual({ reason, until: null });
     }
     expect(reads.projectLive(controls({ goalWait: { reason: 'quiet', until: 12_345 } })).goalWait).toEqual({ reason: 'quiet', until: 12_345 });

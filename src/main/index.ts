@@ -8,6 +8,9 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
 import path from 'node:path';
 import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
+import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
+import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
+import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
@@ -77,6 +80,7 @@ import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
+import { loadedCosBrowser, onCosBrowserLoaded, syncCosBrowser } from './cos-browser/selection.js';
 import {
   applyLoginStartup,
   isBackgroundLaunch,
@@ -323,11 +327,21 @@ function refreshTray(): void {
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
   tray.setToolTip(`Chat On Steroids — ${label}`);
+  const cosBrowser = loadedCosBrowser();
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label, enabled: false },
       { type: 'separator' },
       { label: mainText('Open'), click: windowActivation.request },
+      // The CoS browser lives in the tray: its windows never sit in a taskbar or dock. Only once
+      // it is selected and loaded; the default extension path shows exactly the menu it had.
+      ...(cosBrowser && getConfig().ui.chatBrowser === 'cos' ? [{
+        label: mainText(cosBrowser.visible() ? 'Hide browser' : 'Show browser'),
+        click: () => {
+          if (cosBrowser.visible()) cosBrowser.hide();
+          else void cosBrowser.show().catch(error => logWarn(`cos browser: could not show: ${error instanceof Error ? error.message : String(error)}`));
+        }
+      }] : []),
       {
         label: mainText(running ? 'Disconnect' : 'Connect'),
         click: () => void (running ? disconnect() : connect())
@@ -358,6 +372,8 @@ void app.whenReady().then(async () => {
     snapshotLogOnCrash(`${origin}: ${error.stack ?? error.message}`);
   });
   initConfigPath(userData);
+  initConnectorProofPath(userData);
+  initBrowserProofPath(userData);
   initSecretsPath(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
@@ -379,6 +395,10 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  await loadConnectorProof();
+  await loadBrowserProof();
+  // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
+  for (const surface of await enrolledPluginSurfaces()) notePluginInstalled(surface);
   await pluginManager.initialize(userData);
   if (windowActivation.isDisabled()) return;
   try { applyLoginStartup(app, getConfig().ui.startAtLogin === true); }
@@ -514,6 +534,8 @@ void app.whenReady().then(async () => {
   tray.on('click', windowActivation.request);
   refreshTray();
   onStatusChange(refreshTray);
+  // The built-in browser's own hooks live in its module, which loads only once it is selected.
+  onCosBrowserLoaded(cosBrowser => { cosBrowser.onChange(refreshTray); refreshTray(); });
   onMainTextsChange(refreshTray);
   onMainTextsChange(() => writeDurableSoon(MAIN_TEXTS_STATE, mainTextTranslations()));
 
@@ -526,9 +548,11 @@ void app.whenReady().then(async () => {
 
   // Recording, workers and direct browser tools share one extension transport.
   // ipc.ts uses the same eligibility rule when settings change.
+  // The CoS browser starts once the bridge listens: its extension looks for the app as soon as it
+  // loads, and a miss would leave it waiting for its next retry.
   if (browserExtensionRequired(getConfig())) {
-    void startBridge();
-  }
+    void startBridge().finally(() => void syncCosBrowser());
+  } else void syncCosBrowser();
   // Opt-in, and only once every fact it projects has been restored. ipc.ts starts and stops it
   // when the setting changes; a failed bind is logged and leaves the rest of the app untouched.
   if (getConfig().controlApi.enabled) {
@@ -595,7 +619,8 @@ app.on('will-quit', (event) => {
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close()]
+        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+          Promise.resolve().then(() => loadedCosBrowser()?.stop())]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.
       { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
@@ -627,7 +652,10 @@ app.on('will-quit', (event) => {
 
 // Belt and braces: no web contents anywhere in this app may open a window or
 // navigate. External links go through the vetted allowlist in ipc.ts instead.
+// The CoS browser's pages are the one exception: a browser has to navigate, and signing in to
+// ChatGPT is nothing but navigations and redirects. Its host sets their window rules itself.
 app.on('web-contents-created', (_event, contents) => {
+  if (loadedCosBrowser()?.browses(contents)) return;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
   contents.on('will-redirect', (event) => event.preventDefault());

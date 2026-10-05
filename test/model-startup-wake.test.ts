@@ -31,7 +31,8 @@ it('reattaches wake transport on the first authenticated HTTP success before an 
   await h.call('/events');
   expect(h.sockets).toHaveLength(1);
   const socket = h.sockets[0];
-  expect(socket.url).toBe('ws://127.0.0.1:8765/wake');
+  // The person's browser says which copy it is; the built-in browser's copy says host=cos.
+  expect(socket.url).toBe('ws://127.0.0.1:8765/wake?host=browser');
   socket.onopen(); expect(socket.send).toHaveBeenCalledWith('paired-secret');
   socket.onmessage({ data: 'wake' }); expect(h.maintain).toHaveBeenCalledWith(true);
   await h.call('/events'); expect(h.sockets).toHaveLength(1);

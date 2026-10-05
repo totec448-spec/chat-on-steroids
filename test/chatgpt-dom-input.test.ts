@@ -1179,6 +1179,16 @@ describe('transport-card scan cost', () => {
     ]);
   });
 
+  it('classifies Stream cache expired with a localized Retry control as recoverable', () => {
+    const card = document.createElement('div');
+    card.innerHTML = '<p>Stream cache expired </p><button>Reintentar</button>';
+    document.body.append(card);
+
+    expect(api.errors()).toEqual([
+      expect.objectContaining({ text: 'Stream cache expired', recoverable: true })
+    ]);
+  });
+
   it.each([500, 5000])('rejects a %i-character container before reading its rendered text', length => {
     const host = document.createElement('div');
     const control = document.createElement('button');

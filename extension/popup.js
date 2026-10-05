@@ -21,6 +21,8 @@ let overwriteEnabled = true;
 let showTimes = false;
 let latest = { status: null, tab: null };
 let openedOnFailure = false;
+let transferringSignIn = false;
+let transferredSignIn = false;
 
 // ------------------------------------------------------------------ formatting
 
@@ -447,9 +449,43 @@ async function refresh() {
 
   paintAlert(status, info);
   paintDetails(status, info);
+  $('signInTransfer').hidden = !status?.signInOffer && !transferredSignIn && !$('signInTransferResult').textContent;
+  $('signInTransferBtn').disabled = transferringSignIn || transferredSignIn || !status?.signInOffer;
 }
 
 // -------------------------------------------------------------------- controls
+
+$('signInTransferBtn').addEventListener('click', async () => {
+  const offer = latest.status?.signInOffer;
+  if (!offer || transferringSignIn) return;
+  const section = $('signInTransfer');
+  const result = $('signInTransferResult');
+  transferringSignIn = true;
+  $('signInTransferBtn').disabled = true;
+  section.setAttribute('aria-busy', 'true');
+  result.textContent = '';
+  try {
+    // Request from this user gesture, before any messaging/await can lose Chrome's gesture.
+    const allowed = await chrome.permissions.request({ permissions: ['cookies'] });
+    if (!allowed) {
+      result.textContent = t('popup_sign_in_permission', 'Cookie access not allowed. Click again.');
+      return;
+    }
+    const reply = await chrome.runtime.sendMessage({ type: 'cos_sign_in_transfer', id: offer.id });
+    transferredSignIn = reply?.imported === true;
+    if (transferredSignIn) {
+      // The receipt takes the button's place.
+      $('signInTransferBtn').hidden = true;
+      $('signInTransferDone').hidden = false;
+    } else result.textContent = t('popup_sign_in_failed', 'Transfer failed. Start sign-in again from CoS.');
+  } catch {
+    result.textContent = t('popup_sign_in_failed', 'Transfer failed. Start sign-in again from CoS.');
+  } finally {
+    transferringSignIn = false;
+    section.removeAttribute('aria-busy');
+    $('signInTransferBtn').disabled = transferredSignIn;
+  }
+});
 
 function syncOverwrite() {
   $('overwriteToggle').checked = overwriteEnabled;
