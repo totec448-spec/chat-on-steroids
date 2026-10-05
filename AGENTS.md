@@ -2691,11 +2691,13 @@ and terminal custody while changing the provider binding **S: A → B**. Compact
 task and must not turn source A into an independently recoverable chat.
 
 `session/continuation.ts` owns the transaction; `handoff.ts` validates the brief; `bridge.ts`
-and the extension transport it. `resume-gate.ts` is a short pre-commit admission gate, not a
-second continuation owner. Unknown-chat recording honors its existing 60-second claim window
-instead of creating a shadow session after five seconds. Commit/abort releases the wait early;
-one claim window bounds each admission wait even when overlapping claims appear. Known sessions
-remain immediately readable. The ledger phases are:
+and the extension transport it. `resume-gate.ts` is a pre-commit admission gate, not a second
+continuation owner. Opening/pre-dispatch claims expire after 60 seconds. Once destination Send
+crosses its durable dispatch fence, the gate stays armed until that continuation commits, aborts
+or explicitly releases the dispatch, because ChatGPT may already hold the bootstrap in a chat
+whose id is still unavailable. Unknown-chat recording still waits at most one 60-second admission
+window per attempt, so an unrelated chat cannot be blocked forever. Known sessions remain
+immediately readable. The ledger phases are:
 
 ```text
 awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
