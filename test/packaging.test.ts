@@ -288,6 +288,18 @@ describe('cross-platform packaging targets', () => {
     expect(script).not.toContain('if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/canary"');
   });
 
+  it('keeps every input required by the pinned first-interaction action without restoring PR events', () => {
+    const welcome = yamlFile('.github/workflows/welcome.yml');
+    const steps = welcome.jobs.welcome.steps as Array<Record<string, any>>;
+    const firstInteraction = steps.find((step) => step.uses === 'actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d');
+
+    expect(firstInteraction).toBeTruthy();
+    expect(String(firstInteraction?.with?.issue_message ?? '').trim()).not.toBe('');
+    expect(String(firstInteraction?.with?.pr_message ?? '').trim()).not.toBe('');
+    expect(welcome.on).toHaveProperty('issues');
+    expect(welcome.on).not.toHaveProperty('pull_request_target');
+  });
+
   it('assembles every platform artifact in the reusable release workflow', () => {
     const workflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const parsed = yamlFile('.github/workflows/release.yml');

@@ -26,3 +26,7 @@ jobs:
             - the steps that lead to the problem, and what you expected instead.
 
             If we need more details we will ask here. Screenshots are welcome; please blur names, chat text and paths.
+          # v3.1.0 reads both messages as required inputs before it checks which event fired.
+          # This workflow remains issue-only; pull requests are welcomed by scheduled PR triage.
+          pr_message: |
+            Thanks for your first pull request, and welcome! 👋
