@@ -3301,6 +3301,10 @@ regeneration are documented in `docs/pet/PRODUCTION.md`; pet unit/DOM tests, `sc
 cover this owner without provider conversations.
 `scripts/verify-pet-performance.cjs` measures the production pet in isolated
 Electron with unchanged artwork, process CPU deltas and actual animation wakes.
+On Windows the desktop Pets host must receive a bounded native shape before it is
+shown, and it stays bounded to the visible pet/tray/menu regions while click-through.
+The `pet-overlay:bounds` projection advertises that idle-shape requirement to the
+renderer; Linux/macOS retain their existing full click-through visual-surface contract.
 
 `renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer
@@ -3362,6 +3366,12 @@ dragging or Alt+Up/Down moves a parent and its worker children within its curren
 unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
 project ownership. Pointer custody defers row replacement during live refresh and revalidates
 membership before saving. Off-page order survives partial list refreshes.
+`renderer/sidebar-pins.ts` keeps pinned chats (#1133) as a bounded localStorage preference (500 ids;
+the oldest gives way, a pin is never refused). A pinned chat leads its own list (main Chats or its
+project) and has its own drag scope `pinned:<scope>`, so manual order is kept inside the pinned and
+unpinned groups and a drag never crosses between them. Only recorded chats are pinnable, never
+workers or unattributed activity. Pinned rows carry a quiet pin mark at rest, and Pin/Unpin
+(`aria-pressed`) sits with the row actions, keeping keyboard focus on the rebuilt row's button.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.

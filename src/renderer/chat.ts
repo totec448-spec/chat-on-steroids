@@ -18,6 +18,7 @@ import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -176,6 +177,10 @@ function selectedLocalProject(): LocalProject | null {
 const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
+let sidebarPins: ReturnType<typeof createSidebarPins> | undefined;
+/** Only a person's own recorded chats can be pinned; workers live inside their task's row. */
+const pinnable = (entry: SessionSummary): boolean => !!entry.conversationId && entry.origin?.kind !== 'worker';
+const pinnedChat = (entry: SessionSummary): boolean => pinnable(entry) && sidebarPins?.has(entry.id) === true;
 let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
 function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
 let selectionGeneration = 0;
@@ -439,7 +444,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     top.append(title);
   }
   const badges = sessionBadges(summary);
-  ui(row, 'title', () => [summary.title || t("Untitled session"), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
+  const pinned = pinnedChat(summary);
+  if (pinned) {
+    row.classList.add('is-pinned');
+    const mark = icon('i-pinned', 'ico sess-pin-mark');
+    top.append(mark);
+  }
+  ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
     document.getElementById('sessionTooltip')?.remove();
     const tip = el('div', 'session-tooltip', row.title);
@@ -562,6 +573,26 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         void toggleSessionTrust(summary.id, summary.conversationId!, !trusted);
       });
       actions.push(trust);
+    }
+
+    if (pinnable(summary)) {
+      const pin = document.createElement('button');
+      pin.className = `btn sess-action sess-pin${pinned ? ' is-pinned' : ''}`;
+      pin.type = 'button';
+      pin.setAttribute('aria-pressed', String(pinned));
+      ui(pin, 'title', () => pinned ? t("Unpin this chat") : t("Pin this chat to the top of its list"));
+      pin.append(icon(pinned ? 'i-pinned' : 'i-pin'));
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation();
+        sidebarPins?.toggle(summary.id);
+        paintSessions();
+        // Keep the keyboard on the same chat's Pin control after the row is rebuilt. Its actions
+        // show only while the row has focus, so the row takes focus first.
+        const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
+        rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
+        rebuilt?.querySelector<HTMLElement>('.sess-pin')?.focus({ preventScroll: true });
+      });
+      actions.push(pin);
     }
 
     const rename = document.createElement('button');
@@ -852,17 +883,22 @@ function paintSessions(): void {
     if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
     if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
   };
-  const orderedSessions = sidebarOrder
-    ? [...new Set(sessions.map(entry => projectGroup(entry.projectId) ?? ''))].flatMap(scope =>
-      sidebarOrder!.ordered(scope, sessions.filter(entry => (projectGroup(entry.projectId) ?? '') === scope)))
-    : sessions;
+  // Pinned chats lead their own list (#1133); each group keeps its own manual order.
+  const orderedSessions = [...new Set(sessions.map(entry => projectGroup(entry.projectId) ?? ''))].flatMap(scope => {
+    const members = sessions.filter(entry => (projectGroup(entry.projectId) ?? '') === scope);
+    const group = (pinned: boolean) => {
+      const rows = members.filter(entry => pinnedChat(entry) === pinned);
+      return sidebarOrder ? sidebarOrder.ordered(pinnedSortScope(scope, pinned), rows) : rows;
+    };
+    return [...group(true), ...group(false)];
+  });
   for (const entry of orderedSessions) {
     if (entry.origin?.kind === 'worker') continue;
     if (!entry.conversationId && entry.origin?.kind !== 'desktop') { diagnostics.push(entry); continue; }
     const projectId = projectGroup(entry.projectId);
     const target: HTMLElement[] = projectId ? [] : rows;
     const row = sessionRow(entry); target.push(row);
-    row.dataset.sortScope = projectId ?? '';
+    row.dataset.sortScope = pinnedSortScope(projectId ?? '', pinnedChat(entry));
     const workers = children.get(entry.id); if (workers) group(entry.id, workers, row, target);
     if (projectId) {
       const tasks = projectRows.get(projectId) ?? [];
@@ -5593,10 +5629,11 @@ function selectNewChat(projectId: string | null = null): void {
 
 export function initChat(next: Deps): void {
   sidebarCompletion = createSidebarCompletionState();
+  sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
-      .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' }))
+      .map(entry => ({ id: entry.id, scope: pinnedSortScope(projectGroup(entry.projectId) ?? '', pinnedChat(entry)) }))
   ], paintSessions);
   deps = next;
   const stopComposerHeightMotion = installComposerHeightMotion($('composer'));
