@@ -3376,21 +3376,23 @@ describe('recording authored message text', () => {
 
 describe('canonical Fiber transcript ingestion in 1.8', () => {
   it.each([
-    ['marked as Markdown', true, 'Run `echo two` and keep #tags as they are.'],
-    ['plain', false, 'Run \\`echo two\\` and keep \\#tags as they are.']
-  ] as const)('records a user message ChatGPT stored %s the way ChatGPT shows it', async (_case, markdown, recorded) => {
+    ['marked as Markdown', true, 'Run `echo two` and keep #tags as they are.', 'Run `echo two` and keep #tags as they are.'],
+    ['unmarked but shown unescaped', false, 'Run `echo two` and keep #tags as they are.', 'Run `echo two` and keep #tags as they are.'],
+    ['unmarked and shown with its backslashes', false, 'Run \\`echo two\\` and keep \\#tags as they are.', 'Run \\`echo two\\` and keep \\#tags as they are.']
+  ] as const)('records a user message ChatGPT stored escaped (%s) the way ChatGPT shows it', async (_case, markdown, shown, recorded) => {
     // ChatGPT stores page-inserted text (Goal replies, app-sent messages with the Core mention) as
     // escaped Markdown and flags it; it shows the unescaped text. A plain copy is a person's literal.
     live = await harness();
     const stored = 'Run \\`echo two\\` and keep \\#tags as they are.';
-    const section = userTurn(live.document, `stored-${markdown}`, 'Run `echo two` and keep #tags as they are.', { sent: false });
-    await bindFiberTurns([{ section, turn: { turnId: `stored-${markdown}`, messages: [{ role: 'user', stable: true,
-      messageId: `m-stored-${markdown}`, rawMessageId: `m-stored-${markdown}`, rawText: stored, ...(markdown ? { markdown: true } : {}) }] } }]);
+    const id = `stored-${_case.replaceAll(' ', '-')}`;
+    const section = userTurn(live.document, id, shown, { sent: false });
+    await bindFiberTurns([{ section, turn: { turnId: id, messages: [{ role: 'user', stable: true,
+      messageId: `m-${id}`, rawMessageId: `m-${id}`, rawText: stored, ...(markdown ? { markdown: true } : {}) }] } }]);
     await live.hook.flush();
     await settle();
     live.hook.observe();
     await live.hook.flush();
-    const users = emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === `m-stored-${markdown}`);
+    const users = emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === `m-${id}`);
     expect(users.at(-1)?.text).toBe(recorded);
   });
 
