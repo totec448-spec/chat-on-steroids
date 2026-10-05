@@ -76,8 +76,11 @@ app.whenReady().then(async () => {
     assert.deepEqual(rows.map(r=>r.titleMarks),[['bridge'],[],[]],'A title match is marked in the title');
     assert.equal(rows[0].titleClipped,false);
     assert.ok(rows.every(r=>!r.overflow),'No result row overflows');
-    const contrast=await js(`(()=>{const m=document.querySelector('#searchResults mark'),c=getComputedStyle(m);return [c.color,c.backgroundColor]})()`);
-    assert.notEqual(contrast[0],contrast[1],'Marked text is readable');
+    // Title and snippet marks share the theme's wash: never the browser's own yellow highlight.
+    const marks=await js(`[...document.querySelectorAll('#searchResults mark')].map(m=>{const c=getComputedStyle(m);return {text:m.textContent,color:c.color,background:c.backgroundColor}})`);
+    assert.ok(marks.length>=5,'Marks are painted: '+JSON.stringify(marks));
+    assert.equal(new Set(marks.map(m=>m.background)).size,1,'Every mark has the same background: '+JSON.stringify(marks));
+    assert.ok(marks.every(m=>m.background!=='rgb(255, 255, 0)'&&m.color!==m.background),'Marks use the theme, readably: '+JSON.stringify(marks));
     await capture(`${theme}-results.png`);
     await key('Escape');
     await until(`!document.getElementById('sessionList').hidden`);
