@@ -1963,5 +1963,6 @@
   "{0} sub-agents in this round": "이 라운드의 하위 에이전트 {0}개",
   "The Chat On Steroids browser is still running": "Chat On Steroids 브라우저가 계속 실행 중입니다",
   "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "채팅은 계속 진행됩니다. 다시 열려면 트레이 아이콘 메뉴에서 ‘브라우저 표시’를 선택하세요.",
-  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "채팅은 계속 진행됩니다. 다시 열려면 메뉴 막대 아이콘 메뉴에서 ‘브라우저 표시’를 선택하세요."
+  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "채팅은 계속 진행됩니다. 다시 열려면 메뉴 막대 아이콘 메뉴에서 ‘브라우저 표시’를 선택하세요.",
+  "Recent": "최근"
 }
