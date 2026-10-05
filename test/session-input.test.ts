@@ -121,6 +121,32 @@ describe('durable user input ownership', () => {
     resetInputForTests();
     expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
   });
+  it('marks the person\'s own request for a picture to go out without the Core mention, and nothing else', async () => {
+    binding.finishEnabled = false;
+    const claim = async (args: Partial<InputArgs>) => {
+      const row = await enqueueInput(input(args));
+      const claimed = await claimBrowserInput(row.id, 'page', binding.conversationId);
+      await acknowledgeBrowserInput(row.id, 'page', binding.conversationId, `m-${row.id}`).catch(() => undefined);
+      return claimed as (InputEntry & { coreMention?: false }) | null;
+    };
+    expect(await claim({ text: 'Create an image of a fox in a misty forest' })).toMatchObject({ coreMention: false });
+    expect(await claim({ text: 'Fix the failing test in src/app.ts' })).not.toHaveProperty('coreMention');
+    // Generated openings and workers keep the mention.
+    expect(await claim({ text: 'Create an image of a fox', authoredSource: 'objective' })).not.toHaveProperty('coreMention');
+    binding.origin = 'worker';
+    try { expect(await claim({ text: 'Create an image of a fox' })).not.toHaveProperty('coreMention'); }
+    finally { binding.origin = 'desktop'; }
+    // "make it brighter" changes a picture only right after ChatGPT made one.
+    expect(await claim({ text: 'make it brighter' })).not.toHaveProperty('coreMention');
+    const store = await import('../src/main/session/store.js');
+    const original = vi.mocked(store.readRecentEvents).getMockImplementation()!;
+    vi.mocked(store.readRecentEvents).mockImplementation(async (id, count, options) => options?.kinds?.includes('native_image') ? [
+      { kind: 'user_message', seq: 1, time: now, source: 'extension', messageId: 'q', message: { text: 'draw a fox', chars: 10, truncated: false } },
+      { kind: 'native_image', seq: 2, time: now, source: 'extension', messageId: 'a', providerStatus: 'finished_successfully' }
+    ] as never : original(id, count, options));
+    try { expect(await claim({ text: 'make it brighter' })).toMatchObject({ coreMention: false }); }
+    finally { vi.mocked(store.readRecentEvents).mockImplementation(original); }
+  });
   it('preserves messages beyond the former composer limit through admission, restart and browser claim', async () => {
     binding.finishEnabled = false;
     const text = 'Long user request. '.repeat(2000);
