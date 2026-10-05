@@ -438,6 +438,37 @@ code {
 .view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
 .view-menu-items { position: absolute; top: calc(100% + 5px); left: 0; z-index: 100; width: 260px; padding: 6px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003; }
 .view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
+/* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
+:is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
+  position: fixed; z-index: 200; display: grid; gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
+  background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
+  transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
+.row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
+@keyframes row-menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes row-menu-out { from { opacity: 1; } to { opacity: 0; } }
+.row-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; font: inherit; font-size: calc(13px * var(--text-scale, 1)); text-align: start; cursor: pointer;
+  transition: background-color 90ms ease, color 90ms ease; }
+.row-menu-item:hover:not(:disabled), .row-menu-item:focus-visible:not(:disabled), .row-menu-item[aria-expanded='true'] { background: var(--row-menu-hover); outline: none; }
+.row-menu-item.is-danger:hover:not(:disabled), .row-menu-item.is-danger:focus-visible:not(:disabled) { background: color-mix(in srgb, var(--popover, var(--card)) 84%, var(--red)); }
+.row-menu-item:hover > .ico:not(.row-menu-chevron, .row-menu-check), .row-menu-item:focus-visible > .ico:not(.row-menu-chevron, .row-menu-check) { color: var(--ink); }
+.row-menu-item.is-danger:hover > .ico, .row-menu-item.is-danger:focus-visible > .ico { color: var(--red); }
+.row-menu-item:focus { outline: none; }
+.row-menu-item:disabled { opacity: .45; cursor: default; }
+.row-menu-item > .ico { --ico: 15px; flex: none; color: var(--soft); }
+.row-menu-item.is-danger, .row-menu-item.is-danger > .ico { color: var(--red); }
+.row-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-menu-gap { flex: none; width: 15px; }
+.row-menu-item > .row-menu-chevron, .row-menu-item > .row-menu-check { --ico: 13px; margin-inline-start: auto; color: var(--faint); }
+.row-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
+.row-menu-swatch { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--edge); background: transparent; }
+.row-menu-swatch[data-color='blue'] { background: #4c7fc1; border-color: #0002; }
+.row-menu-swatch[data-color='green'] { background: #3f9b68; border-color: #0002; }
+.row-menu-swatch[data-color='amber'] { background: #c38b2f; border-color: #0002; }
+.row-menu-swatch[data-color='purple'] { background: #8063b2; border-color: #0002; }
+.row-menu-swatch[data-color='rose'] { background: #bd5d72; border-color: #0002; }
+.row-menu-swatch[data-color='teal'] { background: #388f91; border-color: #0002; }
+@media (prefers-reduced-motion: reduce) { .row-menu, .row-menu-leaving, .row-menu-item { animation: none; transition: none; } }
 .view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
 .view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
 .app.is-sidebar-collapsed { grid-template-columns: minmax(0, 0px) minmax(0, 1fr); }
@@ -2204,16 +2235,26 @@ input[readonly] {
 @keyframes session-spin { to { transform: rotate(360deg); } }
 .session-status.is-unseen { width: 8px; height: 8px; background: var(--accent); }
 .session-status.is-failed { background: var(--red); }
-.sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
-.sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
+/* The row's menu button floats over its end, so hovering never reflows the title or the list:
+   the title (and its pin mark or status) fades out under it instead of losing its ellipsis to a gap. */
+.sess-actions { position: absolute; inset-block: 0; right: 6px; display: flex; align-items: center; flex: none; gap: 1px;
+  opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.sess:hover .sess-actions, .sess:focus-within .sess-actions, .sess:has(.row-menu-button[aria-expanded='true']) .sess-actions { opacity: 1; pointer-events: auto; }
+.sess:is(:hover, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, transparent 30px, #000 54px); mask-image: linear-gradient(to left, transparent 0, transparent 30px, #000 54px); }
+.sess:is(:hover, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top b { text-overflow: clip; }
+.sess:has(.sess-rename) .sess-top { -webkit-mask-image: none; mask-image: none; }
+/* A row with sub-agents: at rest its arrow sits in the column every row uses; on hover it slides
+   left and the menu button takes that column. A transform, so the title never reflows: its end fades
+   out under the arrow as it does under the button. */
+.sess > .worker-toggle { transform: translateX(3px); transition: transform 160ms ease; }
+.sess:is(:hover, :focus-within, :has(.row-menu-button[aria-expanded='true'])) > .worker-toggle { transform: translateX(-24px); }
+@media (prefers-reduced-motion: reduce) { .sess > .worker-toggle { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .sess-actions { transition: none; } }
 /* While a chat is being named, its field takes the actions' place (#1107). */
 .sess:has(.sess-rename) .sess-actions { display: none; }
-.sess-action { padding: 3px; border: 0; background: transparent; }
 /* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
 .sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
-.sess:hover .sess-pin-mark, .sess:focus-within .sess-pin-mark { display: none; }
-.sess-pin.is-pinned { color: var(--accent); }
-.sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
 .session-diagnostics .sess-top b { font-size: calc(13px * var(--text-scale, 1)); }
@@ -3563,34 +3604,26 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .project-group { margin: 8px 0; }
 .project-group[data-sort-scope] { position: relative; }
-.project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 8px; list-style: none; }
+.project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 6px 6px 8px; border-radius: 8px; list-style: none; }
+/* Like a chat row: the row lights up under the pointer, and its menu button sits in the chats' column. */
+.project-heading:hover, .project-heading:has(.project-menu[aria-expanded='true']) { background: var(--hover); }
 .project-heading[data-sort-handle] { cursor: grab; user-select: none; }
 .project-heading::-webkit-details-marker { display: none; }
-.project-color-wrap { position: relative; flex: 0 0 auto; display: grid; place-items: center; }
-.project-color { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; opacity: 0; }
-.project-color::before { content: ''; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--edge); background: var(--sunk); box-shadow: inset 0 0 0 2px var(--page); }
-.project-color:not([data-color='']) { opacity: 1; }
-.project-heading:hover .project-color, .project-heading:focus-within .project-color, .project-color[aria-expanded='true'] { opacity: 1; }
-.project-color[data-color='blue']::before, .project-color-choice[data-color='blue']::before { background: #4c7fc1; }
-.project-color[data-color='green']::before, .project-color-choice[data-color='green']::before { background: #3f9b68; }
-.project-color[data-color='amber']::before, .project-color-choice[data-color='amber']::before { background: #c38b2f; }
-.project-color[data-color='purple']::before, .project-color-choice[data-color='purple']::before { background: #8063b2; }
-.project-color[data-color='rose']::before, .project-color-choice[data-color='rose']::before { background: #bd5d72; }
-.project-color[data-color='teal']::before, .project-color-choice[data-color='teal']::before { background: #388f91; }
-.project-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.project-color-menu { position: absolute; z-index: 45; top: calc(100% + 4px); right: 0; display: grid; grid-template-columns: repeat(6, 28px); gap: 5px; width: max-content; padding: 6px; border: 1px solid var(--edge); border-radius: 10px; background: var(--popover, var(--card)); box-shadow: 0 8px 28px #0004; cursor: default; }
-.project-color-menu[hidden] { display: none; }
-.project-color-choice { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
-.project-color-choice:not([data-color=''])::before { content: ''; width: 16px; height: 16px; border-radius: 50%; border: 1px solid #0002; }
-.project-color-choice[data-color=''] { grid-column: 1 / -1; width: 100%; height: 26px; font-size: calc(11px * var(--text-scale, 1)); color: var(--soft); }
-.project-color-choice:hover:not(:disabled), .project-color-choice:focus-visible { background: var(--hover); }
-.project-color-choice[aria-checked='true'] { border-color: var(--soft); }
-.project-color-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-new { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; opacity: 0; }
-.project-heading:hover .project-new, .project-heading:focus-within .project-new { opacity: 1; }
-.project-remove { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; padding: 4px; color: var(--faint); opacity: 0; }
-.project-heading:hover .project-remove, .project-heading:focus-within .project-remove { opacity: 1; }
+/* A project's color tints its folder; the menu (⋯ or a right click) changes it. */
+.project-group[data-project-color='blue'] > .project-heading > .ico { color: #4c7fc1; }
+.project-group[data-project-color='green'] > .project-heading > .ico { color: #3f9b68; }
+.project-group[data-project-color='amber'] > .project-heading > .ico { color: #c38b2f; }
+.project-group[data-project-color='purple'] > .project-heading > .ico { color: #8063b2; }
+.project-group[data-project-color='rose'] > .project-heading > .ico { color: #bd5d72; }
+.project-group[data-project-color='teal'] > .project-heading > .ico { color: #388f91; }
+/* One "⋯" per row, shown on hover or focus and while its menu is open. */
+.row-menu-button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--faint); }
+.row-menu-button:hover, .row-menu-button[aria-expanded='true'] { color: var(--ink); background: var(--hover); }
+.row-menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.project-menu { opacity: 0; transition: opacity 120ms ease; }
+@media (prefers-reduced-motion: reduce) { .project-menu { transition: none; } }
+.project-heading:hover .project-menu, .project-heading:focus-within .project-menu, .project-menu[aria-expanded='true'] { opacity: 1; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }

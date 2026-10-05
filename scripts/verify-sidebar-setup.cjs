@@ -107,28 +107,38 @@ app.whenReady().then(async () => {
     // before checking the idle baseline; hover/focus are separately intended to reveal the control.
     win.webContents.sendInputEvent({type:'mouseMove',x:1090,y:890});
     await js('document.activeElement?.blur(); new Promise(r=>requestAnimationFrame(r))');
-    assert.equal(await js(`document.querySelector('.project-color').dataset.color`),'');
-    assert.equal(await js(`getComputedStyle(document.querySelector('.project-color')).opacity`),'0');
-    await js(`document.querySelector('.project-color').click()`);
-    assert.equal(await js(`document.querySelector('.project-color').getAttribute('aria-expanded')`),'true');
-    await js(`document.querySelector('[data-project-color-choice="blue"]').focus()`);
-    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'});
-    // Include Enter's native character event, as for the summary activation below.
-    win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
-    win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
+    // One quiet "⋯" on the project row; its menu replaces the color dot, pencil and trash.
+    assert.equal(await js(`document.querySelector('.project-group').dataset.projectColor`),undefined);
+    assert.equal(await js(`getComputedStyle(document.querySelector('.project-menu')).opacity`),'0');
+    assert.equal(await js(`document.querySelector('.project-heading').querySelectorAll('button').length`),1);
+    const press=keyCode=>{for (const type of ['keyDown','char','keyUp']) if (type!=='char'||keyCode==='Enter') win.webContents.sendInputEvent({type,keyCode:type==='char'?'\r':keyCode});};
+    await js(`document.querySelector('.project-menu').click()`);
+    assert.equal(await js(`document.querySelector('.project-menu').getAttribute('aria-expanded')`),'true');
+    // The menu and its submenu stay inside the window: the old color popup was cut by the sidebar.
+    await js(`document.querySelector('.row-menu [data-row-action="color"]').focus()`);
+    press('Right');
+    for(let i=0;i<100 && await js(`document.querySelectorAll('.row-menu').length!==2`);i++) await new Promise(r=>setTimeout(r,10));
+    const fits=await js(`[...document.querySelectorAll('.row-menu')].map(m=>{const r=m.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})`);
+    assert.deepEqual(fits,[true,true],'The menu and its Color submenu fit in the window');
+    assert.equal(await js(`document.activeElement.dataset.rowAction`),'color-none','The submenu opens on the current color');
+    await screenshot('project-menu-color.png');
+    press('Down');
+    assert.equal(await js(`document.activeElement.dataset.rowAction`),'color-blue');
+    press('Enter');
     for(let i=0;i<100 && await js(`document.querySelector('.project-group').dataset.projectColor!=='blue'`);i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.querySelector('.project-group').dataset.projectColor`),'blue');
-    assert.equal(await js(`document.querySelector('.project-color').dataset.color`),'blue');
-    assert.equal(await js(`getComputedStyle(document.querySelector('.project-color')).opacity`),'1');
+    assert.equal(await js(`getComputedStyle(document.querySelector('.project-heading > .ico')).color`),'rgb(76, 127, 193)','The folder wears the project color');
+    assert.equal(await js(`document.querySelectorAll('.row-menu').length`),0);
     await screenshot('project-color-blue.png');
-    assert.equal(await js(`document.activeElement===document.querySelector('.project-color')`),true,
-      'Saving a keyboard-selected swatch must return focus to its project color button');
+    assert.equal(await js(`document.activeElement===document.querySelector('.project-menu')`),true,
+      'Saving a keyboard-selected color must return focus to its project menu button');
     // A later completion must not take focus back from a newer composer interaction.
     await js(`window.originalColorSave=window.api.setProjectColor;
       window.api.setProjectColor=(id,value)=>new Promise(resolve=>{window.completeColorSave=()=>window.originalColorSave(id,value).then(resolve)});
-      document.querySelector('.project-color').click();
-      document.querySelector('[data-project-color-choice="green"]').focus()`);
-    for (const type of ['keyDown','char','keyUp']) win.webContents.sendInputEvent({type,keyCode:type==='char'?'\r':'Enter'});
+      document.querySelector('.project-menu').click();
+      document.querySelector('.row-menu [data-row-action="color"]').click();
+      document.querySelector('.row-menu [data-row-action="color-green"]').focus()`);
+    press('Enter');
     assert.equal(await js(`typeof window.completeColorSave`),'function');
     const composerPoint = await js(`(() => {const r=document.getElementById('chatInput').getBoundingClientRect();return {x:Math.round(r.left+20),y:Math.round(r.top+r.height/2)}})()`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...composerPoint});

@@ -79,6 +79,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, setIcon, toast } from './dom.js';
+import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -155,6 +156,79 @@ const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
+/** The row's "⋯" button as the sidebar holds it now; repaints replace it. */
+function rowMenuButton(owner: string): HTMLElement | null {
+  return [...document.querySelectorAll<HTMLElement>('[data-row-menu]')].find(button => button.dataset.rowMenu === owner) ?? null;
+}
+
+/** Projects whose color or removal is being saved: their choices wait for the answer. */
+const savingProjectColor = new Set<string>();
+const removingProject = new Set<string>();
+
+/** A project's menu: a new chat in it, its color (a submenu), and taking it off the sidebar. */
+function projectMenuItems(id: string): RowMenuItem[] {
+  const color = projects.find(row => row.id === id)?.color ?? null;
+  return [
+    { action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id }, run: () => selectNewChat(id) },
+    {
+      action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
+      submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
+        action: `color-${choice ?? 'none'}`, swatch: choice ?? '', checked: color === choice, disabled: savingProjectColor.has(id),
+        label: () => choice ? projectColorName(choice) : t('None'), run: () => void saveProjectColor(id, choice)
+      }))
+    },
+    {
+      action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removingProject.has(id),
+      label: () => t('Remove'), title: () => t('Remove project from sidebar; keep conversations and files'),
+      run: () => void removeProjectFromSidebar(id)
+    }
+  ];
+}
+
+async function saveProjectColor(id: string, choice: ProjectColor | null): Promise<void> {
+  const project = projects.find(row => row.id === id);
+  if (!project || savingProjectColor.has(id) || (project.color ?? null) === choice) return;
+  savingProjectColor.add(id);
+  try {
+    const updated = await run(api.setProjectColor(id, choice));
+    if (!updated) return;
+    // Reject list snapshots captured before this newer catalog commit.
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+  } finally { savingProjectColor.delete(id); }
+}
+
+async function removeProjectFromSidebar(id: string): Promise<void> {
+  if (removingProject.has(id)) return;
+  removingProject.add(id);
+  try {
+    const removed = await run(api.removeProject(id));
+    if (!removed) return;
+    // Reject list snapshots captured before this newer catalog commit.
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? removed : row);
+    expandedProjects.delete(id); projectVisibleCounts.delete(id);
+    if (selectedProjectId === id) {
+      if (!selectedId) {
+        const oldKey = draftKey();
+        const authoredDraft = authoredComposerText();
+        selectedProjectId = null; selectionGeneration++; replaceComposerDraft();
+        // Keep the visible draft and its attachments while moving to unfiled.
+        inputDrafts.set(draftKey(), authoredDraft); inputDrafts.delete(oldKey); newChatTasks.delete(oldKey);
+        skillPicker?.restore();
+        const images = imageDrafts.get(oldKey);
+        if (images) imageDrafts.set(draftKey(), images);
+        else imageDrafts.delete(draftKey());
+        imageDrafts.delete(oldKey);
+        ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
+      } else selectedProjectId = null;
+    }
+    paintSessions(); void refreshInputQueue();
+    toast(t('Project removed; conversations kept'));
+  } finally { removingProject.delete(id); }
+}
+
 /** A project color as people say it, in the interface language. */
 function projectColorName(color: ProjectColor): string {
   return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
@@ -453,6 +527,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
     document.getElementById('sessionTooltip')?.remove();
+    // An open row menu is what the pointer is reading; the tooltip would cover it.
+    if (document.querySelector('.row-menu')) return;
     const tip = el('div', 'session-tooltip', row.title);
     tip.id = 'sessionTooltip'; tip.setAttribute('role', 'tooltip');
     const bounds = row.getBoundingClientRect();
@@ -473,50 +549,32 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
   }
-  const actionBar = el('div', 'sess-actions');
-
-  const remove = document.createElement('button');
-  remove.className = 'btn sess-action sess-del';
-  remove.type = 'button';
-  ui(remove, 'title', () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."));
-  remove.append(icon('i-trash'));
-  remove.addEventListener('click', (event) => {
-    event.stopPropagation();
-    void deleteSession(summary.id);
-  });
-
-  const actions: HTMLButtonElement[] = [];
+  // One button for the chat's actions, as in ChatGPT; a right click on the row opens the same menu.
+  const owner = `chat:${summary.id}`;
+  const items: RowMenuItem[] = [];
+  const remove: RowMenuItem = {
+    action: 'remove', icon: 'i-trash', danger: true, separated: true, label: () => t('Remove'),
+    title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
+    run: () => void deleteSession(summary.id)
+  };
   if (summary.conversationId === null) {
-    // Strict mode cannot trust an unattributed stream by definition. Do not render an
-    // "Allow" button that the kernel will intentionally ignore; the Settings checkbox
-    // explains that unattributed calls stay blocked until strict mode is turned off.
-    if (deps.state()?.config.multiAgent?.strictChatAllowlist === true) {
-      actionBar.append(remove);
-      row.append(top, actionBar);
-      return row;
+    // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
+    // that the kernel will intentionally ignore; the Settings checkbox explains that
+    // unattributed calls stay blocked until strict mode is turned off.
+    if (deps.state()?.config.multiAgent?.strictChatAllowlist !== true) {
+      // The same decision as a chat's Block: may this activity use local tools? It has no
+      // conversation to be stored against, so it moves the app-wide switch and nothing else.
+      const blocked = unattributedBlocked();
+      items.push({
+        action: 'block', icon: blocked ? 'i-play' : 'i-ban',
+        label: () => blocked ? t('Allow unattributed calls') : t('Block unattributed calls'),
+        title: () => blocked
+          ? t("Allow unattributed calls: self-contained calls run again even when the app cannot prove which chat sent them")
+          : t("Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop"),
+        run: () => void toggleUnattributedBlock(!blocked)
+      });
     }
-    // The same button in the same column as a chat's, because it is the same decision: may
-    // this activity use local tools? It has no conversation to be stored against, so it moves
-    // the app-wide switch — the checkbox on the settings sheet — and nothing else.
-    const blocked = unattributedBlocked();
-    const block = document.createElement('button');
-    block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
-    block.type = 'button';
-    ui(block, 'title', () => blocked
-      ? t("Allow unattributed calls: self-contained calls run again even when the app cannot prove which chat sent them")
-      : t("Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop"));
-    block.append(icon(blocked ? 'i-play' : 'i-ban'));
-    block.addEventListener('click', (event) => {
-      event.stopPropagation();
-      void toggleUnattributedBlock(!blocked);
-    });
-    actions.push(block);
-
-    actionBar.append(...actions, remove);
-    row.append(top, actionBar);
-    return row;
-  }
-  if (summary.conversationId) {
+  } else {
     const policyLineage = [
       summary.conversationId,
       ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
@@ -537,88 +595,69 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         if (trustedChats.has(conversationId)) { effectivePolicy = 'trusted'; break; }
       }
     }
+    items.push(
+      { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
+      { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) }
+    );
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
     // A resumed row is the only control left for its committed predecessors. Project a source
     // Block onto that row so Release can clear the exact lineage that currently fences tools.
     const blocked = effectivePolicy === 'blocked';
-    const block = document.createElement('button');
-    block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
-    block.type = 'button';
-    ui(block, 'title', () => blocked
-      ? t("Release this chat: its tool calls run again")
-      : t("Block this chat: every tool call it makes is refused and it is told to stop"));
-    block.append(icon(blocked ? 'i-play' : 'i-ban'));
-    block.addEventListener('click', (event) => {
-      event.stopPropagation();
-      void toggleSessionBlock(summary.id, !blocked);
+    items.push({
+      action: 'block', icon: blocked ? 'i-play' : 'i-ban', separated: true,
+      label: () => blocked ? t('Release chat') : t('Block chat'),
+      title: () => blocked
+        ? t("Release this chat: its tool calls run again")
+        : t("Block this chat: every tool call it makes is refused and it is told to stop"),
+      run: () => void toggleSessionBlock(summary.id, !blocked)
     });
-    actions.push(block);
-
     if (strictAllowlist && summary.origin?.kind !== 'worker') {
       // `trustedChats` is the explicit durable registry. A committed resumed chat can be
       // effectively trusted by one of those historical ids, so project the same durable lineage
-      // that main enforces. This only chooses the button state; IPC remains authoritative.
+      // that main enforces. This only chooses the item; IPC remains authoritative.
       const trusted = effectivePolicy === 'trusted';
-      const trust = document.createElement('button');
-      trust.className = `btn sess-action sess-trust${trusted ? ' is-trusted' : ''}`;
-      trust.type = 'button';
-      ui(trust, 'title', () => trusted
-        ? t("Untrust this chat: strict mode refuses its tool calls")
-        : t("Trust this chat: strict mode lets its tool calls run"));
-      trust.append(icon(trusted ? 'i-lock' : 'i-check'));
-      trust.addEventListener('click', (event) => {
-        event.stopPropagation();
-        void toggleSessionTrust(summary.id, summary.conversationId!, !trusted);
+      items.push({
+        action: 'trust', icon: trusted ? 'i-lock' : 'i-check',
+        label: () => trusted ? t('Untrust chat') : t('Trust chat'),
+        title: () => trusted
+          ? t("Untrust this chat: strict mode refuses its tool calls")
+          : t("Trust this chat: strict mode lets its tool calls run"),
+        run: () => void toggleSessionTrust(summary.id, summary.conversationId!, !trusted)
       });
-      actions.push(trust);
     }
-
     if (pinnable(summary)) {
-      const pin = document.createElement('button');
-      pin.className = `btn sess-action sess-pin${pinned ? ' is-pinned' : ''}`;
-      pin.type = 'button';
-      pin.setAttribute('aria-pressed', String(pinned));
-      ui(pin, 'title', () => pinned ? t("Unpin this chat") : t("Pin this chat to the top of its list"));
-      pin.append(icon(pinned ? 'i-pinned' : 'i-pin'));
-      pin.addEventListener('click', (event) => {
-        event.stopPropagation();
-        sidebarPins?.toggle(summary.id);
-        paintSessions();
-        // Keep the keyboard on the same chat's Pin control after the row is rebuilt. Its actions
-        // show only while the row has focus, so the row takes focus first.
-        const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
-        rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
-        rebuilt?.querySelector<HTMLElement>('.sess-pin')?.focus({ preventScroll: true });
+      // First, as in ChatGPT: a pinned chat stays above the unpinned ones of its own list (#1133).
+      items.unshift({
+        action: 'pin', icon: pinned ? 'i-pinned' : 'i-pin',
+        label: () => pinned ? t('Unpin chat') : t('Pin chat'),
+        title: () => pinned ? t("Unpin this chat") : t("Pin this chat to the top of its list"),
+        run: () => {
+          sidebarPins?.toggle(summary.id);
+          paintSessions();
+          // The row moved: keep the keyboard on the same chat's menu button. Its button shows only
+          // while the row has focus, so the row takes focus first.
+          const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
+          rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
+          rowMenuButton(owner)?.focus({ preventScroll: true });
+        }
       });
-      actions.push(pin);
     }
-
-    const rename = document.createElement('button');
-    rename.className = 'btn sess-action sess-name';
-    rename.type = 'button';
-    ui(rename, 'title', () => t("Rename this chat in the app. Its title in ChatGPT stays the same."));
-    rename.append(icon('i-pencil'));
-    rename.addEventListener('click', (event) => {
-      event.stopPropagation();
-      startRename(summary);
-    });
-    actions.push(rename);
-
-    const open = document.createElement('button');
-    open.className = 'btn sess-action sess-open';
-    open.type = 'button';
-    ui(open, 'title', () => t("Open this chat in your browser"));
-    open.append(icon('i-out'));
-    open.addEventListener('click', (event) => {
-      event.stopPropagation();
-      void run(api.openSessionChat(summary.id));
-    });
-    actions.push(open);
   }
-
-  actionBar.append(...actions, remove);
+  items.push(remove);
+  const more = el('button', 'btn row-menu-button sess-menu') as HTMLButtonElement;
+  more.type = 'button'; more.dataset.rowMenu = owner; more.append(icon('i-more-vertical'));
+  more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', String(rowMenuOpenFor(owner)));
+  ui(more, 'title', () => t('More options'));
+  ui(more, 'aria-label', () => t('More options'));
+  const menu = (at?: { x: number; y: number }) => ({
+    owner, at, label: () => summary.title || t("Untitled session"), anchor: () => rowMenuButton(owner), items: () => items
+  });
+  more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
+  row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
+  const actionBar = el('div', 'sess-actions');
+  actionBar.append(more);
   row.append(top, actionBar);
   return row;
 }
@@ -858,7 +897,7 @@ function paintSessions(): void {
   // page on the next repaint, and so did the color button after a pick.
   const focused = document.activeElement;
   const focusedControl = focused instanceof HTMLElement && projectList.contains(focused)
-    ? ['.project-heading', '.project-color', '.project-new', '.project-remove', '.project-show-more'].find(selector => focused.matches(selector))
+    ? ['.project-heading', '.project-menu', '.project-show-more'].find(selector => focused.matches(selector))
     : undefined;
   const focusedProject = focusedControl ? (focused as HTMLElement).closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
   const children = new Map<string, SessionSummary[]>();
@@ -940,129 +979,20 @@ function paintSessions(): void {
       section.open = open;
     });
     if (project) {
-      const colorWrap = el('span', 'project-color-wrap');
-      const color = el('button', 'btn project-color') as HTMLButtonElement;
-      color.type = 'button'; color.dataset.color = project.color ?? '';
-      color.setAttribute('aria-haspopup', 'menu'); color.setAttribute('aria-expanded', 'false');
-      ui(color, 'title', () => t('Change project color'));
-      ui(color, 'aria-label', () => t('Change project color'));
-      const menu = el('span', 'project-color-menu'); menu.hidden = true; menu.setAttribute('role', 'menu');
-      ui(menu, 'aria-label', () => t('Change project color'));
-      const closeColorMenu = (restoreFocus = false): void => {
-        menu.hidden = true; color.setAttribute('aria-expanded', 'false');
-        if (restoreFocus) color.focus();
-      };
-      const openColorMenu = (): void => {
-        menu.hidden = false; color.setAttribute('aria-expanded', 'true');
-        const selected = menu.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
-          menu.querySelector<HTMLButtonElement>('.project-color-choice');
-        selected?.focus();
-      };
-      color.addEventListener('click', event => {
-        event.preventDefault(); event.stopPropagation();
-        if (color.disabled) return;
-        if (menu.hidden) openColorMenu(); else closeColorMenu(true);
+      // One button for the project's actions, as in ChatGPT; a right click on the row opens the same menu.
+      const owner = `project:${id}`;
+      const more = el('button', 'btn row-menu-button project-menu') as HTMLButtonElement;
+      more.type = 'button'; more.dataset.rowMenu = owner; more.append(icon('i-more-vertical'));
+      more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', String(rowMenuOpenFor(owner)));
+      ui(more, 'title', () => t('More options'));
+      ui(more, 'aria-label', () => t('More options'));
+      const menu = (at?: { x: number; y: number }) => ({
+        owner, at, label: () => projects.find(row => row.id === id)?.name ?? t('Unavailable project'),
+        anchor: () => rowMenuButton(owner), items: () => projectMenuItems(id)
       });
-      let savingColor = false;
-      for (const choice of [null, ...PROJECT_COLORS] as const) {
-        const option = el('button', 'project-color-choice') as HTMLButtonElement;
-        option.type = 'button'; option.dataset.projectColorChoice = choice ?? ''; option.dataset.color = choice ?? '';
-        option.setAttribute('role', 'menuitemradio');
-        option.setAttribute('aria-checked', String((project.color ?? null) === choice));
-        // The menu is named "Change project color"; each choice says the color itself.
-        const label = (): string => choice ? projectColorName(choice) : t('None');
-        ui(option, 'aria-label', label); ui(option, 'title', label);
-        if (!choice) option.textContent = t('None');
-        option.addEventListener('click', async event => {
-          event.preventDefault(); event.stopPropagation();
-          if (savingColor) return;
-          if ((project.color ?? null) === choice) return closeColorMenu(true);
-          savingColor = true;
-          const selectionAtSave = selectedId;
-          const generationAtSave = selectionGeneration;
-          let restoreColorFocus = colorWrap.contains(document.activeElement);
-          // Disabling a focused choice can move focus to body. A later deliberate focus
-          // change belongs to the user, not to the pending save's repaint.
-          const noticeFocus = (event: FocusEvent): void => {
-            if (event.target !== document.body && !colorWrap.contains(event.target as Node)) restoreColorFocus = false;
-          };
-          document.addEventListener('focusin', noticeFocus);
-          color.disabled = true;
-          menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = true; });
-          let updated: LocalProject | null | undefined;
-          try { updated = await run(api.setProjectColor(id, choice as ProjectColor | null)); }
-          finally { document.removeEventListener('focusin', noticeFocus); }
-          // In an inactive document, activeElement can change without a focusin notification.
-          // Check its current owner as well before replacing the palette or restoring focus.
-          restoreColorFocus = restoreColorFocus &&
-            (document.activeElement === document.body || colorWrap.contains(document.activeElement));
-          if (!updated) {
-            savingColor = false; color.disabled = false;
-            menu.querySelectorAll<HTMLButtonElement>('.project-color-choice').forEach(button => { button.disabled = false; });
-            if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) openColorMenu();
-            return;
-          }
-          ++sessionsLoadGeneration;
-          projects = projects.map(row => row.id === id ? updated : row);
-          paintSessions();
-          if (restoreColorFocus && visible && selectedId === selectionAtSave && selectionGeneration === generationAtSave) {
-            $('projectList').querySelector<HTMLElement>(`.project-group[data-project-id="${id}"] .project-color`)?.focus({ preventScroll: true });
-          }
-        });
-        menu.append(option);
-      }
-      menu.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return closeColorMenu(true); }
-        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-        const options = [...menu.querySelectorAll<HTMLButtonElement>('.project-color-choice:not(:disabled)')];
-        if (!options.length) return;
-        const current = options.indexOf(document.activeElement as HTMLButtonElement);
-        const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-        event.preventDefault(); event.stopPropagation();
-        options[(Math.max(0, current) + delta + options.length) % options.length]?.focus();
-      });
-      colorWrap.addEventListener('focusout', () => queueMicrotask(() => {
-        if (!colorWrap.contains(document.activeElement)) closeColorMenu();
-      }));
-      colorWrap.append(color, menu); heading.append(colorWrap);
-      const create = el('button', 'btn project-new'); create.append(icon('i-pencil')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
-      ui(create, 'title', () => t("New chat in this project")); ui(create, 'aria-label', () => t("New chat in this project"));
-      create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);
-      const remove = el('button', 'btn project-remove') as HTMLButtonElement;
-      remove.type = 'button'; remove.append(icon('i-trash'));
-      ui(remove, 'title', () => t("Remove project from sidebar; keep conversations and files"));
-      ui(remove, 'aria-label', () => t("Remove project {0}", [project.name]));
-      remove.addEventListener('click', async event => {
-        event.preventDefault(); event.stopPropagation();
-        if (remove.disabled) return;
-        remove.disabled = true;
-        try {
-          const removed = await run(api.removeProject(id));
-          if (!removed) return;
-          // Reject list snapshots captured before this newer catalog commit.
-          ++sessionsLoadGeneration;
-          projects = projects.map(row => row.id === id ? removed : row);
-          expandedProjects.delete(id); projectVisibleCounts.delete(id);
-          if (selectedProjectId === id) {
-            if (!selectedId) {
-              const oldKey = draftKey();
-              const authoredDraft = authoredComposerText();
-              selectedProjectId = null; selectionGeneration++; replaceComposerDraft();
-              // Keep the visible draft and its attachments while moving to unfiled.
-              inputDrafts.set(draftKey(), authoredDraft); inputDrafts.delete(oldKey); newChatTasks.delete(oldKey);
-              skillPicker?.restore();
-              const images = imageDrafts.get(oldKey);
-              if (images) imageDrafts.set(draftKey(), images);
-              else imageDrafts.delete(draftKey());
-              imageDrafts.delete(oldKey);
-              ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
-            } else selectedProjectId = null;
-          }
-          paintSessions(); void refreshInputQueue();
-          toast(t('Project removed; conversations kept'));
-        } finally { remove.disabled = false; }
-      });
-      heading.append(remove);
+      more.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleRowMenu(menu()); });
+      heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
+      heading.append(more);
     }
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;

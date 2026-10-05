@@ -24,6 +24,7 @@ import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
 let document: Document;
 let css = '';
 let chatSource = '';
+let menuSource = '';
 let browserPreferencesSource = '';
 
 beforeAll(async () => {
@@ -36,6 +37,7 @@ beforeAll(async () => {
   document = new JSDOM(html).window.document;
   css = styles + '\n' + await fs.readFile(path.join(process.cwd(), 'src/renderer/settings.css'), 'utf8');
   chatSource = chat;
+  menuSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'row-menu.ts'), 'utf8');
 });
 
 it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
@@ -296,16 +298,19 @@ describe('the session-row chat actions', () => {
     expect(chatSource).toContain('rough current-chat context tokens');
   });
 
-  it('reserves all three top-right hit targets instead of laying the timestamp underneath them', () => {
-    expect(rule('.sess-action')).not.toContain('position: absolute');
+  it('reserves the row menu button\'s hit target instead of laying the timestamp underneath it', () => {
+    expect(rule('.row-menu-button')).not.toContain('position: absolute');
     expect(rule('.sess-actions')).toContain('flex: none');
   });
 
   it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?openSessionChat\(summary\.id\)/);
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?toggleSessionBlock\(summary\.id/);
-    expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
-    expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+    // Open and Block are offered only on the branch of a row that has a conversation.
+    expect(chatSource).toMatch(/if \(summary\.conversationId === null\) \{[\s\S]*?\} else \{[\s\S]*?openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId === null\) \{[\s\S]*?\} else \{[\s\S]*?toggleSessionBlock\(summary\.id/);
+    // The row's button does not select it, and the menu's items live outside the row, in the
+    // document body, so choosing one can neither select nor delete the row under the pointer.
+    expect(chatSource).toMatch(/more\.addEventListener\('click', \(event\) => \{ event\.stopPropagation\(\)/);
+    expect(menuSource).toContain('document.body.append(menu)');
   });
 
   it('keeps a block visible without hovering, because it is state and not just an action', () => {
@@ -328,8 +333,9 @@ describe('the session-row chat actions', () => {
     expect(chatSource).toMatch(
       /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
     );
+    // In strict mode the row offers no Allow the kernel would ignore: only Remove.
     expect(chatSource).toMatch(
-      /strictChatAllowlist === true[\s\S]{0,300}actionBar\.append\(remove\)[\s\S]{0,120}return row/
+      /strictChatAllowlist !== true\) \{[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)[\s\S]{0,120}\n  \} else \{/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
