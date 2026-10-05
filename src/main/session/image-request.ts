@@ -94,7 +94,7 @@ const FILES = words(`
   file | files | folder | folders | directory | directories | datei\\p{L}* | ordner\\p{L}* | verzeichnis\\p{L}* | archivo\\p{L}* | carpeta\\p{L}* |
   fichier\\p{L}* | dossier\\p{L}* | repertoire | arquivo\\p{L}* | pasta\\p{L}* | файл\\p{L}* | папк\\p{L}* | dosya\\p{L}* | klasor\\p{L}* | tệp | thư mục`);
 // "… and save it to the folder": where the picture goes, not file work.
-const SAVE_VERB = /(?<![\p{L}])(?:save|store|download|export|speicher\p{L}*|herunterladen|exportier\p{L}*|guarda\p{L}*|descarga\p{L}*|enregistre\p{L}*|télécharge\p{L}*|salve|salvar|baixe|сохрани\p{L}*|скача\p{L}*|kaydet\p{L}*|indir|lưu|tải)(?![\p{L}])/u;
+const SAVE_VERB = /(?<![\p{L}])(?:save[sd]?|saving|stor(?:e[sd]?|ing)|download(?:s|ed|ing)?|export(?:s|ed|ing)?|speicher\p{L}*|herunterladen|exportier\p{L}*|guarda\p{L}*|descarga\p{L}*|enregistre\p{L}*|télécharge\p{L}*|salve|salvar|baixe|сохрани\p{L}*|скача\p{L}*|kaydet\p{L}*|indir|lưu|tải)(?![\p{L}])/u;
 const SAVE_CLAUSE = /(?<![\p{L}])(?:save|store|put|speicher\p{L}*|lege|guarda\p{L}*|enregistre\p{L}*|salve|salvar|сохрани\p{L}*|kaydet\p{L}*|lưu)(?![\p{L}]).*$/u;
 // Files and everyday work: they rule out reading a short follow-up as an image edit, not a clear request.
 const TASK = words(`
@@ -118,6 +118,8 @@ const WORD_END = '(?![\\p{L}\\p{N}_])';
 const anyOf = (list: string): RegExp => new RegExp(`${WORD_EDGE}(?:${list})${WORD_END}`, 'u');
 const aboutRe = anyOf(ABOUT_PICTURES), filesRe = anyOf(FILES);
 const identifierRe = new RegExp(`${WORD_EDGE}(?:${NOUN})[-_](?!(?:style|like|realistic|real|quality|ready|perfect|based|inspired)${WORD_END})[\\p{L}\\p{N}]`, 'u');
+// Tool and variable names built on a picture word ("save_image", "view_image") are technical text.
+const toolNameRe = new RegExp(`[\\p{L}\\p{N}]_(?:${NOUN})${WORD_END}`, 'u');
 const nounRe = anyOf(NOUN), codeRe = anyOf(CODE), taskRe = anyOf(TASK), processRe = anyOf(PROCESS), editRe = anyOf(EDIT), createRe = anyOf(CREATE);
 // A request: a creating verb, then a picture noun within a few words ("create a small watercolor image").
 const DEFINITE = 'the|these|those|this|that|my|our|your|its|their|die|den|das|diese|dieses|meine|unsere|las|los|estas|estos|mis|nuestras|les|ces|mes|nos|as|os|estas|estes|minhas|nossas';
@@ -156,7 +158,8 @@ const CJK_PROCESS = /压缩|裁剪|调整大小|描述|分析|壓縮|裁切|調�
 const CJK_EDIT = /加上|加一|添加|加个|加個|加入|换成|換成|改为|改為|追加して|加えて|つけて|추가해|넣어|修改|改成|变成|改為|變成|编辑|編輯|去掉背景|变得|編集|変えて|背景を消|にして|수정|바꿔|편집|배경 제거|로 만들어/u;
 
 function sentences(text: string): string[] {
-  return text.split(/[.!?;\n。！？；]+/u).map(part => part.trim()).filter(Boolean);
+  // A "." ends a sentence only before a space or the end, never inside a file name or a number.
+  return text.split(/[.!?;]+(?=\s|$)|[\n。！？；]+/u).map(part => part.trim()).filter(Boolean);
 }
 
 export function asksForImage(text: string, context: ImageRequestContext = {}): boolean {
@@ -164,7 +167,7 @@ export function asksForImage(text: string, context: ImageRequestContext = {}): b
   if (!raw) return false;
   const forms = [raw, fold(raw)];
   const any = (re: RegExp): boolean => forms.some(form => re.test(form));
-  if (any(codeRe) || any(identifierRe) || CJK_CODE.test(raw)) return false;
+  if (any(codeRe) || any(identifierRe) || any(toolNameRe) || CJK_CODE.test(raw)) return false;
   for (const sentence of sentences(raw)) {
     const variants = [sentence, fold(sentence)];
     const has = (re: RegExp): boolean => variants.some(form => re.test(form));
