@@ -94,9 +94,14 @@ describe('asksForImage', () => {
   });
 
   it('reads a short follow-up after ChatGPT made an image as an edit, but not work or files', () => {
-    for (const text of ['make it brighter', 'Change the background to blue', 'Add a hat to the cat', 'mach es dunkler', 'cámbialo a rojo', '把背景改成蓝色'])
+    for (const text of ['make it brighter', 'Change the background to blue', 'Add a hat to the cat', 'mach es dunkler', 'cámbialo a rojo', '把背景改成蓝色',
+      'make it brighter and save it as v2.png', 'Generate another image like that one'])
       expect(asksForImage(text, { afterImage: true }), text).toBe(true);
-    for (const text of ['now run the tests', 'fix the build', 'Add a test for the parser', 'save it to the folder', 'thanks, that works'])
+    for (const text of ['now run the tests', 'fix the build', 'Add a test for the parser', 'save it to the folder', 'thanks, that works',
+      // Saving the picture just made is file work for the app (live 2026-10-05: this went out without the mention).
+      'Use the save_image tool of the "Chat On Steroids Core" connector exactly once to save the image you just generated as boat.png in the shared project folder. Then reply with only the tool result.',
+      'save the image you just generated as boat.png', 'Save the picture you made into the project folder',
+      'Speichere das Bild, das du gerade erstellt hast, im Projektordner', 'Guarda la imagen que creaste en la carpeta del proyecto'])
       expect(asksForImage(text, { afterImage: true }), text).toBe(false);
     // Without an image just made, the same words are no image request.
     expect(asksForImage('make it brighter')).toBe(false);
