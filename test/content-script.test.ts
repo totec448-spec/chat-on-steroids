@@ -889,7 +889,9 @@ describe('desktop input delivery and helper ownership', () => {
       await settle(); live.hook.observe(); await settle(); await live.hook.flush();
       const starts = emitted(live.sent, 'turn_start').length;
       if (acknowledge && !invalidate) {
-        expect(emitted(live.sent, 'user_message').filter(row => row.event.messageId === 'm-gated-spa-user').at(-1)?.event.text).toBe(canonical);
+        // Recorded the way ChatGPT shows it: the page renders the submitted text, so an escaped
+        // stored copy is recorded unescaped (the raw copy still decides the receipt above).
+        expect(emitted(live.sent, 'user_message').filter(row => row.event.messageId === 'm-gated-spa-user').at(-1)?.event.text).toBe(submitted);
         live.hook.observe(); await settle(); await live.hook.flush();
         expect(emitted(live.sent, 'turn_start')).toHaveLength(starts);
       }
