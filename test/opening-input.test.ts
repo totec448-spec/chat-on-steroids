@@ -11,6 +11,7 @@ import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { isChatTrusted, resetTrustedChatsForTests, setChatTrusted } from '../src/main/session/trusted-chats.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
+import { getLog } from '../src/main/logger.js';
 
 let directory: string;
 const args = (over: Partial<InputArgs> = {}): InputArgs => ({ id: randomUUID(), sessionId: null, text: 'Independent task', mode: 'auto',
@@ -203,6 +204,19 @@ it('does not create an unnecessary Trust bit for a CoS opening while strict mode
   await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
   expect(await bindBrowserInputProject(row.id, 'ordinary-opening-owner', conversation)).toBe(true);
   expect(isChatTrusted(conversation)).toBe(false);
+});
+
+it('logs a new chat getting its conversation id without calling the old one null', async () => {
+  // Activity shows this line; "moved from ChatGPT conversation null" read like a fault.
+  const row = await enqueueInput(args());
+  const conversation = randomUUID();
+  expect(await rebindSession(row.sessionId!, null, conversation)).toBe(true);
+  const line = getLog().map(entry => entry.message).filter(message => message.includes(conversation)).at(-1);
+  expect(line).toBe(`session ${row.sessionId} is now ChatGPT conversation ${conversation}`);
+  const next = randomUUID();
+  expect(await rebindSession(row.sessionId!, conversation, next)).toBe(true);
+  expect(getLog().map(entry => entry.message).filter(message => message.includes(next)).at(-1))
+    .toBe(`session ${row.sessionId} moved from ChatGPT conversation ${conversation} to ${next}`);
 });
 
 it('fails closed instead of trusting a recovered opening whose durable attach outran its outbox ACK', async () => {

@@ -3263,7 +3263,10 @@ export async function rebindSession(
     entry.metaDirty = false;
     missingCurrentConversations.delete(toConversationId);
     publishAttachmentSummary(entry.summary);
-    logInfo(`session ${id} moved from ChatGPT conversation ${fromConversationId} to ${toConversationId}`);
+    // A new chat gets its first id here; "moved from conversation null" read like a fault in Activity.
+    logInfo(fromConversationId
+      ? `session ${id} moved from ChatGPT conversation ${fromConversationId} to ${toConversationId}`
+      : `session ${id} is now ChatGPT conversation ${toConversationId}`);
     return true;
   });
 }
