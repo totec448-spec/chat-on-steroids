@@ -1,4 +1,7 @@
 import { conversationProgress } from './session/progress.js';
+import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
+import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
+import { notePluginInstalled, notePluginMissing } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
@@ -217,6 +220,7 @@ import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
 import { conversationHasMcpCallSince, readHandoffResponse } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
+import { completeImageExport, IMAGE_EXPORT_BODY_BYTES, pendingImageExports } from './image-export.js';
 import { bindAgentWorkspace } from './workspace.js';
 import { extensionUpdateOffer, prepareExtensionUpdate, shippedExtensionBuild } from './extension-path.js';
 
@@ -693,6 +697,13 @@ const REVEAL_COLLECT_MS = 4_000;
 const revealBrowsers = new Map<string, number>();
 const pendingReveals: Array<{ conversationId: string; settle: (shown: boolean) => void }> = [];
 
+/** Browsers whose extension can fetch a generated image's original for the image export (#889). */
+const imageExportBrowsers = new Map<string, number>();
+export function imageExportCapable(): boolean {
+  const now = Date.now();
+  return browserWakeConnected() && [...imageExportBrowsers.values()].some(at => now - at < OPENING_CUSTODY_MS);
+}
+
 function revealCapable(): boolean {
   const now = Date.now();
   return [...revealBrowsers.values()].some(at => now - at < OPENING_CUSTODY_MS);
@@ -930,7 +941,23 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     // tab open went "missing" a minute after start although it was connected all along.
     present: browserPresent() || browserWakeConnected(),
     lastSeenAt,
-    extensionVersion
+    extensionVersion,
+    externalExtension: externalExtensionStatus(),
+    cosExtension: { present: cosExtensionPresent() }
+  };
+}
+
+/** Live sightings this run, plus what lasts across restarts for Setup. */
+function externalExtensionStatus(): BridgeStatus['externalExtension'] {
+  const proof = externalBrowserProof();
+  if (!externalExtension && !proof) return null;
+  return {
+    present: externalExtensionPresent(),
+    version: externalExtension?.version ?? null,
+    lastSeenAt: externalExtension?.seenAt ?? null,
+    signedIn: externalExtensionPresent() && externalExtension?.loginAt != null && Date.now() - externalExtension.loginAt < BROWSER_PRESENT_MS
+      ? externalExtension.signedIn ?? null : null,
+    proof: proof && { version: proof.version, signedIn: proof.signedIn }
   };
 }
 
@@ -948,22 +975,77 @@ export function browserPresent(): boolean {
 export function browserWakeConnected(): boolean { return browserWake?.connected() === true; }
 
 /**
- * Records one authenticated browser sighting and schedules the inverse state transition.
- *
- * Presence is process-local, unlike pairing. The extension polls frequently, so every new
- * sighting pushes this deadline out. If those polls stop because Chrome/extension went away,
- * the timer emits exactly the state change the renderer otherwise has no reason to request.
+ * The extension in the person's own Chrome, Edge or Brave, apart from the CoS browser's copy: Setup
+ * waits for this one, because the built-in browser's Google sign-in comes back through it.
+ * Version observations do not grant presence. Old peers without a host header are unknown:
+ * an older built-in worker also lacks that header and must not complete external Setup.
  */
-function noteBrowserSeen(): boolean {
-  const wasPresent = browserPresent();
-  lastSeenAt = Date.now();
+let externalExtension: { seenAt: number | null; version: string | null; browserId?: string; signedIn?: boolean | null; loginAt?: number } | null = null;
+
+/** The CoS browser's own copy of the extension, last heard from: its sign-in step needs it connected. */
+let cosExtensionSeenAt: number | null = null;
+
+function cosExtensionPresent(): boolean {
+  // An idle companion sends no requests; its authenticated wake channel stays open all the same.
+  return server !== null && ((cosExtensionSeenAt !== null && Date.now() - cosExtensionSeenAt < BROWSER_PRESENT_MS) ||
+    browserWake?.connected('cos') === true);
+}
+
+function externalExtensionPresent(): boolean {
+  return server !== null && externalExtension?.seenAt != null && Date.now() - externalExtension.seenAt < BROWSER_PRESENT_MS;
+}
+
+function noteExternalExtension(req: http.IncomingMessage): boolean {
+  if (req.headers['x-extension-host'] === 'cos') {
+    const appeared = !cosExtensionPresent();
+    cosExtensionSeenAt = Date.now();
+    return appeared;
+  }
+  if (req.headers['x-extension-host'] !== 'browser') return false;
+  const header = req.headers['x-extension-version'];
+  const version = typeof header === 'string' ? header.slice(0, 32) : null;
+  const browserId = browserOf(req) ?? undefined;
+  const sameBrowser = browserId !== undefined && externalExtension?.browserId === browserId && externalExtensionPresent();
+  const appeared = !sameBrowser || externalExtension?.version !== version;
+  externalExtension = { ...(sameBrowser ? externalExtension : {}), seenAt: Date.now(), version, browserId };
+  // Lasting evidence for Setup: this browser has the extension, in this version.
+  const proved = browserId !== undefined && version !== null && noteExternalInstalled(browserId, version);
+  return appeared || proved;
+}
+
+/** ChatGPT's own answer in the person's browser. It outlasts the tab: Setup keeps it until a signed-out answer. */
+function noteExternalLogin(browserId: string, signedIn: boolean | null): void {
+  if (!externalExtension || externalExtension.browserId !== browserId) return;
+  externalExtension.signedIn = signedIn;
+  externalExtension.loginAt = Date.now();
+  if (signedIn !== null) noteExternalSignedIn(browserId, signedIn);
+  scheduleBrowserPresence();
+  changed();
+}
+
+/** One timer publishes the next expiry of either presence, even while the other keeps polling. */
+function scheduleBrowserPresence(): void {
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
+  browserPresenceTimer = null;
+  const now = Date.now();
+  const deadlines = [lastSeenAt, externalExtension?.seenAt ?? null, externalExtension?.loginAt ?? null, cosExtensionSeenAt]
+    .filter((at): at is number => at !== null && at + BROWSER_PRESENT_MS > now)
+    .map(at => at + BROWSER_PRESENT_MS);
+  if (!server || deadlines.length === 0) return;
   browserPresenceTimer = setTimeout(() => {
     browserPresenceTimer = null;
-    if (!browserPresent()) changed();
-  }, BROWSER_PRESENT_MS + 1);
+    changed();
+    scheduleBrowserPresence();
+  }, Math.max(1, Math.min(...deadlines) - now + 1));
   browserPresenceTimer.unref?.();
-  return !wasPresent;
+}
+
+function noteBrowserSeen(req: http.IncomingMessage): boolean {
+  const externalAppeared = noteExternalExtension(req);
+  const wasPresent = browserPresent();
+  lastSeenAt = Date.now();
+  scheduleBrowserPresence();
+  return !wasPresent || externalAppeared;
 }
 
 /**
@@ -978,8 +1060,13 @@ export async function unpair(): Promise<void> {
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
   ++browserCredentialEpoch;
+  cosSignInTransfer.cancel();
   await withBrowserCredentials(async () => {
     await setSecret('bridgeToken', BROWSER_DISCONNECTED);
+    lastSeenAt = null;
+    if (externalExtension) externalExtension.seenAt = null;
+    cosExtensionSeenAt = null;
+    scheduleBrowserPresence();
     clearCompanionDiagnostics();
     browserWake?.revoke();
     browserControl.reset();
@@ -1007,7 +1094,7 @@ function json(res: http.ServerResponse, status: number, body: unknown, origin: s
   };
   if (origin) {
     headers['access-control-allow-origin'] = origin;
-    headers['access-control-allow-headers'] = 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser';
+    headers['access-control-allow-headers'] = 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host';
     headers['access-control-allow-methods'] = 'GET, POST, OPTIONS';
   }
   res.writeHead(status, headers);
@@ -1089,6 +1176,8 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     if (extensionBuildSeenAt.size > 16) extensionBuildSeenAt.delete(extensionBuildSeenAt.keys().next().value!);
   }
   if (typeof version !== 'string') return warnProtocol(protocol);
+  const externalChanged = req.headers['x-extension-host'] === 'browser' && externalExtension?.version !== version.slice(0, 32);
+  if (externalChanged) externalExtension = { version: version.slice(0, 32), seenAt: null };
   extensionVersion = version.slice(0, 32);
   const key = `${extensionVersion}\u0000${stamp ?? ''}`;
   const announcedAt = announcedExtensions.get(key);
@@ -1114,7 +1203,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     // Even an incompatible peer reports its version before the protocol fence.
     // Publish that evidence without falsely granting compatible browser presence.
     changed();
-  }
+  } else if (externalChanged) changed();
   warnProtocol(protocol);
 }
 
@@ -1140,7 +1229,7 @@ async function browserDisconnected(): Promise<boolean> {
   return (await getSecret('bridgeToken')) === BROWSER_DISCONNECTED;
 }
 
-function readBody(req: http.IncomingMessage): Promise<unknown> {
+function readBody(req: http.IncomingMessage, limit = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let size = 0;
     let overflowed = false;
@@ -1151,7 +1240,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
       // ECONNRESET, which it cannot tell apart from the app having crashed.
       if (overflowed) return;
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > limit) {
         overflowed = true;
         chunks.length = 0;
         reject(new Error('body_too_large'));
@@ -1754,7 +1843,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     finishGoalDraft: getSessionFinishDraft(sessionId, activeTurnId),
     finishWaiting,
     goalDraft: draft ? { stage: draft.stage, model: draft.model, text: draft.text.slice(-8000), error: draft.error } : null,
-    goalWait: !blocked && !draft && goalActiveFor(id) ? await goalWaitFor(id, sessionId) : null,
+    goalWait: !blocked && !draft && goalActiveFor(id)
+      ? await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined) : null,
     stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
     objective: goalObjectiveFor(id),
     loopAfterTurn: control.afterTurn,
@@ -2008,7 +2098,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!origin) return json(res, 403, { error: 'forbidden_origin' }, null);
     res.writeHead(204, {
       'access-control-allow-origin': origin,
-      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser',
+      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
       // Chrome asks for this before letting an extension reach a loopback address.
       'access-control-allow-private-network': 'true',
@@ -2104,7 +2194,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return { token, reused };
     });
     if (!provisioned) return json(res, 409, { error: 'browser_disconnected' }, origin);
-    const appeared = noteBrowserSeen();
+    const appeared = noteBrowserSeen(req);
     if (!provisioned.reused) {
       logInfo('bridge: browser extension connected and provisioned');
     }
@@ -2132,7 +2222,45 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // Charge only an authenticated extension. A random local process must not be able to
   // consume the browser's shared budget before failing origin/authentication.
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
-  if (noteBrowserSeen()) changed();
+  if (noteBrowserSeen(req)) changed();
+
+  // Only an explicit login operation accepts a session. Never put cookies in diagnostics,
+  // command journals, status snapshots, recorder events or HTTP error descriptions.
+  // The extension in the person's own browser saying it is there, and whether ChatGPT is signed in
+  // there, without asking for work. Setup needs it from a browser that has no chat to serve yet:
+  // the authenticated request above already recorded presence and version.
+  if (route === '/browser/presence' && req.method === 'POST') {
+    let body: unknown;
+    try { body = await readBody(req, 1024); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const signedIn = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).chatGptSignedIn : undefined;
+    if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
+        externalExtension.browserId === browserOf(req) && (typeof signedIn === 'boolean' || signedIn === null)) {
+      noteExternalLogin(externalExtension.browserId, signedIn);
+    }
+    return json(res, 200, { ok: true }, origin);
+  }
+
+  if (route === '/cos-browser/sign-in') {
+    if (getConfig().ui.chatBrowser !== 'cos') return json(res, 409, { error: 'transfer_expired' }, origin);
+    if (req.method === 'GET') return json(res, 200, { offer: cosSignInTransfer.pending() }, origin);
+    if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' }, origin);
+    const browserId = browserOf(req);
+    if (!browserId) return json(res, 400, { error: 'invalid_browser_request' }, origin);
+    const epoch = browserCredentialEpoch;
+    try {
+      const body = await readBody(req, 96 * 1024);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'bad_request' }, origin);
+      const fields = body as Record<string, unknown>;
+      if (typeof fields.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(fields.id) ||
+        Object.keys(fields).some(key => !['id', 'cookies'].includes(key))) return json(res, 400, { error: 'bad_request' }, origin);
+      await cosSignInTransfer.accept(fields.id, browserId, fields.cookies,
+        () => browserCredentialEpoch === epoch && getConfig().ui.chatBrowser === 'cos');
+      return json(res, 200, { ok: true, imported: true }, origin);
+    } catch (error) {
+      const reason = error instanceof SignInTransferError ? error.reason : 'bad_request';
+      return json(res, reason === 'invalid_session' || reason === 'bad_request' ? 400 : 409, { error: reason }, origin);
+    }
+  }
 
   if (route === '/browser-control' && req.method === 'POST') {
     const body = await readBody(req) as Record<string, unknown>;
@@ -2227,8 +2355,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     let openConversations: string[] = [];
     let stalledConversations: string[] = [];
     let revealRequested = false;
+    let imageExportRequested = false;
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown; canExportImages?: unknown; chatGptSignedIn?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
@@ -2240,6 +2369,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       stalledConversations = (body.stalledConversations ?? []) as string[];
       noteExtensionUpdateHold(body.updateHold);
       revealRequested = body.canReveal === true;
+      imageExportRequested = body.canExportImages === true;
+      if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
+          externalExtension.browserId === browserOf(req)) {
+        noteExternalLogin(externalExtension.browserId, typeof body.chatGptSignedIn === 'boolean' ? body.chatGptSignedIn : null);
+      }
     }
     const openSet = new Set(openConversations);
     const tabPolicy = await browserTabPolicy(openSet);
@@ -2275,6 +2409,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (browser && req.method === 'POST') browserChats.set(browser, openSet);
     const canReveal = req.method === 'POST' && revealRequested;
     if (canReveal) revealBrowsers.set(browser ?? '', Date.now());
+    if (req.method === 'POST' && imageExportRequested) imageExportBrowsers.set(browser ?? '', Date.now());
     const pendingInputs = await pendingBrowserInputs();
     const pendingIds = new Set(pendingInputs.map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
@@ -2307,6 +2442,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         revivals,
         placement: pendingBrowserPlacement(null, browser),
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
+        ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
         repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser),
@@ -2322,6 +2458,32 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       },
       origin
     );
+  }
+
+  // ChatGPT's own plugin list names the Core plugin: it is created in this account. The id is only
+  // checked for shape; what it proves is existence, which Setup reads instead of a test message.
+  // A generated image's original, fetched by the page that shows it, for one pending export (#889).
+  if (route === '/image-export' && req.method === 'POST') {
+    let body: unknown;
+    try { body = await readBody(req, IMAGE_EXPORT_BODY_BYTES); }
+    catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    return json(res, 200, { ok: await completeImageExport(body) }, origin);
+  }
+  if (route === '/core-plugin' && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    // ChatGPT's complete plugins list no longer names this install's Core: deleted or disconnected.
+    if (body && body.missing === true && body.appId === undefined) {
+      notePluginMissing('core');
+      return json(res, 200, { ok: true }, origin);
+    }
+    if (!body || typeof body.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(body.appId)) {
+      return json(res, 400, { error: 'invalid_core_plugin' }, origin);
+    }
+    notePluginInstalled('core');
+    return json(res, 200, { ok: true }, origin);
   }
 
   if (route === '/usage' && req.method === 'POST') {
@@ -5038,6 +5200,8 @@ export function publishBridgePortChange(next: Config, previous: Config, persist:
       if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
       browserPresenceTimer = null;
       lastSeenAt = null;
+      if (externalExtension) externalExtension.seenAt = null;
+      cosExtensionSeenAt = null;
       clearCompanionDiagnostics();
       server = prepared.instance;
       port = prepared.actual;
@@ -5215,6 +5379,8 @@ export async function stopBridge(): Promise<void> {
     // A stopped listener cannot currently see the extension. Require one fresh authenticated
     // request after the next start rather than carrying a recent sighting across bridge lifetimes.
     lastSeenAt = null;
+    if (externalExtension) externalExtension.seenAt = null;
+    cosExtensionSeenAt = null;
     clearCompanionDiagnostics();
     for (const command of commands) {
       if (command.timer) clearTimeout(command.timer);
@@ -6435,7 +6601,7 @@ async function goalInputPriority(conversationId: string, sessionId: string, turn
 }
 
 /** Both UIs describe the same existing reply and work deadlines, without another clock owner. */
-async function goalWaitFor(conversationId: string, sessionId: string, now = Date.now()): Promise<import('../shared/goal.js').GoalWait | null> {
+async function goalWaitFor(conversationId: string, sessionId: string, now = Date.now(), closed = false): Promise<import('../shared/goal.js').GoalWait | null> {
   const pending = goalPendingReplyFor(conversationId);
   if (!pending) {
     const countdowns = await sessionRecoveryCountdowns(sessionId, conversationId);
@@ -6447,6 +6613,9 @@ async function goalWaitFor(conversationId: string, sessionId: string, now = Date
   // rather than deciding from a context that is about to change. No deadline: the wait ends
   // when the last worker stops, and a countdown would only be a second, guessed clock.
   if (waitingForSubAgents(conversationId)) return { reason: 'workers' };
+  // The person closed this chat's tab, and browser recovery waits for its page to return: the
+  // owed turn is collected then. Until that, nothing is settling, so the window says so.
+  if (closed) return { reason: 'closed' };
   if ((pending.listenUntil ?? 0) > now) return { reason: pending.silenceSourceTurnId ? 'listening' : 'native-busy', until: pending.listenUntil };
   const grant = activeUntil.get(conversationId);
   if (grant?.sessionId === sessionId && grant.mcpBacked && !grant.thinkingFailed && grant.until > now)
@@ -10229,9 +10398,13 @@ export function resetBridgeForTests(): void {
   browserSeenAt.clear();
   browserChats.clear();
   revealBrowsers.clear();
+  imageExportBrowsers.clear();
   for (const entry of pendingReveals.splice(0)) entry.settle(false);
   openingCustody.clear();
   extensionVersion = null;
+  externalExtension = null;
+  cosExtensionSeenAt = null;
+  resetBrowserProofForTests();
   announcedExtensions.clear();
   extensionBuildSeenAt.clear();
   versionWarned = false;

@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "La aplicación no pudo guardar la tarea. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
   },
+  "popup_sign_in_transfer": {
+    "message": "Llevar sesión al CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Acceso a cookies denegado. Haz clic de nuevo."
+  },
+  "popup_sign_in_imported": {
+    "message": "Sesión transferida"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Has iniciado sesión en CoS browser."
+  },
+  "popup_sign_in_failed": {
+    "message": "Falló. Vuelve a iniciar sesión desde CoS."
+  },
   "popup_app_not_running_help": {
     "message": "Asegúrate de que Chat On Steroids esté abierto en este ordenador. La extensión se conecta sola."
   }

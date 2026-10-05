@@ -608,7 +608,7 @@ describe('surface boundaries', () => {
     everything();
     const names = toolNames(await core('tools/list'));
     // find is absent because exec_command is present — they are mutually exclusive.
-    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'update_plan', 'view_image', 'write_stdin']);
+    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'save_image', 'update_plan', 'view_image', 'write_stdin']);
     for (const name of surfaceDefinition('desktop').tools.filter(name => name !== 'exec')) expect(names, name).not.toContain(name);
   });
 
@@ -866,13 +866,53 @@ describe('surface boundaries', () => {
     }
   });
 
+  it('reads the user\'s own Skills read-only through /user-skills, and nothing else in their homes', async () => {
+    everything();
+    const home = path.join(base, 'user-skills-home');
+    await fs.mkdir(path.join(home, '.claude/skills/review'), { recursive: true });
+    await fs.writeFile(path.join(home, '.claude/skills/review/SKILL.md'), '---\nname: Review\n---\nRead the whole diff first.');
+    await fs.mkdir(path.join(home, '.codex'), { recursive: true });
+    await fs.writeFile(path.join(home, '.codex/auth.json'), '{"token":"secret-token"}');
+    vi.stubEnv('HOME', home); vi.stubEnv('USERPROFILE', home); vi.stubEnv('CLAUDE_CONFIG_DIR', ''); vi.stubEnv('CODEX_HOME', '');
+    try {
+      const reply = await core('tools/call', { name: 'read', arguments: { paths: ['/user-skills/claude/skills/review/SKILL.md'] } });
+      expect(reply.body.result?.isError).toBeFalsy();
+      expect(JSON.stringify(reply.body.result?.content)).toContain('Read the whole diff first.');
+      const listing = await core('tools/call', { name: 'read', arguments: { paths: ['/user-skills/claude/skills'] } });
+      expect(JSON.stringify(listing.body.result?.content)).toContain('review');
+      const secret = await core('tools/call', { name: 'read', arguments: { paths: ['/user-skills/codex/auth.json'] } });
+      expect(JSON.stringify(secret.body.result?.content)).not.toContain('secret-token');
+      const patch = '*** Begin Patch\n*** Update File: /user-skills/claude/skills/review/SKILL.md\n@@\n-Read the whole diff first.\n+Skip the diff.\n*** End Patch';
+      const patched = await core('tools/call', { name: 'apply_patch', arguments: { patch } });
+      expect(patched.body.result?.isError).toBe(true);
+      expect(await fs.readFile(path.join(home, '.claude/skills/review/SKILL.md'), 'utf8')).toContain('Read the whole diff first.');
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
+    everything();
+    const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
+    // No string that names an image: ChatGPT fills one with the generated picture's `file_…` id, and
+    // then fails the call internally before it reaches the app (measured live 2026-10-05, 3 of 3).
+    expect(Object.keys(tool?.inputSchema?.properties ?? {})).toEqual(['path', 'nth']);
+    expect(tool?.inputSchema?.properties?.nth).toMatchObject({ type: 'integer', minimum: 1 });
+    expect(tool?.inputSchema?.required).toEqual(['path']);
+    const reply = await core('tools/call', { name: 'save_image', arguments: { path: '/workspace/out.png' } });
+    expect(reply.body.result?.isError).toBe(true);
+    const refusal = JSON.stringify(reply.body.result?.content);
+    expect(refusal).toContain('could not tell which chat this save_image call came from');
+    // It names the Core that answered, so a call sent to another computer's Core says so (#1097).
+    expect(refusal).toContain('Chat On Steroids Core could not tell');
+    expect(refusal).toContain('If the chat belongs to another computer');
+  });
+
   it('keeps the worst-case no-query discovery of each surface small', async () => {
     everything();
     const coreTools = toolList(await core('tools/list'));
     const desktopTools = toolList(await desktop('tools/list'));
 
     // Each populated surface includes code mode; find and the shell exec pair remain exclusive.
-    expect(coreTools).toHaveLength(8);
+    expect(coreTools).toHaveLength(9);
     expect(desktopTools).toHaveLength(BROWSER_TOOLS.length + (IS_WINDOWS ? 16 : process.platform === 'darwin' ? 3 : 1));
 
     // And the size, which is what a discovery pull actually costs the model on every

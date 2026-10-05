@@ -62,7 +62,7 @@ const {
   spawn,
   swarmStateForCaller
 } = await import('../src/main/agents.js');
-const { registerIpc } = await import('../src/main/ipc.js');
+const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
@@ -119,6 +119,21 @@ it('saves Auto-select Skills through Settings and preserves it across a stale un
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+});
+
+it('names a chat with one clean line, and clears the name for an empty one (#1107)', async () => {
+  expect(cleanSessionName('  Release\nprep\t\u0000now  ')).toBe('Release prep now');
+  expect(cleanSessionName('x'.repeat(300))).toHaveLength(120);
+  expect(cleanSessionName(' \u2028 ')).toBeNull();
+  expect(cleanSessionName(null)).toBeNull();
+  const session = await createSession({ conversationId: 'ipc-rename-chat', title: 'From ChatGPT' });
+  const rename = (title: unknown) => handlers.get('sessions:rename')!(null, { id: session.id, title }) as Promise<unknown>;
+  await rename('  My   name ');
+  expect(await getSession(session.id)).toMatchObject({ title: 'My name', titleSource: 'manual' });
+  await rename('');
+  expect((await getSession(session.id))?.title).toBe('From ChatGPT');
+  expect(await rename(42)).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:rename')!(null, { id: 'missing-session-0001', title: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Session not found') });
 });
 
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
@@ -1257,6 +1272,35 @@ describe('every link the window offers', () => {
     expect(vi.mocked(shell.openExternal).mock.calls.length).toBe(before);
   });
 
+  it("opens Setup's ChatGPT and OpenAI pages in the CoS browser when it is the chosen browser", async () => {
+    const original = getConfig();
+    const url = 'https://platform.openai.com/settings/organization/tunnels';
+    try {
+      await saveConfig({ ...original, ui: { ...original.ui, chatBrowser: 'cos' } });
+      vi.mocked(openInPreferredBrowser).mockClear();
+      vi.mocked(shell.openExternal).mockClear();
+      expect(await handlers.get('link:open')!(null, { url })).toEqual({ ok: true, data: true });
+      expect(openInPreferredBrowser).toHaveBeenCalledWith(url, { reveal: true });
+      expect(shell.openExternal).not.toHaveBeenCalled();
+      // "Open in another browser" beside it: the same page in the system's own browser.
+      vi.mocked(openInPreferredBrowser).mockClear();
+      expect(await handlers.get('link:open')!(null, { url, external: true })).toEqual({ ok: true, data: true });
+      expect(shell.openExternal).toHaveBeenLastCalledWith(url);
+      expect(openInPreferredBrowser).not.toHaveBeenCalled();
+      // Every other site still leaves for the system browser.
+      await handlers.get('link:open')!(null, { url: 'https://openrouter.ai/settings/keys' });
+      expect(shell.openExternal).toHaveBeenCalledWith('https://openrouter.ai/settings/keys');
+
+      await saveConfig({ ...original, ui: { ...original.ui, chatBrowser: 'chrome' } });
+      vi.mocked(openInPreferredBrowser).mockClear();
+      await handlers.get('link:open')!(null, { url });
+      expect(shell.openExternal).toHaveBeenLastCalledWith(url);
+      expect(openInPreferredBrowser).not.toHaveBeenCalled();
+    } finally {
+      await saveConfig(original);
+    }
+  });
+
   it('serializes non-Error throws into a real IPC error string', async () => {
     vi.mocked(shell.openExternal).mockRejectedValueOnce('Windows shell refused the request');
     const reply = (await handlers.get('link:open')!(null, {
@@ -1938,8 +1982,10 @@ describe('session IPC contracts', () => {
     });
     const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
     expect(reply.ok, reply.error).toBe(true);
+    // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
     expect(openInPreferredBrowser).toHaveBeenCalledWith(
-      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { reveal: true }
     );
 
     const unattributed = await createSession({ title: 'no conversation', conversationId: null });

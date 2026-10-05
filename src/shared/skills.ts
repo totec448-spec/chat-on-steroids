@@ -86,7 +86,7 @@ export function validGitHubSkillOrigin(value: unknown): value is GitHubSkillOrig
 }
 
 export type SkillScope = 'managed' | 'repo' | 'user' | 'system' | 'admin';
-export type SkillSource = 'managed' | 'repo-agents' | 'project-codex' | 'user-agents' | 'codex-home' | 'codex-plugin' | 'bundled' | 'admin';
+export type SkillSource = 'managed' | 'repo-agents' | 'project-codex' | 'project-claude' | 'user-agents' | 'codex-home' | 'codex-plugin' | 'claude-home' | 'claude-plugin' | 'bundled' | 'admin';
 export type CodexPluginSource =
   | { source: 'remote'; id: string }
   | { source: 'local' }
@@ -113,6 +113,16 @@ export interface CodexPluginSkillProvenance {
   /** Package-relative directory below the plugin's `skills/` root. */
   skillPath: string;
 }
+/** Where a Skill from an enabled Claude Code plugin comes from (`~/.claude/plugins`). */
+export interface ClaudePluginSkillProvenance {
+  /** `name@marketplace`, as Claude Code's `enabledPlugins` names it. */
+  pluginId: string;
+  pluginName: string;
+  marketplaceName: string;
+  version: string;
+  /** Package-relative directory below the plugin's `skills/` root. */
+  skillPath: string;
+}
 export interface SkillMetadata {
   displayName?: string;
   shortDescription?: string;
@@ -127,6 +137,8 @@ export interface LibrarySkill extends SkillSummary, SkillMetadata {
   managed: boolean;
   /** Present only for a Skill projected from Codex's active installed plugin package. */
   codexPlugin?: CodexPluginSkillProvenance;
+  /** Present only for a Skill from an enabled Claude Code plugin. */
+  claudePlugin?: ClaudePluginSkillProvenance;
 }
 export interface SkillLibrary {
   skills: LibrarySkill[];

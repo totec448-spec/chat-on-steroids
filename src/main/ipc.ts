@@ -107,13 +107,16 @@ import { extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
   clearImageStorage,
+  clearSessionName,
+  renameSession,
   getSession,
   getImageStorage,
   readHandoff,
   readToolEditReview,
   withSessionMutationFence
 } from './session/store.js';
-import { forgetSession, onSessionChange } from './session/recorder.js';
+import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
+import { searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -134,6 +137,10 @@ import {
   MAX_COMMAND_ALLOWLIST_RULE_CHARS,
   validateCommandAllowlistRule
 } from '../shared/command-allowlist.js';
+import { cosBrowserSignedIn, onCosBrowserSignInChange } from './cos-browser/sign-in.js';
+import { loadCosBrowser, syncCosBrowser } from './cos-browser/selection.js';
+import { onConnectorProofChange } from './connector-proof.js';
+import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import { openInPreferredBrowser } from './browser.js';
 import { manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
@@ -199,6 +206,7 @@ const settingsPatch = z.object({
     mentionCore: z.boolean().optional(),
     language: z.enum(UI_LANGUAGES).optional(),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
+    cosBrowserTrayHint: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
@@ -363,6 +371,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
       browserPreferences: current.ui.browserPreferences,
+      cosBrowserTrayHint: current.ui.cosBrowserTrayHint,
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
       planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
       finishAction: pick(current.ui.finishAction, base.ui.finishAction, wanted.ui.finishAction),
@@ -471,6 +480,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
 }
 
 const sessionIdArg = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) });
+/** A chat's own name in the app (#1107): one line, no control characters; null or blank clears it. */
+const sessionNameArg = sessionIdArg.extend({ title: z.string().max(2000).nullable() });
+export function cleanSessionName(title: string | null): string | null {
+  const clean = (title ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim();
+  return clean || null;
+}
 const agentIdArg = z.string().min(1).max(64).regex(/^[0-9a-z-]+$/i);
 
 const renameRoot = z.object({
@@ -505,6 +520,7 @@ async function buildState(): Promise<AppState> {
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
     bridge: await bridgeStatus(),
+    cosBrowserSignedIn: cosBrowserSignedIn(),
     update: updateStatus(),
     desktopAccess: getMacOSDesktopAccess()
   };
@@ -657,6 +673,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Startup and settings saves use one eligibility rule.
     if (browserExtensionRequired(next)) await startBridge();
     else await stopBridge();
+    if (before.ui.chatBrowser !== next.ui.chatBrowser) await syncCosBrowser();
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
@@ -1119,9 +1136,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('link:open', async (payload) => {
-    const { url } = z.object({ url: z.string().max(8192) }).parse(payload);
+    const { url, external } = z.object({ url: z.string().max(8192), external: z.boolean().optional() }).parse(payload);
     if (!ALLOWED_LINKS.has(url) && !safeExternalLink(url)) throw new Error('That link is not allowed');
-    await shell.openExternal(url);
+    // Setup's ChatGPT and OpenAI pages open where the user is already signed in, unless the
+    // user asked for their own browser instead.
+    if (!external && getConfig().ui.chatBrowser === 'cos' && opensInCosBrowser(url)) await openInPreferredBrowser(url, { reveal: true });
+    else await shell.openExternal(url);
+    return true;
+  });
+
+  // Setup's "Open ChatGPT" for Chrome, Edge or Brave: the chosen browser, where the extension is.
+  handle('chatgpt:open', async () => {
+    await openInPreferredBrowser('https://chatgpt.com/', { reveal: true });
+    return true;
+  });
+
+  // Setup's button once ChatGPT is surely signed in: ChatGPT's own sign-out, where it runs. The
+  // status follows from that browser's own answer, as it does for any sign-out.
+  handle('chatgpt:signOut', async () => {
+    await openInPreferredBrowser('https://chatgpt.com/auth/logout', { reveal: true });
+    return true;
+  });
+
+  // Installation does not change the saved execution browser or load the CoS host.
+  handle('browser:setupOpen', async (payload) => {
+    const { browser, page } = z.object({ browser: z.enum(['chrome', 'edge', 'brave']), page: z.enum(['extensions', 'chatgpt']) }).strict().parse(payload);
+    const url = page === 'chatgpt' ? 'https://chatgpt.com/' : `${browser === 'edge' ? 'edge' : browser === 'brave' ? 'brave' : 'chrome'}://extensions/`;
+    await openInPreferredBrowser(url, { browser, reveal: true });
+    return true;
+  });
+
+  // Setup's first step: the CoS browser on screen, on ChatGPT's login when signed out.
+  handle('cosBrowser:show', async () => {
+    if (getConfig().ui.chatBrowser !== 'cos') throw new Error('The CoS browser is not the selected ChatGPT browser');
+    await (await loadCosBrowser()).showSignIn();
     return true;
   });
 
@@ -1287,7 +1335,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new Error('This session has no valid ChatGPT conversation');
     }
     // The extension's own browser first: the OS may pick another browser or account (#882).
-    if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId));
+    // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
+    if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
     return true;
   });
 
@@ -1379,6 +1428,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return trustedChatIds();
   });
 
+  // Search chats by title and by what was said in them (#1107).
+  handle('sessions:search', async (payload) => {
+    const { query } = z.object({ query: z.string().max(200) }).parse(payload);
+    return searchSessions(query);
+  });
+  handle('sessions:rename', async (payload) => {
+    const { id, title } = sessionNameArg.parse(payload);
+    if (!await getSession(id)) throw new Error('Session not found');
+    const name = cleanSessionName(title);
+    if (name) await renameSession(id, name, 'manual');
+    else await clearSessionName(id);
+    notifyChanged(id);
+    return true;
+  });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
@@ -1592,6 +1655,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  onCosBrowserSignInChange(pushState);
+  onConnectorProofChange(pushState);
   registerPluginIpc(handle, getWindow, pushState);
   // Draft stages belong to session controls; state:changed only refreshes settings.
   onGoalChange(() => push('session:changed'));

@@ -12,7 +12,7 @@ import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePre
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
-import type { RunningToolActivity, SessionChange, ToolEditReview } from '../shared/session.js';
+import type { RunningToolActivity, SessionChange, SessionSearchReply, ToolEditReview } from '../shared/session.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
@@ -224,7 +224,12 @@ const api = {
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
   exportMarkdown: (request: { id: string; scope: 'answer' | 'session'; turnId?: string; target: 'clipboard' | 'file' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
-  openLink: (url: string) => call<boolean>('link:open', { url }),
+  // `external`: the system's own browser even for a page the CoS browser would open.
+  openLink: (url: string, options: { external?: boolean } = {}) => call<boolean>('link:open', { url, ...(options.external ? { external: true } : {}) }),
+  showCosBrowser: () => call<boolean>('cosBrowser:show'),
+  openChatGpt: () => call<boolean>('chatgpt:open'),
+  signOutChatGpt: () => call<boolean>('chatgpt:signOut'),
+  openSetupBrowser: (browser: 'chrome' | 'edge' | 'brave', page: 'extensions' | 'chatgpt') => call<boolean>('browser:setupOpen', { browser, page }),
   // Applies the update this app has already downloaded and verified: the app quits, the
   // installer runs, and the app comes back as the new version. It takes no argument because
   // there is nothing here to choose - the main process knows what is staged.
@@ -324,6 +329,10 @@ const api = {
   setSessionTrusted: (id: string, expectedConversationId: string, trusted: boolean) =>
     call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
+  /** Chats matching every word of `query`, by title first, then by what was said in them. */
+  searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
+  /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
+  renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
   unpairExtension: () => call<AppState>('bridge:unpair'),

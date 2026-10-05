@@ -645,5 +645,81 @@ button:focus-visible {
   line-height: 1.4;
 }
 
+/* The CoS browser's sign-in handoff: one button, shown only while the app waits for it. */
+.transfer-button[hidden], .transfer-done[hidden] { display: none; }
+.transfer { margin: 0 0 18px; animation: transfer-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.transfer-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--ink);
+  font: 600 13.5px/1.25 var(--sans);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.transfer-button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 88%, var(--card)); }
+.transfer-button:active:not(:disabled) { transform: scale(0.98); }
+.transfer-button:disabled { cursor: default; }
+/* The app's own mark beside the label. */
+.transfer-mark { flex: none; width: 18px; height: 18px; }
+.transfer[aria-busy="true"] .transfer-button { opacity: 0.6; }
+
+/* The receipt: the app's own mark, sealed with a check. */
+.transfer-done {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--green-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 22%, transparent);
+  animation: transfer-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.done-logo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.6);
+  animation: done-pop 420ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+.done-check {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 18px;
+  height: 18px;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--bg);
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 16;
+  animation: done-pop 360ms cubic-bezier(0.34, 1.4, 0.64, 1) 160ms both, done-draw 300ms ease-out 300ms both;
+}
+.done-text { display: grid; gap: 1px; min-width: 0; }
+.done-text strong { color: var(--text); font: 600 13.5px/1.3 var(--sans); }
+.done-text span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+@keyframes done-pop { from { opacity: 0; transform: scale(0.6); } }
+@keyframes done-draw { from { stroke-dashoffset: 16; } }
+#signInTransferResult { margin: 8px 0 0; color: var(--red); font-size: 12px; line-height: 1.4; text-align: center; }
+#signInTransferResult:empty { display: none; }
+@keyframes transfer-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .transfer, .transfer-done, .done-logo, .done-check { animation: none; } }
 /* Korean separates words with spaces: wrap there, not inside a word. */
 html:lang(ko) body { word-break: keep-all; overflow-wrap: break-word; }

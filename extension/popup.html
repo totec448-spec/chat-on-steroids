@@ -32,6 +32,23 @@
 
       <p class="hint" id="appHint" hidden data-i18n="popup_app_not_running_help">Make sure Chat On Steroids is open on this computer. The companion connects on its own.</p>
       <p class="alert" id="alert" hidden></p>
+      <section class="transfer" id="signInTransfer" hidden>
+        <button class="transfer-button" id="signInTransferBtn" type="button">
+          <img class="transfer-mark" src="icons/icon32.png" alt="" width="18" height="18" />
+          <span id="signInTransferLabel" data-i18n="popup_sign_in_transfer">Bring session to CoS browser</span>
+        </button>
+        <div class="transfer-done" id="signInTransferDone" role="status" hidden>
+          <span class="done-logo" aria-hidden="true">
+            <img src="icons/icon48.png" alt="" width="22" height="22" />
+            <svg class="done-check" viewBox="0 0 20 20"><path d="M5.5 10.5 8.6 13.5 14.5 7" /></svg>
+          </span>
+          <span class="done-text">
+            <strong data-i18n="popup_sign_in_imported">Session transferred</strong>
+            <span data-i18n="popup_sign_in_imported_detail">You're signed in to the CoS browser.</span>
+          </span>
+        </div>
+        <p id="signInTransferResult" role="status" aria-live="polite"></p>
+      </section>
       <p class="caption" data-i18n="popup_section_session_capture">Session capture</p>
       <section class="card">
         <div class="row" id="r-tab">

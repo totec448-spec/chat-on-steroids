@@ -27,6 +27,7 @@ import { recoveryMessage, recoveryBusyMs } from '../../shared/recovery.js';
 import { invokedSkills } from '../../shared/skill-invocation.js';
 import { SKILL_ID_PATTERN } from '../../shared/skills.js';
 import { autoSelectManagedSkills } from '../skill-routing.js';
+import { asksForImage } from './image-request.js';
 
 export const inputArgs = z.object({
   projectId: z.string().uuid().nullable().optional(),
@@ -1417,8 +1418,32 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (!requiresAuthorization && completedTurnId && entry.sessionId && conversationId)
       await consumeGoalReplyForInputNow(conversationId, entry.sessionId, completedTurnId);
     logInfo(`input ${id}: browser claimed after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
-    return { ...combinedInput(claimed, companion), ...selection, text: claimed.deliveryText ?? claimed.text };
+    const withoutMention = await imageRequestWithoutMention(entry, session, companion);
+    if (withoutMention) logInfo(`input ${id}: asks for an image, so it goes out without the Core mention`);
+    return { ...combinedInput(claimed, companion), ...selection, text: claimed.deliveryText ?? claimed.text,
+      ...(withoutMention ? { coreMention: false as const } : {}) };
   });
+}
+/**
+ * The person's own message asking ChatGPT for a picture goes out without the Core mention: ChatGPT
+ * switches its image tool off for a message that mentions an app (see image-request.ts). Generated
+ * messages (Goal, Loop, recovery, workers, the Goal helper) keep the mention as before.
+ */
+async function imageRequestWithoutMention(entry: InputEntry, session: SessionSummary | null, companion?: InputEntry): Promise<boolean> {
+  // A combined message also carries the next queued instruction, which may need the app.
+  if (companion || entry.purpose === 'decision' || entry.recovery || entry.finishOwner || (entry.authoredSource ?? 'text') !== 'text') return false;
+  if (session?.origin?.kind === 'worker' || session?.origin?.kind === 'helper') return false;
+  const attachedImage = (entry.images?.length ?? 0) > 0 || (entry.attachments ?? []).some(file => file.mimeType.startsWith('image/'));
+  // Shortly after ChatGPT made a picture, "make it brighter" changes that picture: the picture
+  // answered one of the last two questions, so one failed edit in between still counts.
+  let afterImage = false;
+  if (session) {
+    const recent = await readRecentEvents(session.id, 64, { kinds: ['user_message', 'native_image'] }).catch(() => []);
+    const questions = recent.flatMap((event, index) => event.kind === 'user_message' ? [index] : []);
+    const since = questions.length >= 2 ? questions.at(-2)! : questions.at(-1);
+    afterImage = since !== undefined && recent.slice(since + 1).some(event => event.kind === 'native_image' && event.providerStatus !== 'in_progress');
+  }
+  return asksForImage(entry.text, { attachedImage, afterImage });
 }
 /** Initial provider binding uses the same reserved session as local admission. */
 async function bindOpening(entry: InputEntry, conversationId: string): Promise<boolean> {
