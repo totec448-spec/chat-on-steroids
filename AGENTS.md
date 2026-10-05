@@ -2199,6 +2199,23 @@ the chat in `reveals`, under the same holding rule, and focuses its tab or opens
 minimized window). When no such extension is connected, or none takes it within 4 s, the request
 is withdrawn and the app opens the URL through the OS as before.
 
+Core's `save_image` (created only with the create-files permission) saves the original file of an
+image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
+chat comes from request correlation (waiting up to 20 s), never from the model. The image is the
+latest recorded finished `native_image` of that chat's session, or the one whose `messageId` or
+`providerAssetId` the `image` argument names. The destination resolves like any write
+(`allowMissing`), must not exist, and gets the image's own extension when it has none; a named
+extension of another format is refused. An extension whose `/status` body says
+`canExportImages: true` receives pending exports in `imageExports: [{ nonce, conversationId,
+messageId, assetId }]` (never the destination). The worker hands each nonce once to the tab
+showing that chat (`clf-image-export`); the page fetches exactly the same-origin URL or page blob
+its fiber-stamped `<img>` already loaded and answers `{ data: base64 }` or `{ error }`
+(`not_open`, `not_rendered`, `fetch_failed`, `not_image`, `too_large`). The worker posts
+`{ nonce, data }` or `{ nonce, error }` to `POST /image-export` (body limit sized for 25 MB). The
+app requires a decodable PNG, JPEG or WebP of at most 25 MB, writes a `.part` file beside the
+destination and hard-links it into place, so an existing name is never replaced, and answers the
+tool within 60 s. No URL, cookie or credential leaves the page.
+
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
 authorized, its shared layout policy bounds it to 45% of the work area and 800×600, then
