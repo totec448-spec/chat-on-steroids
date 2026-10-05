@@ -5,6 +5,7 @@ import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig } from '../config.js';
+import { connectorName } from '../../shared/connector-names.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
  *
@@ -494,8 +495,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             (caller.requestId ? (await awaitRequestCorrelation(caller.requestId, 20_000))?.conversationId ?? null : null);
           // Never guessed from recent activity: a wrong guess would save another chat's image.
           if (!conversationId) {
-            return fail('save_image could not tell which chat this call came from, so it does not know which image to save. ' +
-              'Call save_image directly as its own tool call, not from inside a JavaScript or exec step, and try again.');
+            // Name the Core that answered: with one ChatGPT account on several computers, ChatGPT
+            // may send a chat's call to another computer's Core, which never sees that chat (#1097).
+            return fail(`${connectorName('core', getConfig().connectorSuffix)} could not tell which chat this save_image call came from, ` +
+              'so it does not know which image to save. If the chat belongs to another computer, call save_image of that ' +
+              'computer\'s Chat On Steroids Core instead. Otherwise call save_image directly as its own tool call, not from ' +
+              'inside a JavaScript or exec step, and try again.');
           }
           if (!imageExportCapable()) {
             return fail('save_image needs the Chat On Steroids browser extension to be connected and up to date, so the chat\'s page can hand over the image.');
