@@ -1,7 +1,11 @@
 {
+  "Clear search": "Xóa tìm kiếm",
   "Jump to latest": "Chuyển đến mới nhất",
+  "No chats match": "Không có cuộc trò chuyện nào khớp",
   "Previous source": "Nguồn trước",
   "Next source": "Nguồn tiếp theo",
+  "Search chats": "Tìm cuộc trò chuyện",
+  "Searching message text… {0} of {1} chats": "Đang tìm trong nội dung tin nhắn… {0}/{1} cuộc trò chuyện",
   "{0} more sources were not recorded with this reply.": "Còn {0} nguồn chưa được ghi lại cùng phản hồi này.",
   "Thinking": "Đang suy luận",
   "Copy answer": "Sao chép câu trả lời",

@@ -1,7 +1,11 @@
 {
+  "Clear search": "検索をクリア",
   "Jump to latest": "最新へ移動",
+  "No chats match": "一致するチャットはありません",
   "Previous source": "前のソース",
   "Next source": "次のソース",
+  "Search chats": "チャットを検索",
+  "Searching message text… {0} of {1} chats": "メッセージ本文を検索中… {1} 件中 {0} 件のチャット",
   "{0} more sources were not recorded with this reply.": "この返信では他の {0} 件のソースが記録されていません。",
   "Thinking": "考え中",
   "Copy answer": "回答をコピー",

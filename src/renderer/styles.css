@@ -491,6 +491,25 @@ code {
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
 /* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
 .sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
+/* Chat search (#1107): one field above Projects and Chats; results take their place while it holds a query. */
+.sidebar-search { position: relative; display: flex; align-items: center; margin: 0 0 6px; }
+.sidebar-search > .ico { position: absolute; left: 10px; --ico: 14px; color: var(--faint); pointer-events: none; }
+.sidebar-search input { flex: 1; min-width: 0; height: 30px; padding: 0 30px 0 30px; border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); outline: none; }
+.sidebar-search input::placeholder { color: var(--faint); }
+.sidebar-search input:focus { border-color: var(--accent); }
+.sidebar-search input::-webkit-search-cancel-button { display: none; }
+.sidebar-search-clear { position: absolute; right: 4px; padding: 4px; border: 0; background: transparent; color: var(--faint); }
+.sidebar-search-clear .ico { --ico: 13px; }
+.search-list { display: flex; flex-direction: column; }
+.search-result { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-height: 36px; padding: 7px 10px; margin: 2px 0;
+  border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.search-result:hover, .search-result.is-sel, .search-result:focus-visible { background: var(--hover); outline: none; }
+.search-result b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
+.search-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1)); line-height: 17px; overflow-wrap: anywhere; }
+.search-snippet mark { background: var(--accent-wash); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+.search-status { padding: 8px 10px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
 .sidebar-sessions h2 { font-size: calc(10px * var(--text-scale, 1)); padding: 10px 8px; }
 .sidebar-sessions .foot { border: 0; padding: 12px 8px; font-size: calc(10px * var(--text-scale, 1)); }
 .sidebar-bottom { border-top: 1px solid var(--line); padding-top: 10px; display: flex; align-items: center; gap: 4px; }
