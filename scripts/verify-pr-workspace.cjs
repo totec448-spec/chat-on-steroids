@@ -238,7 +238,7 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('rightDockToggle').click();document.getElementById('sidebarPlugins').click()`);
     assert.equal(await js('document.querySelector(".app").dataset.screen'),'library');
     assert.equal(await js('document.getElementById("sidebarPrimary").hidden'),false);
-    await js(`document.querySelector('[data-new-project="project-b"]').click()`);
+    await js(`document.querySelector('.project-group[data-project-id="project-b"] .project-menu').click();document.querySelector('.row-menu [data-new-project="project-b"]').click()`);
     await until('document.querySelector(".app").dataset.screen==="chat"');
     assert.ok(await js('document.getElementById("chatInput").placeholder.includes("Second project")'));
     await js(`document.querySelector('.sess[data-id="task-0"]').click()`);

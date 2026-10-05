@@ -48,18 +48,23 @@ app.whenReady().then(async () => {
   const field=`document.querySelector('.sess-rename')`;
   const key=async name=>{win.webContents.sendInputEvent({type:'keyDown',keyCode:name});win.webContents.sendInputEvent({type:'keyUp',keyCode:name});await pause(120);};
   await win.loadURL(server.resolvedUrls.local[0]);
-  await until(`!!${row}?.querySelector('button.sess-name')`);
+  await until(`!!${row}?.querySelector('.row-menu-button')`);
+  // Rename is an item of the row's menu (the "⋯" button, or a right click on the row).
+  const rename=async()=>{await js(`${row}.querySelector('.row-menu-button').click()`);await until(`!!document.querySelector('.row-menu [data-row-action="rename"]')`);await js(`document.querySelector('.row-menu [data-row-action="rename"]').click()`);};
   win.show(); win.focus(); win.webContents.focus(); await pause(100);
 
   for (const theme of ['dark','light']) {
     await js(`setTheme(${JSON.stringify(theme)})`);
     await until(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`);
-    // The pencil sits among the row's hover actions.
+    // One "⋯" sits on the hovered or focused row; its menu holds Rename and the other actions.
     await js(`${row}.querySelector('.sess-top').focus()`);
     await settle();
     assert.equal(await js(`getComputedStyle(${row}.querySelector('.sess-actions')).display`),'flex');
+    assert.equal(await js(`${row}.querySelectorAll('.sess-actions button').length`),1);
+    await js(`${row}.querySelector('.row-menu-button').click()`);
+    await until(`!!document.querySelector('.row-menu')`);
     await capture(`${theme}-actions.png`);
-    await js(`${row}.querySelector('button.sess-name').click()`);
+    await js(`document.querySelector('.row-menu [data-row-action="rename"]').click()`);
     await until(`!!${field}`);
     await settle();
     // The field takes the row: the actions step aside instead of squeezing it.
@@ -95,7 +100,7 @@ app.whenReady().then(async () => {
   await capture('renamed.png');
 
   // An empty name hands the title back to ChatGPT's.
-  await js(`${row}.querySelector('button.sess-name').click()`);
+  await rename();
   await until(`!!${field}`);
   await js(`${field}.select()`);
   await key('Backspace');

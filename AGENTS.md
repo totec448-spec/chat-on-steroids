@@ -825,14 +825,20 @@ Null means no project; a broken explicit binding is an error, not a reason to in
 Projects may also store one optional color from the fixed `PROJECT_COLORS` palette. Color is
 sidebar presentation metadata only: changing or removing it never resolves paths, changes the
 project folder, grants permission, rebinds sessions, or changes prompt/workspace
-selection. Legacy rows without color remain unchanged. The sidebar keeps an unset color control
-quiet until hover/focus and opens an explicit keyboard-reachable palette; choosing a swatch (or
-None) calls the same `projects:color` owner rather than cycling through values.
-After a keyboard color save, the repainted color button regains focus only while the same
-selected-chat generation is visible and the user has not focused another control. Leaving and
-returning to that chat invalidates the old focus action. A rejected save uses the same ownership
-check before reopening its palette; it never steals focus from a newer interaction. Completion
-checks both focus notifications and the current active element, including an inactive document.
+selection. Legacy rows without color remain unchanged. A project's color tints its folder icon.
+Every sidebar row (a project or a chat) has one quiet "⋯" button, shown on hover/focus or while its
+menu is open, and a right click on the row opens the same menu (`renderer/row-menu.ts`). The menu
+lives in the document body, outside the sidebar the activity repaints, so a repaint never closes
+it; it finds its row's button again by owner (`data-row-menu`), stays inside the window, opens
+submenus beside their item, and is keyboard-driven (arrows, Right/Left for submenus, Escape gives
+focus back to the button). A project's menu: New chat in this project (`data-new-project`, which
+also shows the chat screen), Color (a submenu: None and the palette as radio items, each calling
+the same `projects:color` owner; choices wait while a save is pending) and Remove. A chat's
+menu: Rename and Open in browser, Block/Release and, in strict mode, Trust/Untrust, then Remove;
+the Unattributed row offers only its app-wide Block/Allow (never in strict mode) and Remove.
+Choosing an item gives focus back to the row's button before the action runs, so a color save's
+repaint keeps it there unless the user moved focus meanwhile; an action that moves focus
+(renaming, a new chat's field) still does.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
@@ -3370,8 +3376,9 @@ membership before saving. Off-page order survives partial list refreshes.
 the oldest gives way, a pin is never refused). A pinned chat leads its own list (main Chats or its
 project) and has its own drag scope `pinned:<scope>`, so manual order is kept inside the pinned and
 unpinned groups and a drag never crosses between them. Only recorded chats are pinnable, never
-workers or unattributed activity. Pinned rows carry a quiet pin mark at rest, and Pin/Unpin
-(`aria-pressed`) sits with the row actions, keeping keyboard focus on the rebuilt row's button.
+workers or unattributed activity. Pinned rows carry a quiet pin mark at rest (it makes way for the
+row's "⋯" on hover, focus or while its menu is open), and Pin chat/Unpin chat is the first item of
+the chat's row menu, keeping keyboard focus on the rebuilt row's menu button.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.
@@ -3467,7 +3474,7 @@ never become preview text. `session/title.ts` supplies presentation and legacy r
 store serialization protects manual/origin names and current-conversation title observations.
 Apply provider titles after the batch's messages, so a late receipt or title-first batch cannot
 strand a preview. Cold reads repair legacy context previews from canonical authored history.
-The user names a chat in the sidebar (pencil or double-click; `sessions:rename { id, title }`,
+The user names a chat in the sidebar (its menu's Rename or a double-click; `sessions:rename { id, title }`,
 title trimmed to one line of at most 120 characters). A non-empty name is a `manual` title; the
 title shown until then moves to `autoTitle { title, source }`, which keeps receiving the
 automatic titles the chat would have accepted (provider titles unless the chat was app-opened,
