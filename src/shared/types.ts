@@ -490,6 +490,11 @@ export interface SurfaceStatus {
    */
   lastRequestAt: number | null;
   lastToolCallAt: number | null;
+  /**
+   * The newest of the same evidence from earlier runs of the app, through the tunnel this
+   * connector uses now. Null when there is none, or when it came through another tunnel.
+   */
+  proof?: { requestAt: number | null; toolCallAt: number | null; installedAt?: number | null } | null;
 }
 
 export type SurfaceConnectionState =

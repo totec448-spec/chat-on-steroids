@@ -510,6 +510,16 @@ describe('who is allowed to talk to it', () => {
     expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
   });
 
+  it('accepts only an exact plugin id or an exact missing report on /core-plugin', async () => {
+    await pair();
+    expect((await request('POST', '/core-plugin', { body: { appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' } })).status).toBe(200);
+    // ChatGPT's complete plugins list without this install's Core takes the proof back.
+    expect((await request('POST', '/core-plugin', { body: { missing: true } })).status).toBe(200);
+    for (const body of [{ missing: 'yes' }, { missing: true, appId: 'app://asdk_app_x' },{ appId: 'app://asdk_app_x' }, {}]) {
+      expect((await request('POST', '/core-plugin', { body })).status).toBe(400);
+    }
+  });
+
   it('answers unknown rather than incompatible to a /hello without a protocol header (#568)', async () => {
     // A plain curl in a bug report read "compatible": false and pointed everyone the wrong way.
     const plain = await fetch(`${base}/hello`);

@@ -1843,6 +1843,8 @@
   "Preview limited to 600 lines. Open Review for the complete edit.": "Предпросмотр ограничен 600 строками. Откройте проверку для просмотра всей правки.",
   "{0} unchanged lines": "Неизменённых строк: {0}",
   "More edited files are available in the recording.": "Другие изменённые файлы доступны в записи.",
+  "The plugin is in your ChatGPT. It runs the first time a chat asks for it.": "Плагин добавлен в ваш ChatGPT. Он запустится, когда чат впервые к нему обратится.",
+  "Added in ChatGPT. Its tools have not run yet.": "Добавлен в ChatGPT. Его инструменты ещё не запускались.",
   "1 sub-agent in this round": "Подагент в этом раунде: 1",
   "{0} sub-agents in this round": "Подагенты в этом раунде: {0}"
 }
