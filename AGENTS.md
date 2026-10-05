@@ -489,6 +489,20 @@ current executable with child-only `ELECTRON_RUN_AS_NODE=1`. A native Codex exec
 existing environment. This distinction prevents a packaged Electron executable from reopening
 the app instead of running the npm entry; it changes neither installed Electron fuses nor roots.
 
+Claude Code Skills are discovered from files only; no Claude Code process runs. The Claude home is
+`CLAUDE_CONFIG_DIR` or `~/.claude`. Its `skills/` folder is a user root (source `claude-home`) and a
+project's `.claude/skills` is a repo root (source `project-claude`). Plugin Skills (source
+`claude-plugin`) come from `plugins/installed_plugins.json` (v2: `plugins["name@marketplace"]` lists
+installations with `scope`, `installPath`, `version`, and `projectPath` for project/local scope)
+filtered by `enabledPlugins` (`true` only) from the user `settings.json`, overridden by the
+project's `.claude/settings.json` and then `.claude/settings.local.json`. One installation per
+plugin counts: the user-scope one, or a project/local one whose `projectPath` is the current
+project. Its `installPath` must be an approved directory inside `<claude home>/plugins/cache`, a
+present `.claude-plugin/plugin.json` must name the same plugin, and only its `skills/` root is
+scanned. `LibrarySkill.claudePlugin` carries `{ pluginId, pluginName, marketplaceName, version,
+skillPath }`; the command id is `<stem>--claude-<hash>`, hashed from marketplace + plugin +
+package-relative Skill path so a plugin update keeps the command.
+
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
 checkpoints. Editing a queued message makes its text human-authored again. At the existing
