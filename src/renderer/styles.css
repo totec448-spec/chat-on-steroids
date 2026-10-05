@@ -1295,14 +1295,16 @@ main {
 
 /* ------------------------------------------------------------------ health */
 
+/* The two figures sit optically centered between the card's top edge and the facts divider. */
 .big {
   display: flex;
   gap: 26px;
-  padding: 3px 14px 12px;
+  padding: 13px 14px 14px;
 }
 
 .big b {
   display: block;
+  line-height: 1.15;
   font-size: calc(22px * var(--text-scale, 1));
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -1319,6 +1321,9 @@ main {
 }
 
 .big span {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.3;
   font-size: calc(11px * var(--text-scale, 1));
   color: var(--faint);
 }
@@ -1751,15 +1756,16 @@ details.connector[open] > summary::before { rotate: 90deg; }
   transition: border-color 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out, box-shadow 160ms ease-out;
 }
 .setup-rail-mark::before { content: counter(setup-rail); }
-.setup-rail-mark .ico { display: none; --ico: 15px; }
+/* Phosphor's check sits low in its em box (its ink spans 64–208 of 256); lift it to the optical center. */
+.setup-rail-mark .ico { display: none; --ico: 15px; translate: 0 -1px; }
 .setup-rail-ready .setup-rail-mark::before { content: none; }
-.setup-rail-ready .setup-rail-mark .ico { display: block; }
+.setup-rail-ready .setup-rail-mark .ico { display: inline-flex; }
 .setup-rail-label { max-width: 100%; overflow: hidden; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .setup-rail button:hover .setup-rail-mark { border-color: var(--accent-edge); color: var(--ink); }
 .setup-rail button:hover .setup-rail-label { color: var(--ink); }
 .setup-rail li.is-done .setup-rail-mark { border-color: var(--green-line); background: var(--green-wash); color: var(--green); }
 .setup-rail li.is-done .setup-rail-mark::before { content: none; }
-.setup-rail li.is-done .setup-rail-mark .ico { display: block; }
+.setup-rail li.is-done .setup-rail-mark .ico { display: inline-flex; }
 .setup-rail li.is-current .setup-rail-mark { border-color: var(--accent-edge); background: var(--accent-wash); color: var(--ink); }
 .setup-rail button[aria-current="step"] .setup-rail-mark { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
 .setup-rail button[aria-current="step"] .setup-rail-label { color: var(--ink); font-weight: 650; }
