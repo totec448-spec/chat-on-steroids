@@ -82,6 +82,21 @@ jobs:
           cat SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
 
+      - name: Limit checksums to published canary assets
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          # release.yml always includes the native-source archive in the candidate so the full
+          # candidate can be verified above. Canary intentionally does not attach that archive;
+          # do not publish a checksum manifest that names a file users cannot download here.
+          grep -Fq '  Chat-On-Steroids-Native-Sources.tar.gz' SHA256SUMS.txt || {
+            echo 'Candidate checksum manifest is missing the native-source archive.' >&2
+            exit 1
+          }
+          grep -vF '  Chat-On-Steroids-Native-Sources.tar.gz' SHA256SUMS.txt > SHA256SUMS.canary.txt
+          mv SHA256SUMS.canary.txt SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       # One canary at a time: the previous one and its tag are replaced, never kept beside it.
       - name: Replace the canary prerelease
         run: |
