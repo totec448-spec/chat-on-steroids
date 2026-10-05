@@ -1183,6 +1183,7 @@
   "Waiting before recovery reload": "Đang chờ trước khi tải lại để khôi phục",
   "ChatGPT resumed work · waiting before retry": "ChatGPT đã tiếp tục công việc · đang chờ trước khi thử lại",
   "Answer settling": "Đang chờ phản hồi ổn định",
+  "Paused until this chat is open in the browser": "Tạm dừng cho đến khi cuộc trò chuyện này được mở trong trình duyệt",
   "Browser and desktop control": "Điều khiển trình duyệt và máy tính",
   "Background browser tabs, DOM, console and network; native windows and input where supported.": "Tab trình duyệt nền, DOM, console và mạng; cửa sổ gốc và thao tác nhập trên nền tảng hỗ trợ.",
   "Browser tabs, DOM, screenshots, console and network; native windows where supported.": "Tab trình duyệt, DOM, ảnh chụp màn hình, console và mạng; cửa sổ gốc trên nền tảng hỗ trợ.",

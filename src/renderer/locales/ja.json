@@ -1280,6 +1280,7 @@
   "Waiting before recovery reload": "復旧用の再読み込み前に待機中",
   "ChatGPT resumed work · waiting before retry": "ChatGPT が作業を再開しました · 再試行前に待機中",
   "Answer settling": "回答の終了を確認中",
+  "Paused until this chat is open in the browser": "このチャットがブラウザーで開かれるまで一時停止中",
   "Image preview retained with this delivery; not yet saved to history.": "この送信に画像プレビューを保持しています。履歴にはまだ保存されていません。",
   "Skills": "スキル",
   "Loading skills…": "スキルを読み込み中…",
