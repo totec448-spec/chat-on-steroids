@@ -196,6 +196,43 @@ describe('cross-platform packaging targets', () => {
     expect(steps.indexOf(narrow!)).toBeLessThan(steps.indexOf(publish!));
   });
 
+  it('publishes and verifies the next canary before retiring the previous one', () => {
+    const canary = yamlFile('.github/workflows/canary.yml');
+    const steps = canary.jobs.publish.steps as Array<Record<string, any>>;
+    const publish = steps.find((step) => step.name === 'Replace the canary prerelease');
+    const script = String(publish?.run ?? '');
+
+    const uniqueTag = script.indexOf('candidate_tag="canary-${GITHUB_SHA}"');
+    const reuseCandidate = script.indexOf('if ! gh release view "$candidate_tag"');
+    const createRelease = script.indexOf('gh release create "$candidate_tag"');
+    const verifyTag = script.indexOf('refs/tags/${candidate_tag}');
+    const verifyTarget = script.indexOf('--json targetCommitish');
+    const verifyAssets = script.indexOf('diff -u expected-canary-assets.txt actual-canary-assets.txt');
+    const verifyDigests = script.indexOf('diff -u expected-canary-digests.txt actual-canary-digests.txt');
+    const cleanup = script.indexOf('gh release delete "$tag" --cleanup-tag --yes');
+    const reconcileRefs = script.indexOf('gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"');
+    const finalRefs = script.lastIndexOf("git ls-remote --tags origin refs/tags/canary 'refs/tags/canary-*'");
+    expect(uniqueTag).toBeGreaterThanOrEqual(0);
+    expect(reuseCandidate).toBeGreaterThan(uniqueTag);
+    expect(createRelease).toBeGreaterThan(reuseCandidate);
+    expect(verifyTag).toBeGreaterThan(createRelease);
+    expect(verifyTarget).toBeGreaterThan(createRelease);
+    expect(verifyAssets).toBeGreaterThan(verifyTarget);
+    expect(verifyDigests).toBeGreaterThan(verifyAssets);
+    expect(cleanup).toBeGreaterThan(verifyDigests);
+    expect(reconcileRefs).toBeGreaterThan(cleanup);
+    expect(finalRefs).toBeGreaterThan(reconcileRefs);
+    expect(script).toContain('--target "$GITHUB_SHA"');
+    expect(script).toContain('--json isDraft');
+    expect(script).toContain('.tagName == "canary"');
+    expect(script).toContain('^canary-[0-9a-f]{40}$');
+    expect(script).toContain("grep -E '^(canary|canary-[0-9a-f]{40})$'");
+    expect(script).toContain("manifest_hash=\"$(sha256sum publish/SHA256SUMS.txt | cut -d' ' -f1)\"");
+    expect(script).not.toContain('gh release upload canary');
+    expect(script).not.toContain('--clobber');
+    expect(script).not.toContain('git ls-remote --exit-code origin refs/heads/main');
+  });
+
   it('assembles every platform artifact in the reusable release workflow', () => {
     const workflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const parsed = yamlFile('.github/workflows/release.yml');
