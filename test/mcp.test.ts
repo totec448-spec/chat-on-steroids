@@ -892,7 +892,10 @@ describe('surface boundaries', () => {
   it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
     everything();
     const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
-    expect(Object.keys(tool?.inputSchema?.properties ?? {})).toEqual(['path', 'image']);
+    // No string that names an image: ChatGPT fills one with the generated picture's `file_…` id, and
+    // then fails the call internally before it reaches the app (measured live 2026-10-05, 3 of 3).
+    expect(Object.keys(tool?.inputSchema?.properties ?? {})).toEqual(['path', 'nth']);
+    expect(tool?.inputSchema?.properties?.nth).toMatchObject({ type: 'integer', minimum: 1 });
     expect(tool?.inputSchema?.required).toEqual(['path']);
     const reply = await core('tools/call', { name: 'save_image', arguments: { path: '/workspace/out.png' } });
     expect(reply.body.result?.isError).toBe(true);

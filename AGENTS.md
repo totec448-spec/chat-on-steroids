@@ -2243,8 +2243,9 @@ image ChatGPT generated in the calling chat (#889); the recording keeps only a p
 chat comes from request correlation (waiting up to 20 s), never from the model. Without one the
 refusal names the Core that answered (`connectorName`), since another computer's chat may have
 called it (#1097). The image is the
-latest recorded finished `native_image` of that chat's session, or the one whose `messageId` or
-`providerAssetId` the `image` argument names. The destination resolves like any write
+latest recorded finished `native_image` of that chat's session, or the `nth` one counting back
+(`nth` 2 is the one before). It is a number on purpose: ChatGPT filled a string argument with the
+picture's `file_…` id and then failed the call internally before it reached the app (2026-10-05). The destination resolves like any write
 (`allowMissing`), must not exist, and gets the image's own extension when it has none; a named
 extension of another format is refused. An extension whose `/status` body says
 `canExportImages: true` receives pending exports in `imageExports: [{ nonce, conversationId,
