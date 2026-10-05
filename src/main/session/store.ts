@@ -1806,6 +1806,10 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   const completedAt = final.kind === 'turn_end' ? final.time : final.finalObservedAt ?? final.time;
   const question = questions[0];
   const correction = (event: SessionEvent) => isTurnCorrection(event, final.turnId, entry.summary.timelineTurns) && positionOf(event) < seq;
+  // The question this turn answered, reported again after the answer, is not a new question: a
+  // new chat's first message can reach the page as "just authored" (re-escaped) only after
+  // ChatGPT's redraw, when the turn has already ended. A genuinely new question has a new id.
+  const ownQuestion = final.turnId ? entry.summary.timelineTurns?.[final.turnId]?.questionId : undefined;
   if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!final.turnId && (!question || question.time > final.time)) return null;
@@ -1829,7 +1833,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     }
     if (event.kind === 'turn_end') return !sameTurn(event.turnId, final.turnId) || event.outcome !== 'completed';
     if (event.kind === 'turn_start') return !(nativeReopen && event === last);
-    if (event.kind === 'user_message') return !correction(event);
+    if (event.kind === 'user_message') return !correction(event) && !(ownQuestion && event.messageId === ownQuestion);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
   return { messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq,
