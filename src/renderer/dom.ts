@@ -50,6 +50,8 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-page-next': 'caret-right',
   'i-page-previous': 'caret-left',
   'i-pencil': 'pencil-simple',
+  'i-pin': 'push-pin-simple',
+  'i-pinned': 'fill:push-pin-simple',
   'i-play': 'play',
   'i-plus': 'plus',
   'i-power': 'power',
