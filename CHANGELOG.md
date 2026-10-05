@@ -30,6 +30,7 @@ Search all your chats by title or by what was said in them, and give chats your 
   - **Goal met while closing:** a Goal that decided "goal reached" while its tab was closing no longer keeps spinning.
   - **Reopened chat:** a reopened chat whose first message ChatGPT showed late now gets its Goal decision.
   - **After a stall:** Goal decides after a turn the page had to give up on, when ChatGPT had already delivered the answer.
+  - **After its own message:** Goal no longer stops after sending a follow-up that contains `code` or other formatting. ChatGPT answered, but the app didn't notice the answer, so Goal waited forever.
 - **Goal no longer reloads a chat again and again** after a page reload. Tool calls already on the reloaded page were taken for new work, so every Goal pickup was refused and the chat reloaded.
 - **macOS 27: choosing "Continue with Google" in the built-in browser no longer closes the app.**
 - **Setup's ChatGPT step speaks your language** when it names the plugins ChatGPT hasn't called yet, with the right singular or plural, and it says to pick "Tunnel, then your tunnel ID".
