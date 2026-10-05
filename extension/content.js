@@ -965,12 +965,14 @@
       receipt.accepted.conversationId === current && receipt.accepted.epoch === epoch;
     const attachmentsMatch = receipt.text || (receipt.attachmentNames?.length &&
       JSON.stringify(receipt.attachmentNames) === JSON.stringify((userMessageSource(message)?.attachments || []).map(file => file.name).sort()));
+    // Text this page inserted (a Goal reply) comes back Markdown-escaped like any app insertion,
+    // so it gets the bootstrap's raw-then-one-unescape comparison. A person's own typing stays raw.
     return (!receipt.conversationId || receipt.conversationId === current) &&
       (!receipt.previousMessageId || receipt.previousMessageId !== message.id) && !!attachmentsMatch &&
-      (acceptedIdentity || matchesSubmittedUser(message, receipt.text));
+      (acceptedIdentity || (receipt.inserted ? matchesSubmittedBootstrap : matchesSubmittedUser)(message, receipt.text));
   }
 
-  function rememberUserSend() {
+  function rememberUserSend(inserted = false) {
     if (!alive) return;
     // Only the explicitly selected offline Goal backend changes the user prompt.
     const composer = CLF_DOM.composer();
@@ -983,6 +985,10 @@
     const text = sendText(CLF_DOM.composerAuthoredText());
     const attachmentNames = CLF_DOM.composerAttachmentNames();
     if (!text && !attachmentNames.length) return;
+    // The same Send is recorded again by the page's own click and submit listeners; they cannot
+    // tell who inserted the text, so they keep what the inserting caller said about it.
+    if (!inserted && userSendReceipt?.inserted && userSendReceipt.text === text && Date.now() - userSendReceipt.at < USER_SEND_RECEIPT_MS)
+      inserted = true;
     let previousMessageId = null;
     for (const message of CLF_DOM.messages()) {
       if (userMessagePresent(message)) previousMessageId = message.id;
@@ -993,6 +999,7 @@
     const sections = assistantSections();
     userSendReceipt = {
       text,
+      inserted,
       attachmentNames,
       conversationId: CLF_DOM.conversationId(),
       previousMessageId,
@@ -10679,7 +10686,9 @@
             !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
             allowed.blocked || allowed.queuePending || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
             goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
-        rememberUserSend();
+        // The page inserted this reply, and ChatGPT stores inserted text Markdown-escaped: a raw
+        // comparison never matched a reply with `code` or *emphasis*, and its turn never opened.
+        rememberUserSend(true);
         sendAttempted = true;
         return true;
       });
