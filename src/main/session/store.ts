@@ -1810,6 +1810,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   // new chat's first message can reach the page as "just authored" (re-escaped) only after
   // ChatGPT's redraw, when the turn has already ended. A genuinely new question has a new id.
   const ownQuestion = final.turnId ? entry.summary.timelineTurns?.[final.turnId]?.questionId : undefined;
+  const nativeFinal = final.kind === 'turn_end' || (final.final === true && !!final.providerMessageId);
   if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!final.turnId && (!question || question.time > final.time)) return null;
@@ -1831,8 +1832,15 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
         sameTurn(owner.turnId, final.turnId) && event.call.conversationId === conversationId &&
         (!event.turnId || sameTurn(event.turnId, final.turnId)));
     }
-    if (event.kind === 'turn_end') return !sameTurn(event.turnId, final.turnId) || event.outcome !== 'completed';
-    if (event.kind === 'turn_start') return !(nativeReopen && event === last);
+    // The page's ten-minute check ends a turn as `stalled` when it never saw the end. After
+    // ChatGPT's own final for that turn, the turn did end; nothing new happened (#1099).
+    if (event.kind === 'turn_end') return !sameTurn(event.turnId, final.turnId) ||
+      (event.outcome !== 'completed' && !(event.outcome === 'stalled' && nativeFinal));
+    // The first start of the final's own turn, recorded after that final: ChatGPT reported a fast
+    // answer's end before the page opened the turn from the Send receipt (#1099). Not new work.
+    if (event.kind === 'turn_start') return !(nativeReopen && event === last) &&
+      !(event.source !== 'app' && !!final.turnId && event.turnId === final.turnId &&
+        entry.summary.timelineTurns?.[final.turnId]?.origin === positionOf(event));
     if (event.kind === 'user_message') return !correction(event) && !(ownQuestion && event.messageId === ownQuestion);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
