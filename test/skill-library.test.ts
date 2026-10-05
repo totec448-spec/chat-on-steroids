@@ -5,6 +5,7 @@ import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initSkillsPath, importSkillPackage, listSkills, removeSkill } from '../src/main/skills.js';
 import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
+import type { LibrarySkill } from '../src/shared/skills.js';
 
 let root: string, project: string;
 const contents = (name: string, body = 'Keep all instructions.') => `---\nname: ${name}\ndescription: >-\n  Check the source\n  before editing.\n---\n${body}`;
@@ -244,4 +245,34 @@ it('lists only the signed-in Claude account\'s synced Skills and stays quiet abo
   const library = await listSkillLibrary();
   expect(library.skills.map(skill => `${skill.name}:${skill.source}`).sort()).toEqual(['Pdf:claude-home', 'Shared:user-agents']);
   expect(library.errors).toEqual([]);
+});
+
+it('shares the bounded Skills index across sources and writes each folder once', () => {
+  // Measured on a real Mac (2026-10-05): 21 ~/.agents and 5 Codex Skills filled the index first,
+  // and all 66 Claude Skills, plugin and synced, were left out.
+  const skill = (source: LibrarySkill['source'], folder: string, name: string, implicit = true): LibrarySkill => ({
+    id: `${name}--${source}`, name, description: `${name} does one careful thing well, with checks before and after every single step it takes.`,
+    path: `${folder}/${name}/SKILL.md`, scope: source === 'managed' ? 'managed' : 'user', source, managed: source === 'managed', allowImplicitInvocation: implicit });
+  const plugin = '/user-skills/claude/plugins/cache/claude-plugins-official/superpowers/6.4.1/skills';
+  const synced = '/user-skills/claude/skills/synced/26cc62c5-fb37-4985-a89b-dfd98481eecc_94f9fd01-b3be-4e08-804b-418e3fd927f7';
+  const skills = [
+    skill('managed', '/skills', 'clear-writing'),
+    ...Array.from({ length: 21 }, (_, index) => skill('user-agents', '/user-skills/agents/skills', `agents-${index}`)),
+    ...Array.from({ length: 5 }, (_, index) => skill('codex-home', '/user-skills/codex/skills', `codex-${index}`)),
+    ...Array.from({ length: 40 }, (_, index) => skill('claude-plugin', plugin, `plugin-${index}`)),
+    ...Array.from({ length: 26 }, (_, index) => skill('claude-home', synced, `synced-${index}`)),
+    skill('claude-plugin', plugin, 'hidden-helper', false)
+  ];
+  const text = skillLibraryInstructions({ skills, errors: [], roots: [], includeInstructions: true });
+  const listed = skills.filter(entry => text.includes(`/${entry.id}`));
+  expect(text.length).toBeLessThanOrEqual(2000 * 4 + 400);
+  expect(listed.length).toBeGreaterThanOrEqual(45);
+  for (const source of ['managed', 'user-agents', 'codex-home', 'claude-plugin', 'claude-home'] as const)
+    expect(listed.some(entry => entry.source === source), source).toBe(true);
+  expect(text).not.toContain('hidden-helper');
+  // Long shared folders appear once, as a heading the rows complete.
+  expect(text.split(plugin).length - 1).toBe(1);
+  expect(text.split(synced).length - 1).toBe(1);
+  expect(text).toContain(`${skills.length - 1 - listed.length} more Skills are installed`);
+  expect(text).toMatch(/pick (?:any of )?them with \//);
 });
