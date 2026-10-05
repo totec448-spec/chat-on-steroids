@@ -1563,7 +1563,10 @@ settles its already-proven request even when another connector call starts after
 `readCompletedFinal` check requires request proof preceding that final and still rejects new work
 or newer boundaries. The turn's own question (`timelineTurns[turn].questionId`) re-reported
 `authoredNow` after the answer (a new chat's first message seen only after ChatGPT's redraw) is
-not new work; a new question has a new id. Activity and composer settlement consume this verdict without a competing
+not new work; a new question has a new id. When ChatGPT reported a fast answer's end before the
+page opened its turn (#1099), the turn's first page-side `turn_start` after that final and the
+page's later `stalled` end of the same turn do not veto a native final (`final` with a provider
+message id); `failed`, `unknown`, other turns and app reopens still do. Activity and composer settlement consume this verdict without a competing
 timestamp rule; running local tools retain their independent delivery fence. After recorder
 restart, the latest ended boundary can recover its exact request ownership only from the
 durable request-turn index recorded before that boundary. A newer question or canonical final

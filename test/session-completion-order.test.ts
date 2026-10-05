@@ -142,6 +142,35 @@ describe('completed request ownership', () => {
     expect(await readCompletedFinal(id, chat, turn)).toBeNull();
   });
 
+  /**
+   * #1099, part 2: the page's ten-minute check closed a turn as `stalled` because it never saw
+   * the end, although ChatGPT had already delivered that turn's final answer. The stall only
+   * says the page could not see the end; ChatGPT's own final says it ended. Goal then waited
+   * for good ("chat_still_working").
+   */
+  it.each([
+    ['stalled', true, true], ['stalled', false, false], ['failed', true, false], ['unknown', true, false]
+  ] as const)('a %s end after a final recorded before its turn opened keeps it complete only when native (%s)', async (outcome, native, complete) => {
+    const began = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(began);
+    // ChatGPT reported the fast answer's end before the page opened the turn from the Send receipt.
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: began, messageId: 'question', text: 'Inspect the source.' },
+      { kind: 'assistant_message', time: began + 1, turnId: turn, messageId: 'answer',
+        ...(native ? { providerMessageId: '11111111-2222-4333-8444-555555555555' } : {}), text: 'The source is checked.',
+        final: true, state: 'final' },
+      { kind: 'turn_start', time: began + 2, turnId: turn }
+    ]);
+    // Ten minutes later the page's own check closes the turn it never saw end.
+    clock.mockReturnValue(began + 600_000);
+    await recordChatObservations(chat, [{ kind: 'turn_end', time: Date.now(), turnId: turn, outcome }]);
+    const ends = (await readEvents(opened.sessionId!)).filter(event => event.kind === 'turn_end');
+    expect(ends.map(event => event.kind === 'turn_end' && event.outcome)).toEqual([outcome]);
+    const final = await readCompletedFinal(opened.sessionId!, chat, turn);
+    if (complete) expect(final).toMatchObject({ messageId: 'answer', turnId: turn });
+    else expect(final).toBeNull();
+  });
+
   it('still reopens a falsely completed view without native final proof', async () => {
     const { id, began, clock } = await completed(false);
     clock.mockReturnValue(began + 30);
