@@ -3822,6 +3822,37 @@
     void flush();
   }
 
+  /**
+   * The original file of one generated image this page shows, for the app's image export (#889).
+   *
+   * Fetches exactly the same-origin URL (or page blob) the exact `<img>` already loaded, with the
+   * page's own session, so nothing new is contacted and no URL or credential leaves the page: only
+   * the bytes go back, base64-encoded. Refuses anything not this chat's, not an image, or too large.
+   */
+  async function exportNativeImage(message) {
+    const messageId = typeof message.messageId === 'string' ? message.messageId : '';
+    const assetId = typeof message.assetId === 'string' ? message.assetId : '';
+    if (!messageId || !assetId || !conversationId || message.conversationId !== conversationId ||
+        CLF_DOM.conversationId() !== conversationId) return { error: 'not_open' };
+    const image = { messageId, assetId };
+    let node = nativeImageNode(image);
+    if (!node) { await refreshFiber(); node = nativeImageNode(image); }
+    if (!node || !node.complete || !(node.naturalWidth > 0)) return { error: 'not_rendered' };
+    let blob;
+    try {
+      const response = await fetch(node.currentSrc || node.src);
+      if (!response.ok) return { error: 'fetch_failed' };
+      blob = await response.blob();
+    } catch { return { error: 'fetch_failed' }; }
+    if (!/^image\//.test(blob.type || '')) return { error: 'not_image' };
+    if (blob.size <= 0) return { error: 'fetch_failed' };
+    if (blob.size > 25 * 1024 * 1024) return { error: 'too_large' };
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    return { data: btoa(binary) };
+  }
+
   /** Captures one already-rendered native image without fetching or retaining its signed URL. */
   async function captureNativeImage(task) {
     const { key, image, observation, heldEpoch, heldConversation } = task;
@@ -12936,6 +12967,10 @@
       }
       if (message.type === 'clf-repair-check') {
         void inspectRepairPage(message).then(sendResponse).catch(() => sendResponse({ safe: false }));
+        return true;
+      }
+      if (message.type === 'clf-image-export') {
+        void exportNativeImage(message).then(sendResponse).catch(() => sendResponse({ error: 'fetch_failed' }));
         return true;
       }
       if (message.type === 'clf-resume-compaction') {

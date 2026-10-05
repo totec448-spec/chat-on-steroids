@@ -9205,6 +9205,45 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(live.sent.some(message => message.type === 'reload_owned_chat')).toBe(false);
   });
 
+  it('hands the app the original bytes of the exact generated image this page shows, and nothing else (#889)', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const messageId = '57df052b-e3d9-4997-9fb6-f02df295a2b7';
+    const assetId = 'file_00000000565c82469b5dd3b99950b7d8';
+    const section = assistantTurn(live.document, 'turn-export', []);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const image = live.document.createElement('img');
+    image.src = `https://chatgpt.com/backend-api/estuary/content?id=${assetId}&sig=private`;
+    image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
+    Object.defineProperties(image, {
+      complete: { configurable: true, value: true },
+      naturalWidth: { configurable: true, value: 1254 },
+      naturalHeight: { configurable: true, value: 1254 }
+    });
+    section.append(image);
+    await replyFiber([], [{ turnId: 'turn-export', conversationId, messages: [], activities: [], images: [{ messageId, assetId,
+      providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully', width: 1254, height: 1254, order: 0, partOrder: 0 }] }]);
+    await settle();
+    const original = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    let type = 'image/png';
+    const fetched: string[] = [];
+    (live.window as any).fetch = vi.fn(async (url: string) => {
+      fetched.push(String(url));
+      return { ok: true, blob: async () => ({ type, size: original.length, arrayBuffer: async () => original.buffer.slice(0) }) };
+    });
+
+    const reply = await live.runtimeMessage({ type: 'clf-image-export', conversationId, messageId, assetId });
+    expect(reply).toEqual({ data: Buffer.from(original).toString('base64') });
+    // Exactly the URL the image already loaded; nothing else was contacted.
+    expect(fetched).toEqual([image.src]);
+
+    expect(await live.runtimeMessage({ type: 'clf-image-export', conversationId: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', messageId, assetId }))
+      .toEqual({ error: 'not_open' });
+    type = 'text/html';
+    expect(await live.runtimeMessage({ type: 'clf-image-export', conversationId, messageId, assetId })).toEqual({ error: 'not_image' });
+    expect(fetched).toHaveLength(2);
+  });
+
   it.each(['estuary', 'blob'])('records two generated gallery assets once each despite nine %s presentation clones', async transport => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-generated-gallery', []);

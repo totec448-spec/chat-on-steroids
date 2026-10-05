@@ -1,6 +1,8 @@
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
-import { goalWorkerChat } from '../bridge.js';
+import { goalWorkerChat, imageExportCapable } from '../bridge.js';
+import { exportImage, ImageExportError } from '../image-export.js';
+import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig } from '../config.js';
 /**
@@ -135,7 +137,7 @@ import {
   awaitFreshCallOrigin,
   recordAgentMessage
 } from '../session/recorder.js';
-import { findSessionByConversation } from '../session/store.js';
+import { findSessionByConversation, readRecentEvents } from '../session/store.js';
 import { requestCorrelation } from '../session/correlation.js';
 import {
   adoptAgent,
@@ -459,6 +461,71 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             };
           } catch (error) {
             if (error instanceof ViewImageError) return fail(error.message);
+            throw error;
+          }
+        })
+    );
+  }
+
+  // -------------------------------------------------------------- save_image
+  //
+  // The original of an image ChatGPT generated in this chat, saved into an approved folder (#889).
+  // The chat's own page fetches it; see image-export.ts.
+  if (exposedCaps.create) {
+    reg.register(
+      'save_image',
+      toolDeclaration('save_image', () => ({
+        description: 'Save the original file of an image ChatGPT generated in this chat (not a screenshot or preview) to a new file in an approved folder. ' +
+          'Never replaces an existing file. The chat must be open in the browser with the image on its page.',
+        inputSchema: z
+          .object({
+            path: z.string().describe('New file path in an approved folder, for example /workspace/images/logo.png. Without an extension the image\'s own (.png, .jpg or .webp) is added.'),
+            image: z.string().optional().describe('Which image: the message id or file id ChatGPT gave it. Omit for the latest image generated in this chat.')
+          })
+          .strict()
+      })),
+      async ({ path, image }) =>
+        guard('save_image', async () => {
+          if (!caps.create) {
+            return fail('TOOL_DISABLED: save_image is disabled by the current Chat On Steroids permissions. Ask the user to enable creating files in the app.');
+          }
+          const caller = currentCaller();
+          const conversationId = caller.conversationId ??
+            (caller.requestId ? (await awaitRequestCorrelation(caller.requestId, 20_000))?.conversationId ?? null : null);
+          // Never guessed from recent activity: a wrong guess would save another chat's image.
+          if (!conversationId) {
+            return fail('save_image could not tell which chat this call came from, so it does not know which image to save. ' +
+              'Call save_image directly as its own tool call, not from inside a JavaScript or exec step, and try again.');
+          }
+          if (!imageExportCapable()) {
+            return fail('save_image needs the Chat On Steroids browser extension to be connected and up to date, so the chat\'s page can hand over the image.');
+          }
+          const session = await findSessionByConversation(conversationId);
+          const recorded = session ? await readRecentEvents(session.id, 400, { kinds: ['native_image'] }) : [];
+          const images = recorded.filter((event): event is Extract<typeof event, { kind: 'native_image' }> =>
+            event.kind === 'native_image' && event.providerStatus !== 'in_progress');
+          const wanted = image?.trim();
+          const chosen = wanted
+            ? images.filter(event => event.messageId === wanted || event.providerAssetId === wanted).at(-1)
+            : images.at(-1);
+          if (!chosen) {
+            return fail(wanted
+              ? `save_image found no generated image "${wanted}" in this chat. Omit image to save the latest one.`
+              : 'save_image found no image generated in this chat yet.');
+          }
+          const target = await resolveIn(ctx.roots, path, { allowMissing: true });
+          try {
+            await fs.lstat(target.real);
+            return fail(`${target.virtual} already exists. save_image never replaces a file; choose another name.`);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
+          try {
+            const saved = await exportImage({ conversationId, messageId: chosen.messageId, assetId: chosen.providerAssetId }, target);
+            logInfo(`tool save_image ${saved.virtual} (${formatBytes(saved.bytes)})`);
+            return ok(`Saved ${saved.virtual} (${saved.width}x${saved.height} ${saved.format.toUpperCase()}, ${formatBytes(saved.bytes)}), the original file ChatGPT generated.`);
+          } catch (error) {
+            if (error instanceof ImageExportError) return fail(`save_image did not save the image: ${error.message}`);
             throw error;
           }
         })

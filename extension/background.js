@@ -2636,6 +2636,41 @@ async function followApp(data) {
  * "Open in ChatGPT" from the app, shown in this browser: the chat's tab if it has one, else a new
  * one. The app asks here rather than the OS, which can pick another browser or account (#882).
  */
+/** Exports this worker has already handed to a page, so the next /status does not hand them out twice. */
+const imageExportsInFlight = new Set();
+/** How long a page may take to fetch and encode one original image. */
+const IMAGE_EXPORT_PAGE_MS = 45_000;
+
+/**
+ * A generated image's original for the app's image export (#889): the tab showing the chat fetches
+ * the image its own page shows, and this worker posts the bytes, or the page's refusal, to the app.
+ */
+async function runImageExports(jobs) {
+  if (!Array.isArray(jobs)) return;
+  for (const job of jobs.slice(0, 4)) {
+    const nonce = typeof job?.nonce === 'string' && /^[0-9a-f-]{36}$/i.test(job.nonce) ? job.nonce : null;
+    const conversationId = cleanConversationId(job?.conversationId);
+    const messageId = typeof job?.messageId === 'string' ? job.messageId.slice(0, 200) : '';
+    const assetId = typeof job?.assetId === 'string' ? job.assetId.slice(0, 200) : '';
+    if (!nonce || !conversationId || !messageId || !assetId || imageExportsInFlight.has(nonce)) continue;
+    imageExportsInFlight.add(nonce);
+    void (async () => {
+      let answer = null;
+      try {
+        const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+        const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
+        answer = tab
+          ? await tabReply(tab.id, { type: 'clf-image-export', conversationId, messageId, assetId }, undefined, IMAGE_EXPORT_PAGE_MS)
+          : { error: 'not_open' };
+      } catch { answer = null; }
+      const body = answer && typeof answer.data === 'string'
+        ? { nonce, data: answer.data }
+        : { nonce, error: typeof answer?.error === 'string' ? answer.error.slice(0, 40) : 'not_rendered' };
+      await call('/image-export', { method: 'POST', body: JSON.stringify(body) });
+    })().catch(() => undefined).finally(() => setTimeout(() => imageExportsInFlight.delete(nonce), 120_000));
+  }
+}
+
 async function revealChats(ids) {
   if (!Array.isArray(ids)) return;
   for (const raw of ids.slice(0, 5)) {
@@ -2721,7 +2756,7 @@ async function maintainOnce() {
     .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
     .map(conversationForTab)
     .filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations, canReveal: true,
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations, canReveal: true, canExportImages: true,
     chatGptSignedIn: chatGptSignedInState,
     ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
@@ -2732,6 +2767,7 @@ async function maintainOnce() {
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
+  void runImageExports(reply.data.imageExports).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;
