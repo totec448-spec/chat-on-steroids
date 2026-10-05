@@ -1087,7 +1087,7 @@ with `coreMention: false`, and the page sends it without the mention; every othe
 setting. `asksForImage` matches the person's prose (no leading `/command`, code or links) in all
 app languages: a creating verb near a picture noun, "a picture of …", drawing verbs, wishes ("I
 want a poster"), verb-last orders, and CJK pairs; an edit of an attached picture or, within 300
-characters, of the picture the last answer made (`native_image` after the last question). Code,
+characters, of a picture one of the last two answers made (a finished `native_image` after the second-to-last question, so one failed edit in between still counts). Code,
 container/system images, web and git terms, picture-word identifiers ("image-fixes"), file
 handling, text about pictures (captions, ideas, lists) and charts or tables named first keep the
 mention. A miss leaves things as before; a false alarm drops the mention from one message.

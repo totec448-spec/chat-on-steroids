@@ -1434,12 +1434,14 @@ async function imageRequestWithoutMention(entry: InputEntry, session: SessionSum
   if (companion || entry.purpose === 'decision' || entry.recovery || entry.finishOwner || (entry.authoredSource ?? 'text') !== 'text') return false;
   if (session?.origin?.kind === 'worker' || session?.origin?.kind === 'helper') return false;
   const attachedImage = (entry.images?.length ?? 0) > 0 || (entry.attachments ?? []).some(file => file.mimeType.startsWith('image/'));
-  // Right after ChatGPT made a picture, "make it brighter" changes that picture.
+  // Shortly after ChatGPT made a picture, "make it brighter" changes that picture: the picture
+  // answered one of the last two questions, so one failed edit in between still counts.
   let afterImage = false;
   if (session) {
     const recent = await readRecentEvents(session.id, 64, { kinds: ['user_message', 'native_image'] }).catch(() => []);
-    const lastQuestion = recent.findLastIndex(event => event.kind === 'user_message');
-    afterImage = lastQuestion >= 0 && recent.slice(lastQuestion + 1).some(event => event.kind === 'native_image' && event.providerStatus !== 'in_progress');
+    const questions = recent.flatMap((event, index) => event.kind === 'user_message' ? [index] : []);
+    const since = questions.length >= 2 ? questions.at(-2)! : questions.at(-1);
+    afterImage = since !== undefined && recent.slice(since + 1).some(event => event.kind === 'native_image' && event.providerStatus !== 'in_progress');
   }
   return asksForImage(entry.text, { attachedImage, afterImage });
 }
