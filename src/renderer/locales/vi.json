@@ -1,7 +1,10 @@
 {
   "Jump to latest": "Chuyển đến mới nhất",
+  "Leave empty to use ChatGPT's title": "Để trống để dùng tiêu đề của ChatGPT",
+  "Name for this chat": "Tên cho cuộc trò chuyện này",
   "Previous source": "Nguồn trước",
   "Next source": "Nguồn tiếp theo",
+  "Rename this chat in the app. Its title in ChatGPT stays the same.": "Đổi tên cuộc trò chuyện này trong ứng dụng. Tiêu đề trong ChatGPT vẫn giữ nguyên.",
   "{0} more sources were not recorded with this reply.": "Còn {0} nguồn chưa được ghi lại cùng phản hồi này.",
   "Thinking": "Đang suy luận",
   "Copy answer": "Sao chép câu trả lời",

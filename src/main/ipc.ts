@@ -107,13 +107,15 @@ import { extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
   clearImageStorage,
+  clearSessionName,
+  renameSession,
   getSession,
   getImageStorage,
   readHandoff,
   readToolEditReview,
   withSessionMutationFence
 } from './session/store.js';
-import { forgetSession, onSessionChange } from './session/recorder.js';
+import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -477,6 +479,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
 }
 
 const sessionIdArg = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) });
+/** A chat's own name in the app (#1107): one line, no control characters; null or blank clears it. */
+const sessionNameArg = sessionIdArg.extend({ title: z.string().max(2000).nullable() });
+export function cleanSessionName(title: string | null): string | null {
+  const clean = (title ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim();
+  return clean || null;
+}
 const agentIdArg = z.string().min(1).max(64).regex(/^[0-9a-z-]+$/i);
 
 const renameRoot = z.object({
@@ -1419,6 +1427,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return trustedChatIds();
   });
 
+  handle('sessions:rename', async (payload) => {
+    const { id, title } = sessionNameArg.parse(payload);
+    if (!await getSession(id)) throw new Error('Session not found');
+    const name = cleanSessionName(title);
+    if (name) await renameSession(id, name, 'manual');
+    else await clearSessionName(id);
+    notifyChanged(id);
+    return true;
+  });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
