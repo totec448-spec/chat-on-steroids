@@ -12570,7 +12570,10 @@
         receipt = { conversation, user: { id: user.id } };
         return true;
       }, matchesSubmittedBootstrap, DESKTOP_RECEIPT_MS, noteWithdraw,
-      input.purpose === 'decision' ? null : input.recovery || agent || mentionCore ? currentCoreMention() : null,
+      // A person's message asking for a picture goes out without the mention (the app decides:
+      // ChatGPT switches its own image tool off for a message that mentions an app).
+      input.purpose === 'decision' || (input.coreMention === false && !input.recovery && !agent) ? null
+        : input.recovery || agent || mentionCore ? currentCoreMention() : null,
       sentRequestSince);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
