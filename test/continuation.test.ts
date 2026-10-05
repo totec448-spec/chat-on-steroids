@@ -1396,6 +1396,29 @@ describe('the window in which a replacement chat is expected', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('keeps the destination ownership gate armed while an already-dispatched resume still awaits its chat id', async () => {
+    const { sessionId, token } = await readyContinuation();
+    const destination = '94949494-2222-4333-8444-666666666666';
+    await claimContinuationNow(token, 'very-slow-resume-command');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+
+    // Once dispatch is durable, ChatGPT may already hold the bootstrap in a conversation whose
+    // id the page still cannot expose. The recorder fence therefore belongs to the dispatched
+    // continuation, not to the age of the original browser-opening claim.
+    expect(resumeOpeningChat()).toBe(true);
+
+    const create = vi.spyOn(store, 'createSession');
+    const observation = sessionForConversation(destination);
+    expect(await commitContinuation(token, destination)).toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(await observation).toBe(sessionId);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it.each(['abort', 'expiry'] as const)('releases unrelated new recording when the resume claim ends by %s', async reason => {
     const { token } = await readyContinuation();
     await claimContinuationNow(token, 'unfinished-resume-command');
@@ -1482,6 +1505,21 @@ describe('the window in which a replacement chat is expected', () => {
     resetContinuationsForTests();
     expect(resumeOpeningChat()).toBe(false);
     await restoreContinuations(snapshot);
+    expect(resumeOpeningChat()).toBe(true);
+  });
+
+  it('restores a dispatched destination as transaction-owned instead of aging it out after restart', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'restart-after-dispatch');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    const snapshot = snapshotContinuations();
+
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+
     expect(resumeOpeningChat()).toBe(true);
   });
 
