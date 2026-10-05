@@ -647,6 +647,56 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   await vi.waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
 });
 
+it('searches chats from the sidebar: results replace the lists, matches are marked, Escape brings the lists back (#1107)', async () => {
+  const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
+  const listed = { ...base, id: 'search-listed-0001', title: 'Listed chat', conversationId: 'search-listed-conversation' };
+  let indexed = 1;
+  const searchSessions = vi.fn(async (query: string) => ({ ok: true, data: query === 'bridge' ? {
+    results: [{ id: 'search-hit-0001', title: 'Release planning', projectId: null,
+      snippet: { text: '…then the bridge gets its installer.', matches: [[10, 16]] } }],
+    indexed, total: 3 } : { results: [], indexed: 3, total: 3 } }));
+  const getSession = vi.fn(async (id: string) => ({ ok: true, data: { summary: { ...base, id, title: 'Release planning' }, events: [], total: 0, nextFrom: 1 } }));
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [listed], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    searchSessions, getSession
+  });
+  const doc = mounted.window.document;
+  const field = doc.getElementById('chatSearch') as HTMLInputElement;
+  const results = doc.getElementById('searchResults')!;
+  const lists = doc.getElementById('sessionList')!;
+  await vi.waitFor(() => expect(doc.querySelector('[data-id="search-listed-0001"]')).not.toBeNull());
+  expect(results.hidden).toBe(true);
+
+  field.value = 'bridge';
+  field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(results.querySelector('.search-result')).not.toBeNull());
+  expect(lists.hidden).toBe(true);
+  expect(results.hidden).toBe(false);
+  expect((doc.getElementById('chatSearchClear') as HTMLButtonElement).hidden).toBe(false);
+  expect(results.querySelector('.search-result b')!.textContent).toBe('Release planning');
+  expect([...results.querySelectorAll('.search-snippet mark')].map(mark => mark.textContent)).toEqual(['bridge']);
+  // Indexing is not done yet: the result says so, and asks again until it is.
+  expect(results.querySelector('.search-status')!.textContent).toContain('1 of 3');
+  indexed = 3;
+  await vi.waitFor(() => expect(results.querySelector('.search-status')).toBeNull());
+
+  (results.querySelector('.search-result') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
+  expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true);
+
+  field.value = 'nothing';
+  field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(results.textContent).toContain('No chats match'));
+
+  field.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await vi.waitFor(() => expect(lists.hidden).toBe(false));
+  expect(results.hidden).toBe(true);
+  expect(field.value).toBe('');
+});
+
 it('shows an inherited Block ahead of Trust on a committed resumed row', async () => {
   const source = 'strict-resume-blocked-source-0001';
   const current = 'strict-resume-blocked-current-0001';
