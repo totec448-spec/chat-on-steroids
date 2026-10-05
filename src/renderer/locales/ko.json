@@ -1,7 +1,10 @@
 {
   "Jump to latest": "최신으로 이동",
+  "Leave empty to use ChatGPT's title": "비워 두면 ChatGPT의 제목을 사용합니다",
+  "Name for this chat": "이 채팅의 이름",
   "Previous source": "이전 출처",
   "Next source": "다음 출처",
+  "Rename this chat in the app. Its title in ChatGPT stays the same.": "앱에서 이 채팅의 이름을 바꿉니다. ChatGPT의 제목은 그대로입니다.",
   "{0} more sources were not recorded with this reply.": "이 답변에는 다른 출처 {0}개가 기록되지 않았습니다.",
   "Thinking": "생각 중",
   "Copy answer": "답변 복사",

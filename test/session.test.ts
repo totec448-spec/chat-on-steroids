@@ -55,6 +55,7 @@ import {
   readHandoff,
   rebindSession,
   renameSession,
+  clearSessionName,
   reopenSession,
   resetSessionStoreForTests,
   rewriteUnattributedToolCalls,
@@ -3307,6 +3308,57 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(opened.sessionId!))?.title).toBe('Fix the flaky bridge test');
     await renameSession(opened.sessionId!, 'My own name');
     expect((await getSession(opened.sessionId!))?.title).toBe('My own name');
+  });
+
+  it('clears a name back to ChatGPT\'s newest title, also after a restart (#1107)', async () => {
+    const conversationId = 'named-then-cleared';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'First provider title' }
+    ]);
+    await renameSession(opened.sessionId!, 'My name');
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'Newer provider title' }]);
+    let summary = await getSession(opened.sessionId!);
+    expect(summary).toMatchObject({ title: 'My name', titleSource: 'manual', autoTitle: { title: 'Newer provider title', source: 'provider' } });
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    expect(await getSession(opened.sessionId!)).toMatchObject({ title: 'My name', autoTitle: { title: 'Newer provider title' } });
+    await clearSessionName(opened.sessionId!);
+    summary = await getSession(opened.sessionId!);
+    expect(summary).toMatchObject({ title: 'Newer provider title', titleSource: 'provider' });
+    expect(summary?.autoTitle).toBeUndefined();
+    // ChatGPT names it again from here on.
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'Latest provider title' }]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Latest provider title');
+  });
+
+  it('clears a name to the title the chat had by its own rules: request, first message or worker task (#1107)', async () => {
+    // A chat this app opened: named by its request, and ChatGPT's instructions title never wins.
+    const desktop = 'named-desktop';
+    await noteChatOrigin(desktop, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+    const opened = await recordChatObservations(desktop, [{ kind: 'conversation_title', time: Date.now(), text: 'Coding Agent Instructions' }]);
+    await upsertMessageEvent(opened.sessionId!, { kind: 'user_message', source: 'app', time: Date.now(),
+      messageId: 'named-desktop-opening', authoredText: 'Fix the flaky bridge test', message: { text: '[[COS_CONTEXT:10]]\nwire', chars: 23, truncated: false } });
+    await renameSession(opened.sessionId!, 'Bridge work');
+    await recordChatObservations(desktop, [{ kind: 'conversation_title', time: Date.now(), text: 'Coding Agent Anleitung' }]);
+    await clearSessionName(opened.sessionId!);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Fix the flaky bridge test');
+
+    // A chat with no title from ChatGPT yet: its first message.
+    const plain = await recordChatObservations('named-plain', [
+      { kind: 'user_message', time: Date.now(), text: 'why is the bridge flaky', messageId: 'named-plain-1' }
+    ]);
+    await renameSession(plain.sessionId!, 'Flaky bridge');
+    await clearSessionName(plain.sessionId!);
+    expect(await getSession(plain.sessionId!)).toMatchObject({ title: 'why is the bridge flaky', titleSource: 'fallback' });
+
+    // A worker: its task title, also when the origin is stamped while it carries a name.
+    const work = await recordChatObservations('named-worker', [
+      { kind: 'user_message', time: Date.now(), text: 'bootstrap', messageId: 'named-worker-boot' }
+    ]);
+    await renameSession(work.sessionId!, 'My worker');
+    await noteChatOrigin('named-worker', worker);
+    expect((await getSession(work.sessionId!))?.title).toBe('My worker');
+    await clearSessionName(work.sessionId!);
+    expect((await getSession(work.sessionId!))?.title).toBe('worker-1 · Port the recorder tests to the new fixture');
   });
 
   it('repairs a stored instructions title of an app-opened chat on cold read', async () => {

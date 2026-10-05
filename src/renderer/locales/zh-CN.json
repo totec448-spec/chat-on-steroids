@@ -1,7 +1,10 @@
 {
   "Jump to latest": "跳到最新",
+  "Leave empty to use ChatGPT's title": "留空则使用 ChatGPT 中的标题",
+  "Name for this chat": "此聊天的名称",
   "Previous source": "上一个来源",
   "Next source": "下一个来源",
+  "Rename this chat in the app. Its title in ChatGPT stays the same.": "在应用中重命名此聊天。它在 ChatGPT 中的标题保持不变。",
   "{0} more sources were not recorded with this reply.": "此回复未记录另外 {0} 个来源。",
   "Thinking": "思考中",
   "Copy answer": "复制回答",

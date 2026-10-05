@@ -429,8 +429,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.tabIndex = 0;
   top.dataset.sessionSelect = '';
   top.dataset.sortHandle = '';
-  const title = el('b', '', () => summary.title || t("Untitled session")); title.dir = 'auto';
-  top.append(title);
+  if (renaming?.id === summary.id) top.append(renameField(summary));
+  else {
+    const title = el('b', '', () => summary.title || t("Untitled session")); title.dir = 'auto';
+    // Double-click names the chat, like the pencil does (#1107).
+    if (summary.conversationId) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
+    top.append(title);
+  }
   const badges = sessionBadges(summary);
   ui(row, 'title', () => [summary.title || t("Untitled session"), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
@@ -557,6 +562,17 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       actions.push(trust);
     }
 
+    const rename = document.createElement('button');
+    rename.className = 'btn sess-action sess-name';
+    rename.type = 'button';
+    ui(rename, 'title', () => t("Rename this chat in the app. Its title in ChatGPT stays the same."));
+    rename.append(icon('i-pencil'));
+    rename.addEventListener('click', (event) => {
+      event.stopPropagation();
+      startRename(summary);
+    });
+    actions.push(rename);
+
     const open = document.createElement('button');
     open.className = 'btn sess-action sess-open';
     open.type = 'button';
@@ -572,6 +588,69 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   actionBar.append(...actions, remove);
   row.append(top, actionBar);
   return row;
+}
+
+/**
+ * The chat being named in the sidebar (#1107). Kept outside the row because activity repaints the
+ * sidebar many times a second: the field, its text and its caret survive every repaint.
+ */
+let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
+
+function startRename(summary: SessionSummary): void {
+  const current = summary.title || '';
+  renaming = { id: summary.id, original: current, value: current, start: 0, end: current.length };
+  document.getElementById('sessionTooltip')?.remove();
+  paintSessions();
+}
+
+function renameField(summary: SessionSummary): HTMLInputElement {
+  const field = document.createElement('input');
+  field.className = 'sess-rename';
+  field.type = 'text';
+  field.maxLength = 120;
+  field.dir = 'auto';
+  field.value = renaming!.value;
+  ui(field, 'aria-label', () => t("Name for this chat"));
+  ui(field, 'placeholder', () => t("Leave empty to use ChatGPT's title"));
+  const own = (): boolean => renaming?.id === summary.id;
+  // The row selects on click and starts a drag on pointer down; typing in its name does neither.
+  for (const type of ['click', 'dblclick', 'pointerdown', 'mousedown']) field.addEventListener(type, (event) => event.stopPropagation());
+  field.addEventListener('input', () => {
+    if (own()) Object.assign(renaming!, { value: field.value, start: field.selectionStart ?? field.value.length, end: field.selectionEnd ?? field.value.length });
+  });
+  field.addEventListener('select', () => {
+    if (own()) Object.assign(renaming!, { start: field.selectionStart ?? 0, end: field.selectionEnd ?? 0 });
+  });
+  field.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void finishRename(true); }
+    else if (event.key === 'Escape') { event.preventDefault(); void finishRename(false); }
+  });
+  field.addEventListener('blur', () => {
+    // A repaint replaces the field; only leaving it for something else ends the edit.
+    setTimeout(() => {
+      if (!own() || (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
+      void finishRename(true);
+    }, 0);
+  });
+  queueMicrotask(() => {
+    if (!own() || !field.isConnected) return;
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(renaming!.start, renaming!.end);
+  });
+  return field;
+}
+
+async function finishRename(save: boolean): Promise<void> {
+  const edit = renaming;
+  if (!edit) return;
+  renaming = null;
+  const value = edit.value.trim();
+  paintSessions();
+  if (!save || value === edit.original.trim()) return;
+  // Empty asks for the title the app would show without a name: ChatGPT's own.
+  await run(api.renameSession(edit.id, value || null));
+  await loadSessions('changed');
 }
 
 /**
@@ -734,6 +813,9 @@ function projectSortEntries(): Array<{ id: string; scope: string }> {
 function paintSessions(): void {
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
+  // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
+  // Korean) lives in that exact node. The edit's end repaints with everything that changed.
+  if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
   document.getElementById('sessionTooltip')?.remove();
   const projectList = $('projectList'), chatList = $('chatList');
   // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure

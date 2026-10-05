@@ -62,7 +62,7 @@ const {
   spawn,
   swarmStateForCaller
 } = await import('../src/main/agents.js');
-const { registerIpc } = await import('../src/main/ipc.js');
+const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
@@ -119,6 +119,21 @@ it('saves Auto-select Skills through Settings and preserves it across a stale un
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+});
+
+it('names a chat with one clean line, and clears the name for an empty one (#1107)', async () => {
+  expect(cleanSessionName('  Release\nprep\t\u0000now  ')).toBe('Release prep now');
+  expect(cleanSessionName('x'.repeat(300))).toHaveLength(120);
+  expect(cleanSessionName(' \u2028 ')).toBeNull();
+  expect(cleanSessionName(null)).toBeNull();
+  const session = await createSession({ conversationId: 'ipc-rename-chat', title: 'From ChatGPT' });
+  const rename = (title: unknown) => handlers.get('sessions:rename')!(null, { id: session.id, title }) as Promise<unknown>;
+  await rename('  My   name ');
+  expect(await getSession(session.id)).toMatchObject({ title: 'My name', titleSource: 'manual' });
+  await rename('');
+  expect((await getSession(session.id))?.title).toBe('From ChatGPT');
+  expect(await rename(42)).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:rename')!(null, { id: 'missing-session-0001', title: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Session not found') });
 });
 
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {

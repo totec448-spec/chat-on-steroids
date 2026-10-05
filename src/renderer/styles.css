@@ -2177,6 +2177,9 @@ input[readonly] {
 .sess:hover, .sess.is-sel { background: var(--hover); }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
+.sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--card); color: var(--ink); font: inherit; font-size: calc(14px * var(--text-scale, 1)); line-height: 22px; outline: none;
+  cursor: text; user-select: text; }
 .session-status { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .session-status.is-active, .session-status.is-working { width: 12px; height: 12px; background: transparent; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: session-spin 900ms linear infinite; }
 @keyframes session-spin { to { transform: rotate(360deg); } }
@@ -2184,6 +2187,8 @@ input[readonly] {
 .session-status.is-failed { background: var(--red); }
 .sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
 .sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
+/* While a chat is being named, its field takes the actions' place (#1107). */
+.sess:has(.sess-rename) .sess-actions { display: none; }
 .sess-action { padding: 3px; border: 0; background: transparent; }
 .sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
