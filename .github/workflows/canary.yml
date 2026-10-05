@@ -1,7 +1,8 @@
 name: Canary
 
-# Test builds of main, published as one rolling prerelease named `canary`. Every push to main
-# that can change the app builds one; it can also be started by hand:
+# Test builds of main, published as one rolling Canary prerelease. Each candidate is first
+# published under its own canary-<sha> tag; only after verification are older canaries retired.
+# Every push to main that can change the app builds one; it can also be started by hand:
 #   gh workflow run canary.yml --ref main
 #
 # Not a release. It builds the same candidate as publish.yml (release.yml) and attaches it
@@ -24,9 +25,9 @@ on:
 permissions:
   contents: read
 
-# Never cancel a run in progress: the publish step replaces the previous canary, and a cancel
-# between its delete and create would leave none. GitHub keeps only the newest waiting run in
-# the group, so a burst of merges still ends in one build of the latest main.
+# Never cancel a run in progress. Publication creates and verifies the next canary before cleanup,
+# and GitHub keeps only the newest waiting run in the group, so a burst of merges still converges
+# on one build of the latest app-relevant main.
 concurrency:
   group: canary
   cancel-in-progress: false
@@ -97,12 +98,14 @@ jobs:
           mv SHA256SUMS.canary.txt SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      # One canary at a time: the previous one and its tag are replaced, never kept beside it.
+      # Publish the complete next canary before retiring the previous one. A stale run whose target
+      # GitHub refuses therefore cannot destroy the last known-good public canary.
       - name: Replace the canary prerelease
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
           short="${GITHUB_SHA::12}"
+          candidate_tag="canary-${GITHUB_SHA}"
           cat > canary-notes.md <<NOTES
           Test build of \`main\` at ${short}, after ${version}. **Not a release.**
           Built for the platforms most installs use: Windows x64, macOS on Apple silicon and Linux x64.
@@ -111,15 +114,89 @@ jobs:
           - Issues and pull requests are accepted only for problems that also happen on the [latest stable release](https://github.com/${GITHUB_REPOSITORY}/releases/latest).
           - The app does not offer canary builds as updates. It offers the next stable release as usual.
           NOTES
-          if gh release view canary >/dev/null 2>&1; then
-            gh release delete canary --cleanup-tag --yes
-          fi
           # Whatever the candidate packaged, without the native sources archive a release keeps.
           mapfile -t assets < <(find publish -maxdepth 1 -name 'Chat-On-Steroids-*' ! -name '*Native-Sources*' | sort)
-          gh release create canary \
-            "${assets[@]}" \
-            publish/SHA256SUMS.txt \
-            --prerelease --latest=false --target "$GITHUB_SHA" \
-            --title "Canary ${short} (not a release)" \
-            --notes-file canary-notes.md
-          gh release view canary --json url,isPrerelease --jq '"\(.url) prerelease=\(.isPrerelease)"'
+          if ! gh release view "$candidate_tag" >/dev/null 2>&1; then
+            gh release create "$candidate_tag" \
+              "${assets[@]}" \
+              publish/SHA256SUMS.txt \
+              --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Canary ${short} (not a release)" \
+              --notes-file canary-notes.md
+          fi
+
+          tag_sha="$(git ls-remote --exit-code origin "refs/tags/${candidate_tag}" | cut -f1)"
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "Published canary tag $candidate_tag resolves to $tag_sha, not $GITHUB_SHA." >&2
+            exit 1
+          fi
+          target="$(gh release view "$candidate_tag" --json targetCommitish --jq .targetCommitish)"
+          if [ "$target" != "$GITHUB_SHA" ]; then
+            echo "Published canary target $target does not match candidate $GITHUB_SHA." >&2
+            exit 1
+          fi
+          prerelease="$(gh release view "$candidate_tag" --json isPrerelease --jq .isPrerelease)"
+          if [ "$prerelease" != "true" ]; then
+            echo "Published canary is not a prerelease." >&2
+            exit 1
+          fi
+          draft="$(gh release view "$candidate_tag" --json isDraft --jq .isDraft)"
+          if [ "$draft" != "false" ]; then
+            echo "Published canary is still a draft." >&2
+            exit 1
+          fi
+
+          {
+            for asset in "${assets[@]}"; do basename "$asset"; done
+            echo SHA256SUMS.txt
+          } | sort > expected-canary-assets.txt
+          gh release view "$candidate_tag" --json assets --jq '.assets[].name' | sort > actual-canary-assets.txt
+          diff -u expected-canary-assets.txt actual-canary-assets.txt
+
+          {
+            while read -r hash name; do
+              printf '%s\tsha256:%s\n' "$name" "$hash"
+            done < publish/SHA256SUMS.txt
+            manifest_hash="$(sha256sum publish/SHA256SUMS.txt | cut -d' ' -f1)"
+            printf 'SHA256SUMS.txt\tsha256:%s\n' "$manifest_hash"
+          } | sort > expected-canary-digests.txt
+          gh release view "$candidate_tag" --json assets \
+            --jq '.assets[] | "\(.name)\t\(.digest)"' \
+            | sort > actual-canary-digests.txt
+          diff -u expected-canary-digests.txt actual-canary-digests.txt
+
+          mapfile -t old_tags < <(
+            gh release list --limit 100 --json tagName,isPrerelease,name \
+              --jq '.[] | select(.isPrerelease == true and (.name | startswith("Canary ")) and (.tagName == "canary" or (.tagName | test("^canary-[0-9a-f]{40}$")))) | .tagName' \
+              | grep -vxF "$candidate_tag" || true
+          )
+          for tag in "${old_tags[@]}"; do
+            gh release delete "$tag" --cleanup-tag --yes
+          done
+
+          # A release deletion can succeed before its tag deletion fails. Release listing would no
+          # longer expose that orphan, so reconcile the remote canary refs themselves as the final
+          # cleanup owner. Only legacy `canary` and our own canary-<sha> namespace are eligible.
+          mapfile -t orphan_tags < <(
+            git ls-remote --tags origin refs/tags/canary 'refs/tags/canary-*' \
+              | awk '$2 !~ /\^\{\}$/ { sub("^refs/tags/", "", $2); print $2 }' \
+              | grep -E '^(canary|canary-[0-9a-f]{40})$' \
+              | grep -vxF "$candidate_tag" || true
+          )
+          for tag in "${orphan_tags[@]}"; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"
+          done
+
+          mapfile -t remaining_tags < <(
+            git ls-remote --tags origin refs/tags/canary 'refs/tags/canary-*' \
+              | awk '$2 !~ /\^\{\}$/ { sub("^refs/tags/", "", $2); print $2 }' \
+              | grep -E '^(canary|canary-[0-9a-f]{40})$' \
+              | sort
+          )
+          if [ "${#remaining_tags[@]}" -ne 1 ] || [ "${remaining_tags[0]}" != "$candidate_tag" ]; then
+            echo "Canary cleanup did not converge on only $candidate_tag." >&2
+            printf 'Remaining canary tags: %s\n' "${remaining_tags[*]}" >&2
+            exit 1
+          fi
+          gh release view "$candidate_tag" --json url,isPrerelease,targetCommitish \
+            --jq '"\(.url) prerelease=\(.isPrerelease) target=\(.targetCommitish)"'
