@@ -12,6 +12,8 @@
   "Leave empty to use ChatGPT's title": "留空則使用 ChatGPT 中的標題",
   "Name for this chat": "此聊天的名稱",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "在 App 中重新命名此聊天。它在 ChatGPT 中的標題維持不變。",
+  "Pin this chat": "釘選此聊天",
+  "Unpin this chat": "取消釘選此聊天",
   "{0} more sources were not recorded with this reply.": "此回覆未記錄另外 {0} 個來源。",
   "Thinking": "思考中",
   "Copy answer": "複製回答",

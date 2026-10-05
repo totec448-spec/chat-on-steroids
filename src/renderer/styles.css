@@ -2204,10 +2204,13 @@ input[readonly] {
 @keyframes session-spin { to { transform: rotate(360deg); } }
 .session-status.is-unseen { width: 8px; height: 8px; background: var(--accent); }
 .session-status.is-failed { background: var(--red); }
+.sess-pin { display: none; flex: none; padding: 3px; border: 0; background: transparent; color: var(--faint); }
+.sess:hover .sess-pin, .sess:focus-within .sess-pin, .sess-pin.is-pinned { display: inline-flex; }
+.sess-pin.is-pinned { color: var(--accent); }
 .sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
 .sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
 /* While a chat is being named, its field takes the actions' place (#1107). */
-.sess:has(.sess-rename) .sess-actions { display: none; }
+.sess:has(.sess-rename) :is(.sess-actions, .sess-pin) { display: none; }
 .sess-action { padding: 3px; border: 0; background: transparent; }
 .sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }

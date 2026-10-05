@@ -1,5 +1,6 @@
 /** Sidebar order is a local presentation preference; session/project ownership never changes. */
 const STORAGE_KEY = 'chat-on-steroids.sidebar-order';
+const PINS_STORAGE_KEY = 'chat-on-steroids.sidebar-pins';
 const MAX_IDS = 5000;
 export const SIDEBAR_PROJECT_SCOPE = ':projects';
 type Entry = { id: string; scope: string };
@@ -20,10 +21,38 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     }
   } catch { /* Unavailable/corrupt layout storage must not prevent opening chats. */ }
 
+  const pinned = new Set<string>();
+  try {
+    const raw = window.localStorage.getItem(PINS_STORAGE_KEY);
+    const saved: unknown = raw && raw.length <= 600_000 ? JSON.parse(raw) : [];
+    if (Array.isArray(saved)) for (const id of saved) {
+      if (pinned.size >= MAX_IDS) break;
+      if (typeof id === 'string' && id.length > 0 && id.length <= 160) pinned.add(id);
+    }
+  } catch { /* Pinning is optional presentation state, so corrupt storage cannot block the sidebar. */ }
+
   function ordered<T extends { id: string }>(scope: string, rows: T[]): T[] {
     const rank = new Map((orders.get(scope) ?? []).map((id, index) => [id, index]));
     // Newly encountered chats precede the saved sequence, preserving their native order.
-    return [...rows].sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
+    const base = [...rows].sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
+    if (scope === SIDEBAR_PROJECT_SCOPE) return base;
+    return [...base.filter(row => pinned.has(row.id)), ...base.filter(row => !pinned.has(row.id))];
+  }
+
+  function isPinned(id: string): boolean {
+    return pinned.has(id);
+  }
+
+  function setPinned(id: string, value: boolean): void {
+    if (!entries().some(entry => entry.id === id && entry.scope !== SIDEBAR_PROJECT_SCOPE)) return;
+    if (value === pinned.has(id)) return;
+    if (value) {
+      if (pinned.size >= MAX_IDS) return;
+      pinned.add(id);
+    } else pinned.delete(id);
+    try { window.localStorage.setItem(PINS_STORAGE_KEY, JSON.stringify([...pinned])); }
+    catch { /* Keep the pin in this window when layout storage is unavailable. */ }
+    repaint();
   }
 
   function move(id: string, target: string, after: boolean, scope: string): void {
@@ -98,7 +127,10 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
       if (event.clientY < bounds.top + 28) scroll.scrollTop -= 18;
       else if (event.clientY > bounds.bottom - 28) scroll.scrollTop += 18;
     }
-    const candidates = rows(drag.scope).filter(row => rowId(row) !== drag!.id);
+    const candidates = rows(drag.scope).filter(row => {
+      const id = rowId(row);
+      return id !== drag!.id && !!id && pinned.has(id) === pinned.has(drag!.id);
+    });
     clearMarkers();
     const before = candidates.find(row => { const rect = row.getBoundingClientRect(); return event.clientY < rect.top + rect.height / 2; });
     const target = before ?? candidates.at(-1);
@@ -120,7 +152,10 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     const row = (event.target as Element).closest<HTMLElement>('[data-sort-scope]');
     const id = row && rowId(row);
     if (!row || !id || event.target !== handle(row)) return;
-    const siblings = rows(row.dataset.sortScope!);
+    const siblings = rows(row.dataset.sortScope!).filter(candidate => {
+      const candidateId = rowId(candidate);
+      return !!candidateId && pinned.has(candidateId) === pinned.has(id);
+    });
     const target = siblings[siblings.indexOf(row) + (event.key === 'ArrowUp' ? -1 : 1)];
     event.preventDefault();
     const targetId = target && rowId(target);
@@ -131,5 +166,5 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
       .find(next => rowId(next) === id && next.dataset.sortScope === row.dataset.sortScope);
     if (replacement) handle(replacement).focus({ preventScroll: true });
   });
-  return { ordered, get interacting() { return drag !== null; } };
+  return { ordered, isPinned, setPinned, get interacting() { return drag !== null; } };
 }

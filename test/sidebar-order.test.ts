@@ -5,11 +5,12 @@ import { createSidebarOrder } from '../src/renderer/sidebar-order.js';
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
-function fixture(saved?: string) {
+function fixture(saved?: string, savedPins?: string) {
   dom = new JSDOM('<div class="scroll"><div id="list"></div></div>', { url: 'https://local.test', pretendToBeVisual: true });
   const w = dom.window;
   Object.assign(globalThis, { window: w, document: w.document });
   if (saved) w.localStorage.setItem('chat-on-steroids.sidebar-order', saved);
+  if (savedPins) w.localStorage.setItem('chat-on-steroids.sidebar-pins', savedPins);
   const list = w.document.getElementById('list')!;
   list.setPointerCapture = vi.fn(); list.hasPointerCapture = () => false;
   let entries = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, index) => ({ id, scope: index < 3 ? 'project' : '' }));
@@ -35,6 +36,7 @@ function fixture(saved?: string) {
     ids: (scope: string) => order.ordered(scope, entries.filter(row => row.scope === scope)).map(row => row.id),
     update: (next: typeof entries) => { entries = next; },
     saved: () => w.localStorage.getItem('chat-on-steroids.sidebar-order')!,
+    savedPins: () => w.localStorage.getItem('chat-on-steroids.sidebar-pins')!,
   };
 }
 
@@ -91,4 +93,36 @@ it('supports keyboard movement, preserves focus and tolerates corrupt preference
   f.row('b').dispatchEvent(new f.w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }));
   expect(f.ids('project')).toEqual(['b', 'a', 'c']);
   expect(f.w.document.activeElement).toBe(f.row('b'));
+});
+
+it('keeps pinned chats above their scope while preserving manual order and pinning across reload', () => {
+  const f = fixture();
+  f.drag('a', 500);
+  expect(f.ids('project')).toEqual(['b', 'c', 'a']);
+  expect(f.order.isPinned('a')).toBe(false);
+
+  f.order.setPinned('a', true);
+  expect(f.ids('project')).toEqual(['a', 'b', 'c']);
+  expect(f.ids('')).toEqual(['d', 'e', 'f']);
+
+  f.order.setPinned('c', true);
+  expect(f.ids('project')).toEqual(['c', 'a', 'b']);
+  expect(f.savedPins()).toBe('["a","c"]');
+
+  // Manual movement is still available inside the pinned group, but cannot cross the pin boundary.
+  f.drag('a', -100);
+  expect(f.ids('project')).toEqual(['a', 'c', 'b']);
+  f.drag('b', -100);
+  expect(f.ids('project')).toEqual(['a', 'c', 'b']);
+  f.row('b').dispatchEvent(new f.w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }));
+  expect(f.ids('project')).toEqual(['a', 'c', 'b']);
+
+  const savedOrder = f.saved(); const savedPins = f.savedPins(); f.w.close();
+  const reloaded = fixture(savedOrder, savedPins);
+  expect(reloaded.ids('project')).toEqual(['a', 'c', 'b']);
+  expect(reloaded.order.isPinned('a')).toBe(true);
+  expect(reloaded.order.isPinned('c')).toBe(true);
+
+  reloaded.order.setPinned('c', false);
+  expect(reloaded.ids('project')).toEqual(['a', 'c', 'b']);
 });

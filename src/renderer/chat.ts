@@ -462,6 +462,23 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
   }
+  let pinAction: HTMLButtonElement | null = null;
+  if (summary.conversationId && summary.origin?.kind !== 'worker') {
+    const pinned = sidebarOrder?.isPinned(summary.id) === true;
+    const pin = document.createElement('button');
+    pin.className = `btn sess-pin${pinned ? ' is-pinned' : ''}`;
+    pin.type = 'button'; pin.setAttribute('aria-pressed', String(pinned));
+    ui(pin, 'title', () => pinned ? t("Unpin this chat") : t("Pin this chat"));
+    ui(pin, 'aria-label', () => pinned ? t("Unpin this chat") : t("Pin this chat"));
+    pin.append(icon(pinned ? 'i-pin-fill' : 'i-pin'));
+    pin.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const restoreFocus = document.activeElement === pin;
+      sidebarOrder?.setPinned(summary.id, !pinned);
+      if (restoreFocus) $('sessionList').querySelector<HTMLButtonElement>(`[data-id="${summary.id}"] .sess-pin`)?.focus({ preventScroll: true });
+    });
+    pinAction = pin;
+  }
   const actionBar = el('div', 'sess-actions');
 
   const remove = document.createElement('button');
@@ -588,7 +605,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   }
 
   actionBar.append(...actions, remove);
-  row.append(top, actionBar);
+  row.append(top);
+  if (pinAction) row.append(pinAction);
+  row.append(actionBar);
   return row;
 }
 

@@ -647,6 +647,44 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   await vi.waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
 });
 
+it('pins a normal chat above newer siblings and unpins it without changing session data', async () => {
+  const base = {
+    conversationId: null, chatIds: [], startedAt: 1, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null
+  };
+  const newer = { ...base, id: 'pin-newer-0001', title: 'Newer chat', conversationId: 'pin-conversation-newer', chatIds: ['pin-conversation-newer'], updatedAt: 30 };
+  const important = { ...base, id: 'pin-important-0001', title: 'Important chat', conversationId: 'pin-conversation-important', chatIds: ['pin-conversation-important'], updatedAt: 20 };
+  const older = { ...base, id: 'pin-older-0001', title: 'Older chat', conversationId: 'pin-conversation-older', chatIds: ['pin-conversation-older'], updatedAt: 10 };
+  const listed = [newer, important, older];
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: { sessions: listed, activeId: null, pressure: [], blocked: [], trusted: [] } })
+  });
+  const doc = mounted.window.document;
+  const ids = () => [...doc.querySelectorAll<HTMLElement>('#chatList > .sess')].map(row => row.dataset.id);
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${important.id}"]`)!;
+  await vi.waitFor(() => expect(row()?.querySelector('button.sess-pin')).not.toBeNull());
+  expect(ids()).toEqual([newer.id, important.id, older.id]);
+
+  const original = JSON.stringify(listed);
+  const pin = row().querySelector<HTMLButtonElement>('button.sess-pin')!;
+  expect(pin.title).toBe('Pin this chat');
+  pin.focus();
+  pin.click();
+  await vi.waitFor(() => expect(ids()).toEqual([important.id, newer.id, older.id]));
+  const pinned = row().querySelector<HTMLButtonElement>('button.sess-pin')!;
+  expect(pinned.classList.contains('is-pinned')).toBe(true);
+  expect(pinned.getAttribute('aria-pressed')).toBe('true');
+  expect(doc.activeElement).toBe(pinned);
+  expect(mounted.window.localStorage.getItem('chat-on-steroids.sidebar-pins')).toBe('["pin-important-0001"]');
+  expect(JSON.stringify(listed)).toBe(original);
+
+  row().querySelector<HTMLButtonElement>('button.sess-pin')!.click();
+  await vi.waitFor(() => expect(ids()).toEqual([newer.id, important.id, older.id]));
+  expect(mounted.window.localStorage.getItem('chat-on-steroids.sidebar-pins')).toBe('[]');
+});
+
 it('searches chats from the sidebar: results replace the lists, matches are marked, Escape brings the lists back (#1107)', async () => {
   const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,

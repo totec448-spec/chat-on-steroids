@@ -12,6 +12,8 @@
   "Leave empty to use ChatGPT's title": "空欄にすると ChatGPT のタイトルを使います",
   "Name for this chat": "このチャットの名前",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "このチャットの名前をアプリ内で変更します。ChatGPT でのタイトルは変わりません。",
+  "Pin this chat": "このチャットをピン留め",
+  "Unpin this chat": "このチャットのピン留めを解除",
   "{0} more sources were not recorded with this reply.": "この返信では他の {0} 件のソースが記録されていません。",
   "Thinking": "考え中",
   "Copy answer": "回答をコピー",

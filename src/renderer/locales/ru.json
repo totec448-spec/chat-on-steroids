@@ -12,6 +12,8 @@
   "Leave empty to use ChatGPT's title": "Оставьте пустым, чтобы использовать название из ChatGPT",
   "Name for this chat": "Название этого чата",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Переименовать этот чат в приложении. Его название в ChatGPT не изменится.",
+  "Pin this chat": "Закрепить этот чат",
+  "Unpin this chat": "Открепить этот чат",
   "{0} more sources were not recorded with this reply.": "Ещё {0} источников не сохранено для этого ответа.",
   "Thinking": "Рассуждает",
   "Copy answer": "Копировать ответ",

@@ -12,6 +12,8 @@
   "Leave empty to use ChatGPT's title": "Déjalo vacío para usar el título de ChatGPT",
   "Name for this chat": "Nombre de este chat",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Cambia el nombre de este chat en la app. Su título en ChatGPT no cambia.",
+  "Pin this chat": "Fijar este chat",
+  "Unpin this chat": "Desfijar este chat",
   "{0} more sources were not recorded with this reply.": "No se registraron otras {0} fuentes con esta respuesta.",
   "Thinking": "Pensando",
   "Copy answer": "Copiar respuesta",

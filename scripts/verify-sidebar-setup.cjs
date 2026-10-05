@@ -17,7 +17,10 @@ app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const fixture = `
-    if (new URL(location.href).searchParams.has('reset')) localStorage.removeItem('chat-on-steroids.sidebar-order');
+    if (new URL(location.href).searchParams.has('reset')) {
+      localStorage.removeItem('chat-on-steroids.sidebar-order');
+      localStorage.removeItem('chat-on-steroids.sidebar-pins');
+    }
     localStorage.removeItem('cos.ui.language');
     ${fixtureConfigSource()}
     const config = fixtureConfig({
@@ -171,6 +174,17 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
     await new Promise(r=>setTimeout(r,200));
     await screenshot('sidebar.png');
+    assert.equal(await js(`document.querySelector('[data-id="task-3"] .sess-pin i').classList.contains('ph-fill')`),false);
+    await js(`document.querySelector('[data-id="task-3"] .sess-pin').click()`);
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    const pinned=await js(`[...document.querySelectorAll('.project-group > .sess')].map(row=>({id:row.dataset.id,pinned:row.querySelector('.sess-pin')?.classList.contains('is-pinned')}))`);
+    assert.deepEqual(pinned.map(row=>row.id),['task-3','task-1','task-2','task-0','task-4']);
+    assert.equal(pinned[0].pinned,true);
+    assert.equal(await js(`document.querySelector('[data-id="task-3"] .sess-pin').getAttribute('aria-pressed')`),'true');
+    assert.equal(await js(`document.querySelector('[data-id="task-3"] .sess-pin i').classList.contains('ph-push-pin-simple')`),true);
+    assert.equal(await js(`document.querySelector('[data-id="task-3"] .sess-pin i').classList.contains('ph-fill')`),true);
+    assert.equal(await js(`document.querySelector('.sess.is-sel') === null`),true);
+    await screenshot('sidebar-pinned.png');
     win.webContents.setZoomFactor(1.17);
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'),true);
@@ -276,7 +290,9 @@ app.whenReady().then(async () => {
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group").length === 2'));i++) await new Promise(r=>setTimeout(r,25));
     assert.deepEqual(await js(projectOrder),['second-project','demo-project']);
+    assert.equal(await js(`document.querySelector('[data-id="task-3"] .sess-pin').getAttribute('aria-pressed')`),'true');
+    assert.equal(await js(`document.querySelector('[data-id="task-3"] .sess-pin').classList.contains('is-pinned')`),true);
     await screenshot('project-order-restored.png');
-    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,projectOrder:{pointer:true,keyboard:true,restored:true},showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
+    console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,pin:{ordered:true,persisted:true},projectOrder:{pointer:true,keyboard:true,restored:true},showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error=>{console.error(error);app.exit(1)});
