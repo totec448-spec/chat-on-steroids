@@ -1966,5 +1966,9 @@
   "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Các cuộc trò chuyện vẫn tiếp tục. Chọn “Hiện trình duyệt” trong menu của biểu tượng thanh menu để mở lại.",
   "Pinned": "Đã ghim",
   "Unpin this chat": "Bỏ ghim cuộc trò chuyện này",
-  "Pin this chat to the top of its list": "Ghim cuộc trò chuyện này lên đầu danh sách"
+  "Pin this chat to the top of its list": "Ghim cuộc trò chuyện này lên đầu danh sách",
+  "Core connection lost": "Mất kết nối Core",
+  "Desktop connection lost": "Mất kết nối Desktop",
+  "Plugins connection lost": "Mất kết nối Plugins",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tunnel bị ngắt kết nối ngoài dự kiến. Mở Chat On Steroids để kiểm tra kết nối."
 }

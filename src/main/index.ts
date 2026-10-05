@@ -11,7 +11,7 @@ import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
-import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
+import { connect, disconnect, getStatus, onStatusChange, setConnectionLossNotifier, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
@@ -290,6 +290,21 @@ setStuckNotifier((title, body, sessionId) => {
     const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
     if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
   });
+  notice.show();
+  return true;
+});
+setConnectionLossNotifier(surface => {
+  if (quitting || window?.isFocused() || !Notification.isSupported()) return false;
+  const titles = {
+    core: 'Core connection lost',
+    desktop: 'Desktop connection lost',
+    plugins: 'Plugins connection lost'
+  } as const;
+  const notice = new Notification({
+    title: mainText(titles[surface]),
+    body: mainText('The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.')
+  });
+  notice.on('click', showWindow);
   notice.show();
   return true;
 });

@@ -3508,8 +3508,9 @@ catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,ko,tr,fr,pt-PT,pt-BR,de,ru,vi}.
 `cos.ui.language`. The main process has no catalogs: the renderer translates the allowlisted
 stopped-chat notice texts (`shared/stop-notice.ts`) and publishes them over `ui:stopNoticeTexts`
 at startup and on each language change; unknown keys are refused and untranslated notices stay English.
-The tray menu, its tooltip and the Session finish notice with its buttons work the same way: the
-allowlisted `shared/main-texts.ts` over `ui:mainTexts`, kept by `main/main-texts.ts`, which repaints the tray.
+The tray menu, its tooltip, the Session finish notice with its buttons and tunnel-loss notices work
+the same way: the allowlisted `shared/main-texts.ts` over `ui:mainTexts`, kept by
+`main/main-texts.ts`, which repaints the tray.
 The renderer also reports the language over `ui:language`; the main process keeps it as `ui.language`
 and hands it to the extension in the `/status` reply (`language`). The extension stores it as
 `appLanguage` and `i18n.js` then reads that catalog itself (content scripts get it from the service
@@ -3790,6 +3791,18 @@ Approved-root requirements are surface/capability decisions, not whether the ext
 Separate local listener health, public tunnel reachability, ChatGPT connector configuration and
 browser attachment in both status and diagnosis. Stale connect/disconnect results cannot replace
 a newer endpoint. Secret paths/tokens are not public diagnostics.
+
+Each actual tunnel lifetime keeps one in-memory loss-notice budget in `connection.ts`: a connected
+report arms it; the next offline/auth-failed/tunnel-unavailable report consumes it. Unknown health
+or retry/starting reports neither erase an established connection nor re-arm an outage. Core,
+Desktop and Plugins OpenAI tunnels are independent; whole-origin transports notify once for their
+shared Core tunnel. Initial failures stay silent. Existing generation and optional-lifetime fences
+keep Disconnect, shutdown, settings reconnect and retired reports silent. `setConnectionLossNotifier`
+injects presentation from `index.ts`, which skips focused/unsupported/quitting windows, localizes
+static safe text through `mainText`, and opens the app on click. A skipped or failed notice is not
+retried; notification failures never alter tunnel state or recovery. No raw tunnel detail or secret
+identifier enters the notice. `test/connection.test.ts` and `test/connection-notice.test.ts` cover the
+transition budget, intentional retirement and notification adapter.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
 `/v1/health` (which also lists the routes this build serves), `/v1/status` and the read routes
