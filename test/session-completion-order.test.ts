@@ -122,6 +122,26 @@ describe('completed request ownership', () => {
     expect(events.at(-1)).toMatchObject({ kind: 'tool_call', call: { requestId: 'wfr_new_request' } });
   });
 
+  /**
+   * Seen live on Windows (2026-10-05): ChatGPT showed an app-sent first message Markdown-escaped
+   * only after the answer had ended, so the turn's own question got a text revision after its
+   * final. Every Goal decision for that turn was then refused as "still working", for good.
+   */
+  it.each([false, true])('keeps a final complete when its own question is revised after it (restart %s)', async restart => {
+    const { id, began, clock } = await completed();
+    clock.mockReturnValue(began + 30);
+    // The page reports it as just authored: a new chat's first message seen only after the redraw.
+    await recordChatObservations(chat, [{ kind: 'user_message', time: began, messageId: 'question', text: 'Inspect the source\\.', authoredNow: true }]);
+    expect((await readEvents(id)).find(event => event.kind === 'user_message' && event.messageId === 'question'))
+      .toMatchObject({ message: { text: 'Inspect the source\\.' } });
+    if (restart) { await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests(); }
+    expect(await readCompletedFinal(id, chat, turn)).toMatchObject({ messageId: 'answer', turnId: turn });
+    // A new question after the final is still new work.
+    clock.mockReturnValue(began + 40);
+    await recordChatObservations(chat, [{ kind: 'user_message', time: Date.now(), messageId: 'next-question', text: 'And the tests?' }]);
+    expect(await readCompletedFinal(id, chat, turn)).toBeNull();
+  });
+
   it('still reopens a falsely completed view without native final proof', async () => {
     const { id, began, clock } = await completed(false);
     clock.mockReturnValue(began + 30);
