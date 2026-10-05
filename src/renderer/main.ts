@@ -1439,9 +1439,11 @@ function apply(next: AppState): void {
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
-            t("ChatGPT ran a tool {0}, but {1} has never been called — create it in ChatGPT to use it.", [ago(ranAt), unverified
-              .map((surface) => `“${surface.connectorName}”`)
-              .join(' and ')])
+            t(unverified.length === 1
+              ? "ChatGPT ran a tool {0}, but {1} has never been called — create it in ChatGPT to use it."
+              : "ChatGPT ran a tool {0}, but {1} have never been called — create them in ChatGPT to use them.",
+            [ago(ranAt), new Intl.ListFormat(currentLanguage(), { type: 'conjunction' })
+              .format(unverified.map((surface) => `“${surface.connectorName}”`))])
           : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
