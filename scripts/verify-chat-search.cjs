@@ -185,9 +185,11 @@ app.whenReady().then(async () => {
   assert.ok(hit.inView,'The matching message is in view: '+JSON.stringify(hit));
   assert.ok(hit.paged&&!hit.newest,'Its page was loaded around it, not the newest page: '+JSON.stringify(hit));
   // The user's own bubble gets a ring and keeps its shape; nothing else in the row is restyled.
-  const mark=await js(`(()=>{const b=document.querySelector('#timeline .is-search-hit .user-message-text'),s=b.closest('.said');return {ring:b.getAnimations().map(a=>a.animationName),said:s.getAnimations().map(a=>a.animationName),radius:getComputedStyle(s).borderRadius}})()`);
-  assert.deepEqual(mark.ring,['search-hit-ring'],'The bubble is ringed: '+JSON.stringify(mark));
-  assert.deepEqual(mark.said,[],'The bubble\'s container is not restyled: '+JSON.stringify(mark));
+  // Read from the applied style, not running animations: a slow runner can finish the 2.6s mark first,
+  // and under reduced motion the ring is drawn without one.
+  const mark=await js(`(()=>{const b=document.querySelector('#timeline .is-search-hit .user-message-text'),s=b.closest('.said'),bs=getComputedStyle(b),ss=getComputedStyle(s);return {ring:bs.animationName,shadow:bs.boxShadow,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,said:ss.animationName,radius:ss.borderRadius}})()`);
+  assert.ok(mark.reduced?mark.shadow!=='none':mark.ring==='search-hit-ring','The bubble is ringed: '+JSON.stringify(mark));
+  assert.equal(mark.said,'none','The bubble container is not restyled: '+JSON.stringify(mark));
   await capture('opened-at-match.png');
   // From that page of history, Jump to latest goes straight to the end, not one page at a time.
   await js(`document.getElementById('jumpLatest').click()`);
