@@ -5,7 +5,8 @@ import { initDurableStore, flushDurable, resetDurableForTests } from '../src/mai
 import {
   createSession, deleteSession, flushSessions, initSessionStore, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
 } from '../src/main/session/store.js';
-import { foldCase, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
+import { foldCase, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
+import { positionOf } from '../src/shared/chronology.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
@@ -133,4 +134,25 @@ it('matches words without their accents, at the right place, and says when more 
   expect((await searchSessions('cafe', 2)).results).toHaveLength(2);
   expect(await searchSessions('cafe', 3)).not.toHaveProperty('limited');
   expect((await searchSessions('cafe', 3)).results).toHaveLength(3);
+});
+
+it('locates the first message holding the query, so a result opens there', async () => {
+  const id = await chat('Release planning', [
+    ['user', 'plan the release'],
+    ['assistant', 'First tag the build.'],
+    ['user', 'and the Wíndows installer?'],
+    ['assistant', 'The windows installer comes after the bridge.']
+  ]);
+  const { readEvents } = await import('../src/main/session/store.js');
+  const said = (await readEvents(id, { kinds: ['user_message', 'assistant_message'] }));
+  // Accents and case fold as in the search itself; the first message holding a word wins.
+  const found = await locateSearchMatch(id, 'WINDOWS');
+  const third = said.find(event => event.kind === 'user_message' && event.message.text.startsWith('and the'))!;
+  expect(found).toEqual({ seq: third.seq, kind: 'user_message', messageId: (third as { messageId?: string }).messageId ?? null, position: positionOf(third) });
+  // Any one of the words is enough to place it: the snippet came from the first of them.
+  expect((await locateSearchMatch(id, 'bridge installer'))?.seq).toBe(third.seq);
+  expect((await locateSearchMatch(id, 'bridge'))?.kind).toBe('assistant_message');
+  // Nothing said matches (a title-only match): no place to open at.
+  expect(await locateSearchMatch(id, 'planning')).toBeNull();
+  expect(await locateSearchMatch(id, '   ')).toBeNull();
 });

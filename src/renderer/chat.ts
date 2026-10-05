@@ -2298,9 +2298,62 @@ function paintJumpLatest(): void {
 
 function jumpToLatest(): void {
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
+  // On a page of history (a search result opened there, or reading went far up), the end is not
+  // loaded yet: open the chat at its end again instead of paging down to it one page at a time.
+  const newest = events.reduce((latest, event) => Math.max(latest, event.seq), 0);
+  if (historyBefore !== null && selectedId !== null && detailCursor !== null && newest + 1 < detailCursor) {
+    historyBefore = null;
+    detailFor = null;
+    void loadDetail();
+    return;
+  }
   const pane = $('chatBody');
   $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   scrollPane(pane, pane.scrollHeight, true);
+}
+
+/**
+ * Opens a chat at the message a search matched (#1117): when it is older than the loaded page, the
+ * page around it, as scrolling up would load it. Centered and briefly marked; reading there is
+ * history reading, so the chat no longer follows its end until the reader goes back down.
+ */
+async function revealSearchMatch(id: string, query: string): Promise<void> {
+  const selection = selectionGeneration;
+  const current = (): boolean => selection === selectionGeneration && selectedId === id;
+  const location = await run(api.locateSearchMatch(id, query));
+  if (!location || !current()) return;
+  // The chat's own first page, and the fill that follows it, settle first.
+  for (const deadline = Date.now() + 5000; detailFor !== id || historyLoading || historyDemand !== null;) {
+    if (Date.now() > deadline || !current()) return;
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+  }
+  const rowFor = (): HTMLElement | null => {
+    const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
+      : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
+    if (!event) return null;
+    const key = itemKey({ kind: 'event', event });
+    return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
+  };
+  let row = rowFor();
+  if (!row) {
+    // Marked as history before the read, so a live update meanwhile cannot land in this page.
+    const boundary = location.position + Math.ceil(TIMELINE_BATCH_SIZE / 2);
+    events = [];
+    historyStart = null;
+    historyBefore = boundary;
+    const loaded = await loadDetail(true, boundary);
+    if (!current()) return;
+    // A failed read leaves nothing to show: open the chat at its end instead.
+    if (!loaded || !events.length) { historyBefore = null; detailFor = null; void loadDetail(); return; }
+    row = rowFor();
+  }
+  if (!row) return;
+  readTimeline();
+  row.scrollIntoView({ block: 'center' });
+  row.classList.remove('is-search-hit');
+  void row.offsetWidth;
+  row.classList.add('is-search-hit');
+  window.setTimeout(() => row.classList.remove('is-search-hit'), 2600);
 }
 
 /** Explicit history inspection releases the same follow/send hold as reading upwards. */
@@ -5999,8 +6052,16 @@ export function initChat(next: Deps): void {
   });
 
   chatSearch = initChatSearch({
-    select: (id) => { if (id === selectedId) return; pendingNewInput = null; selectSession(id); },
-    selectedId: () => selectedId
+    select: (id, match) => {
+      if (id !== selectedId) { pendingNewInput = null; selectSession(id); }
+      if (match) void revealSearchMatch(id, match);
+    },
+    selectedId: () => selectedId,
+    // The chats the sidebar lists, newest first: sub-agents, helpers and diagnostics rows stay out.
+    recent: () => sessions
+      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && (!!entry.conversationId || entry.origin?.kind === 'desktop'))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map(entry => ({ id: entry.id, title: entry.title }))
   });
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');

@@ -1963,5 +1963,6 @@
   "{0} sub-agents in this round": "このラウンドのサブエージェント: {0}",
   "The Chat On Steroids browser is still running": "Chat On Steroids ブラウザーは実行中です",
   "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "チャットは続いています。戻すには、トレイアイコンのメニューで「ブラウザを表示」を選んでください。",
-  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "チャットは続いています。戻すには、メニューバーアイコンのメニューで「ブラウザを表示」を選んでください。"
+  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "チャットは続いています。戻すには、メニューバーアイコンのメニューで「ブラウザを表示」を選んでください。",
+  "Recent": "最近"
 }

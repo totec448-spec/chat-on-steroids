@@ -10,7 +10,8 @@
  */
 import { promises as fs } from 'node:fs';
 import { setImmediate as yieldToEvents } from 'node:timers/promises';
-import type { SessionSearchReply, SessionSearchResult, SessionSummary } from '../../shared/session.js';
+import type { SessionSearchLocation, SessionSearchReply, SessionSearchResult, SessionSummary } from '../../shared/session.js';
+import { positionOf } from '../../shared/chronology.js';
 import { transcriptEntries } from '../../shared/markdown-export.js';
 import { indexedSessions, readEvents, readOverflowText, sessionSearchIndexPath } from './store.js';
 import { logWarn } from '../logger.js';
@@ -205,4 +206,30 @@ export async function searchIndexingSettled(): Promise<void> {
 
 export function resetSessionSearchForTests(): void {
   cache.clear(); cachedChars = 0; current.clear(); indexingWanted = false;
+}
+
+/**
+ * The first message of a chat holding any of the query's words: where its snippet came from, so the
+ * chat can open there instead of at its end. Read only when a result is opened, from the recording.
+ */
+export async function locateSearchMatch(id: string, query: string): Promise<SessionSearchLocation | null> {
+  const terms = queryTerms(query);
+  if (!terms.length) return null;
+  const events = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
+  for (const entry of transcriptEntries(events)) {
+    const text = entry.stored.truncated && entry.stored.assetId
+      ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
+      : entry.stored.text;
+    const lower = foldCase(text.replace(/\s+/g, ' '));
+    if (!terms.some(term => lower.includes(term))) continue;
+    const event = events.find(candidate => candidate.seq === entry.seq);
+    if (!event || (event.kind !== 'user_message' && event.kind !== 'assistant_message')) return null;
+    const messageId = event.messageId ?? null;
+    // A revised message keeps the place where it first appeared.
+    const position = Math.min(...events
+      .filter(other => other === event || (messageId !== null && other.kind === event.kind && other.messageId === messageId))
+      .map(other => positionOf(other)));
+    return { seq: event.seq, kind: event.kind, messageId, position };
+  }
+  return null;
 }
