@@ -66,7 +66,13 @@
         </button>
       </nav>
         <section class="sidebar-sessions">
+          <div class="sidebar-search">
+            <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+            <input id="chatSearch" type="search" placeholder="Search chats" aria-label="Search chats" autocomplete="off" spellcheck="false" />
+            <button class="btn sidebar-search-clear" id="chatSearchClear" type="button" title="Clear search" aria-label="Clear search" hidden></button>
+          </div>
           <div class="scroll">
+            <div id="searchResults" aria-live="polite" hidden></div>
             <div id="sessionList">
               <details class="sidebar-session-section" id="projectsSection" open>
                 <summary class="sidebar-session-heading">

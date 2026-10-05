@@ -166,6 +166,12 @@ function assertReady(): void {
   }
 }
 
+/** The chat's plain-text search index (search.ts); it lives and is deleted with the session. */
+export function sessionSearchIndexPath(id: string): string {
+  assertSessionId(id);
+  return path.join(sessionDir(id), 'search.txt');
+}
+
 function sessionDir(id: string): string {
   assertReady();
   return path.join(root, id);

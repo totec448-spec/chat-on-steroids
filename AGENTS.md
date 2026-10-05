@@ -2209,7 +2209,9 @@ is withdrawn and the app opens the URL through the OS as before.
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
-chat comes from request correlation (waiting up to 20 s), never from the model. The image is the
+chat comes from request correlation (waiting up to 20 s), never from the model. Without one the
+refusal names the Core that answered (`connectorName`), since another computer's chat may have
+called it (#1097). The image is the
 latest recorded finished `native_image` of that chat's session, or the one whose `messageId` or
 `providerAssetId` the `image` argument names. The destination resolves like any write
 (`allowMissing`), must not exist, and gets the image's own extension when it has none; a named
@@ -3422,6 +3424,17 @@ first-message fallbacks unless a provider title was seen; worker/helper origins 
 title, also when an origin is stamped later). A blank or null title clears the name: the title
 becomes `autoTitle`, else the first message, and naming authority returns to its source. ChatGPT's
 own title is never changed.
+
+Chat search (#1107) is IPC `sessions:search { query ≤200 }` → `SessionSearchReply { results ≤50,
+indexed, total }`. `session/search.ts` never reads a journal per query: each chat gets
+`<session>/search.txt` (first line the stamp `version:updatedAt:events`, then the user's authored
+words and ChatGPT's answers, overflow text included, capped at 1M characters), built in the
+background newest first, reused while the stamp matches, deleted with the chat. Helper chats are
+left out, as in the sidebar. Every query word must match (title or text, any order, case-folded
+with `foldCase`, which keeps UTF-16 lengths so ranges index the original). Title matches rank
+first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16
+`[start, end)` ranges into `title` and `snippet.text`. While `indexed < total`, text results
+cover only indexed chats and the renderer asks again.
 
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
