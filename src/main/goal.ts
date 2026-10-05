@@ -1581,6 +1581,10 @@ function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null)
   draft.stage = stage;
   draft.error = error;
   draft.settledAt = Date.now();
+  // NO_REPLY is a decision with nothing to type, so it discharges the turn here, as the page's
+  // acknowledgement would. A page closed meanwhile never acknowledges, the draft dies with the
+  // process, and the turn stayed owed for the ledger's twelve hours ("Answer settling").
+  if (stage === 'no-reply') handleGoalReply(draft.conversationId, draft.turnId);
   notifyGoalChange();
   // A failed helper has not answered the source. Keep its debt; the failed draft
   // retains the transport's retry/ambiguity fence until a deliberate retry or change.

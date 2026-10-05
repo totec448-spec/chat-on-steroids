@@ -1391,7 +1391,10 @@ inventing a native final or turn end. A completed final can start a browser deci
 mode enables after-turn delivery, or when the finish tool is disabled (§17).
 `automaticFinishEnabled()` is shared by generation and queued-input validity: only the effective
 per-chat Goal/Loop switch authorizes an automatic decision.
-A "goal met" decision (`no-reply`) ends the run but keeps the objective and the Goal switch. Once
+A "goal met" decision (`no-reply`) ends the run but keeps the objective and the Goal switch. It
+discharges its turn's reply obligation when it settles, without waiting for the page: nothing is
+left to type, and a page closed meanwhile would otherwise leave the turn owed until the ledger
+TTL. A typed continuation stays owed until the page acknowledges it. Once
 the page acknowledges it, `goalViewFor()` hides it from the page, while `goalOutcomeFor()` keeps it
 in the window's session controls until a newer turn replaces it: the Goal row then reads
 "Goal reached · <objective>" instead of "Pursuing goal", and the lifecycle row does not repeat it.
