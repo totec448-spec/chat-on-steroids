@@ -1909,6 +1909,54 @@ describe('active agent tab discard protection', () => {
     }
   });
 
+  it('hands an image export to the tab showing its chat and posts the page\'s answer, once (#889)', async () => {
+    const SHOWN = 'dddddddd-eeee-4fff-8aaa-444444444444';
+    const CLOSED = 'dddddddd-eeee-4fff-8aaa-555555555555';
+    const NONCE_SHOWN = '11111111-2222-4333-8444-555555555555';
+    const NONCE_CLOSED = '66666666-7777-4888-8999-000000000000';
+    const posted: Array<{ canExportImages?: boolean }> = [];
+    const delivered: Array<Record<string, unknown>> = [];
+    const jobs = [
+      { nonce: NONCE_SHOWN, conversationId: SHOWN, messageId: 'message-1', assetId: 'file_1' },
+      { nonce: NONCE_CLOSED, conversationId: CLOSED, messageId: 'message-2', assetId: 'file_2' },
+      { nonce: 'not-a-nonce', conversationId: SHOWN, messageId: 'message-3', assetId: 'file_3' }
+    ];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          posted.push(JSON.parse(String(init?.body || '{}')));
+          // Still pending on the next poll: the worker must not hand the same export out twice.
+          return response(200, { ok: true, repairs: [], imageExports: jobs });
+        }
+        if (url.pathname === '/image-export') { delivered.push(JSON.parse(String(init?.body || '{}'))); return response(200, { ok: true }); }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [
+        { id: 3, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete' },
+        { id: 5, windowId: 7, url: `https://chatgpt.com/c/${SHOWN}`, status: 'complete' }
+      ],
+      tabsSendMessage: async (_tabId, message) => message.type === 'clf-image-export' ? { data: 'iVBORw0KGgo=' } : { ok: true }
+    });
+
+    await worker.fireAlarm();
+    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await worker.fireAlarm();
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    expect(posted[0]?.canExportImages).toBe(true);
+    const asked = worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string }).type === 'clf-image-export');
+    expect(asked).toEqual([[5, { type: 'clf-image-export', conversationId: SHOWN, messageId: 'message-1', assetId: 'file_1' }, undefined]]);
+    expect(delivered).toEqual(expect.arrayContaining([
+      { nonce: NONCE_SHOWN, data: 'iVBORw0KGgo=' },
+      { nonce: NONCE_CLOSED, error: 'not_open' }
+    ]));
+    expect(delivered).toHaveLength(2);
+  });
+
   it('relays a page bootstrap step to the app by name and id only (#882)', async () => {
     const steps: unknown[] = [];
     const worker = loadWorker({

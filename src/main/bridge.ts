@@ -220,6 +220,7 @@ import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
 import { conversationHasMcpCallSince, readHandoffResponse } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
+import { completeImageExport, IMAGE_EXPORT_BODY_BYTES, pendingImageExports } from './image-export.js';
 import { bindAgentWorkspace } from './workspace.js';
 import { extensionUpdateOffer, prepareExtensionUpdate, shippedExtensionBuild } from './extension-path.js';
 
@@ -695,6 +696,13 @@ function chatHeldElsewhere(conversationId: string, browser: string | null): bool
 const REVEAL_COLLECT_MS = 4_000;
 const revealBrowsers = new Map<string, number>();
 const pendingReveals: Array<{ conversationId: string; settle: (shown: boolean) => void }> = [];
+
+/** Browsers whose extension can fetch a generated image's original for the image export (#889). */
+const imageExportBrowsers = new Map<string, number>();
+export function imageExportCapable(): boolean {
+  const now = Date.now();
+  return browserWakeConnected() && [...imageExportBrowsers.values()].some(at => now - at < OPENING_CUSTODY_MS);
+}
 
 function revealCapable(): boolean {
   const now = Date.now();
@@ -2346,8 +2354,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     let openConversations: string[] = [];
     let stalledConversations: string[] = [];
     let revealRequested = false;
+    let imageExportRequested = false;
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown; chatGptSignedIn?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown; canExportImages?: unknown; chatGptSignedIn?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
@@ -2359,6 +2368,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       stalledConversations = (body.stalledConversations ?? []) as string[];
       noteExtensionUpdateHold(body.updateHold);
       revealRequested = body.canReveal === true;
+      imageExportRequested = body.canExportImages === true;
       if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
           externalExtension.browserId === browserOf(req)) {
         noteExternalLogin(externalExtension.browserId, typeof body.chatGptSignedIn === 'boolean' ? body.chatGptSignedIn : null);
@@ -2398,6 +2408,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (browser && req.method === 'POST') browserChats.set(browser, openSet);
     const canReveal = req.method === 'POST' && revealRequested;
     if (canReveal) revealBrowsers.set(browser ?? '', Date.now());
+    if (req.method === 'POST' && imageExportRequested) imageExportBrowsers.set(browser ?? '', Date.now());
     const pendingInputs = await pendingBrowserInputs();
     const pendingIds = new Set(pendingInputs.map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
@@ -2430,6 +2441,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         revivals,
         placement: pendingBrowserPlacement(null, browser),
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
+        ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
         repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser),
@@ -2449,6 +2461,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   // ChatGPT's own plugin list names the Core plugin: it is created in this account. The id is only
   // checked for shape; what it proves is existence, which Setup reads instead of a test message.
+  // A generated image's original, fetched by the page that shows it, for one pending export (#889).
+  if (route === '/image-export' && req.method === 'POST') {
+    let body: unknown;
+    try { body = await readBody(req, IMAGE_EXPORT_BODY_BYTES); }
+    catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    return json(res, 200, { ok: await completeImageExport(body) }, origin);
+  }
   if (route === '/core-plugin' && req.method === 'POST') {
     const body = await readBody(req) as Record<string, unknown>;
     // ChatGPT's complete plugins list no longer names this install's Core: deleted or disconnected.
@@ -10372,6 +10394,7 @@ export function resetBridgeForTests(): void {
   browserSeenAt.clear();
   browserChats.clear();
   revealBrowsers.clear();
+  imageExportBrowsers.clear();
   for (const entry of pendingReveals.splice(0)) entry.settle(false);
   openingCustody.clear();
   extensionVersion = null;

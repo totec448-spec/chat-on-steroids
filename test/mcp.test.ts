@@ -608,7 +608,7 @@ describe('surface boundaries', () => {
     everything();
     const names = toolNames(await core('tools/list'));
     // find is absent because exec_command is present — they are mutually exclusive.
-    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'update_plan', 'view_image', 'write_stdin']);
+    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'save_image', 'update_plan', 'view_image', 'write_stdin']);
     for (const name of surfaceDefinition('desktop').tools.filter(name => name !== 'exec')) expect(names, name).not.toContain(name);
   });
 
@@ -866,13 +866,23 @@ describe('surface boundaries', () => {
     }
   });
 
+  it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
+    everything();
+    const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
+    expect(Object.keys(tool?.inputSchema?.properties ?? {})).toEqual(['path', 'image']);
+    expect(tool?.inputSchema?.required).toEqual(['path']);
+    const reply = await core('tools/call', { name: 'save_image', arguments: { path: '/workspace/out.png' } });
+    expect(reply.body.result?.isError).toBe(true);
+    expect(JSON.stringify(reply.body.result?.content)).toContain('could not tell which chat this call came from');
+  });
+
   it('keeps the worst-case no-query discovery of each surface small', async () => {
     everything();
     const coreTools = toolList(await core('tools/list'));
     const desktopTools = toolList(await desktop('tools/list'));
 
     // Each populated surface includes code mode; find and the shell exec pair remain exclusive.
-    expect(coreTools).toHaveLength(8);
+    expect(coreTools).toHaveLength(9);
     expect(desktopTools).toHaveLength(BROWSER_TOOLS.length + (IS_WINDOWS ? 16 : process.platform === 'darwin' ? 3 : 1));
 
     // And the size, which is what a discovery pull actually costs the model on every
