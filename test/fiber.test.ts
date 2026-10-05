@@ -863,6 +863,21 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]!.messages[0]).toMatchObject({ role: 'user', rawText: authored_ });
   });
 
+  it.each([
+    ['marked', { serialization_metadata: { render_format: 'markdown' } }, true],
+    ['unmarked', {}, false],
+    ['marked with another format', { serialization_metadata: { render_format: 'plain' } }, false]
+  ] as const)('reports ChatGPT\'s own Markdown storage mark on a user message (%s)', async (_case, metadata, markdown) => {
+    const message = { ...authored('stored-user-message', 'Run \\`echo two\\`'), author: { role: 'user' } };
+    const { turns } = await scan([], [{
+      id: 'stored-user', messages: [{ ...message, metadata: { ...(message as { metadata?: object }).metadata, ...metadata } }],
+      conversationProps: { conversation: { id: THREAD } }
+    }]);
+    // The raw stored text stays for exact comparisons; the mark tells readers how ChatGPT shows it.
+    expect(turns[0]!.messages[0]).toMatchObject({ role: 'user', rawText: 'Run \\`echo two\\`' });
+    expect(turns[0]!.messages[0]!.markdown === true).toBe(markdown);
+  });
+
   it('keeps an ordinary Markdown link a user wrote', async () => {
     const { turns } = await scan([], [{
       id: 'link-user', messages: [{ ...authored('link-user-message', 'See [the docs](https://example.com/app) first.'), author: { role: 'user' } }],

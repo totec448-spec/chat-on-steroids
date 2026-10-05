@@ -1259,6 +1259,10 @@ While an exact send receipt still has a bounded evidence reader, the existing ob
 requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
 remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
 source needed to recognize its Send. Route, epoch and stable message identity still decide acceptance.
+Fiber reports ChatGPT's own mark for that storage (`serialization_metadata.render_format === 'markdown'`)
+as `markdown: true` on a user message. Recorded `user_message` text is shown the way ChatGPT shows it:
+a marked copy is unescaped once (`shownUserText`), a plain copy stays literal. Every comparison
+(receipts, handoff markers) still reads the raw stored text.
 ChatGPT stores text the page inserted Markdown-escaped (`` \`code\` ``, `\#`, `\<newline>`). A Goal
 reply's receipt is therefore marked `inserted` (`rememberUserSend(true)`; the page's own click and
 submit listeners that record the same Send again keep the mark) and is matched like a bootstrap:
