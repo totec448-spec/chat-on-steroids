@@ -45,6 +45,8 @@ describe('asksForImage', () => {
     '고양이 그림을 그려줘',
     '바다 이미지 만들어줘',
     '/clear-writing Create an image of a quiet library',
+    'Create a picture of version 2.5 of our mascot, a fox',
+    'Draw a cat. Then save it as cat.final.png',
     'Create a logo and save it to the project folder',
     'Erstelle ein Bild von einer Katze und speichere es im Ordner',
     'Draw a cartoon of a python snake',
@@ -101,7 +103,10 @@ describe('asksForImage', () => {
       // Saving the picture just made is file work for the app (live 2026-10-05: this went out without the mention).
       'Use the save_image tool of the "Chat On Steroids Core" connector exactly once to save the image you just generated as boat.png in the shared project folder. Then reply with only the tool result.',
       'save the image you just generated as boat.png', 'Save the picture you made into the project folder',
-      'Speichere das Bild, das du gerade erstellt hast, im Projektordner', 'Guarda la imagen que creaste en la carpeta del proyecto'])
+      'Speichere das Bild, das du gerade erstellt hast, im Projektordner', 'Guarda la imagen que creaste en la carpeta del proyecto',
+      // A "." inside a file name split this into a sentence that read "saves the latest image of" (live 2026-10-05).
+      'Call the save_image tool of the "Chat On Steroids Core" connector exactly once with ONLY the path argument /chatgpt_homelab/cos-qa-boat-final.png and no image argument (it then saves the latest image of this chat). Reply with only the tool result.',
+      'It saves the latest image of this chat into boat.final.png', 'Use view_image on the picture you made'])
       expect(asksForImage(text, { afterImage: true }), text).toBe(false);
     // Without an image just made, the same words are no image request.
     expect(asksForImage('make it brighter')).toBe(false);

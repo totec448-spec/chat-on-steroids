@@ -1259,6 +1259,12 @@ While an exact send receipt still has a bounded evidence reader, the existing ob
 requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
 remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
 source needed to recognize its Send. Route, epoch and stable message identity still decide acceptance.
+ChatGPT stores text the page inserted Markdown-escaped (`` \`code\` ``, `\#`, `\<newline>`). A Goal
+reply's receipt is therefore marked `inserted` (`rememberUserSend(true)`; the page's own click and
+submit listeners that record the same Send again keep the mark) and is matched like a bootstrap:
+raw, then one unescape. A person's own typing stays an exact raw comparison. Compared raw, a reply
+with `code` never matched, so its turn opened only when the page saw the question before the app
+held it as an anchor; otherwise no turn opened and Goal waited forever (2026-10-05).
 
 Page-reply waits are bounded: reuse/close observations get three seconds; New Chat preparation
 gets fifteen seconds. Missing preparation replies retain the elected tab and grant no fallback.
@@ -2243,8 +2249,9 @@ image ChatGPT generated in the calling chat (#889); the recording keeps only a p
 chat comes from request correlation (waiting up to 20 s), never from the model. Without one the
 refusal names the Core that answered (`connectorName`), since another computer's chat may have
 called it (#1097). The image is the
-latest recorded finished `native_image` of that chat's session, or the one whose `messageId` or
-`providerAssetId` the `image` argument names. The destination resolves like any write
+latest recorded finished `native_image` of that chat's session, or the `nth` one counting back
+(`nth` 2 is the one before). It is a number on purpose: ChatGPT filled a string argument with the
+picture's `file_…` id and then failed the call internally before it reached the app (2026-10-05). The destination resolves like any write
 (`allowMissing`), must not exist, and gets the image's own extension when it has none; a named
 extension of another format is refused. An extension whose `/status` body says
 `canExportImages: true` receives pending exports in `imageExports: [{ nonce, conversationId,
