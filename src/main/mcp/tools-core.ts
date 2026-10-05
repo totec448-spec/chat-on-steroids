@@ -481,11 +481,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
         inputSchema: z
           .object({
             path: z.string().describe('New file path in an approved folder, for example /workspace/images/logo.png. Without an extension the image\'s own (.png, .jpg or .webp) is added.'),
-            image: z.string().optional().describe('Which image: the message id or file id ChatGPT gave it. Omit for the latest image generated in this chat.')
+            // A number, not a name: ChatGPT fills a string here with the picture's `file_…` id and then
+            // fails the call internally before it reaches the app (measured live 2026-10-05).
+            nth: z.number().int().min(1).max(100).optional().describe('Which image, counting back from the newest generated in this chat: 1 (the default) is the latest, 2 the one before, and so on.')
           })
           .strict()
       })),
-      async ({ path, image }) =>
+      async ({ path, nth }) =>
         guard('save_image', async () => {
           if (!caps.create) {
             return fail('TOOL_DISABLED: save_image is disabled by the current Chat On Steroids permissions. Ask the user to enable creating files in the app.');
@@ -509,13 +511,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const recorded = session ? await readRecentEvents(session.id, 400, { kinds: ['native_image'] }) : [];
           const images = recorded.filter((event): event is Extract<typeof event, { kind: 'native_image' }> =>
             event.kind === 'native_image' && event.providerStatus !== 'in_progress');
-          const wanted = image?.trim();
-          const chosen = wanted
-            ? images.filter(event => event.messageId === wanted || event.providerAssetId === wanted).at(-1)
-            : images.at(-1);
+          const chosen = images.at(-(nth ?? 1));
           if (!chosen) {
-            return fail(wanted
-              ? `save_image found no generated image "${wanted}" in this chat. Omit image to save the latest one.`
+            return fail(images.length
+              ? `save_image found only ${images.length} generated image${images.length === 1 ? '' : 's'} in this chat. Use nth ${images.length} or lower, or omit nth for the latest.`
               : 'save_image found no image generated in this chat yet.');
           }
           const target = await resolveIn(ctx.roots, path, { allowMissing: true });
