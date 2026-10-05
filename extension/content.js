@@ -798,7 +798,16 @@
    * text: Goal replies, app sends with the Core mention) comes back escaped, `\\`code\\`` for `code`;
    * its flag says so. A plain copy is literal and stays exactly as typed.
    */
-  const shownUserText = (text, markdown) => markdown ? unescapeMarkdown(text) : text;
+  const shownUserText = (text, markdown, rendered = null) => {
+    if (markdown) return unescapeMarkdown(text);
+    // ChatGPT's own rendering is the other proof: when the page shows exactly the unescaped text,
+    // the backslashes were storage escapes. A person's literal backslash is shown and stays.
+    if (typeof rendered === 'string' && rendered && text !== rendered && text.includes('\\')) {
+      const unescaped = unescapeMarkdown(text);
+      if (sendText(unescaped) === sendText(rendered)) return unescaped;
+    }
+    return text;
+  };
   const unescapeMarkdown = (value) => String(value || '').replace(/\\\r?\n/g, '\n').replace(/\\([!-\/:-@\[-`{-~])/g, '$1')
     .replace(/(^|\n)&#x20;/g, '$1 ');
   /** The leading continuation marker, as typed or as the composer escaped it. */
@@ -2369,7 +2378,7 @@
         }
         markSeen(key, reaction);
         if (justAuthored) newUserMessage = justAuthored;
-        const shown = shownUserText(text, source.markdown);
+        const shown = shownUserText(text, source.markdown, message.text);
         emit({
           kind: 'user_message',
           text: shown,
@@ -4713,13 +4722,13 @@
           emit({
             kind: 'user_message',
             messageId: message.messageId,
-            text: shownUserText(message.rawText, message.markdown === true),
+            text: shownUserText(message.rawText, message.markdown === true, renderedUserTexts.get(message.messageId)),
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
             ...(sentModel ? { model: sentModel } : {}),
             ...(message.createTime ? { time: message.createTime, authoredTime: true, authoredAt: message.createTime } : {})
           });
           reportedUserMessages.delete(message.messageId);
-          reportedUserMessages.set(message.messageId, { text: shownUserText(message.rawText, message.markdown === true), createTime: message.createTime || null,
+          reportedUserMessages.set(message.messageId, { text: shownUserText(message.rawText, message.markdown === true, renderedUserTexts.get(message.messageId)), createTime: message.createTime || null,
             conversationId: CLF_DOM.conversationId(), model: sentModel || null });
           if (reportedUserMessages.size > 256) reportedUserMessages.delete(reportedUserMessages.keys().next().value);
           continue;

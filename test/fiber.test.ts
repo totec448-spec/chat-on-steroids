@@ -875,7 +875,7 @@ describe('the calls a turn says it made', () => {
     }]);
     // The raw stored text stays for exact comparisons; the mark tells readers how ChatGPT shows it.
     expect(turns[0]!.messages[0]).toMatchObject({ role: 'user', rawText: 'Run \\`echo two\\`' });
-    expect(turns[0]!.messages[0]!.markdown === true).toBe(markdown);
+    expect((turns[0]!.messages[0] as { markdown?: boolean }).markdown === true).toBe(markdown);
   });
 
   it('keeps an ordinary Markdown link a user wrote', async () => {
