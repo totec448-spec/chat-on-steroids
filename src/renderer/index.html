@@ -26,15 +26,16 @@
 
     <div class="app" data-screen="chat">
       <div class="app-topbar">
-        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><i class="ico ph ph-sidebar-simple" aria-hidden="true"></i></button>
+        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar"><i class="ico ph ph-sidebar-simple" aria-hidden="true"></i></button>
         <details class="view-menu" id="viewMenu"><summary>View</summary><div class="view-menu-items">
-          <button class="btn" id="sidebarMenuToggle" type="button">Toggle Sidebar <kbd>Ctrl+B</kbd></button>
+          <button class="btn" id="sidebarMenuToggle" type="button">Toggle Sidebar <kbd data-shortcut="B">Ctrl+B</kbd></button>
+          <button class="btn" id="searchMenuItem" type="button">Search Chats <kbd data-shortcut="K">Ctrl+K</kbd></button>
           <hr />
           <button class="btn" id="viewPets" type="button">Desktop Pets</button>
           <hr />
-          <button class="btn" id="zoomIn" type="button">Zoom In <kbd>Ctrl++</kbd></button>
-          <button class="btn" id="zoomOut" type="button">Zoom Out <kbd>Ctrl+−</kbd></button>
-          <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
+          <button class="btn" id="zoomIn" type="button">Zoom In <kbd data-shortcut="+">Ctrl++</kbd></button>
+          <button class="btn" id="zoomOut" type="button">Zoom Out <kbd data-shortcut="−">Ctrl+−</kbd></button>
+          <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd data-shortcut="0">Ctrl+0</kbd></button>
         </div></details>
       </div>
       <aside class="sidebar" id="sidebar">

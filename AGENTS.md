@@ -3430,11 +3430,14 @@ indexed, total }`. `session/search.ts` never reads a journal per query: each cha
 `<session>/search.txt` (first line the stamp `version:updatedAt:events`, then the user's authored
 words and ChatGPT's answers, overflow text included, capped at 1M characters), built in the
 background newest first, reused while the stamp matches, deleted with the chat. Helper chats are
-left out, as in the sidebar. Every query word must match (title or text, any order, case-folded
-with `foldCase`, which keeps UTF-16 lengths so ranges index the original). Title matches rank
+left out, as in the sidebar. Every query word must match (title or text, any order, case- and
+accent-folded with `foldCase`, which keeps UTF-16 lengths so ranges index the original; `ß` stays). Title matches rank
 first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16
 `[start, end)` ranges into `title` and `snippet.text`. While `indexed < total`, text results
-cover only indexed chats and the renderer asks again.
+cover only indexed chats and the renderer asks again. `limited: true` means more chats matched than
+`results` holds; the sidebar then asks for another word. ⌘K (macOS) / Ctrl+K focuses the field,
+except inside the terminal. Primary-shortcut labels (`kbd[data-shortcut]`, the sidebar tooltip)
+come from `renderer/shortcuts.ts`: ⌘ on macOS, the localized Ctrl ("Strg") elsewhere.
 
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
