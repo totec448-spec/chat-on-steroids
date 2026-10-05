@@ -8798,7 +8798,11 @@ describe('a stop button that goes missing while the turn is still running', () =
     );
   });
 
-  it.each(['A network error occurred. Please check your connection and try again.', 'Resume stream unavailable'])(
+  it.each([
+    'A network error occurred. Please check your connection and try again.',
+    'Resume stream unavailable',
+    'Stream cache expired'
+  ])(
     'classifies the newer shell failure %s as a recoverable transport failure', async (wording) => {
     live = await harness();
     startGenerating(live.document);
