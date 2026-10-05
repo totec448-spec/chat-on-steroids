@@ -85,7 +85,7 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
   await import('../src/renderer/pet-overlay.js');
   await flushOverlay();
-  boundsListener!({ width: 1000, height: 800, scaleFactor: 1 });
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: true });
   const runningSnapshot: PetOverlaySnapshot = {
     visible: true, dismissedPetIds: [], level: 'running',
     activities: [{ id: 'task-1', title: 'Prime', body: 'Working', level: 'running', sessionId: 'session-one' }],
@@ -102,7 +102,10 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   const shells = [...dom.window.document.querySelectorAll<HTMLElement>('.pet-shell')];
   expect(shells).toHaveLength(2);
   expect(setInteractive.mock.lastCall?.[0]).toBe(false);
-  expect(setInteractive.mock.lastCall?.[1]).toEqual([]);
+  const idleRegions = setInteractive.mock.lastCall?.[1] as Array<{ x: number; y: number; width: number; height: number }>;
+  expect(idleRegions).toHaveLength(2);
+  expect(idleRegions.every(region => region.x >= 0 && region.y >= 0 && region.width > 0 && region.height > 0)).toBe(true);
+  expect(idleRegions.some(region => region.x === 0 && region.y === 0 && region.width === 1000 && region.height === 800)).toBe(false);
   expect(dom.window.document.querySelectorAll('.pet-body')).toHaveLength(2);
   expect(dom.window.document.querySelector('canvas,.pet-canvas,.pet-sprite,.pet-bat')).toBeNull();
   for (const shell of shells) {
@@ -167,7 +170,11 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   expect(focusOwner).not.toHaveBeenCalled();
   expect(releaseFocus).toHaveBeenCalledOnce();
   dom.window.document.dispatchEvent(new dom.window.MouseEvent('mousemove', { clientX: 700, clientY: 700, bubbles: true }));
-  expect(setInteractive).toHaveBeenLastCalledWith(false, []);
+  expect(setInteractive.mock.lastCall?.[0]).toBe(false);
+  expect(setInteractive.mock.lastCall?.[1]).toEqual(expect.not.arrayContaining([
+    { x: 0, y: 0, width: 1000, height: 800 }
+  ]));
+  expect((setInteractive.mock.lastCall?.[1] as unknown[]).length).toBeGreaterThan(0);
 
   pointer(tur, 'pointerdown', 120, 120, 8);
   pointer(tur, 'pointerup', 120, 120, 8);
@@ -186,13 +193,13 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   // The work area can change by a pixel mid-drag (menu bar, Dock): the pet stays held, follows the
   // pointer, and lands on release instead of staying lifted with its moves ignored.
   pointer(tur, 'pointerdown', 120, 120, 10);
-  boundsListener!({ width: 1000, height: 799, scaleFactor: 1 });
+  boundsListener!({ width: 1000, height: 799, scaleFactor: 1, boundedIdleShape: true });
   pointer(tur, 'pointermove', 170, 160, 10);
   expect(tur.dataset.state).toBe('held');
   pointer(tur, 'pointerup', 170, 160, 10);
   expect(tur.dataset.dragging).toBe('false');
   expect(tur.dataset.state).toBe('landing');
-  boundsListener!({ width: 1000, height: 800, scaleFactor: 1 });
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: true });
 
   const willow = dom.window.document.querySelector<HTMLElement>('.pet-shell[data-pet-id="willow"]')!;
   willow.dispatchEvent(new dom.window.MouseEvent('contextmenu', { clientX: 320, clientY: 280, bubbles: true }));
@@ -208,6 +215,9 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   await flushOverlay();
   expect(dom.window.document.querySelectorAll('.pet-shell')).toHaveLength(2);
   expect(dom.window.document.querySelector<HTMLButtonElement>('.pet-shell[data-pet-id="willow"] .pet-badge')?.hidden).toBe(false);
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: false });
+  dom.window.document.dispatchEvent(new dom.window.MouseEvent('mousemove', { clientX: 700, clientY: 700, bubbles: true }));
+  expect(setInteractive).toHaveBeenLastCalledWith(false, []);
 });
 
 it('sleeps between authored deadlines and uses display frames only for continuous motion', async () => {
