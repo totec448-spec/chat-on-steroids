@@ -179,6 +179,23 @@ describe('cross-platform packaging targets', () => {
     expect(yamlFile('.github/workflows/publish.yml').jobs.candidate?.with?.platforms).toBeUndefined();
   });
 
+  it('publishes a canary checksum manifest that names only attached canary assets', () => {
+    const canary = yamlFile('.github/workflows/canary.yml');
+    const steps = canary.jobs.publish.steps as Array<Record<string, any>>;
+    const reverify = steps.find((step) => step.name === 'Re-verify the checksums');
+    const narrow = steps.find((step) => step.name === 'Limit checksums to published canary assets');
+    const publish = steps.find((step) => step.name === 'Replace the canary prerelease');
+
+    expect(reverify?.run).toContain('sha256sum -c SHA256SUMS.txt');
+    expect(narrow?.['working-directory']).toBe('publish');
+    expect(narrow?.run).toContain('Chat-On-Steroids-Native-Sources.tar.gz');
+    expect(narrow?.run).toContain('SHA256SUMS.txt');
+    expect(narrow?.run).toContain('SHA256SUMS.canary.txt');
+    expect(publish?.run).toContain("! -name '*Native-Sources*'");
+    expect(steps.indexOf(narrow!)).toBeGreaterThan(steps.indexOf(reverify!));
+    expect(steps.indexOf(narrow!)).toBeLessThan(steps.indexOf(publish!));
+  });
+
   it('assembles every platform artifact in the reusable release workflow', () => {
     const workflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const parsed = yamlFile('.github/workflows/release.yml');
