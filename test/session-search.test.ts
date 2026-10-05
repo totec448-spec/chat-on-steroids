@@ -114,3 +114,23 @@ it('marks matches at the right place, also around characters whose lowercase is 
   expect(cut.text.startsWith('…') && cut.text.endsWith('…')).toBe(true);
   expect(cut.text.slice(cut.matches[0]![0], cut.matches[0]![1])).toBe('needle');
 });
+
+it('matches words without their accents, at the right place, and says when more chats match than it shows', async () => {
+  const german = await chat('Prüfung der Größe', [['user', 'Notizen zum Café in São Paulo']]);
+  const turkish = await chat('İstanbul trip', [['user', 'plan the route']]);
+  expect((await search('prufung grosse')).results.map(result => result.id)).toEqual([]);
+  expect((await search('prufung')).results).toEqual([{ id: german, title: 'Prüfung der Größe', projectId: null, titleMatches: [[0, 7]] }]);
+  const cafe = (await search('cafe sao')).results.find(result => result.id === german)!;
+  expect(cafe.snippet!.matches.map(([start, end]) => cafe.snippet!.text.slice(start, end))).toEqual(['Café', 'São']);
+  expect((await search('ISTANBUL')).results.map(result => result.id)).toEqual([turkish]);
+  // Folding never changes a string's length, so ranges index the original.
+  for (const text of ['Prüfung', 'İstanbul', 'Ǆemal', 'ẞ', 'Tiếng Việt', '😀 café']) expect(foldCase(text)).toHaveLength(text.length);
+
+  await chat('Third café chat', [['user', 'more coffee']]);
+  await chat('Fourth chat', [['assistant', 'The café opens at nine.']]);
+  await search('cafe');
+  expect(await searchSessions('cafe', 2)).toMatchObject({ limited: true });
+  expect((await searchSessions('cafe', 2)).results).toHaveLength(2);
+  expect(await searchSessions('cafe', 3)).not.toHaveProperty('limited');
+  expect((await searchSessions('cafe', 3)).results).toHaveLength(3);
+});

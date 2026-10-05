@@ -1228,4 +1228,6 @@ export interface SessionSearchReply {
   /** Chats whose words are indexed so far, out of all chats; equal once indexing is done. */
   indexed: number;
   total: number;
+  /** More chats match than `results` holds. */
+  limited?: true;
 }
