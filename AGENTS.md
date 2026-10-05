@@ -3401,6 +3401,14 @@ never become preview text. `session/title.ts` supplies presentation and legacy r
 store serialization protects manual/origin names and current-conversation title observations.
 Apply provider titles after the batch's messages, so a late receipt or title-first batch cannot
 strand a preview. Cold reads repair legacy context previews from canonical authored history.
+The user names a chat in the sidebar (pencil or double-click; `sessions:rename { id, title }`,
+title trimmed to one line of at most 120 characters). A non-empty name is a `manual` title; the
+title shown until then moves to `autoTitle { title, source }`, which keeps receiving the
+automatic titles the chat would have accepted (provider titles unless the chat was app-opened,
+first-message fallbacks unless a provider title was seen; worker/helper origins keep their task
+title, also when an origin is stamped later). A blank or null title clears the name: the title
+becomes `autoTitle`, else the first message, and naming authority returns to its source. ChatGPT's
+own title is never changed.
 
 Chat search (#1107) is IPC `sessions:search { query ≤200 }` → `SessionSearchReply { results ≤50,
 indexed, total }`. `session/search.ts` never reads a journal per query: each chat gets

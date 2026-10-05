@@ -622,6 +622,11 @@ export interface SessionSummary {
   nativeQuestion?: { messageId: string; origin: number } | null;
   /** Durable naming authority; absent only on legacy recordings. */
   titleSource?: 'fallback' | 'provider' | 'manual';
+  /**
+   * While the user's own name is shown (`titleSource: 'manual'`), the title the app would show
+   * otherwise, kept current, so clearing the name brings back ChatGPT's present title (#1107).
+   */
+  autoTitle?: { title: string; source: 'fallback' | 'provider' };
   /** Latest proven native picker selection; scoped to its frontend, never worker creation intent. */
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
