@@ -75,19 +75,23 @@ it('honors layered config and both YAML policy styles while keeping package reso
   expect(library.errors).toEqual([]);
 });
 
-it('never discovers unapproved global files or follows a project package link out of scope', async () => {
+it('reads the user\'s own Skill folders read-only without approving their homes', async () => {
   await write(path.join(root, 'home/.agents/skills/private/SKILL.md'), contents('Private'));
   await write(path.join(root, 'codex/plugins/cache/team-market/private-pack/1.0.0/plugin.json'), JSON.stringify({ name: 'private-pack', version: '1.0.0' }));
   await write(path.join(root, 'codex/plugins/cache/team-market/private-pack/1.0.0/skills/private/SKILL.md'), contents('Private plugin'));
   await saveConfig({ ...getConfig(), roots: [{ name: 'project', path: project }] });
   const location = path.join(project, '.agents/skills'); await fs.mkdir(location, { recursive: true });
   await fs.symlink(path.join(root, 'home/.agents/skills/private'), path.join(location, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
-  let queried = false;
-  const library = await listSkillLibrary({ projectPath: project }, { codexPlugins: async () => { queried = true; return []; } });
-  expect(library.skills).toEqual([]);
-  expect(queried).toBe(false);
-  expect(library.roots.every(entry => !entry.path.includes('codex/plugins/cache'))).toBe(true);
-  expect(library.errors.join(' ')).toContain('linked');
+  const library = await listSkillLibrary({ projectPath: project }, { codexPlugins: async () => [] });
+  // ~/.agents is not approved, yet its Skill is listed once, under the read-only /user-skills path;
+  // the project's link to it lists nothing twice. A Codex plugin the runtime does not report stays out.
+  expect(library.skills.map(skill => [skill.name, skill.path])).toEqual([['Private', '/user-skills/agents/skills/private/SKILL.md']]);
+  expect((await readLibrarySkill(library.skills[0]!.id, { projectPath: project }, library)).text).toBe(contents('Private'));
+  expect(library.roots.every(entry => !entry.path.includes('plugins/cache'))).toBe(true);
+  expect(library.errors).toEqual([]);
+  // Without the Read files permission nothing is discovered.
+  await saveConfig({ ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } });
+  expect((await listSkillLibrary({}, { codexPlugins: async () => [] })).skills).toEqual([]);
 });
 
 it('discovers enabled Codex plugin skills from only the active installed version and keeps command identity across upgrades', async () => {
