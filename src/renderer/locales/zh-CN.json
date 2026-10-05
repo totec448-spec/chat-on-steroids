@@ -1963,5 +1963,8 @@
   "{0} sub-agents in this round": "本轮有 {0} 个子智能体",
   "The Chat On Steroids browser is still running": "Chat On Steroids 浏览器仍在运行",
   "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "你的聊天仍在继续。在托盘图标的菜单中选择“显示浏览器”即可重新打开。",
-  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "你的聊天仍在继续。在菜单栏图标的菜单中选择“显示浏览器”即可重新打开。"
+  "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "你的聊天仍在继续。在菜单栏图标的菜单中选择“显示浏览器”即可重新打开。",
+  "Pinned": "已置顶",
+  "Unpin this chat": "取消置顶此聊天",
+  "Pin this chat to the top of its list": "将此聊天置顶到所在列表"
 }
