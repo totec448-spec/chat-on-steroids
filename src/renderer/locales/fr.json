@@ -1,7 +1,10 @@
 {
   "Jump to latest": "Aller au plus récent",
+  "Leave empty to use ChatGPT's title": "Laissez vide pour utiliser le titre de ChatGPT",
+  "Name for this chat": "Nom de ce chat",
   "Previous source": "Source précédente",
   "Next source": "Source suivante",
+  "Rename this chat in the app. Its title in ChatGPT stays the same.": "Renommer ce chat dans l’app. Son titre dans ChatGPT ne change pas.",
   "{0} more sources were not recorded with this reply.": "{0} autres sources n’ont pas été enregistrées avec cette réponse.",
   "Thinking": "Réflexion",
   "Copy answer": "Copier la réponse",
