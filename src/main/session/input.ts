@@ -1418,7 +1418,7 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (!requiresAuthorization && completedTurnId && entry.sessionId && conversationId)
       await consumeGoalReplyForInputNow(conversationId, entry.sessionId, completedTurnId);
     logInfo(`input ${id}: browser claimed after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
-    const withoutMention = await imageRequestWithoutMention(entry, session);
+    const withoutMention = await imageRequestWithoutMention(entry, session, companion);
     if (withoutMention) logInfo(`input ${id}: asks for an image, so it goes out without the Core mention`);
     return { ...combinedInput(claimed, companion), ...selection, text: claimed.deliveryText ?? claimed.text,
       ...(withoutMention ? { coreMention: false as const } : {}) };
@@ -1429,8 +1429,9 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
  * switches its image tool off for a message that mentions an app (see image-request.ts). Generated
  * messages (Goal, Loop, recovery, workers, the Goal helper) keep the mention as before.
  */
-async function imageRequestWithoutMention(entry: InputEntry, session: SessionSummary | null): Promise<boolean> {
-  if (entry.purpose === 'decision' || entry.recovery || entry.finishOwner || (entry.authoredSource ?? 'text') !== 'text') return false;
+async function imageRequestWithoutMention(entry: InputEntry, session: SessionSummary | null, companion?: InputEntry): Promise<boolean> {
+  // A combined message also carries the next queued instruction, which may need the app.
+  if (companion || entry.purpose === 'decision' || entry.recovery || entry.finishOwner || (entry.authoredSource ?? 'text') !== 'text') return false;
   if (session?.origin?.kind === 'worker' || session?.origin?.kind === 'helper') return false;
   const attachedImage = (entry.images?.length ?? 0) > 0 || (entry.attachments ?? []).some(file => file.mimeType.startsWith('image/'));
   // Right after ChatGPT made a picture, "make it brighter" changes that picture.
