@@ -1196,6 +1196,11 @@ function paintGoalProgress(): void {
   const body = el('div', 'queue-label'); body.append(el('span', '', error ? `${labels.failed}: ${localizedGoalError(error)}` : labels[phase] ?? phase));
   if (text && ['generating', 'answering', 'preparing'].includes(phase)) { const preview = el('pre', 'goal-live-preview', text.slice(-8000)); body.append(preview); }
   row.replaceChildren(marker, body);
+  // Nothing settles while the chat is closed; opening it is the way on, as from its sidebar row.
+  if (phase === 'settling' && wait?.reason === 'closed' && selectedId) {
+    const id = selectedId;
+    row.append(dockAction(() => t("Open this chat in your browser"), 'i-out', () => void run(api.openSessionChat(id))));
+  }
   if (phase === 'settling' && wait?.until) {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
     const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`]) : t('Checking for activity…'));

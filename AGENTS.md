@@ -3026,7 +3026,8 @@ user's own answer is never stuck behind workers they did not ask about; the dura
 obligation survives and the pickup tree collects it later. A notice-only hold is untouched.
 For the window only, `sessionControlsFor` passes the session's `browserRecoveryDismissedAt`: a
 pending turn whose tab the person closed reports `closed` (after `tools`/`workers`), shown without
-spinner or countdown as "Paused until this chat is open in the browser". Recovery waits for that
+spinner or countdown as "Paused until this chat is open in the browser", with the sidebar row's
+"Open this chat in your browser" action (`openSessionChat`) beside it. Recovery waits for that
 page, so "Answer settling" there spun until the obligation's TTL. `/activity` never sees `closed`:
 the page asking is the return that clears the dismissal.
 
