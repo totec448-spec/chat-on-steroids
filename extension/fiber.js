@@ -690,6 +690,8 @@
         role: 'user',
         stable: true,
         rawText,
+        // ChatGPT's own mark for text it stored as escaped Markdown (page-inserted text).
+        ...(message.metadata?.serialization_metadata?.render_format === 'markdown' ? { markdown: true } : {}),
         ...(attachments.length ? { attachments } : {}),
         order: index,
         createTime: authoredTime(message)
@@ -1044,6 +1046,7 @@
         order: userCandidates[c].order,
         createTime: userCandidates[c].createTime,
         rawText: userCandidates[c].rawText,
+        ...(userCandidates[c].markdown ? { markdown: true } : {}),
         ...(userCandidates[c].attachments ? { attachments: userCandidates[c].attachments } : {}),
         renderedHtml: ''
       });
