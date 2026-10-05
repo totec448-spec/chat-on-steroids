@@ -19,7 +19,6 @@ function notice(): HTMLElement {
 
 /** Presentation subscribes to an existing successful opening; it never opens a browser. */
 export function initToolApprovalNotice(subscribe?: (listener: () => void) => () => void): void {
-  document.getElementById('toolApprovalSetup')?.replaceChildren(notice());
   const dialog = document.createElement('dialog'); dialog.className = 'tool-approval-dialog';
   ui(dialog, 'aria-label', () => t('ChatGPT tool approval'));
   const close = el('button', 'btn btn-solid', () => t('Got it')) as HTMLButtonElement; close.type = 'button';

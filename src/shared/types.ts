@@ -126,7 +126,8 @@ export interface TunnelSettings {
   binaryPath: string;
 }
 
-export const CHAT_BROWSERS = ['chrome', 'edge', 'brave'] as const;
+/** `cos` is the built-in CoS browser (src/main/cos-browser), which needs no installed browser. */
+export const CHAT_BROWSERS = ['chrome', 'edge', 'brave', 'cos'] as const;
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
@@ -164,6 +165,8 @@ export interface UiPrefs {
    * reinstalled extension, which starts with empty storage under a new id, gets them back.
    */
   browserPreferences?: { overwrite: boolean; durations: boolean };
+  /** Set once the notice that the CoS browser hid to the tray, still running, was shown. */
+  cosBrowserTrayHint?: boolean;
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
@@ -549,6 +552,17 @@ export interface BridgeStatus {
    * this app process, which is why "no extension version" never means "outdated extension".
    */
   extensionVersion: string | null;
+  /**
+   * The extension in the person's own Chrome, Edge or Brave, apart from the CoS browser's copy.
+   * Null until one has spoken to this app process; Setup's first step waits for it.
+   */
+  externalExtension?: {
+    present: boolean; version: string | null; lastSeenAt: number | null; signedIn?: boolean | null;
+    /** Kept across restarts: the version last seen there, and whether ChatGPT last answered signed in. */
+    proof?: { version: string; signedIn: boolean | null } | null;
+  } | null;
+  /** The CoS browser's own copy of the extension, connected right now. */
+  cosExtension?: { present: boolean };
 }
 
 /**
@@ -730,6 +744,8 @@ export interface AppState {
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
   bundledTunnelVersion: string | null;
   bridge: BridgeStatus;
+  /** Whether the CoS browser holds a ChatGPT sign-in; null while it is not the running browser. */
+  cosBrowserSignedIn?: boolean | null;
   update: UpdateStatus;
   /** Present only on macOS once the in-process native backend has reported its live TCC state. */
   desktopAccess?: MacOSDesktopAccessStatus | null;

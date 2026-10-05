@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "The app could not save the task. Check free disk space and try saving it again."
   },
+  "popup_sign_in_transfer": {
+    "message": "Bring session to CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie access not allowed. Click again."
+  },
+  "popup_sign_in_imported": {
+    "message": "Session transferred"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "You're signed in to the CoS browser."
+  },
+  "popup_sign_in_failed": {
+    "message": "Transfer failed. Start sign-in again from CoS."
+  },
   "popup_app_not_running_help": {
     "message": "Make sure Chat On Steroids is open on this computer. The companion connects on its own."
   }

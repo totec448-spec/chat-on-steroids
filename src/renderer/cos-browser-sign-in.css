@@ -1,0 +1,203 @@
+/*
+ * Google sign-in card over a CoS browser tab. The view is transparent: ChatGPT's login stays
+ * visible, dimmed, behind one card in the app's own palette.
+ */
+:root {
+  --page: #181818;
+  --ink: #ffffff;
+  --popover: #262626;
+  --hover: #2e2e2e;
+  --soft: #b5b5b5;
+  --faint: #8f8f8f;
+  --line: #333333;
+  --edge: #3c3c3c;
+  --accent: #b0cbed;
+  --red: #f07a7a;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--ink);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+html:lang(zh) body, html:lang(ja) body { letter-spacing: 0; line-break: strict; }
+body { display: grid; place-items: center; padding: 24px; }
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--page) 58%, transparent);
+  animation: fade .42s cubic-bezier(.2, .7, .2, 1) both;
+}
+
+.card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  width: min(392px, 100%);
+  padding: 30px 28px 14px;
+  border-radius: 22px;
+  background: var(--popover);
+  text-align: center;
+  /* A hairline that catches light along the top edge, then two soft shadows for depth. */
+  box-shadow:
+    0 0 0 1px var(--edge),
+    inset 0 1px 0 color-mix(in srgb, var(--ink) 7%, transparent),
+    0 2px 6px #0003,
+    0 28px 70px -18px #000b;
+  animation: rise .6s cubic-bezier(.16, 1, .3, 1) .06s both;
+}
+
+/* ---------------------------------------------------------------- handoff */
+.handoff { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+.tile {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  background: var(--hover);
+  box-shadow: 0 0 0 1px var(--line), 0 6px 16px -8px #000a;
+  animation: pop .5s cubic-bezier(.34, 1.4, .64, 1) .18s both;
+}
+.tile + .path + .tile { animation-delay: .26s; }
+.path { animation: fade .4s ease-out .32s both; }
+.tile img { width: 30px; height: 30px; }
+.tile .ph { font-size: 26px; color: var(--soft); }
+.tile.is-app { background: var(--ink); }
+.tile.is-app img { width: 34px; height: 34px; }
+
+.path { display: flex; gap: 5px; }
+.path i { width: 4px; height: 4px; border-radius: 50%; background: var(--edge); }
+/* Waiting: the dots carry the session from the browser back to the app. */
+.is-waiting .path i { animation: carry 1.4s ease-in-out infinite; }
+.is-waiting .path i:nth-child(1) { animation-delay: .6s; }
+.is-waiting .path i:nth-child(2) { animation-delay: .45s; }
+.is-waiting .path i:nth-child(3) { animation-delay: .3s; }
+.is-waiting .path i:nth-child(4) { animation-delay: .15s; }
+
+/* ------------------------------------------------------------------- copy */
+h1 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.3; letter-spacing: -0.016em; }
+.lead { max-width: 310px; margin: 8px 0 0; color: var(--soft); font-size: 13px; line-height: 1.6; }
+.lead strong { color: var(--ink); font-weight: 600; }
+.hint { max-width: 310px; margin: 14px 0 0; color: var(--faint); font-size: 12px; line-height: 1.5; }
+.notice { max-width: 310px; margin: 14px 0 0; color: var(--red); font-size: 12.5px; line-height: 1.5; }
+
+/* ---------------------------------------------------------------- choices */
+.options {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 24px;
+}
+.option {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 9px;
+  min-width: 0;
+  height: 92px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color .16s, box-shadow .16s, transform .16s cubic-bezier(.16, 1, .3, 1);
+}
+.option img, .option .ph { width: 32px; height: 32px; font-size: 28px; color: var(--soft); }
+.option span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.option:hover:not(:disabled) {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, var(--line));
+  transform: translateY(-2px);
+}
+.option:active:not(:disabled) { transform: translateY(0) scale(.98); }
+.option:disabled { opacity: .5; cursor: default; }
+
+/* ----------------------------------------------------------------- footer */
+.foot { display: flex; justify-content: center; gap: 4px; margin-top: 22px; }
+.link {
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color .14s, color .14s;
+}
+.link:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.link:disabled { opacity: .45; cursor: default; }
+.link:focus-visible, .option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Done: the browser and the path step aside, and the app's own mark is sealed with a check. */
+.tile.is-app { position: relative; }
+.seal {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 50%;
+  background: #22a06b;
+  box-shadow: 0 0 0 3px var(--popover);
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 16;
+  opacity: 0;
+  transform: scale(.5);
+}
+.handoff > :is(.path, .tile:last-child) { transition: opacity .28s ease, width .38s cubic-bezier(.16, 1, .3, 1), margin .38s cubic-bezier(.16, 1, .3, 1); }
+.is-done .handoff { gap: 0; }
+.is-done .handoff > :is(.path, .tile:last-child) { width: 0; opacity: 0; overflow: hidden; margin: 0; animation: none; }
+.is-done .tile.is-app { animation: celebrate .5s cubic-bezier(.34, 1.4, .64, 1) both; }
+.is-done .seal { animation: seal .4s cubic-bezier(.34, 1.4, .64, 1) .18s both, draw .3s ease-out .32s both; }
+.is-done h1 { margin-bottom: 4px; }
+
+/* A phase change (choice → waiting, and back) slides the new words in. */
+.swap :is(h1, .lead, .options, .hint, .notice, .foot) { animation: swap .38s cubic-bezier(.16, 1, .3, 1) both; }
+.swap .lead { animation-delay: .04s; }
+.swap :is(.options, .hint) { animation-delay: .08s; }
+.swap .foot { animation-delay: .12s; }
+.swap .tile:last-child { animation: pop .45s cubic-bezier(.34, 1.4, .64, 1) both; }
+
+/* Leaving: the card settles away and the page comes back up from under the dim. */
+.leaving .scrim { animation: fade-out .26s ease-in both; }
+.leaving .card { animation: leave .22s cubic-bezier(.4, 0, 1, 1) both; }
+
+@keyframes fade { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(18px) scale(.96); } }
+@keyframes leave { to { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes pop { from { opacity: 0; transform: scale(.6); } }
+@keyframes swap { from { opacity: 0; transform: translateY(6px); } }
+@keyframes celebrate { 40% { transform: scale(1.08); } }
+@keyframes seal { to { opacity: 1; transform: none; } }
+@keyframes draw { from { stroke-dashoffset: 16; } to { stroke-dashoffset: 0; } }
+@keyframes carry { 0%, 100% { background: var(--edge); transform: none; } 40% { background: var(--accent); transform: scale(1.5); } }
+@media (prefers-reduced-motion: reduce) {
+  .scrim, .card, .tile, .path, .swap *, .leaving * { animation: none !important; }
+  .is-done .seal { animation: none; opacity: 1; transform: none; }
+  .is-waiting .path i { animation: none; background: var(--accent); }
+  .option { transition: none; }
+}

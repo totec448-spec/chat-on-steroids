@@ -95,6 +95,29 @@ it('reports only app reachability from compatible health and pairing', () => {
   expect(hint.hidden).toBe(true);
 });
 
+it('requests cookie permission from the transfer click and reports denial without sending a session', async () => {
+  const document = openPopup();
+  const win = popup!.window as any;
+  win.chrome.permissions = { request: async () => false };
+  const sent: any[] = [];
+  win.chrome.runtime.sendMessage = async (message: any) => {
+    sent.push(message);
+    return message.type === 'status' ? { connected: true, paired: true, compatible: true,
+      signInOffer: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' } } : null;
+  };
+  await win.refresh();
+  expect(document.getElementById('signInTransfer')!.hidden).toBe(false);
+  document.getElementById('signInTransferBtn')!.click();
+  await expect.poll(() => document.getElementById('signInTransferResult')!.textContent).toContain('not allowed');
+  expect(sent.some(message => message.type === 'cos_sign_in_transfer')).toBe(false);
+  expect((document.getElementById('signInTransferBtn') as HTMLButtonElement).disabled).toBe(false);
+  win.chrome.runtime.sendMessage = async () => null;
+  await win.refresh();
+  expect(document.getElementById('signInTransfer')!.hidden).toBe(false);
+  expect(document.getElementById('signInTransferResult')!.textContent).toContain('not allowed');
+  expect((document.getElementById('signInTransferBtn') as HTMLButtonElement).disabled).toBe(true);
+});
+
 it('explains manual mismatch recovery with both versions', () => {
   const document = openPopup();
   (popup!.window as any).paintAlert({ connected: true, paired: true, compatible: false, appVersion: '2.0.7', appProtocol: 13, extensionVersion: '2.0.6', extensionProtocol: 12 }, null);

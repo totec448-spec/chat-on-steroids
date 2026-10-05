@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "タスクをアプリが保存できませんでした。空きディスク容量を確認して、もう一度保存してください。"
   },
+  "popup_sign_in_transfer": {
+    "message": "セッションをCoS browserへ移す"
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie へのアクセスが拒否されました。もう一度クリックしてください。"
+  },
+  "popup_sign_in_imported": {
+    "message": "セッションを移しました"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "CoS browser にログインしました。"
+  },
+  "popup_sign_in_failed": {
+    "message": "失敗しました。CoS からログインをやり直してください。"
+  },
   "popup_app_not_running_help": {
     "message": "このコンピューターで Chat On Steroids が開いていることを確認してください。拡張機能は自動的に接続します。"
   }

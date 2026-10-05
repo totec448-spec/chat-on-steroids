@@ -1148,6 +1148,21 @@
   "content_goal_error_goal_objective_not_durable": {
     "message": "L’application n’a pas pu enregistrer la tâche. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
   },
+  "popup_sign_in_transfer": {
+    "message": "Transférer la session vers CoS browser"
+  },
+  "popup_sign_in_permission": {
+    "message": "Accès aux cookies refusé. Cliquez à nouveau."
+  },
+  "popup_sign_in_imported": {
+    "message": "Session transférée"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Vous êtes connecté à CoS browser."
+  },
+  "popup_sign_in_failed": {
+    "message": "Échec. Relancez la connexion depuis CoS."
+  },
   "popup_app_not_running_help": {
     "message": "Vérifiez que Chat On Steroids est ouvert sur cet ordinateur. L’extension se connecte d’elle-même."
   }
