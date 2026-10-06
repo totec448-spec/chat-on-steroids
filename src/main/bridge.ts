@@ -4401,6 +4401,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const raw = typeof body['status'] === 'string' ? body['status'] : 'sent';
     const status: AckStatus = raw === 'failed' ? 'failed' : 'sent';
     const error = typeof body['error'] === 'string' ? body['error'].slice(0, 200) : null;
+    const rawDetail = typeof body['detail'] === 'string' ? body['detail'] : '';
+    const projectEntryDetail = /^project-entry:[a-z0-9:=.-]{1,146}$/.test(rawDetail)
+      ? rawDetail.slice('project-entry:'.length)
+      : null;
     const client = typeof body['client'] === 'string' ? body['client'].slice(0, 64) : '';
     const conversation = conversationId(body['conversationId']);
     const priorReceipt = receiptFor(id);
@@ -4777,6 +4781,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // unlike an MCP call there is no dispatcher epilogue after this ACK. Settle the durable
     // command first, then release/park the quiescent active incarnation if no slot is occupied.
     releaseQuiescentRun();
+    if (status === 'failed' && command.spec.type === 'resume' && projectEntryDetail) {
+      logWarn(`bridge: command ${id} failed: project entry ${projectEntryDetail}`);
+    }
     logInfo(`bridge: ${specKey(command.spec)} completed with ${receipt.outcome}`);
     void deliver();
     return json(res, 200, receiptReply(receipt), origin);
