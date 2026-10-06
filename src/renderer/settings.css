@@ -368,6 +368,16 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 /* Settings search: above the page list, as chat search sits above the chats. While the field holds
    a query its results take the list's place; the setting opened from them is washed briefly. */
 .app[data-screen='settings'] .settings-find { margin: 0 0 10px; animation: sidebar-content-in 200ms cubic-bezier(.16, 1, .3, 1); }
+/* The field's own look: it used to borrow chat search's sidebar field, whose rules left with it. */
+.settings-find { position: relative; display: flex; align-items: center; }
+.settings-find > .ico { position: absolute; left: 10px; --ico: 14px; color: var(--faint); pointer-events: none; }
+.settings-find input { flex: 1; min-width: 0; height: 30px; padding: 0 30px; border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); outline: none; }
+.settings-find input::placeholder { color: var(--faint); }
+.settings-find input:focus { border-color: var(--accent); }
+.settings-find input::-webkit-search-cancel-button { display: none; }
+.settings-find-clear { position: absolute; right: 4px; padding: 4px; border: 0; background: transparent; color: var(--faint); }
+.settings-find-clear .ico { --ico: 13px; }
 .settings-find-results { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .is-found { animation: setting-found 1600ms ease-out; }
 @keyframes setting-found { from, 35% { background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
