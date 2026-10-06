@@ -1337,6 +1337,19 @@
       <div class="search-dialog-results" id="searchResults" aria-live="polite"></div>
     </dialog>
 
+    <dialog class="whats-new-dialog" id="whatsNewDialog" aria-labelledby="whatsNewTitle" aria-describedby="whatsNewLead">
+      <header class="whats-new-head">
+        <span class="whats-new-mark" aria-hidden="true"><i class="ico ph ph-sparkle"></i></span>
+        <span class="whats-new-version" id="whatsNewVersion"></span>
+        <h2 id="whatsNewTitle">What's new</h2>
+        <p class="whats-new-lead" id="whatsNewLead"></p>
+      </header>
+      <ul class="whats-new-list" id="whatsNewList"></ul>
+      <footer class="whats-new-actions">
+        <button class="btn" id="whatsNewNotes" type="button"><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Full release notes</button>
+        <button class="btn btn-solid is-primary" id="whatsNewDone" type="button">Got it</button>
+      </footer>
+    </dialog>
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">
         <h3 id="setupProfileDialogTitle">Add profile</h3>

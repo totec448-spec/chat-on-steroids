@@ -4279,6 +4279,14 @@ requires `docs/release-notes/vX.Y.Z.md`, rechecks versions/privacy/hashes and re
 release. A tag alone does not build/publish. An unpublished candidate can be built separately,
 but do not mix artifacts from another ref/run into a release.
 
+What's New (#1172) shows a version's highlights once after a real update. `ui.lastSeenVersion`
+is the version this install last started as. Only the main process records it: on a fresh install
+when the config file is missing, and through `ui:whatsNewSeen`, which can only record
+`APP_VERSION`. `whatsNewAction` in `src/shared/whats-new.ts` decides: same version: nothing; a
+newer version (or no recorded one) with an entry: show, then record; anything else, a downgrade
+included: record. Each release PR adds its version's entry to `src/renderer/whats-new.ts`, with
+literal `t()` keys translated into every catalog. `verify-whats-new.cjs` checks it on real pixels.
+
 `verify:notices` checks installed production dependencies against the lockfile and rejects
 missing license material or mismatched reviewed catalog hashes. Custom package updates cannot
 inherit an older license review. Notice completeness and native source/replacement obligations

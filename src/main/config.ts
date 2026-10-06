@@ -43,6 +43,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { logError } from './logger.js';
+import { APP_VERSION } from './version.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
 import {
@@ -326,6 +327,8 @@ const configSchema = z.object({
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),
     language: z.enum(UI_LANGUAGES).optional(),
+    // The version this install last started as; What's New shows once per real update (#1172).
+    lastSeenVersion: z.string().trim().min(1).max(40).optional().catch(undefined),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     cosBrowserTrayHint: z.boolean().optional(),
     finishTool: z.boolean().optional(),
@@ -638,7 +641,8 @@ export async function loadConfig(): Promise<Config> {
       logError(`Could not read settings: ${(err as Error).message}`);
       current = conservativeRecoveryConfig();
     } else {
-      current = defaultConfig();
+      // A fresh install has nothing new to show: it records its own version before anything can.
+      current = { ...defaultConfig(), ui: { ...defaultConfig().ui, lastSeenVersion: APP_VERSION } };
     }
   }
   return current;

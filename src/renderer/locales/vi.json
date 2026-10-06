@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT đang chờ bạn phê duyệt",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Một cuộc trò chuyện tạm dừng cho đến khi bạn cho phép hoặc từ chối một lệnh gọi công cụ trong ChatGPT. Nhấp để mở.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT đang chờ bạn cho phép hoặc từ chối một lệnh gọi công cụ trong cuộc trò chuyện này. Không có gì tiếp tục cho đến khi bạn trả lời ở đó.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "Yêu cầu phê duyệt công cụ mà ChatGPT đưa ra trong cuộc trò chuyện này đã được trả lời."
+  "The tool approval ChatGPT asked for in this chat was answered.": "Yêu cầu phê duyệt công cụ mà ChatGPT đưa ra trong cuộc trò chuyện này đã được trả lời.",
+  "What's new": "Có gì mới",
+  "Full release notes": "Ghi chú phát hành đầy đủ",
+  "Version {0}": "Phiên bản {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "Ghim cuộc trò chuyện, tìm kiếm từ mọi nơi và biết khi ChatGPT đang chờ bạn.",
+  "Pin chats": "Ghim cuộc trò chuyện",
+  "Keep the chats you use most at the top of the sidebar.": "Giữ các cuộc trò chuyện dùng nhiều nhất ở đầu thanh bên.",
+  "One menu for every chat": "Một menu cho mọi cuộc trò chuyện",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "Ghim, đổi tên, mở hoặc sao chép liên kết của cuộc trò chuyện từ menu ⋯.",
+  "Search from anywhere": "Tìm kiếm từ mọi nơi",
+  "{0} finds any chat and opens it at the message that matched.": "{0} tìm mọi cuộc trò chuyện và mở tại tin nhắn khớp.",
+  "Search your settings": "Tìm trong cài đặt",
+  "Type in Settings to find any setting on any page.": "Gõ trong Cài đặt để tìm mọi cài đặt trên mọi trang.",
+  "Know when ChatGPT is waiting": "Biết khi ChatGPT đang chờ",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Khi ChatGPT yêu cầu bạn cho phép một công cụ, cuộc trò chuyện sẽ báo cho bạn thay vì đứng yên.",
+  "One connection control": "Một nút điều khiển kết nối",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Một viên nang nhỏ ở thanh bên hiển thị kết nối và báo cho bạn nếu bị mất."
 }

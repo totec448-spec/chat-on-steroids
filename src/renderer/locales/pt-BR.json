@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "O ChatGPT está aguardando sua aprovação",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Um chat está pausado até você permitir ou negar uma chamada de ferramenta no ChatGPT. Clique para abri-lo.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "O ChatGPT está aguardando você permitir ou negar uma chamada de ferramenta neste chat. Nada continua até você responder lá.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "A aprovação de ferramenta que o ChatGPT pediu neste chat foi respondida."
+  "The tool approval ChatGPT asked for in this chat was answered.": "A aprovação de ferramenta que o ChatGPT pediu neste chat foi respondida.",
+  "What's new": "Novidades",
+  "Full release notes": "Notas completas da versão",
+  "Version {0}": "Versão {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "Fixe seus chats, pesquise de qualquer lugar e saiba quando o ChatGPT está esperando por você.",
+  "Pin chats": "Fixar chats",
+  "Keep the chats you use most at the top of the sidebar.": "Mantenha os chats que você mais usa no topo da barra lateral.",
+  "One menu for every chat": "Um menu para cada chat",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "Fixe, renomeie, abra ou copie o link de um chat pelo menu ⋯.",
+  "Search from anywhere": "Pesquise de qualquer lugar",
+  "{0} finds any chat and opens it at the message that matched.": "{0} encontra qualquer chat e o abre na mensagem correspondente.",
+  "Search your settings": "Pesquise nas configurações",
+  "Type in Settings to find any setting on any page.": "Digite em Configurações para encontrar qualquer ajuste em qualquer página.",
+  "Know when ChatGPT is waiting": "Saiba quando o ChatGPT está esperando",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Quando o ChatGPT pede para você permitir uma ferramenta, o chat avisa em vez de ficar parado.",
+  "One connection control": "Um único controle de conexão",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Uma pequena cápsula na barra lateral mostra a conexão e avisa se ela cair."
 }
