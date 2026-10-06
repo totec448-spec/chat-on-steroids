@@ -4003,7 +4003,7 @@ motion drops the transitions; a sidebar narrower than 200px keeps the dot alone.
 reachable from Settings and from the capsule when configuration is incomplete. The View menu is
 one icon button (≡) in the title bar opening the row menus' menu (`row-menu.ts`, `view-menu.ts`):
 each action with its icon and this keyboard's shortcut (not the sidebar toggle, which sits beside it), a
-pets label that says what it will do (Show/Hide desktop pets), zoom steps that keep it open with Actual size's value updating
+pets label that says what it will do (Show/Hide pets), zoom steps that keep it open with Actual size's value updating
 (a zoom's resize repositions it instead of closing it), and Show browser (the CoS browser) only while the
 built-in browser is the ChatGPT browser. Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.

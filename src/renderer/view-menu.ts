@@ -33,7 +33,7 @@ export function initViewMenu(actions: ViewMenuActions): { refresh(): void } {
     }] : []),
     {
       action: 'pets', icon: 'i-paw', separated: !actions.cosBrowser(),
-      label: () => actions.pets.visible() ? t('Hide desktop pets') : t('Show desktop pets'),
+      label: () => actions.pets.visible() ? t('Hide pets') : t('Show pets'),
       run: actions.pets.toggle
     },
     {

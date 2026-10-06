@@ -50,7 +50,7 @@ it('opens one menu with each action, its icon and its shortcut, the CoS browser 
   // Not the sidebar: its own toggle sits right beside the menu's button.
   expect(view.items()).toEqual([
     ['search', 'Search chats', 'Ctrl+K'],
-    ['pets', 'Show desktop pets', null],
+    ['pets', 'Show pets', null],
     ['zoom-in', 'Zoom in', 'Ctrl++'],
     ['zoom-out', 'Zoom out', 'Ctrl+−'],
     ['zoom-reset', 'Actual size', 'Ctrl+0']
@@ -81,7 +81,7 @@ it('says what the pets toggle will do, runs actions and closes; zoom steps keep 
   view.item('pets').click();
   expect(view.calls).toEqual(['search', 'pets']);
   view.button.click();
-  expect(view.item('pets').querySelector('.row-menu-label')!.textContent).toBe('Hide desktop pets');
+  expect(view.item('pets').querySelector('.row-menu-label')!.textContent).toBe('Hide pets');
 
   expect(view.item('zoom-reset').querySelector('.row-menu-hint')!.textContent).toBe('100%');
   view.item('zoom-in').click(); await view.settle();
