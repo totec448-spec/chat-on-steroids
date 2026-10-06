@@ -4248,6 +4248,11 @@ export function hasDormantWorkerLeases(): boolean {
  * already have durable proof of this exact A→B transition. We additionally fail closed if B is
  * bound to any worker in the restored run. Repeating the same proven repair is idempotent.
  */
+/** Whether a sub-agent fleet is led from this chat. */
+export function primeFleetIn(conversationId: string): boolean {
+  return allFamilies().some(owner => owner.primeConversationId === conversationId);
+}
+
 export function repairPrimeConversationAfterRecovery(
   fromConversationId: string,
   toConversationId: string
