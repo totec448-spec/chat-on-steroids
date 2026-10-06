@@ -129,3 +129,69 @@ jobs:
           path: outputs/
           if-no-files-found: ignore
           retention-days: 7
+
+  ui-windows:
+    # The same real-Electron UI checks on Windows, where hidden windows animate nothing and the
+    # runner's screen is small by default: both broke checks that pass on macOS (VM 141, 2026-10-06).
+    name: UI checks (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the interface can change
+        id: scope
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -z "$BASE_REF" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "origin/$BASE_REF...HEAD" | grep -qE '^(src/renderer/|src/preload/|src/shared/|extension/|scripts/verify-|scripts/fixtures/|package(-lock)?\.json$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No interface files changed; the UI checks are skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Give the checks a full-size screen
+        if: steps.scope.outputs.run == 'true'
+        # The checks open windows up to 1400x1000; on a smaller screen Windows clamps them and the
+        # layouts they measure are not the ones they were written for.
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: npm ci
+
+      - name: Build the app
+        if: steps.scope.outputs.run == 'true'
+        run: npm run build
+
+      - name: Run the UI checks
+        if: steps.scope.outputs.run == 'true'
+        env:
+          # The same GPU-bound checks as on macOS, plus the Plan motion matrix, which macOS runs on
+          # its own compositor gate above.
+          VERIFY_UI_SKIP: verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-message-reactions.cjs
+          VERIFY_UI_RETRY: '1'
+        run: npm run verify:ui
+
+      - name: Keep the UI check screenshots when a check fails
+        if: failure() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-check-screenshots-windows-${{ github.run_id }}
+          path: outputs/
+          if-no-files-found: ignore
+          retention-days: 7
