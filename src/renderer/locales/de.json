@@ -1963,7 +1963,21 @@
   "The Chat On Steroids browser is still running": "Der Chat-On-Steroids-Browser läuft weiter",
   "Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.": "Deine Chats laufen weiter. Wähle „Browser anzeigen“ im Menü des Tray-Symbols, um ihn zurückzuholen.",
   "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Deine Chats laufen weiter. Wähle „Browser anzeigen“ im Menü des Menüleistensymbols, um ihn zurückzuholen.",
+  "Color": "Farbe",
+  "Open in browser": "Im Browser öffnen",
+  "Block chat": "Chat blockieren",
+  "Release chat": "Chat freigeben",
+  "Trust chat": "Chat vertrauen",
+  "Untrust chat": "Vertrauen aufheben",
+  "Block unattributed calls": "Nicht zugeordnete Aufrufe blockieren",
+  "More options": "Weitere Optionen",
   "Pinned": "Angeheftet",
   "Unpin this chat": "Diesen Chat lösen",
-  "Pin this chat to the top of its list": "Diesen Chat oben in seiner Liste anheften"
+  "Pin this chat to the top of its list": "Diesen Chat oben in seiner Liste anheften",
+  "Pin chat": "Chat anheften",
+  "Unpin chat": "Chat lösen",
+  "Core connection lost": "Verbindung zu Core verloren",
+  "Desktop connection lost": "Verbindung zu Desktop verloren",
+  "Plugins connection lost": "Verbindung zu Plugins verloren",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Die Tunnelverbindung wurde unerwartet getrennt. Öffne Chat On Steroids, um die Verbindung zu prüfen."
 }
