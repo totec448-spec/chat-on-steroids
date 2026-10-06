@@ -1980,5 +1980,8 @@
   "Core connection lost": "Mất kết nối Core",
   "Desktop connection lost": "Mất kết nối Desktop",
   "Plugins connection lost": "Mất kết nối Plugins",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tunnel bị ngắt kết nối ngoài dự kiến. Mở Chat On Steroids để kiểm tra kết nối."
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tunnel bị ngắt kết nối ngoài dự kiến. Mở Chat On Steroids để kiểm tra kết nối.",
+  "Copy link": "Sao chép liên kết",
+  "Copy this chat's ChatGPT link": "Sao chép liên kết ChatGPT của cuộc trò chuyện này",
+  "Link copied": "Đã sao chép liên kết"
 }
