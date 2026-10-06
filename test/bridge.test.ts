@@ -4053,10 +4053,17 @@ describe('delivering a bootstrap', () => {
     const command = queueResume(sessionId, token)!;
     await redeem(command.id);
 
-    await request('POST', '/commands/ack', { body: { id: command.id, status: 'failed', error: 'tab died' } });
+    await request('POST', '/commands/ack', { body: {
+      id: command.id,
+      status: 'failed',
+      error: 'tab died',
+      detail: 'project-entry:transition-timeout:last=source-route'
+    } });
     // Gone from the queue, and gone as a transaction: nothing is coming for this session.
     expect(pendingCommands()).toEqual([]);
     expect(continuationByToken(token)?.state).toBe('aborted');
+    expect(getLog().some(entry => entry.message ===
+      `bridge: command ${command.id} failed: project entry transition-timeout:last=source-route`)).toBe(true);
 
     // A second press is a second command — the user's decision, not the app's timer.
     const { sessionId: againId, token: againToken } = await compactedSession(
