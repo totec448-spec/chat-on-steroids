@@ -185,7 +185,9 @@ describe('the session card header', () => {
     expect(rule('.connection-popover')).toContain('max-height: min(580px, calc(100vh - 70px))');
     expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
     expect(rule('#workspaceSettings')).toContain('height: 36px');
-    expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
+    // A 36px square while connected; it widens only to say Connect, Connecting… or Failed.
+    expect(rule('.sidebar-connection')).toContain('height: 36px; min-width: 36px');
+    expect(document.getElementById('headerConnect')).toBeNull();
     expect(document.getElementById('connectionPopover')!.querySelector('details')).toBeNull();
     expect(document.getElementById('connectionAdvanced')).toBeNull();
     expect(document.getElementById('connectionPopoverVerified')).toBeNull();

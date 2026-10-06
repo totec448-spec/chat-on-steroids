@@ -109,7 +109,9 @@
               title="Not connected"
             >
               <span class="sidebar-connection-dot" aria-hidden="true"></span>
+              <span class="sidebar-connection-label" aria-hidden="true"><span id="sidebarConnectionLabel">Connect</span></span>
             </button>
+            <span class="sr-only" id="connectionAnnounce" role="status" aria-live="polite"></span>
             <section class="connection-popover scroll" id="connectionPopover" role="dialog" aria-label="Connection" hidden>
               <div class="connection-popover-head">
                 <strong id="connectionPopoverTitle">Not connected</strong>
@@ -122,7 +124,7 @@
                   <i aria-hidden="true"></i>
                 </div>
                 <div class="connection-popover-row">
-                  <span>Browser companion</span>
+                  <span>Extension</span>
                   <span id="connectionPopoverBrowser" class="sr-only">Not seen</span>
                   <i aria-hidden="true"></i>
                 </div>
@@ -147,7 +149,6 @@
           <span id="headerSub">Not set up yet</span>
         </span>
         <span class="state">
-          <button class="btn connect-prompt" id="headerConnect" type="button" hidden>Connect</button>
           <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
                lives in the tray and is closed to it, so "installs the next time you start it"
                can mean days. This is the press that means now. -->
