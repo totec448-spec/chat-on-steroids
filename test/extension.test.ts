@@ -3739,6 +3739,60 @@ describe('extension observation journal', () => {
     expect(session.data.settled).toEqual(['resume-retry']);
   });
 
+  it('durably keeps a failed command diagnostic detail through a service worker restart', async () => {
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const firstFetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/ack') return response(503, { error: 'temporarily_unavailable' });
+      return response(404, {});
+    });
+    const first = loadWorker({ local, session, fetch: firstFetch });
+
+    const attempted = await first.send({
+      type: 'ack',
+      id: 'resume-failure-detail',
+      status: 'failed',
+      error: 'plain translated failure',
+      detail: 'project-entry:transition-timeout:last=source-route',
+      client: 'page-one'
+    });
+    expect(attempted.ok).toBe(false);
+    expect(session.data.commandAckOutbox).toMatchObject([{
+      id: 'resume-failure-detail',
+      status: 'failed',
+      error: 'plain translated failure',
+      detail: 'project-entry:transition-timeout:last=source-route',
+      client: 'page-one'
+    }]);
+
+    const bodies: Array<Record<string, unknown>> = [];
+    const secondFetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/ack') {
+        bodies.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, committed: false, outcome: 'terminal-failure' });
+      }
+      return response(404, {});
+    });
+    const restarted = loadWorker({ local, session, fetch: secondFetch });
+    await restarted.send({ type: 'status' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(bodies).toEqual([{
+      id: 'resume-failure-detail',
+      status: 'failed',
+      error: 'plain translated failure',
+      detail: 'project-entry:transition-timeout:last=source-route',
+      client: 'page-one'
+    }]);
+    expect(session.data.commandAckOutbox).toEqual([]);
+    expect(session.data.settled ?? []).toEqual([]);
+  });
+
   it('keeps a fresh command page journal behind its pending ACK after the route gets an id', async () => {
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();

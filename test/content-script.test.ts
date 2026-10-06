@@ -15260,9 +15260,23 @@ describe('the fresh chat the app opened', () => {
     expect(clicks).toBe(outcome === 'wrong-link' ? 0 : 1);
     const enters = outcome === 'success' || outcome === 'kept-editor';
     expect(sends, JSON.stringify(live.sent.filter(message => ['ack', 'compact'].includes(String(message.type))))).toBe(enters ? 1 : 0);
-    expect(live.sent.filter(message => message.type === 'ack')).toEqual([
+    const acks = live.sent.filter(message => message.type === 'ack');
+    expect(acks).toEqual([
       expect.objectContaining(enters ? { status: 'sent', conversationId: destination } : { status: 'failed' })
     ]);
+    if (!enters) {
+      const expectedReason = outcome === 'wrong-link' ? 'source-ready-timeout:last=candidate-count-0'
+        : outcome === 'retarget' ? 'wrong-route-after-click' : null;
+      const error = String(acks[0]?.error);
+      const detail = String(acks[0]?.detail);
+      if (expectedReason) expect(detail).toBe(`project-entry:${expectedReason}`);
+      else {
+        expect(detail.startsWith('project-entry:')).toBe(true);
+        expect(detail).toContain('last=source-turns-remain');
+      }
+      expect(error).not.toContain('[project-entry:');
+      expect(error).toContain('ChatGPT could not open the source Project through its native link; nothing was sent');
+    }
   });
 
   it('acquires its id when a Project route names the fresh chat', async () => {
