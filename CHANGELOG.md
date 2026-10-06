@@ -9,6 +9,50 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.29] — Pin your chats, and know when ChatGPT is waiting for you
+
+Pin the chats you use most, open search from anywhere, and find any setting by typing. When ChatGPT asks you to approve a tool, the app now tells you instead of the chat quietly standing still. Long runs recover on their own in more situations, and Compact & Resume is more reliable.
+
+### ✨ Highlights
+
+- **Pin chats.** Pin a chat to keep it at the top of its list in the sidebar.
+- **One menu for every chat and project.** Each chat in the sidebar has a single ⋯ menu with everything you can do with it: pin, rename, open in your browser, block or remove it, and now **Copy link** to copy the chat's ChatGPT address. Projects get the same menu, with a new chat and their color.
+- **Search from anywhere.** ⌘K (Ctrl+K on Windows and Linux) opens a search window. Picking a result opens the chat right at the message that matched.
+- **Search your settings.** A search field in Settings finds any setting on any page as you type, and takes you straight to it. In Settings, ⌘F (Ctrl+F on Windows and Linux) jumps into it.
+- **Know when ChatGPT is waiting for you.** Sometimes ChatGPT asks you to allow or deny a tool call before it continues. The chat now says so, with a button that opens it in your browser, and a desktop notice follows if nobody answers within half a minute. The app never answers for you.
+- **A clearer connection control.** The connection now lives in one small capsule at the bottom of the sidebar. If a working connection drops unexpectedly, you get a notice once instead of finding out later.
+
+### 🛠 Fixed
+
+- **Long runs recover more reliably.**
+  - **Busy chats:** a chat that stalled after a ChatGPT error used to wait forever while other chats kept running tools. It now continues on its own within a few minutes.
+  - **"Stream cache expired":** a chat that showed this error now recovers by itself.
+  - **The log says why it waits:** when the app holds back a recovery, it logs the reason.
+- **Compact & Resume:**
+  - **When ChatGPT rebuilds its message box:** the handoff no longer gets lost.
+  - **Slow new chat:** the new chat is no longer mistaken for a second, separate session.
+  - **Closed chat:** you can now start it for a chat whose tab was closed.
+- **Scrolling up one notch keeps your place.** A single scroll-wheel step up wasn't always noticed. Opening the terminal or a growing message box then pulled you back to the end.
+- **Agents & automation no longer moves your chat.** It used to open scrolled to the bottom with the chat's "jump to latest" button over it, and the chat could stop following new messages after a visit.
+- **Messages the app sends for you show as written,** without stray backslashes in front of formatting characters.
+- **Windows: the pet stays the size it should,** even while idle.
+- **Updates are found sooner.** Opening Settings checks again if the last check is more than 10 minutes old.
+
+### 💅 Polish
+
+- **Setup:** the check marks are centered in their circles again.
+- **Health:** the "verified link" and "last ChatGPT call" boxes have even spacing.
+- **Sub-agent and Goal helper models:** an unset sub-agent model now shows "Automatic". The "Unverified" badge explains that ChatGPT's current model is used instead.
+- **The Activity page has a title** like the other settings pages.
+- **Search closes an open ⋯ menu,** so it no longer stays open over the search window.
+- **Activity no longer reports a problem on every start** when your ChatGPT account doesn't offer the Goal helper's default model. The app already used ChatGPT's current model instead.
+
+### 💛 Thank you
+
+To **@Haz4rdovisk** for the row menu, the connection capsule and the search window. To **@Akilaydin** for the connection-lost notice, **@lavalava45** for the "Stream cache expired" recovery, **@m1d0e1** and **@mch1902879100-cmyk** for the Compact & Resume fixes, and **@xuan2261** for the Windows pet fix. And to **@tude91979059-byte**, whose long-run logs found why stalled chats didn't recover.
+
+**Updating?** The extension updates itself once no chat is busy. If it stays on the old version, reload it once in `chrome://extensions`. On macOS, the app asks once for your login password so the new version can open its saved keys: choose **Always Allow**.
+
 ## [2.1.28] — Find any chat, and bring your Skills along
 
 Search all your chats by title or by what was said in them, and give chats your own names. Your Claude Code, Codex and personal Skills work without sharing the rest of those folders. ChatGPT can now create pictures in app chats, and save them into your folders. Setup is a guided step-by-step wizard, and ChatGPT can now also run in the app's own built-in browser. Goal no longer gets stuck on "Answer settling".
