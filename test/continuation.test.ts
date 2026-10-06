@@ -577,7 +577,15 @@ describe('committing', () => {
     expect(goalSwitchFor(CHAT_A).own).toBe(false);
     expect(goalPendingReplyFor(CHAT_A)).toBeNull();
     expect(goalPendingReplyFor(CHAT_B)).toBeNull();
+    // An app start replays this committed handoff. With the broker's hooks installed, as the app
+    // installs them, a chat that never led sub-agents has nothing to warn about (2026-10-06:
+    // every start warned "recovered without a broker prime repair hook" per kept handoff).
+    const { getLog } = await import('../src/main/logger.js');
+    const { primeFleetIn } = await import('../src/main/agents.js');
+    setContinuationRecoveryHooks({ repairPrimeTransfer: repairPrimeConversationAfterRecovery, hasPrimeFleet: primeFleetIn });
+    const logged = getLog().length;
     await restoreContinuations(snapshotContinuations());
+    expect(getLog().slice(logged).filter(entry => /prime repair hook|fleet is still led/.test(entry.message))).toEqual([]);
     expect(goalSwitchFor(CHAT_B)).toMatchObject({ enabled: true, mode: 'loop', afterTurn: true });
   });
 
