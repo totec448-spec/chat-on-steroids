@@ -89,6 +89,15 @@ import {
 export const CONTINUATION_TTL_MS = 10 * 60_000;
 
 /**
+ * The normal writing deadline for a manual handoff brief.
+ *
+ * The browser gets three recovery pickups five minutes apart while ChatGPT is writing the
+ * brief. Keep this phase open long enough for all three attempts plus a reconnect window;
+ * once a brief is captured, app-paced phases return to CONTINUATION_TTL_MS.
+ */
+export const CONTINUATION_WRITING_TTL_MS = 30 * 60_000;
+
+/**
  * The longer writing deadline for a manual ticket whose frozen source selection is Pro.
  *
  * Pro reasoning is not part of the visible transcript, so a brief it spends twenty minutes
@@ -471,20 +480,22 @@ const handoffAsked = (entry: Continuation): boolean =>
   entry.sourceSend.state === 'sent';
 
 /**
- * The waiting deadline for a manual ticket. Pro's longer budget exists only while its brief
+ * The waiting deadline for a manual ticket. The extended budget exists only while its brief
  * is being written: later phases are app-paced and keep the ordinary clock.
  */
 const manualWaitingTtlMs = (state: ContinuationState, requested: RequestedModel | null): number =>
-  state === 'awaiting-summary' && requested !== null &&
-  isProModel(requested.model, requested.reasoningEffort ?? undefined)
-    ? CONTINUATION_PRO_WRITING_TTL_MS
+  state === 'awaiting-summary'
+    ? requested !== null && isProModel(requested.model, requested.reasoningEffort ?? undefined)
+      ? CONTINUATION_PRO_WRITING_TTL_MS
+      : CONTINUATION_WRITING_TTL_MS
     : CONTINUATION_TTL_MS;
 
 /**
  * Whether a nonterminal continuation has outlived its wait. A manual one gets
- * CONTINUATION_TTL_MS from its last sign of progress — CONTINUATION_PRO_WRITING_TTL_MS while
- * a Pro brief is still being written; an automatic one has no clock until it is asked for and
- * AUTOMATIC_HANDOVER_TTL_MS from then.
+ * CONTINUATION_TTL_MS from its last sign of progress after the brief is captured;
+ * CONTINUATION_WRITING_TTL_MS while an ordinary manual brief is being written;
+ * CONTINUATION_PRO_WRITING_TTL_MS while a Pro brief is being written. An automatic one has no
+ * clock until it is asked for and AUTOMATIC_HANDOVER_TTL_MS from then.
  */
 const expired = (entry: Continuation, now = Date.now()): boolean =>
   entry.automatic

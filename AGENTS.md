@@ -2824,8 +2824,11 @@ feed's resume boundary, where A's rows stop. A reloaded source waits for its vis
 editable composer and recorded original question before freezing the source identity or stopping
 the turn. Already observed identities and a real user Send remain cancellation boundaries during
 hydration; an empty loading DOM must not be treated as a different conversation. The source
-rechecks the composer before insertion. Failed manual preparation retires only its exact pre-Send token and
-stores a bounded concrete failure reason. Existing user drafts remain intact. Ambiguous dispatched
+rechecks the composer before insertion. After Compact & Resume's source-send permission round-trip,
+it reacquires the visible editable composer and validates the exact frozen prompt: a React remount alone
+does not invalidate an unchanged draft, while an actual text change still fails closed and preserves the draft.
+Failed manual preparation retires only its exact pre-Send token and stores a bounded concrete failure reason.
+Existing user drafts remain intact. Ambiguous dispatched
 requests retain their existing custody and cannot be sent again merely because a receipt is absent.
 
 An unnamed destination never reports a successful resume ACK, even after a transport banner.
