@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "トンネル接続が予期せず切断されました。Chat On Steroids を開いて接続を確認してください。",
   "Copy link": "リンクをコピー",
   "Copy this chat's ChatGPT link": "このチャットのChatGPTリンクをコピー",
-  "Link copied": "リンクをコピーしました"
+  "Link copied": "リンクをコピーしました",
+  "ChatGPT is waiting for your approval": "ChatGPT があなたの承認を待っています",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT でツール呼び出しを許可または拒否するまで、チャットは一時停止しています。クリックして開きます。",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT はこのチャットでツール呼び出しを許可するか拒否するかを待っています。そこで応答するまで何も進みません。",
+  "The tool approval ChatGPT asked for in this chat was answered.": "このチャットで ChatGPT が求めたツールの承認に応答しました。"
 }

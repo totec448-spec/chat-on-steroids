@@ -159,6 +159,8 @@ var CLF_DOM = (() => {
    * and strip our nodes before extracting page text. Unknown/fake DOMs fall back safely.
    */
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot, [data-clf-user-text]';
+  // ChatGPT's tool approval card, as of 2026-10-06. See approvalWaiting().
+  const APPROVAL_CARD = '[data-codex-approval-surface="true"]';
 
   /**
    * Removes this extension's own rendered surfaces from a clone, in place.
@@ -869,6 +871,20 @@ var CLF_DOM = (() => {
     const form = composer()?.closest('form');
     return [...(form || document).querySelectorAll(selector)].filter(button =>
       renderedComposerNode(button) && (!form || button.closest('form') === form));
+  }
+
+  /**
+   * ChatGPT's own tool approval card ("Allow ChatGPT to use …?") is waiting for a person.
+   *
+   * While it stands the turn cannot move: no call reaches the app, nothing streams, and only a
+   * person can answer it. Measured on the live page on 2026-10-06 (German UI): the card root
+   * carries `data-codex-approval-surface="true"` and holds the Deny and Allow once buttons, while
+   * the composer shows voice rather than stop. No label is read, so every language counts. A
+   * card on a kept (undisplayed) page, or one without an enabled button, is not waiting.
+   */
+  function approvalWaiting() {
+    return safe(() => [...document.querySelectorAll(APPROVAL_CARD)].some(card =>
+      !onKeptPage(card) && card.getClientRects().length > 0 && card.querySelector('button:not([disabled])') !== null), false);
   }
 
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
@@ -3245,6 +3261,7 @@ var CLF_DOM = (() => {
     messagesIn,
     sectionSignature,
     generating,
+    approvalWaiting,
     stopButton,
     stopGeneration,
     sendButton,

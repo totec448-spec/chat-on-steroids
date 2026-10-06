@@ -8922,6 +8922,35 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
   });
 
+  it("does not call a turn stalled while ChatGPT's tool approval card waits for the user", async () => {
+    // VM stress test, 2026-10-06: the card held an echo for ten minutes and the page reported
+    // the turn as dead, although only the user's answer was missing.
+    live = await harness();
+    userTurn(live.document, 'turn-approval-user', 'run the check');
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-approval', []);
+    const card = live.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live.document.createElement('button'), live.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live.document.body.append(card);
+    live.hook.observe();
+    await settle();
+    for (let tick = 0; tick < 2; tick++) {
+      live.advance(live.hook.STALL_MS + 1);
+      live.hook.observe();
+      await settle();
+    }
+    const stallText = 'No visible progress for ten minutes. The app could not confirm that this turn finished.';
+    expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).not.toContain(stallText);
+    // Answered, and then quiet for ten minutes: that is a stall again.
+    card.remove();
+    live.advance(live.hook.STALL_MS + 1);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).toContain(stallText);
+  });
+
   /**
    * #786: a non-Pro turn at Extra high or above can think for more than ten minutes without
    * changing the page. While its exact liveness holds — this route, native Stop, this

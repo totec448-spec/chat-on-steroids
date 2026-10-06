@@ -1,5 +1,5 @@
 /**
- * English source of the stopped-chat desktop notices (#855).
+ * English source of the stopped-chat and approval-wait desktop notices (#855).
  *
  * The main process shows these notices but has no interface catalogs. The renderer translates
  * exactly these strings with its own catalogs and publishes the result; anything else is refused,
@@ -10,7 +10,9 @@ export const STOP_NOTICE_TEXTS = [
   'Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.',
   'Its last turn failed and nothing followed. Send a message there to start a fresh turn.',
   'Recovery stopped',
-  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes."
+  "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.",
+  'ChatGPT is waiting for your approval',
+  'A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.'
 ] as const;
 
 export type StopNoticeText = typeof STOP_NOTICE_TEXTS[number];
