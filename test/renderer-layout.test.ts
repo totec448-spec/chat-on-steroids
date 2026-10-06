@@ -62,6 +62,19 @@ it('finds settings on every settings page by name, description and section, neve
   expect([language.title, language.section]).toEqual(['Language', 'Preferences']);
 });
 
+it('titles every settings page the same way, Activity included', () => {
+  for (const panel of ['home', 'general', 'usage', 'appearance', 'activity']) {
+    const head = document.querySelector(`[data-panel="${panel}"] .settings-page-head`);
+    expect(head?.querySelector('h1')?.textContent?.trim(), panel).toBeTruthy();
+    expect(head?.querySelector('p')?.textContent?.trim(), panel).toBeTruthy();
+  }
+  const activity = document.querySelector('[data-panel="activity"]')!;
+  expect(activity.querySelector('.settings-page-head h1')!.textContent!.trim()).toBe('Activity');
+  // The log card's own label is for screen readers only, so the title is not shown twice.
+  expect(activity.querySelector('.card > h2 > .sr-only')?.textContent).toBe('Activity');
+  expect(activity.querySelector('#fullFeed')?.closest('.activity-content')).not.toBeNull();
+});
+
 it('limits the existing tool-detail preference to handoff briefs', () => {
   const toggle = document.getElementById('goalIncludeToolCalls') as HTMLInputElement;
   expect(toggle.type).toBe('checkbox');
