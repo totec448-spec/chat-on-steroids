@@ -75,6 +75,10 @@ app.whenReady().then(async () => {
       assert.ok(list.rows.length>=1 && /Theme/.test(list.rows[0].text) && /Appearance › Colors/.test(list.rows[0].text), 'Theme is found on Appearance: '+JSON.stringify(list.rows));
       assert.equal(list.inside,true,'Results stay inside the sidebar');
       assert.equal(list.fieldInside,true,'The field stays inside the sidebar');
+      // Its own look, not the browser's bare input: rounded, sidebar height, the magnifier inside it.
+      const look=await js(`(()=>{const f=document.getElementById('settingsFind'),s=getComputedStyle(f),r=f.getBoundingClientRect(),i=document.querySelector('#settingsFindBox > .ico').getBoundingClientRect();
+        return {radius:s.borderTopLeftRadius,height:Math.round(r.height),iconInside:i.left>=r.left&&i.right<=r.left+30&&i.top>=r.top&&i.bottom<=r.bottom}})()`);
+      assert.deepEqual(look,{radius:'8px',height:30,iconInside:true},'The search field is styled');
       assert.equal(list.pages,true,'The page list steps aside while searching');
       await shot(`results-${theme}.png`);
       await js(`document.querySelector('#settingsFindResults .search-result').click()`); await pause(400);
