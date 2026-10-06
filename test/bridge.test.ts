@@ -6097,6 +6097,30 @@ describe('delivering a bootstrap', () => {
     }
   });
 
+  it("leaves a worker awake while its page shows ChatGPT's tool approval card", async () => {
+    // VM stress test, 2026-10-06: the card holds the call before it is sent, so the chat is
+    // silent with no call recorded, and only the user can answer it.
+    await pair();
+    spawn({ workers: [{ task: 'wait for approval' }], caller: { conversationId: PRIME_CHAT } });
+    const workerConversation = 'cafe1006-0000-4000-8000-000000001006';
+    expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    const worker = () => swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
+    const quietAt = Math.max(worker().activatedAt ?? 0, worker().lastSeenAt ?? 0) + WORKER_SILENCE_MS + 1_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(quietAt);
+    try {
+      expect((await request('GET', `/activity?conversationId=${workerConversation}&generating=0&approval=1`)).status).toBe(200);
+      expect(await sweepStaleSwarm(quietAt)).toBe(false);
+      expect(worker().state).toBe('active');
+      expect(getLog().some((entry) => entry.message.includes(`${workerConversation} waits for the user to answer ChatGPT's tool approval card`))).toBe(true);
+      // Answered: the same silence now counts.
+      expect((await request('GET', `/activity?conversationId=${workerConversation}&generating=0&approval=0`)).status).toBe(200);
+      expect(await sweepStaleSwarm(quietAt)).toBe(true);
+      expect(worker().state).toBe('sleeping');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not hand a slept worker its dead turn, nor count its replayed native rows as work', async () => {
     // Measured 2026-09-26 (worker-8): a turn left open the day before was adopted by the reopened
     // tab, which refused the wake as "generating" until a ten-minute stall, and its native rows —
@@ -8768,6 +8792,36 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
       expect(await maintenance(), 'an ordinary turn lost its two-minute watchdog')
         .toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  it("holds silence recovery while ChatGPT's tool approval card waits, and recovers once it is answered", async () => {
+    // VM stress test, 2026-10-06: a reload cannot answer the card, and only the user can.
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID();
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Run the check', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn('waits-on-approval')
+      ]);
+      await attributed(chat, false, Date.now());
+      for (let pass = 0; pass < 3; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS / 2);
+        expect((await request('GET', `/activity?conversationId=${chat}&approval=1`)).status).toBe(200);
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS / 2);
+        await sweepStaleSwarm(Date.now());
+        expect(await maintenance(), 'a reload was queued over the approval card').toBeNull();
+      }
+      const why = getLog().filter(entry => entry.message.includes(`silence recovery for ${chat}`)).map(entry => entry.message);
+      expect(why).toEqual([expect.stringContaining('waiting: ChatGPT asks the user to allow or deny a tool call')]);
+      expect((await request('GET', `/activity?conversationId=${chat}&approval=0`)).status).toBe(200);
+      await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 

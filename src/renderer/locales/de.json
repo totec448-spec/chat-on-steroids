@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Die Tunnelverbindung wurde unerwartet getrennt. Öffne Chat On Steroids, um die Verbindung zu prüfen.",
   "Copy link": "Link kopieren",
   "Copy this chat's ChatGPT link": "Den ChatGPT-Link dieses Chats kopieren",
-  "Link copied": "Link kopiert"
+  "Link copied": "Link kopiert",
+  "ChatGPT is waiting for your approval": "ChatGPT wartet auf deine Freigabe",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Ein Chat pausiert, bis du einen Tool-Aufruf in ChatGPT zulässt oder ablehnst. Klicke, um ihn zu öffnen.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT wartet darauf, dass du einen Tool-Aufruf in diesem Chat zulässt oder ablehnst. Es geht erst weiter, wenn du dort antwortest.",
+  "The tool approval ChatGPT asked for in this chat was answered.": "Die Tool-Freigabe, um die ChatGPT in diesem Chat gebeten hat, wurde beantwortet."
 }

@@ -16,7 +16,10 @@ export function stopNoticeTexts(): Record<(typeof STOP_NOTICE_TEXTS)[number], st
       t('Its last turn failed and nothing followed. Send a message there to start a fresh turn.'),
     'Recovery stopped': t('Recovery stopped'),
     "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.":
-      t("The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.")
+      t("The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes."),
+    'ChatGPT is waiting for your approval': t('ChatGPT is waiting for your approval'),
+    'A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.':
+      t('A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.')
   };
 }
 

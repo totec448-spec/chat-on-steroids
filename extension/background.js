@@ -3794,7 +3794,8 @@ const HANDLERS = {
       `&goalClient=${encodeURIComponent(String(source.tab))}` +
       // Forward only the helper states this document may report; these are diagnostics.
       (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '') +
-      (typeof message.generating === 'boolean' ? `&generating=${message.generating ? 1 : 0}` : '');
+      (typeof message.generating === 'boolean' ? `&generating=${message.generating ? 1 : 0}` : '') +
+      (typeof message.approval === 'boolean' ? `&approval=${message.approval ? 1 : 0}` : '');
     const result = await call(`/activity${query}`);
     if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
       await recoverDeferredRevivals();

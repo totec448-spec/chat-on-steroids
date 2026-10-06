@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tünel bağlantısı beklenmedik şekilde kesildi. Bağlantıyı kontrol etmek için Chat On Steroids uygulamasını açın.",
   "Copy link": "Bağlantıyı kopyala",
   "Copy this chat's ChatGPT link": "Bu sohbetin ChatGPT bağlantısını kopyala",
-  "Link copied": "Bağlantı kopyalandı"
+  "Link copied": "Bağlantı kopyalandı",
+  "ChatGPT is waiting for your approval": "ChatGPT onayını bekliyor",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT'de bir araç çağrısına izin verene veya reddedene kadar bir sohbet duraklatıldı. Açmak için tıkla.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT bu sohbette bir araç çağrısına izin vermeni veya reddetmeni bekliyor. Orada yanıt verene kadar hiçbir şey devam etmez.",
+  "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT'nin bu sohbette istediği araç onayı yanıtlandı."
 }

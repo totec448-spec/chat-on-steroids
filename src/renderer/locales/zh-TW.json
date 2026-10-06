@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道連線意外中斷。請開啟 Chat On Steroids 檢查連線。",
   "Copy link": "複製連結",
   "Copy this chat's ChatGPT link": "複製此對話的 ChatGPT 連結",
-  "Link copied": "已複製連結"
+  "Link copied": "已複製連結",
+  "ChatGPT is waiting for your approval": "ChatGPT 正在等待你的核准",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "一個聊天已暫停，直到你在 ChatGPT 中允許或拒絕一次工具呼叫。點一下即可開啟。",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT 正在等待你允許或拒絕此聊天中的一次工具呼叫。在你於該處回應之前，不會繼續。",
+  "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT 在此聊天中要求的工具核准已獲得回應。"
 }

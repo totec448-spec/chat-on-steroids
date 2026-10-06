@@ -111,7 +111,8 @@ import {
   type ChatObservation,
   type PageCallEvidence
 } from './session/recorder.js';
-import { noticeChatStopped } from './stuck-notice.js';
+import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
+import { approvalCardWaiting, noteApprovalCard, resetApprovalWaits, type ApprovalWaitDeps } from './approval-wait.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -2929,6 +2930,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
      * never told that what is driving it is unknown.
      */
     const astraSession = await findSessionByConversation(id, { requireUnique: true });
+    // ChatGPT's own tool approval card on this page: see approval-wait.ts. Older extensions omit it.
+    const pageApproval = url.searchParams.get('approval');
+    if (pageApproval === '1' || pageApproval === '0')
+      void noteApprovalCard(id, pageApproval === '1', astraSession?.id ?? null, approvalWaitDeps).catch(() => undefined);
     const finishOnly = !!astraSession && await astraFinishOnly(astraSession.id, id);
     const silenceSuppressed = finishOnly || await suppressProSilence(id);
     const goalView = async () => {
@@ -4965,7 +4970,7 @@ async function sweepOwnedSwarm(runId: string, now: number): Promise<boolean> {
   for (const slept of sleepSilentWorkers(
     now,
     runId,
-    id => runningToolProgress(id) !== null,
+    id => runningToolProgress(id) !== null || approvalCardWaiting(id, now),
     id => unresolvedTurns.get(id)?.turnId,
     id => unresolvedTurns.get(id)?.requestOriginMax
   )) {
@@ -6476,6 +6481,12 @@ const compactionFilings = new Set<string>();
  */
 const lastAttributedCallAt = new Map<string, number>();
 export const GOAL_QUIET_MS = 60_000;
+
+const approvalWaitDeps: ApprovalWaitDeps = {
+  record: (sessionId, progressId, text, anchor) => recordProgress(sessionId, progressId, text, anchor),
+  notify: noticeApprovalWaiting,
+  log: logInfo
+};
 /**
  * How long tool calls of no known chat may hold one silent chat's recovery (#1086).
  *
@@ -6494,7 +6505,8 @@ const unknownCallHold = new WeakMap<ActivityGrant, number>();
  * sweep starts the clock (`measure`), so work done while the chat was busy never shortens it.
  */
 function silenceHeldByCalls(conversationId: string, grant: ActivityGrant | undefined, now = Date.now(), measure = false): 'own' | 'unknown' | null {
-  if (runningToolProgress(conversationId)) return 'own';
+  // A call ChatGPT holds behind its approval card is this chat's own, and only the user moves it.
+  if (runningToolProgress(conversationId) || approvalCardWaiting(conversationId, now)) return 'own';
   if (runningToolCalls(conversationId) === 0) return null;
   if (!grant) return 'unknown';
   if (measure && !unknownCallHold.has(grant)) unknownCallHold.set(grant, now);
@@ -6504,6 +6516,7 @@ function silenceHeldByCalls(conversationId: string, grant: ActivityGrant | undef
 
 /** The input outbox's check for an automatic Continue: the same bounded hold, over settling calls too. */
 export function recoveryHeldByCalls(conversationId: string): boolean {
+  if (approvalCardWaiting(conversationId)) return true;
   if (inFlightToolCalls(conversationId) === 0) return false;
   if (runningToolProgress(conversationId)) return true;
   const grant = activeUntil.get(conversationId);
@@ -8028,6 +8041,14 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
   for (const [conversationId, grant] of activeUntil) {
     if (grant.until > now) continue;
     if (compacting.has(conversationId)) { noteSilence(conversationId, grant, 'a Compact & Resume handoff owns this chat\'s recovery'); continue; }
+    // Before the "no recorded call" verdict below: a call waiting for approval was never sent,
+    // so none is recorded, and only the user can answer the card. Measured live on 2026-10-06.
+    if (approvalCardWaiting(conversationId, now)) {
+      noteSilence(conversationId, grant, 'waiting: ChatGPT asks the user to allow or deny a tool call');
+      grant.until = now + GOAL_QUIET_MS;
+      deferred = true;
+      continue;
+    }
     // Observation owns liveness, never permission to interrupt the native page.
     // Only an exactly recorded local call in this source turn earns silence repair.
     if (!grant.turnId || !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId)) {
@@ -10437,6 +10458,7 @@ export function workerBriefForTests(agent: string, task: string): string {
 }
 
 export function resetBridgeForTests(): void {
+  resetApprovalWaits();
   clearCompanionDiagnostics();
   for (const command of commands) if (command.timer) clearTimeout(command.timer);
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
