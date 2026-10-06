@@ -46,6 +46,7 @@ const { isNewer } = await import('../src/shared/types.js');
 const {
   applyStagedUpdate,
   checkForUpdates,
+  checkForUpdatesIfStale,
   manualDownloadName,
   manualDownloadUrl,
   markInstallOnQuit,
@@ -224,6 +225,22 @@ describe('finding a newer release', () => {
     // It stopped at the release: no checksums, no artifact, nothing written.
     expect(asked).toEqual(['latest']);
     expect(readdirSync(userData)).toEqual([]);
+  });
+});
+
+describe('asking again when Settings open', () => {
+  it('asks GitHub only when the last answer is over ten minutes old', async () => {
+    const { asked } = github({ version: APP_VERSION });
+    // Never asked yet: it asks.
+    await checkForUpdatesIfStale();
+    expect(asked).toEqual(['latest']);
+    const checkedAt = updateStatus().checkedAt!;
+    // A fresh answer stands.
+    await checkForUpdatesIfStale(checkedAt + 9 * 60_000);
+    expect(asked).toEqual(['latest']);
+    // An old one does not: 2.1.27 said "Up to date" for hours after 2.1.28 was published.
+    await checkForUpdatesIfStale(checkedAt + 11 * 60_000);
+    expect(asked).toEqual(['latest', 'latest']);
   });
 });
 

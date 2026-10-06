@@ -235,6 +235,8 @@ const api = {
   // there is nothing here to choose - the main process knows what is staged.
   installUpdate: () => call<boolean>('update:install'),
   downloadUpdate: () => call<boolean>('update:download'),
+  /** Settings opened: re-check for an update if the last answer is older than ten minutes. */
+  refreshUpdate: () => call<boolean>('update:refresh'),
 
   // Sessions, compaction and the browser bridge. Everything here is read-only or a
   // named action; there is still no channel that takes a path or a command.
