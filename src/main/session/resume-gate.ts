@@ -31,11 +31,17 @@
  */
 export const RESUME_CLAIM_WINDOW_MS = 60_000;
 
-const claims = new Map<string, number>();
+interface ResumeClaim {
+  at: number;
+  dispatched: boolean;
+}
+
+const claims = new Map<string, ResumeClaim>();
 
 /** Records that a replacement chat is expected to appear imminently. */
 function noteExpectedResume(token: string): void {
-  claims.set(token, Date.now());
+  const current = claims.get(token);
+  claims.set(token, { at: Date.now(), dispatched: current?.dispatched === true });
 }
 
 /**
@@ -55,22 +61,37 @@ export function noteResumeClaim(token: string): void {
   noteExpectedResume(token);
 }
 
+/**
+ * Records that the replacement bootstrap crossed its exclusive pre-click dispatch fence.
+ *
+ * Past this point ChatGPT may already hold the handoff in a conversation whose id the page
+ * cannot expose yet. That ambiguity belongs to the continuation transaction, so it must stay
+ * armed until commit/abort/release rather than aging out with the browser-opening grace period.
+ * Recorder admission is still bounded independently by `settleResumeCommit()`; this does not
+ * make an unrelated new conversation wait forever.
+ */
+export function noteResumeDispatch(token: string): void {
+  claims.set(token, { at: Date.now(), dispatched: true });
+}
+
 /** Records that the move landed, or was given up on, so nothing waits on it any longer. */
 export function endResumeClaim(token: string): void {
   claims.delete(token);
 }
 
 /**
- * True while some replacement chat is expected to appear.
+ * True while some replacement chat is expected to appear or an already-dispatched bootstrap
+ * still belongs to an unresolved continuation.
  *
- * Self-expiring, so a claim that is never resolved — a crash between the claim and the
- * commit, a browser that never opens the tab — costs a bounded window rather than a
- * permanent one. That is the safe direction: failing to wait creates a stub session, which
- * is recoverable and visible, while waiting forever would stop recording new chats.
+ * Opening/pre-dispatch claims self-expire, so a browser that never opens costs only one short
+ * grace window. A dispatched claim is different: the prompt may already exist server-side and
+ * cannot be replayed safely, so the continuation transaction itself owns that gate until a
+ * terminal transition calls {@link endResumeClaim}. Recorder admission still has its own
+ * bounded wait and therefore cannot block an unrelated new chat forever.
  */
 export function resumeOpeningChat(now: number = Date.now()): boolean {
-  for (const [token, at] of claims) {
-    if (now - at <= RESUME_CLAIM_WINDOW_MS) return true;
+  for (const [token, claim] of claims) {
+    if (claim.dispatched || now - claim.at <= RESUME_CLAIM_WINDOW_MS) return true;
     claims.delete(token);
   }
   return false;

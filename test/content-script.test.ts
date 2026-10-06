@@ -889,7 +889,9 @@ describe('desktop input delivery and helper ownership', () => {
       await settle(); live.hook.observe(); await settle(); await live.hook.flush();
       const starts = emitted(live.sent, 'turn_start').length;
       if (acknowledge && !invalidate) {
-        expect(emitted(live.sent, 'user_message').filter(row => row.event.messageId === 'm-gated-spa-user').at(-1)?.event.text).toBe(canonical);
+        // Recorded the way ChatGPT shows it: the page renders the submitted text, so an escaped
+        // stored copy is recorded unescaped (the raw copy still decides the receipt above).
+        expect(emitted(live.sent, 'user_message').filter(row => row.event.messageId === 'm-gated-spa-user').at(-1)?.event.text).toBe(submitted);
         live.hook.observe(); await settle(); await live.hook.flush();
         expect(emitted(live.sent, 'turn_start')).toHaveLength(starts);
       }
@@ -3375,6 +3377,27 @@ describe('recording authored message text', () => {
 });
 
 describe('canonical Fiber transcript ingestion in 1.8', () => {
+  it.each([
+    ['marked as Markdown', true, 'Run `echo two` and keep #tags as they are.', 'Run `echo two` and keep #tags as they are.'],
+    ['unmarked but shown unescaped', false, 'Run `echo two` and keep #tags as they are.', 'Run `echo two` and keep #tags as they are.'],
+    ['unmarked and shown with its backslashes', false, 'Run \\`echo two\\` and keep \\#tags as they are.', 'Run \\`echo two\\` and keep \\#tags as they are.']
+  ] as const)('records a user message ChatGPT stored escaped (%s) the way ChatGPT shows it', async (_case, markdown, shown, recorded) => {
+    // ChatGPT stores page-inserted text (Goal replies, app-sent messages with the Core mention) as
+    // escaped Markdown and flags it; it shows the unescaped text. A plain copy is a person's literal.
+    live = await harness();
+    const stored = 'Run \\`echo two\\` and keep \\#tags as they are.';
+    const id = `stored-${_case.replaceAll(' ', '-')}`;
+    const section = userTurn(live.document, id, shown, { sent: false });
+    await bindFiberTurns([{ section, turn: { turnId: id, messages: [{ role: 'user', stable: true,
+      messageId: `m-${id}`, rawMessageId: `m-${id}`, rawText: stored, ...(markdown ? { markdown: true } : {}) }] } }]);
+    await live.hook.flush();
+    await settle();
+    live.hook.observe();
+    await live.hook.flush();
+    const users = emitted(live.sent, 'user_message').map(entry => entry.event).filter(event => event.messageId === `m-${id}`);
+    expect(users.at(-1)?.text).toBe(recorded);
+  });
+
   it('records a raw-provider-ID-only revision without changing canonical message identity', async () => {
     live = await harness();
     const section = assistantTurn(live.document, 'provider-id-revision-turn', []);
@@ -8798,7 +8821,11 @@ describe('a stop button that goes missing while the turn is still running', () =
     );
   });
 
-  it.each(['A network error occurred. Please check your connection and try again.', 'Resume stream unavailable'])(
+  it.each([
+    'A network error occurred. Please check your connection and try again.',
+    'Resume stream unavailable',
+    'Stream cache expired'
+  ])(
     'classifies the newer shell failure %s as a recoverable transport failure', async (wording) => {
     live = await harness();
     startGenerating(live.document);

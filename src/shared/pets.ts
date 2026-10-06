@@ -125,6 +125,7 @@ export interface PetOverlayBounds {
   width: number;
   height: number;
   scaleFactor: number;
+  boundedIdleShape: boolean;
 }
 
 export interface PetOverlaySnapshot {

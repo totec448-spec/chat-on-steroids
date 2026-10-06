@@ -17,13 +17,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { filterSettingsSections } from '../src/renderer/dom.js';
+import { collectSettings, searchSettings } from '../src/renderer/settings-search.js';
 import { sessionWorkingAt } from '../src/shared/session-activity.js';
 import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
 
 let document: Document;
 let css = '';
 let chatSource = '';
+let menuSource = '';
 let browserPreferencesSource = '';
 
 beforeAll(async () => {
@@ -36,25 +37,29 @@ beforeAll(async () => {
   document = new JSDOM(html).window.document;
   css = styles + '\n' + await fs.readFile(path.join(process.cwd(), 'src/renderer/settings.css'), 'utf8');
   chatSource = chat;
+  menuSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'row-menu.ts'), 'utf8');
 });
 
-it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
-  const view = document.querySelector<HTMLElement>('[data-view="settings"]')!;
-  const sections = [...view.querySelectorAll<HTMLElement>('.automation-section-head')];
+it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
+  const entries = collectSettings(document);
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'appearance']));
+  const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
+  expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
+  expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
+  // Names come before descriptions; words match in any order, across a name and its section.
+  expect(searchSettings(entries, 'privacy', 'en').map(entry => entry.title).slice(0, 2)).toEqual(['Privacy', 'Privacy screenshots']);
+  expect(searchSettings(entries, 'typography font', 'en').map(entry => entry.title)).toEqual(['Font']);
+  // A Setup step is found by its name, although only the open step shows.
+  expect(searchSettings(entries, 'api key', 'en')[0]!.target.dataset.railStep).toBe('key');
+  // Conditional rows hidden on their page are not offered.
   const conditional = document.getElementById('goalModels')!;
   expect(conditional.hidden).toBe(true);
-  filterSettingsSections(view, '  SESSION FINISH  ');
-  expect(sections.filter(section => !section.hidden).map(section => section.querySelector('h2')?.textContent)).toEqual(['Keep the turn open']);
-  for (const section of sections) expect((section.nextElementSibling as HTMLElement).hidden).toBe(section.hidden);
-  expect(document.getElementById('finishTool')!.closest('.pane')!.hasAttribute('hidden')).toBe(false);
-  expect(document.getElementById('goalKey')!.closest('.pane')!.hasAttribute('hidden')).toBe(true);
-  filterSettingsSections(view, 'no-such-setting-123');
-  expect(sections.every(section => section.hidden)).toBe(true);
-  expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(false);
-  filterSettingsSections(view, '');
-  expect(sections.every(section => !section.hidden && !(section.nextElementSibling as HTMLElement).hidden)).toBe(true);
-  expect(conditional.hidden).toBe(true);
-  expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(true);
+  expect(entries.some(entry => conditional.contains(entry.target))).toBe(false);
+  expect(searchSettings(entries, 'no-such-setting-123', 'en')).toEqual([]);
+  expect(searchSettings(entries, '   ', 'en')).toEqual([]);
+  // Titles are the setting's name alone, never its description or the choices of its menu.
+  const language = searchSettings(entries, 'language', 'en')[0]!;
+  expect([language.title, language.section]).toEqual(['Language', 'Preferences']);
 });
 
 it('limits the existing tool-detail preference to handoff briefs', () => {
@@ -185,7 +190,9 @@ describe('the session card header', () => {
     expect(rule('.connection-popover')).toContain('max-height: min(580px, calc(100vh - 70px))');
     expect(rule('.connection-popover::-webkit-scrollbar-track')).toContain('margin-block: 10px');
     expect(rule('#workspaceSettings')).toContain('height: 36px');
-    expect(rule('.sidebar-connection')).toContain('width: 36px; height: 36px');
+    // A 36px square while connected; it widens only to say Connect, Connecting… or Failed.
+    expect(rule('.sidebar-connection')).toContain('height: 36px; min-width: 36px');
+    expect(document.getElementById('headerConnect')).toBeNull();
     expect(document.getElementById('connectionPopover')!.querySelector('details')).toBeNull();
     expect(document.getElementById('connectionAdvanced')).toBeNull();
     expect(document.getElementById('connectionPopoverVerified')).toBeNull();
@@ -296,16 +303,19 @@ describe('the session-row chat actions', () => {
     expect(chatSource).toContain('rough current-chat context tokens');
   });
 
-  it('reserves all three top-right hit targets instead of laying the timestamp underneath them', () => {
-    expect(rule('.sess-action')).not.toContain('position: absolute');
+  it('reserves the row menu button\'s hit target instead of laying the timestamp underneath it', () => {
+    expect(rule('.row-menu-button')).not.toContain('position: absolute');
     expect(rule('.sess-actions')).toContain('flex: none');
   });
 
   it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?openSessionChat\(summary\.id\)/);
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]*?toggleSessionBlock\(summary\.id/);
-    expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
-    expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+    // Open and Block are offered only on the branch of a row that has a conversation.
+    expect(chatSource).toMatch(/if \(summary\.conversationId === null\) \{[\s\S]*?\} else \{[\s\S]*?openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId === null\) \{[\s\S]*?\} else \{[\s\S]*?toggleSessionBlock\(summary\.id/);
+    // The row's button does not select it, and the menu's items live outside the row, in the
+    // document body, so choosing one can neither select nor delete the row under the pointer.
+    expect(chatSource).toMatch(/more\.addEventListener\('click', \(event\) => \{ event\.stopPropagation\(\)/);
+    expect(menuSource).toContain('document.body.append(menu)');
   });
 
   it('keeps a block visible without hovering, because it is state and not just an action', () => {
@@ -328,8 +338,9 @@ describe('the session-row chat actions', () => {
     expect(chatSource).toMatch(
       /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
     );
+    // In strict mode the row offers no Allow the kernel would ignore: only Remove.
     expect(chatSource).toMatch(
-      /strictChatAllowlist === true[\s\S]{0,300}actionBar\.append\(remove\)[\s\S]{0,120}return row/
+      /strictChatAllowlist !== true\) \{[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)[\s\S]{0,120}\n  \} else \{/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
