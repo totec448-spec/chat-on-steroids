@@ -1867,6 +1867,177 @@ describe('active agent tab discard protection', () => {
     expect(posted.at(-1)?.stalledConversations).toEqual([DISCARDED, FROZEN]);
   });
 
+  it('observes only the requested exact conversation Project route and reports no raw page data', async () => {
+    const PROJECT = 'g-p-11111111222233334444555555555555';
+    const requestId = '1234567890abcdef1234567890abcdef';
+    const projectUrl = `https://chatgpt.com/g/${PROJECT}-workspace/c/${CHAT}`;
+    const observations: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, {
+          ok: true, repairs: [], commandIds: [],
+          projectObservationRequests: [{ id: requestId, conversationId: CHAT }]
+        });
+        if (url.pathname === '/project-observation') {
+          observations.push(JSON.parse(String(init?.body || '{}')));
+          return response(200, { ok: true });
+        }
+        return response(404, {});
+      }),
+      tabsGet: async id => id === 83 ? { id, url: projectUrl, status: 'complete' } : { id }
+    });
+    await worker.createTab({ id: 83, url: projectUrl });
+    await worker.registerTab(83);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 83);
+
+    await worker.fireAlarm();
+
+    expect(observations).toEqual([
+      {
+        id: requestId, conversationId: CHAT, status: 'claim',
+        documentId: 'document-83-0', navigationEpoch: 0
+      },
+      {
+        id: requestId, conversationId: CHAT, status: 'observed',
+        documentId: 'document-83-0', navigationEpoch: 0, projectId: PROJECT
+      }
+    ]);
+  });
+
+  it('reports the exact requested chat as not a Project without exposing its page URL or content', async () => {
+    const requestId = 'abcdef1234567890abcdef1234567890';
+    const chatUrl = `https://chatgpt.com/c/${CHAT}`;
+    const observations: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, {
+          ok: true, repairs: [], commandIds: [],
+          projectObservationRequests: [{ id: requestId, conversationId: CHAT }]
+        });
+        if (url.pathname === '/project-observation') {
+          observations.push(JSON.parse(String(init?.body || '{}')));
+          return response(200, { ok: true });
+        }
+        return response(404, {});
+      }),
+      tabsGet: async id => id === 84 ? { id, url: chatUrl, status: 'complete' } : { id }
+    });
+    await worker.createTab({ id: 84, url: chatUrl });
+    await worker.registerTab(84);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 84);
+
+    await worker.fireAlarm();
+
+    expect(observations).toEqual([
+      {
+        id: requestId, conversationId: CHAT, status: 'claim',
+        documentId: 'document-84-0', navigationEpoch: 0
+      },
+      {
+        id: requestId, conversationId: CHAT, status: 'not-project',
+        documentId: 'document-84-0', navigationEpoch: 0
+      }
+    ]);
+  });
+
+  it('does not claim Project identity from a document already terminal for navigation', async () => {
+    const PROJECT = 'g-p-99999999222233334444555555555555';
+    const requestId = 'fedcba0987654321fedcba0987654321';
+    const projectUrl = `https://chatgpt.com/g/${PROJECT}-workspace/c/${CHAT}`;
+    const observations: Array<Record<string, unknown>> = [];
+    const session = new FakeStorageArea();
+    let offerObservation = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session,
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, {
+          ok: true, repairs: [], commandIds: [],
+          projectObservationRequests: offerObservation ? [{ id: requestId, conversationId: CHAT }] : []
+        });
+        if (url.pathname === '/project-observation') {
+          observations.push(JSON.parse(String(init?.body || '{}')));
+          return response(200, { ok: true });
+        }
+        return response(404, {});
+      }),
+      tabsGet: async id => id === 85 ? { id, url: projectUrl, status: 'loading' } : { id }
+    });
+    await worker.createTab({ id: 85, url: projectUrl });
+    await worker.registerTab(85);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 85);
+    await worker.startTabNavigation(85, projectUrl);
+    // onUpdated first proves whether Chrome kept the exact document, then terminalizes an
+    // unproved full navigation asynchronously. One extra task turn puts this case on the
+    // already-terminal side of that documented boundary before Project observation begins.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.data.terminalDocuments).toMatchObject({ '85': 'document-85-0' });
+    offerObservation = true;
+
+    await worker.fireAlarm();
+
+    expect(observations).toEqual([{ id: requestId, conversationId: CHAT, status: 'source-tab-lost' }]);
+    expect(observations.some(row => row.status === 'claim' || row.status === 'observed' || 'projectId' in row)).toBe(false);
+  });
+
+  it('does not replay an observed Project identity after its document changes during auth retry', async () => {
+    const PROJECT = 'g-p-77777777222233334444555555555555';
+    const requestId = '00112233445566778899aabbccddeeff';
+    const projectUrl = `https://chatgpt.com/g/${PROJECT}-workspace/c/${CHAT}`;
+    const chatUrl = `https://chatgpt.com/c/${CHAT}`;
+    const observations: Array<Record<string, unknown>> = [];
+    let observedAttempts = 0;
+    let offerObservation = true;
+    let tabUrl = projectUrl;
+    let worker!: ReturnType<typeof loadWorker>;
+    worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/pair') return response(200, { token: 'replacement-token' });
+        if (url.pathname === '/status') return response(200, {
+          ok: true, repairs: [], commandIds: [],
+          projectObservationRequests: offerObservation ? [{ id: requestId, conversationId: CHAT }] : []
+        });
+        if (url.pathname === '/project-observation') {
+          const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+          observations.push(body);
+          if (body.status === 'observed' && ++observedAttempts === 1) {
+            offerObservation = false;
+            tabUrl = chatUrl;
+            await worker.startTabNavigation(86, chatUrl);
+            await worker.registerTab(86, 'replacement-document');
+            await worker.send({ type: 'bind', conversationId: CHAT }, 86, 'replacement-document');
+            return response(401, { error: 'stale_token' });
+          }
+          return response(200, { ok: true });
+        }
+        return response(404, {});
+      }),
+      tabsGet: async id => id === 86 ? { id, url: tabUrl, status: 'complete' } : { id }
+    });
+    await worker.createTab({ id: 86, url: projectUrl });
+    await worker.registerTab(86);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 86);
+
+    await worker.fireAlarm();
+
+    expect(observations.filter(row => row.status === 'observed')).toHaveLength(1);
+    expect(observations.at(-1)).toEqual({ id: requestId, conversationId: CHAT, status: 'project-route-changed' });
+  });
+
   it.each([
     ['focuses the open tab, restoring a minimized window', true, 'minimized'],
     ['opens the chat in a new tab when none has it', false, 'normal']

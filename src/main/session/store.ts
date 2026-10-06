@@ -186,6 +186,8 @@ function assertSessionId(id: string): void {
 
 interface OpenSession {
   summary: SessionSummary;
+  /** Process-lifetime generation of the current ChatGPT frontend attachment. */
+  attachmentGeneration: number;
   nextSeq: number;
   /** Highest durable journal/message seq already reflected by `summary`. */
   historySeq: number;
@@ -431,15 +433,17 @@ function enqueueSessionOperation<T>(entry: OpenSession, label: string, operation
  * ChatGPT conversation and then await a different durable store (for example trusted-chats)
  * must keep that validation and write in one fence, otherwise Compact & Resume can commit A -> B
  * between them and turn stale intent for A into authority inherited by B.
+ * `attachmentGeneration` also changes on every successful rebind, so a caller which observed
+ * outside the fence can reject A -> B -> A rather than trusting the same conversation id again.
  *
  * The summary is read-only by contract; mutate session state only through store primitives.
  */
 export async function withSessionMutationFence<T>(
   id: string,
-  operation: (summary: Readonly<SessionSummary>) => Promise<T>
+  operation: (summary: Readonly<SessionSummary>, attachmentGeneration: number) => Promise<T>
 ): Promise<T> {
   const entry = await ensureOpen(id);
-  return enqueueSessionOperation(entry, 'external policy fence', () => operation(entry.summary));
+  return enqueueSessionOperation(entry, 'external policy fence', () => operation(entry.summary, entry.attachmentGeneration));
 }
 
 /**
@@ -526,6 +530,7 @@ export async function createSession(options: {
   if (summary.conversationId) missingCurrentConversations.delete(summary.conversationId);
   const entry: OpenSession = {
     summary,
+    attachmentGeneration: 1,
     nextSeq: 1,
     historySeq: 0,
     tail: [],
@@ -979,6 +984,7 @@ async function ensureOpen(id: string): Promise<OpenSession> {
     if (!snapshot) throw new Error(`Session ${id} has no recoverable metadata or history`);
     const entry: OpenSession = {
       summary: snapshot.summary,
+      attachmentGeneration: 1,
       nextSeq: snapshot.historySeq + 1,
       historySeq: snapshot.historySeq,
       tail: [],
@@ -3319,6 +3325,7 @@ export async function rebindSession(
 
     // Past this point nothing can fail: the durable record already says chat B.
     Object.assign(entry.summary, staged);
+    entry.attachmentGeneration++;
     entry.metaDirty = false;
     missingCurrentConversations.delete(toConversationId);
     publishAttachmentSummary(entry.summary);

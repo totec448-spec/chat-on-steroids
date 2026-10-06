@@ -826,6 +826,18 @@ Projects may also store one optional color from the fixed `PROJECT_COLORS` palet
 sidebar presentation metadata only: changing or removing it never resolves paths, changes the
 project folder, grants permission, rebinds sessions, or changes prompt/workspace
 selection. Legacy rows without color remain unchanged. A project's color tints its folder icon.
+Projects may also store one optional read-only ChatGPT Project link. Its `remote` record contains
+only provider `chatgpt`, the normalized routing identity `g-p-<32 hex>`, and local link/last-seen
+timestamps. This metadata grants no filesystem, browser or ChatGPT mutation authority and never
+replaces the project's required approved local `path`. Remote routing identities are unique across
+the catalog. Link/Refresh is admitted only from the selected exact session already bound to that
+LocalProject: renderer/preload IPC supplies the local project/session ids, main asks the authenticated
+companion to observe the exact current conversation, and the companion returns only its normalized
+Project routing id (no URL, title, page content or credentials). Multiple live browser holders,
+missing/stale documents and route changes fail closed. Main rechecks the session attachment
+generation inside the same mutation fence held through durable publication, so A -> B -> A cannot
+make an old observation current again. Remove Link deletes only `remote`; it never moves sessions,
+changes local files or mutates ChatGPT.
 Every sidebar row (a project or a chat) has one quiet "⋯" button, shown on hover/focus or while its
 menu is open, and a right click on the row opens the same menu (`renderer/row-menu.ts`). The menu
 lives in the document body, outside the sidebar the activity repaints, so a repaint never closes
@@ -833,7 +845,8 @@ it; it finds its row's button again by owner (`data-row-menu`), stays inside the
 submenus beside their item, and is keyboard-driven (arrows, Right/Left for submenus, Escape gives
 focus back to the button). A project's menu: New chat in this project (`data-new-project`, which
 also shows the chat screen), Color (a submenu: None and the palette as radio items, each calling
-the same `projects:color` owner; choices wait while a save is pending) and Remove. A chat's
+the same `projects:color` owner; choices wait while a save is pending), ChatGPT Project Link/Refresh
+and Remove Link when applicable, then Remove. A chat's
 menu: Rename and Open in browser, Block/Release and, in strict mode, Trust/Untrust, then Remove;
 the Unattributed row offers only its app-wide Block/Allow (never in strict mode) and Remove.
 Choosing an item gives focus back to the row's button before the action runs, so a color save's
@@ -843,7 +856,9 @@ repaint keeps it there unless the user moved focus meanwhile; an action that mov
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
 sidebar list. Adding that same folder again restores grouping. It does not delete files,
-sessions or the approved root. A local project is distinct from a ChatGPT project route.
+sessions or the approved root. An ungrouped row also retains its remote link so its still-bound
+sessions cannot make the same ChatGPT Project look unowned; restore the exact folder and Remove Link
+before linking that remote identity elsewhere. A local project is distinct from a ChatGPT project route.
 
 `workspace.ts` is learned/inherited cwd, keyed to the proven chat or permitted transport request.
 Explicit session project binding takes precedence at kernel entry. Workers inherit only their

@@ -1146,7 +1146,12 @@ async function call(path, init = {}, retried = false) {
     const got = await provision();
     if (!got.ok) return { ok: false, status: 401, error: got.error || 'not_paired' };
   }
-  const { timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = init;
+  const { timeoutMs = REQUEST_TIMEOUT_MS, beforeSend, ...rest } = init;
+  if (typeof beforeSend === 'function') {
+    let current = false;
+    try { current = await beforeSend(); } catch { current = false; }
+    if (!current) return { ok: false, status: 409, error: 'stale_source' };
+  }
   try {
     const response = await fetchBounded(
       `http://127.0.0.1:${found.port}${path}`,
@@ -2763,6 +2768,8 @@ async function maintainOnce() {
     ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
   if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
+  await reportProjectObservations(reply.data.projectObservationRequests, observedTabs);
+  if (intent !== connectionEpoch || !token || disconnected) return;
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
@@ -3246,6 +3253,102 @@ function projectFromUrl(value) {
     return match ? match[1].toLowerCase() : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Answers explicit app requests for the Project identity of exact already-bound conversations.
+ * This is intentionally not a crawler: only request rows handed out by /status are inspected,
+ * and only one exact current tab route is returned. No URL, title or page content leaves Chrome.
+ */
+async function reportProjectObservations(requests, observedTabs) {
+  if (!Array.isArray(requests) || requests.length === 0 || requests.length > 16) return;
+  for (const raw of requests) {
+    const id = typeof raw?.id === 'string' && /^[0-9a-f]{32}$/.test(raw.id) ? raw.id : null;
+    const conversationId = cleanConversationId(raw?.conversationId);
+    if (!id || !conversationId) continue;
+    const candidates = observedTabs.filter(tab => {
+      if (!tab || !Number.isInteger(tab.id) || tab.discarded === true || tab.frozen === true || tab.status === 'loading' || tab.pendingUrl) return false;
+      const key = String(tab.id);
+      const source = { tab: tab.id, documentId: tabDocuments[key], navigationEpoch: tabEpochs[key] };
+      return typeof source.documentId === 'string' && Number.isSafeInteger(source.navigationEpoch) && ownsDocument(source) &&
+        cleanConversationId(tabConversations[key]) === conversationId &&
+        conversationFromUrl(tab.url) === conversationId;
+    });
+    if (candidates.length !== 1) {
+      await call('/project-observation', { method: 'POST', body: JSON.stringify({
+        id, conversationId, status: candidates.length > 1 ? 'project-ambiguous' : 'source-tab-lost'
+      }) });
+      continue;
+    }
+    const candidate = candidates[0];
+    const key = String(candidate.id);
+    const source = { tab: candidate.id, documentId: tabDocuments[key], navigationEpoch: tabEpochs[key] };
+    // Order the lease eligibility check behind any navigation already observed for this tab, but
+    // never hold the tab queue across network I/O: a 401 retry can itself race a replacement
+    // document registration, and that registration must be allowed to run before the retry.
+    const claimReady = await serializeTab(candidate.id, async () => {
+      if (!ownsDocument(source) || cleanConversationId(tabConversations[key]) !== conversationId) return false;
+      let current;
+      try { current = await chrome.tabs.get(candidate.id); } catch { return false; }
+      return ownsDocument(source) && !current?.pendingUrl && current?.status !== 'loading' &&
+        conversationFromUrl(current?.url) === conversationId && cleanConversationId(tabConversations[key]) === conversationId;
+    });
+    if (!claimReady) {
+      await call('/project-observation', { method: 'POST', body: JSON.stringify({ id, conversationId, status: 'source-tab-lost' }) });
+      continue;
+    }
+    const claim = await call('/project-observation', {
+      method: 'POST',
+      body: JSON.stringify({
+        id, conversationId, status: 'claim', documentId: source.documentId, navigationEpoch: source.navigationEpoch
+      }),
+      beforeSend: async () => {
+        if (!ownsDocument(source) || cleanConversationId(tabConversations[key]) !== conversationId) return false;
+        let current;
+        try { current = await chrome.tabs.get(candidate.id); } catch { return false; }
+        return ownsDocument(source) && !current?.pendingUrl && current?.status !== 'loading' &&
+          conversationFromUrl(current?.url) === conversationId && cleanConversationId(tabConversations[key]) === conversationId;
+      }
+    });
+    if (!claim.ok) {
+      if (claim.error === 'stale_source') {
+        await call('/project-observation', { method: 'POST', body: JSON.stringify({ id, conversationId, status: 'source-tab-lost' }) });
+      }
+      continue;
+    }
+    // Re-enter the tab queue only to take the publication snapshot. The actual POST stays outside
+    // the queue and carries a retry-time beforeSend fence, so auth recovery cannot replay a stale
+    // Project identity after document/navigation ownership changes.
+    const latest = await serializeTab(candidate.id, async () => {
+      let latest;
+      try { latest = await chrome.tabs.get(candidate.id); } catch { latest = null; }
+      if (!latest || !ownsDocument(source) || latest.pendingUrl || latest.status === 'loading' ||
+          conversationFromUrl(latest.url) !== conversationId || cleanConversationId(tabConversations[key]) !== conversationId) {
+        return null;
+      }
+      return latest;
+    });
+    if (!latest) {
+      await call('/project-observation', { method: 'POST', body: JSON.stringify({ id, conversationId, status: 'project-route-changed' }) });
+      continue;
+    }
+    const projectId = projectFromUrl(latest.url);
+    const result = await call('/project-observation', { method: 'POST', body: JSON.stringify({
+      id, conversationId, status: projectId ? 'observed' : 'not-project',
+      documentId: source.documentId, navigationEpoch: source.navigationEpoch,
+      ...(projectId ? { projectId } : {})
+    }), beforeSend: async () => {
+      if (!ownsDocument(source) || cleanConversationId(tabConversations[key]) !== conversationId) return false;
+      let current;
+      try { current = await chrome.tabs.get(candidate.id); } catch { return false; }
+      return ownsDocument(source) && !current?.pendingUrl && current?.status !== 'loading' &&
+        conversationFromUrl(current?.url) === conversationId && cleanConversationId(tabConversations[key]) === conversationId &&
+        projectFromUrl(current?.url) === projectId;
+    } });
+    if (!result.ok && result.error === 'stale_source') {
+      await call('/project-observation', { method: 'POST', body: JSON.stringify({ id, conversationId, status: 'project-route-changed' }) });
+    }
   }
 }
 

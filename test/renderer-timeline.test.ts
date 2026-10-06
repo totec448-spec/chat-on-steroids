@@ -255,6 +255,9 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         return ok({ sessions: [...openings, ...sessions], activeId: summary(live.events).id, pressure: [] });
       },
       listProjects: () => ok(projects),
+      linkChatGptProject: (id: string) => ok(projects.find(row => row.id === id) ?? null),
+      verifyChatGptProject: (id: string) => ok(projects.find(row => row.id === id) ?? null),
+      unlinkChatGptProject: (id: string) => ok(projects.find(row => row.id === id) ?? null),
       // IPC snapshots cannot share the backend's mutable array with the renderer.
       listInputs: () => ok(structuredClone(live.inputs)),
       cancelInput: vi.fn((id: string) => {
@@ -1589,7 +1592,8 @@ it('offers a project\'s actions in one menu: a new chat, its color as a submenu,
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'color', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'link-chatgpt-project', 'color', 'remove']);
+  expect(menuItem(w, 'link-chatgpt-project').disabled).toBe(true);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'new-chat'));
   // Keyboard: Down moves, Right opens the color submenu on the current choice, Left comes back.
@@ -1615,6 +1619,38 @@ it('offers a project\'s actions in one menu: a new chat, its color as a submenu,
   // New chat in this project.
   projectMenu(w, project.id); menuItem(w, 'new-chat').click(); await settle();
   expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
+});
+
+it('links, verifies and unlinks the selected Project chat without changing its local Project', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const { w } = await boot([], true, [], [project]);
+  const api = (w as any).api;
+  const remote = { provider: 'chatgpt' as const, projectId: 'g-p-11111111222233334444555555555555', linkedAt: 1000, lastObservedAt: 1000 };
+  let finishLink!: (value: unknown) => void;
+  api.linkChatGptProject = vi.fn(() => new Promise(resolve => { finishLink = resolve; }));
+  api.verifyChatGptProject = vi.fn(async () => ({ ok: true, data: { ...project, remote: { ...remote, lastObservedAt: 1100 } } }));
+  api.unlinkChatGptProject = vi.fn(async () => ({ ok: true, data: project }));
+
+  projectMenu(w, project.id); menuItem(w, 'link-chatgpt-project').click();
+  expect(api.linkChatGptProject).toHaveBeenCalledWith(project.id, '2026-09-02-test0001');
+  projectMenu(w, project.id);
+  expect(menuItem(w, 'link-chatgpt-project').disabled).toBe(true);
+  expect(menuItem(w, 'remove').disabled).toBe(true);
+  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
+  finishLink({ ok: true, data: { ...project, remote } }); await settle();
+  expect(w.document.querySelector(`.project-group[data-project-id="${project.id}"] .project-remote-status`)).not.toBeNull();
+
+  projectMenu(w, project.id); menuItem(w, 'verify-chatgpt-project').click(); await settle();
+  expect(api.verifyChatGptProject).toHaveBeenCalledWith(project.id, '2026-09-02-test0001');
+
+  projectMenu(w, project.id);
+  const unlink = menuItem(w, 'unlink-chatgpt-project');
+  expect(unlink.textContent).toContain('Remove');
+  expect(unlink.textContent).toContain('Link');
+  expect(unlink.textContent).not.toContain('Disconnect');
+  unlink.click(); await settle();
+  expect(api.unlinkChatGptProject).toHaveBeenCalledWith(project.id);
+  expect(w.document.querySelector(`.project-group[data-project-id="${project.id}"] .project-remote-status`)).toBeNull();
 });
 
 it('picks and clears project color without changing project membership', async () => {

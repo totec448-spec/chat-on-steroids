@@ -165,12 +165,36 @@ function rowMenuButton(owner: string): HTMLElement | null {
 /** Projects whose color or removal is being saved: their choices wait for the answer. */
 const savingProjectColor = new Set<string>();
 const removingProject = new Set<string>();
+const syncingChatGptProject = new Set<string>();
 
 /** A project's menu: a new chat in it, its color (a submenu), and taking it off the sidebar. */
 function projectMenuItems(id: string): RowMenuItem[] {
-  const color = projects.find(row => row.id === id)?.color ?? null;
+  const project = projects.find(row => row.id === id);
+  const color = project?.color ?? null;
+  const source = selectedId ? sessions.find(row => row.id === selectedId && row.projectId === id && !!row.conversationId) : undefined;
+  const remote = project?.remote;
+  const busy = syncingChatGptProject.has(id);
+  const removing = removingProject.has(id);
+  const remoteItems: RowMenuItem[] = remote ? [
+    {
+      action: 'verify-chatgpt-project', label: () => `ChatGPT · ${t('Refresh')}`,
+      disabled: busy || removing || !source,
+      title: () => source ? `ChatGPT ${t('Project')} · ${remote.projectId}` : `${t('Project')} · ${t('Refresh')}`,
+      run: () => { if (source) void saveChatGptProjectLink('verify', id, source.id); }
+    },
+    {
+      action: 'unlink-chatgpt-project', label: () => `ChatGPT · ${t('Remove')} ${t('Link')}`, separated: true, disabled: busy || removing,
+      run: () => { void saveChatGptProjectLink('unlink', id); }
+    }
+  ] : [{
+    action: 'link-chatgpt-project', label: () => `ChatGPT · ${t('Link')}`,
+    disabled: busy || removing || !source,
+    title: () => source ? `ChatGPT ${t('Project')}` : `${t('Project')} · ${t('Link')}`,
+    run: () => { if (source) void saveChatGptProjectLink('link', id, source.id); }
+  }];
   return [
     { action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id }, run: () => selectNewChat(id) },
+    ...remoteItems,
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
       submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
@@ -179,11 +203,29 @@ function projectMenuItems(id: string): RowMenuItem[] {
       }))
     },
     {
-      action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removingProject.has(id),
+      action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removing || busy,
       label: () => t('Remove'), title: () => t('Remove project from sidebar; keep conversations and files'),
       run: () => void removeProjectFromSidebar(id)
     }
   ];
+}
+
+async function saveChatGptProjectLink(action: 'link' | 'verify' | 'unlink', id: string, sessionId?: string): Promise<void> {
+  if (syncingChatGptProject.has(id)) return;
+  syncingChatGptProject.add(id);
+  try {
+    const updated = action === 'unlink'
+      ? await run(api.unlinkChatGptProject(id))
+      : action === 'link'
+        ? await run(api.linkChatGptProject(id, sessionId!))
+        : await run(api.verifyChatGptProject(id, sessionId!));
+    if (!updated) return;
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+  } finally {
+    syncingChatGptProject.delete(id);
+  }
 }
 
 async function saveProjectColor(id: string, choice: ProjectColor | null): Promise<void> {
@@ -991,7 +1033,15 @@ function paintSessions(): void {
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
-    heading.append(icon('i-folder'), label); section.append(heading);
+    heading.append(icon('i-folder'), label);
+    if (project?.remote?.provider === 'chatgpt') {
+      const remote = el('span', 'project-remote-status', () => '✓');
+      const freshness = ago(project.remote.lastObservedAt);
+      remote.setAttribute('aria-label', `ChatGPT ${t('Project')} · ${freshness}`);
+      remote.title = `ChatGPT ${t('Project')} · ${project.remote.projectId} · ${freshness}`;
+      heading.append(remote);
+    }
+    section.append(heading);
     // Native `toggle` is queued after activation. A concurrent activity repaint can replace
     // this node first and lose the click. Commit the summary's pointer/keyboard click to the
     // one disclosure owner synchronously, then project it onto this details element.

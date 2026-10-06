@@ -4,6 +4,7 @@ import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, rese
 import { notePluginInstalled, notePluginMissing } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
 import { messageReaction } from '../shared/message-reaction.js';
+import { normalizeChatGptProjectId } from '../shared/projects.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
 import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
@@ -665,6 +666,92 @@ function openingHeldElsewhere(inputId: string, browser: string | null): boolean 
 
 /** The chats each browser reported open in its last maintenance pass. */
 const browserChats = new Map<string, ReadonlySet<string>>();
+
+export type ChatGptProjectObservationResult =
+  | { ok: true; projectId: string; observedAt: number }
+  | { ok: false; reason: 'project-not-detected' | 'project-ambiguous' | 'source-tab-lost' | 'project-route-changed' };
+
+interface PendingProjectObservation {
+  id: string;
+  conversationId: string;
+  browser: string | null;
+  documentId: string | null;
+  navigationEpoch: number | null;
+  promise: Promise<ChatGptProjectObservationResult>;
+  settle: (result: ChatGptProjectObservationResult) => void;
+  timer: NodeJS.Timeout;
+}
+
+/**
+ * Wake sockets normally make this immediate. When that channel is unavailable, the companion's
+ * supported fallback is its 30-second maintenance alarm, so keep one bounded pass of headroom
+ * instead of failing a healthy already-open source before Chrome can perform that fallback.
+ * This is Project-sync observation only; it does not alter Compact & Resume Project-entry timing.
+ */
+const PROJECT_OBSERVATION_MS = 40_000;
+const projectObservations = new Map<string, PendingProjectObservation>();
+const projectObservationByConversation = new Map<string, PendingProjectObservation>();
+
+function finishProjectObservation(entry: PendingProjectObservation, result: ChatGptProjectObservationResult): void {
+  if (projectObservations.get(entry.id) !== entry) return;
+  projectObservations.delete(entry.id);
+  if (projectObservationByConversation.get(entry.conversationId) === entry) projectObservationByConversation.delete(entry.conversationId);
+  clearTimeout(entry.timer);
+  entry.settle(result);
+}
+
+/**
+ * Requests one exact current-chat Project observation. The bridge never enumerates account
+ * Projects: only the recent browser holder of this exact conversation can receive the request.
+ */
+export function requestChatGptProjectObservation(rawConversationId: string): Promise<ChatGptProjectObservationResult> {
+  const target = conversationId(rawConversationId);
+  if (!target) return Promise.resolve({ ok: false, reason: 'source-tab-lost' });
+  const existing = projectObservationByConversation.get(target);
+  if (existing) return existing.promise;
+  const holders = chatHolders(target);
+  if (holders.length > 1) return Promise.resolve({ ok: false, reason: 'project-ambiguous' });
+  if (holders.length === 0 && !browserWakeConnected()) return Promise.resolve({ ok: false, reason: 'source-tab-lost' });
+  let settle!: (result: ChatGptProjectObservationResult) => void;
+  const promise = new Promise<ChatGptProjectObservationResult>(resolve => { settle = resolve; });
+  const entry = {} as PendingProjectObservation;
+  Object.assign(entry, {
+    id: randomBytes(16).toString('hex'),
+    conversationId: target,
+    browser: holders[0] ?? null,
+    documentId: null,
+    navigationEpoch: null,
+    promise,
+    settle,
+    timer: setTimeout(() => finishProjectObservation(entry, { ok: false, reason: 'source-tab-lost' }), PROJECT_OBSERVATION_MS)
+  });
+  entry.timer.unref?.();
+  projectObservations.set(entry.id, entry);
+  projectObservationByConversation.set(target, entry);
+  wakeBrowserWork();
+  return promise;
+}
+
+/** One status response exposes only requests owned by this exact browser and conversation set. */
+function projectObservationOffers(browser: string | null, openConversations: ReadonlySet<string>): Array<{ id: string; conversationId: string }> {
+  if (!browser) return [];
+  const offers: Array<{ id: string; conversationId: string }> = [];
+  for (const entry of [...projectObservations.values()].slice(0, 16)) {
+    const holders = chatHolders(entry.conversationId);
+    if (holders.length > 1) {
+      finishProjectObservation(entry, { ok: false, reason: 'project-ambiguous' });
+      continue;
+    }
+    if (entry.browser && holders.length === 1 && holders[0] !== entry.browser) {
+      finishProjectObservation(entry, { ok: false, reason: 'source-tab-lost' });
+      continue;
+    }
+    if (holders.length !== 1 || holders[0] !== browser || !openConversations.has(entry.conversationId)) continue;
+    entry.browser ??= browser;
+    if (entry.browser === browser) offers.push({ id: entry.id, conversationId: entry.conversationId });
+  }
+  return offers;
+}
 
 /** The browsers that reported this chat open and are still polling. */
 function chatHolders(conversationId: string): string[] {
@@ -2422,6 +2509,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       {
         ok: true,
         conversations: live,
+        projectObservationRequests: projectObservationOffers(browser, openSet),
         stopTurns: await pendingStopCommands(),
         modelCatalogRequest: pendingChatModelRequest(),
         // This install's connector names, so the extension recognizes exactly its own traffic.
@@ -2461,6 +2549,68 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       },
       origin
     );
+  }
+
+  if (route === '/project-observation' && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    const id = typeof body?.id === 'string' && /^[0-9a-f]{32}$/.test(body.id) ? body.id : null;
+    const target = conversationId(body?.conversationId);
+    const status = typeof body?.status === 'string' ? body.status : '';
+    const documentId = typeof body?.documentId === 'string' && body.documentId.length > 0 && body.documentId.length <= 200
+      ? body.documentId : null;
+    const navigationEpoch = Number.isSafeInteger(body?.navigationEpoch) && Number(body.navigationEpoch) >= 0
+      ? Number(body.navigationEpoch) : null;
+    if (!id || !target || !['claim', 'observed', 'not-project', 'project-ambiguous', 'source-tab-lost', 'project-route-changed'].includes(status)) {
+      return json(res, 400, { error: 'invalid_project_observation' }, origin);
+    }
+    if (['claim', 'observed', 'not-project'].includes(status) && (!documentId || navigationEpoch === null)) {
+      return json(res, 400, { error: 'invalid_project_observation_source' }, origin);
+    }
+    const entry = projectObservations.get(id);
+    const browser = browserOf(req);
+    if (!entry || !browser || entry.browser !== browser || entry.conversationId !== target) {
+      return json(res, 409, { error: 'project_observation_not_owned' }, origin);
+    }
+    const holders = chatHolders(target);
+    if (holders.length > 1) {
+      finishProjectObservation(entry, { ok: false, reason: 'project-ambiguous' });
+      return json(res, 409, { error: 'project_ambiguous' }, origin);
+    }
+    if (holders.length !== 1 || holders[0] !== browser) {
+      finishProjectObservation(entry, { ok: false, reason: 'source-tab-lost' });
+      return json(res, 409, { error: 'project_source_lost' }, origin);
+    }
+    if (status === 'claim') {
+      if (entry.documentId === null && entry.navigationEpoch === null) {
+        entry.documentId = documentId;
+        entry.navigationEpoch = navigationEpoch;
+        return json(res, 200, { ok: true }, origin);
+      }
+      if (entry.documentId === documentId && entry.navigationEpoch === navigationEpoch) {
+        return json(res, 200, { ok: true }, origin);
+      }
+      finishProjectObservation(entry, { ok: false, reason: 'project-route-changed' });
+      return json(res, 409, { error: 'project_document_changed' }, origin);
+    }
+    if (status === 'observed' || status === 'not-project') {
+      if (entry.documentId === null || entry.navigationEpoch === null ||
+          entry.documentId !== documentId || entry.navigationEpoch !== navigationEpoch) {
+        finishProjectObservation(entry, { ok: false, reason: 'project-route-changed' });
+        return json(res, 409, { error: 'project_document_changed' }, origin);
+      }
+    }
+    if (status === 'observed') {
+      const projectId = normalizeChatGptProjectId(body.projectId);
+      if (!projectId) {
+        finishProjectObservation(entry, { ok: false, reason: 'project-route-changed' });
+        return json(res, 409, { error: 'project_route_changed' }, origin);
+      }
+      finishProjectObservation(entry, { ok: true, projectId, observedAt: Date.now() });
+    } else {
+      const reason = status === 'not-project' ? 'project-not-detected' : status as Exclude<ChatGptProjectObservationResult, { ok: true }>['reason'];
+      finishProjectObservation(entry, { ok: false, reason });
+    }
+    return json(res, 200, { ok: true }, origin);
   }
 
   // ChatGPT's own plugin list names the Core plugin: it is created in this account. The id is only
@@ -10503,6 +10653,9 @@ export function resetBridgeForTests(): void {
   lastSeenAt = null;
   browserSeenAt.clear();
   browserChats.clear();
+  for (const entry of [...projectObservations.values()]) finishProjectObservation(entry, { ok: false, reason: 'source-tab-lost' });
+  projectObservations.clear();
+  projectObservationByConversation.clear();
   revealBrowsers.clear();
   imageExportBrowsers.clear();
   for (const entry of pendingReveals.splice(0)) entry.settle(false);

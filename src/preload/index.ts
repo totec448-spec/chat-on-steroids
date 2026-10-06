@@ -246,6 +246,9 @@ const api = {
   addProject: () => call<LocalProject | null>('projects:add'),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
+  linkChatGptProject: (id: string, sessionId: string) => call<LocalProject>('projects:linkChatGpt', { id, sessionId }),
+  verifyChatGptProject: (id: string, sessionId: string) => call<LocalProject>('projects:verifyChatGpt', { id, sessionId }),
+  unlinkChatGptProject: (id: string) => call<LocalProject>('projects:unlinkChatGpt', { id }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {

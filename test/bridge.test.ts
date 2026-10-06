@@ -83,6 +83,7 @@ const {
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   revealChatInBrowser,
+  requestChatGptProjectObservation,
   startBridge,
   stopBridge,
   sweepStaleSwarm,
@@ -928,6 +929,106 @@ describe('provisioning', () => {
     // Authorization survived, so the first normal extension poll proves presence again.
     expect((await request('GET', '/status')).status).toBe(200);
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
+  });
+});
+
+describe('ChatGPT Project identity observation', () => {
+  it('hands one bounded observation request only to the exact browser holding the conversation', async () => {
+    await pair();
+    const conversation = 'abababab-1111-4222-8333-444444444444';
+    const project = 'g-p-11111111222233334444555555555555';
+    const browser = 'projectobserverbrowser01';
+    await request('POST', '/status', { browser, body: { openConversations: [conversation] } });
+
+    const pending = requestChatGptProjectObservation(conversation);
+    const status = await request('POST', '/status', { browser, body: { openConversations: [conversation] } });
+    expect(status.body.projectObservationRequests).toEqual([
+      expect.objectContaining({ id: expect.any(String), conversationId: conversation })
+    ]);
+    const offer = status.body.projectObservationRequests[0];
+
+    expect((await request('POST', '/project-observation', {
+      browser: 'differentbrowser0001',
+      body: {
+        id: offer.id, conversationId: conversation, status: 'observed',
+        documentId: 'document-one', navigationEpoch: 7, projectId: project
+      }
+    })).status).toBe(409);
+    expect((await request('POST', '/project-observation', {
+      browser,
+      body: {
+        id: offer.id, conversationId: conversation, status: 'claim',
+        documentId: 'document-one', navigationEpoch: 7
+      }
+    })).status).toBe(200);
+    expect((await request('POST', '/project-observation', {
+      browser,
+      body: {
+        id: offer.id, conversationId: conversation, status: 'observed',
+        documentId: 'document-one', navigationEpoch: 7, projectId: project
+      }
+    })).status).toBe(200);
+
+    await expect(pending).resolves.toEqual({ ok: true, projectId: project, observedAt: expect.any(Number) });
+    expect((await request('POST', '/status', { browser, body: { openConversations: [conversation] } })).body.projectObservationRequests)
+      .toEqual([]);
+  });
+
+  it('settles fail-closed when a Project result arrives before its exact document claim', async () => {
+    await pair();
+    const conversation = 'acacacac-1111-4222-8333-444444444444';
+    const project = 'g-p-12121212222233334444555555555555';
+    const browser = 'projectobserverbrowser03';
+    await request('POST', '/status', { browser, body: { openConversations: [conversation] } });
+
+    const pending = requestChatGptProjectObservation(conversation);
+    const status = await request('POST', '/status', { browser, body: { openConversations: [conversation] } });
+    const offer = status.body.projectObservationRequests[0];
+    expect((await request('POST', '/project-observation', {
+      browser,
+      body: {
+        id: offer.id, conversationId: conversation, status: 'observed',
+        documentId: 'document-one', navigationEpoch: 7, projectId: project
+      }
+    })).status).toBe(409);
+
+    await expect(pending).resolves.toEqual({ ok: false, reason: 'project-route-changed' });
+  });
+
+  it('fails closed when two live browsers report the same conversation', async () => {
+    await pair();
+    const conversation = 'bcbcbcbc-1111-4222-8333-444444444444';
+    await request('POST', '/status', { browser: 'projectbrowserholder01', body: { openConversations: [conversation] } });
+    await request('POST', '/status', { browser: 'projectbrowserholder02', body: { openConversations: [conversation] } });
+    await expect(requestChatGptProjectObservation(conversation)).resolves.toEqual({ ok: false, reason: 'project-ambiguous' });
+  });
+
+  it('rejects a Project result from a different document or navigation epoch than the claimed source', async () => {
+    await pair();
+    const conversation = 'cdcdcdcd-1111-4222-8333-444444444444';
+    const project = 'g-p-aaaaaaaa222233334444555555555555';
+    const browser = 'projectobserverbrowser02';
+    await request('POST', '/status', { browser, body: { openConversations: [conversation] } });
+
+    const pending = requestChatGptProjectObservation(conversation);
+    const status = await request('POST', '/status', { browser, body: { openConversations: [conversation] } });
+    const offer = status.body.projectObservationRequests[0];
+    expect((await request('POST', '/project-observation', {
+      browser,
+      body: {
+        id: offer.id, conversationId: conversation, status: 'claim',
+        documentId: 'document-one', navigationEpoch: 3
+      }
+    })).status).toBe(200);
+    expect((await request('POST', '/project-observation', {
+      browser,
+      body: {
+        id: offer.id, conversationId: conversation, status: 'observed',
+        documentId: 'document-two', navigationEpoch: 4, projectId: project
+      }
+    })).status).toBe(409);
+
+    await expect(pending).resolves.toEqual({ ok: false, reason: 'project-route-changed' });
   });
 });
 
