@@ -250,6 +250,10 @@ $('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
 $('sessionList').addEventListener('click', event => {
   if ((event.target as HTMLElement).closest('[data-id], [data-new-project]')) showTab('chat');
 }, { capture: true });
+// A project's "New chat in this project" lives in its row menu, outside the sidebar.
+document.addEventListener('click', event => {
+  if ((event.target as HTMLElement | null)?.closest?.('.row-menu [data-new-project]')) showTab('chat');
+}, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
 $('sidebarPets').addEventListener('click', () => showTab('pets'));
