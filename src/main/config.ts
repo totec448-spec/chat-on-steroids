@@ -615,12 +615,33 @@ export function initConfigPath(userDataDir: string): void {
   configPath = path.join(userDataDir, 'config.json');
 }
 
-export async function loadConfig(): Promise<Config> {
+/**
+ * Keeps an unusable settings file before recovery defaults can replace it.
+ *
+ * The next save after a failed read writes the recovery settings over the file. Found on the
+ * Windows test VM (2026-10-06): a settings file with a byte-order mark lost its folders and tunnel
+ * that way within a second. The copy keeps the original bytes next to the file; failing to write it
+ * is logged and never blocks starting.
+ */
+async function keepUnreadable(raw: string): Promise<void> {
+  const copy = `${configPath}.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   try {
-    const raw = await fs.readFile(configPath, 'utf8');
-    const parsed = configSchema.safeParse(JSON.parse(raw));
+    await fs.writeFile(copy, raw, 'utf8');
+    logError(`The settings file could not be used; its original was kept as ${path.basename(copy)}`);
+  } catch (error) {
+    logError(`Could not keep a copy of the unusable settings file: ${(error as Error).message}`);
+  }
+}
+
+export async function loadConfig(): Promise<Config> {
+  let raw: string | null = null;
+  try {
+    raw = await fs.readFile(configPath, 'utf8');
+    // Windows PowerShell 5.1 and older Notepad start UTF-8 files with a byte-order mark; it is not JSON.
+    const parsed = configSchema.safeParse(JSON.parse(raw.replace(/^\uFEFF/, '')));
     if (!parsed.success) {
       logError('Settings file was invalid and has been reset to defaults');
+      await keepUnreadable(raw);
       current = conservativeRecoveryConfig();
     } else {
       current = adoptCurrentGoalPrompt(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))));
@@ -636,6 +657,7 @@ export async function loadConfig(): Promise<Config> {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       logError(`Could not read settings: ${(err as Error).message}`);
+      if (raw !== null) await keepUnreadable(raw);
       current = conservativeRecoveryConfig();
     } else {
       current = defaultConfig();
