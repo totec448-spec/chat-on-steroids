@@ -51,10 +51,13 @@ for (const name of scripts) {
   const run = () => new Promise(resolve => {
     const child = spawn(how.command, [path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
     let output = '';
-    const keep = chunk => { output = (output + chunk).slice(-4000); };
+    // A check that throws inside its async body and then quits in a finally block exits 0: its
+    // failure only shows as an unhandled rejection. Two checks passed that way for weeks (#1144).
+    let unhandled = false;
+    const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'timeout', output }); }, TIMEOUT_MS);
-    child.on('close', code => { clearTimeout(timer); resolve({ code, output }); });
+    child.on('close', code => { clearTimeout(timer); resolve({ code: code === 0 && unhandled ? 'unhandled rejection' : code, output }); });
   });
   let outcome = await run();
   const first = outcome;
