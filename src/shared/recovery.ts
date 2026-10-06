@@ -1,7 +1,9 @@
 /** Read-only projection of an existing recovery deadline. Never authorizes an action. */
 export type RecoveryCountdown = {
-  kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup';
+  kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped';
   deadline: number;
+  /** Attempts already spent for a pickup that stopped at its durable limit. */
+  attempts?: number;
   /** The existing UI clock reveals this row without needing a new backend event. */
   visibleAt?: number;
   next?: 'queue' | 'goal' | 'loop' | 'continue';
@@ -10,6 +12,10 @@ export type RecoveryCountdown = {
   /** CoS still holds the source turn open during the existing post-reload wait. */
   generating?: true;
 };
+
+/** A pickup is offered at most three times: after 2, 5 and 10 minutes. */
+export const BROWSER_PICKUP_MAX_ATTEMPTS = 3;
+export const BROWSER_PICKUP_BACKOFF_MS = [2, 5, 10].map(minutes => minutes * 60_000) as [number, ...number[]];
 
 const CONTINUE_TEXTS = [
   'Continue until you are fully finished.',
