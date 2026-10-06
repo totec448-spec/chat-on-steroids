@@ -1829,7 +1829,8 @@ var CLF_DOM = (() => {
   const REVIVAL_RESIDUE = new RegExp('\\(ChatOnSteroids:youarestill[A-Za-z0-9_-]{1,40}inthesamerun,' +
     'andthisistheprimeagenttalkingtoyouagaininthechatyoualreadyknow\\.' +
     'Pickupfromwhatyoudidherebeforeratherthanstartingover\\.' +
-    'Reportwithagentsaction=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
+    // With a connector suffix the sentence names this computer's Core: "the agents tool of … (Windows): ".
+    'Reportwith(?:agents|theagentstoolof[^:]{1,160}:)action=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
 
   /**
    * Empties an editor that holds only an earlier worker wake (#882).
