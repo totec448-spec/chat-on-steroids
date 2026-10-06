@@ -116,7 +116,7 @@ import {
   withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
-import { searchSessions } from './session/search.js';
+import { locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -1432,6 +1432,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:search', async (payload) => {
     const { query } = z.object({ query: z.string().max(200) }).parse(payload);
     return searchSessions(query);
+  });
+  // Where a text match is in its chat, so opening the result shows that message.
+  handle('sessions:locate-match', async (payload) => {
+    const { id, query } = sessionIdArg.extend({ query: z.string().max(200) }).parse(payload);
+    return locateSearchMatch(id, query);
   });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);
