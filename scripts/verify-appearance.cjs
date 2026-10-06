@@ -135,6 +135,10 @@ app.whenReady().then(async () => {
     const layout=[];
     for(const [width,zoom] of [[1100,1],[800,1.17],[1100,1.5],[640,1]]) {
       win.setSize(width,900); win.webContents.setZoomFactor(zoom);
+      // Resize and zoom land asynchronously; on slow CI runners two frames still showed the previous
+      // zoom (640 px at 1.5 read as 427 px). Wait until the page reports this window at this zoom.
+      const expected=Math.round(win.getContentSize()[0]/zoom);
+      for(let i=0;i<200 && Math.abs(await js('innerWidth')-expected)>1;i++) await new Promise(r=>setTimeout(r,10));
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
       const geometry=await js(`(() => {const panel=document.getElementById('appearancePanel');return {viewport:innerWidth,scroll:panel.scrollWidth,width:panel.clientWidth,body:document.documentElement.scrollWidth};})()`);
       assert.ok(geometry.scroll<=geometry.width+1,JSON.stringify({width,zoom,geometry}));
