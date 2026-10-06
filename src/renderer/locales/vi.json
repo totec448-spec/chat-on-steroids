@@ -1588,6 +1588,7 @@
   "Continue an interrupted answer when the app can verify the unfinished turn.": "Tiếp tục câu trả lời bị gián đoạn khi ứng dụng có thể xác minh lượt chưa hoàn tất.",
   "Recovery timing details": "Chi tiết thời gian khôi phục",
   "Unverified": "Chưa xác minh",
+  "This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.": "Tài khoản ChatGPT này không cung cấp mô hình này, vì vậy mô hình hiện tại của ChatGPT sẽ được dùng.",
   "Failed": "Thất bại",
   "Finished": "Đã hoàn tất",
   "Could not copy text.": "Không thể sao chép văn bản.",

@@ -36,6 +36,7 @@
   "Continue an interrupted answer when the app can verify the unfinished turn.": "Uygulama tamamlanmamış turu doğrulayabildiğinde kesilen yanıtı sürdürür.",
   "Recovery timing details": "Kurtarma zamanlaması ayrıntıları",
   "Unverified": "Doğrulanmadı",
+  "This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.": "Bu ChatGPT hesabı bu modeli sunmuyor, bu yüzden ChatGPT'nin geçerli modeli kullanılıyor.",
   "Failed": "Başarısız",
   "Finished": "Tamamlandı",
   "Could not copy text.": "Metin kopyalanamadı.",

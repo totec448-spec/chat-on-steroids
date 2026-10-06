@@ -1795,7 +1795,7 @@ export function goalHelperSelection(): { model: string | null; reasoningEffort: 
   if (key) refreshForUnoffered(`goal helper ${key}`);
   if (key && key !== helperFallbackLogged) {
     helperFallbackLogged = key;
-    logWarn(`goal: the saved helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`);
+    logWarn(`goal: the helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`);
   }
   return { model, reasoningEffort };
 }

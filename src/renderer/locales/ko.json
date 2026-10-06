@@ -1588,6 +1588,7 @@
   "Continue an interrupted answer when the app can verify the unfinished turn.": "앱이 미완료 턴을 확인할 수 있을 때 중단된 답변을 이어갑니다.",
   "Recovery timing details": "복구 타이밍 세부 정보",
   "Unverified": "미검증",
+  "This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.": "이 ChatGPT 계정에서는 이 모델을 제공하지 않으므로 ChatGPT의 현재 모델을 사용합니다.",
   "Failed": "실패",
   "Finished": "완료됨",
   "Could not copy text.": "텍스트를 복사하지 못했습니다.",
