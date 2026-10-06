@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT가 승인을 기다리고 있습니다",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT에서 도구 호출을 허용하거나 거부할 때까지 채팅이 일시 중지됩니다. 클릭하여 여세요.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT가 이 채팅에서 도구 호출을 허용하거나 거부하기를 기다리고 있습니다. 그곳에서 응답할 때까지 아무것도 진행되지 않습니다.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "이 채팅에서 ChatGPT가 요청한 도구 승인에 응답했습니다."
+  "The tool approval ChatGPT asked for in this chat was answered.": "이 채팅에서 ChatGPT가 요청한 도구 승인에 응답했습니다.",
+  "What's new": "새로운 기능",
+  "Full release notes": "전체 릴리스 노트",
+  "Version {0}": "버전 {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "채팅 고정, 어디서나 검색, ChatGPT가 기다릴 때 알림.",
+  "Pin chats": "채팅 고정",
+  "Keep the chats you use most at the top of the sidebar.": "가장 많이 쓰는 채팅을 사이드바 맨 위에 두세요.",
+  "One menu for every chat": "모든 채팅에 하나의 메뉴",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "⋯ 메뉴에서 채팅을 고정, 이름 변경, 열기하거나 링크를 복사하세요.",
+  "Search from anywhere": "어디서나 검색",
+  "{0} finds any chat and opens it at the message that matched.": "{0}로 어떤 채팅이든 찾아 일치한 메시지에서 엽니다.",
+  "Search your settings": "설정 검색",
+  "Type in Settings to find any setting on any page.": "설정에서 입력하면 모든 페이지의 설정을 찾을 수 있습니다.",
+  "Know when ChatGPT is waiting": "ChatGPT가 기다릴 때 알기",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "ChatGPT가 도구 허용을 요청하면 멈춰 있지 않고 채팅이 알려 줍니다.",
+  "One connection control": "하나의 연결 컨트롤",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "사이드바의 작은 캡슐이 연결 상태를 보여 주고 끊기면 알려 줍니다."
 }

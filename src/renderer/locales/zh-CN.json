@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT 正在等待你的批准",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "一个聊天已暂停，直到你在 ChatGPT 中允许或拒绝一次工具调用。点击打开。",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT 正在等待你允许或拒绝此聊天中的一次工具调用。在你于那里作答之前，不会继续。",
-  "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT 在此聊天中请求的工具批准已得到回应。"
+  "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT 在此聊天中请求的工具批准已得到回应。",
+  "What's new": "新功能",
+  "Full release notes": "完整版本说明",
+  "Version {0}": "版本 {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "置顶聊天、随处搜索，并在 ChatGPT 等你时及时知道。",
+  "Pin chats": "置顶聊天",
+  "Keep the chats you use most at the top of the sidebar.": "把最常用的聊天固定在侧边栏顶部。",
+  "One menu for every chat": "每个聊天一个菜单",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "在 ⋯ 菜单中置顶、重命名、打开聊天或复制其链接。",
+  "Search from anywhere": "随处搜索",
+  "{0} finds any chat and opens it at the message that matched.": "{0} 可找到任意聊天，并在匹配的消息处打开。",
+  "Search your settings": "搜索设置",
+  "Type in Settings to find any setting on any page.": "在设置中输入即可找到任意页面上的任意设置。",
+  "Know when ChatGPT is waiting": "知道 ChatGPT 何时在等你",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "当 ChatGPT 请求你允许某个工具时，聊天会告诉你，而不是停在那里。",
+  "One connection control": "一个连接控件",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "侧边栏中的小胶囊显示连接状态，并在断开时提醒你。"
 }

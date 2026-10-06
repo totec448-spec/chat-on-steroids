@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT があなたの承認を待っています",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT でツール呼び出しを許可または拒否するまで、チャットは一時停止しています。クリックして開きます。",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT はこのチャットでツール呼び出しを許可するか拒否するかを待っています。そこで応答するまで何も進みません。",
-  "The tool approval ChatGPT asked for in this chat was answered.": "このチャットで ChatGPT が求めたツールの承認に応答しました。"
+  "The tool approval ChatGPT asked for in this chat was answered.": "このチャットで ChatGPT が求めたツールの承認に応答しました。",
+  "What's new": "新機能",
+  "Full release notes": "リリースノート全文",
+  "Version {0}": "バージョン {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "チャットのピン留め、どこからでも検索、ChatGPT が待っているときの通知。",
+  "Pin chats": "チャットをピン留め",
+  "Keep the chats you use most at the top of the sidebar.": "よく使うチャットをサイドバーの上部に固定できます。",
+  "One menu for every chat": "すべてのチャットにひとつのメニュー",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "⋯ メニューからピン留め、名前の変更、開く、リンクのコピーができます。",
+  "Search from anywhere": "どこからでも検索",
+  "{0} finds any chat and opens it at the message that matched.": "{0} でどのチャットも見つかり、一致したメッセージの位置で開きます。",
+  "Search your settings": "設定を検索",
+  "Type in Settings to find any setting on any page.": "設定で入力すると、どのページの設定でも見つかります。",
+  "Know when ChatGPT is waiting": "ChatGPT が待っているときにわかる",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "ChatGPT がツールの許可を求めると、止まったままにせずチャットがお知らせします。",
+  "One connection control": "ひとつの接続コントロール",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "サイドバーの小さなカプセルが接続を表示し、切断されるとお知らせします。"
 }

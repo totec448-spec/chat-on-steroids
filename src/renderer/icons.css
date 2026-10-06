@@ -80,6 +80,7 @@
 .ph.ph-palette::before { content: '\e6c8'; }
 .ph.ph-paw-print::before { content: '\e648'; }
 .ph.ph-pencil-simple::before { content: '\e3b4'; }
+.ph.ph-plug::before { content: '\e946'; }
 .ph.ph-push-pin-simple::before { content: '\e65c'; }
 .ph.ph-play::before { content: '\e3d0'; }
 .ph.ph-plus::before { content: '\e3d4'; }
@@ -89,6 +90,7 @@
 .ph.ph-robot::before { content: '\e762'; }
 .ph.ph-sidebar-simple::before { content: '\ec24'; }
 .ph.ph-sliders-horizontal::before { content: '\e434'; }
+.ph.ph-sparkle::before { content: '\e6a2'; }
 .ph.ph-star::before { content: '\e46a'; }
 .ph.ph-sign-in::before { content: '\e428'; }
 .ph.ph-sign-out::before { content: '\e42a'; }

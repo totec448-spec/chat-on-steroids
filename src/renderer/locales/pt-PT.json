@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "O ChatGPT está à espera da sua aprovação",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Um chat está em pausa até permitir ou recusar uma chamada de ferramenta no ChatGPT. Clique para o abrir.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "O ChatGPT está à espera que permita ou recuse uma chamada de ferramenta neste chat. Nada continua até responder lá.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "A aprovação de ferramenta que o ChatGPT pediu neste chat foi respondida."
+  "The tool approval ChatGPT asked for in this chat was answered.": "A aprovação de ferramenta que o ChatGPT pediu neste chat foi respondida.",
+  "What's new": "Novidades",
+  "Full release notes": "Notas completas da versão",
+  "Version {0}": "Versão {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "Afixe os seus chats, pesquise a partir de qualquer lado e saiba quando o ChatGPT está à sua espera.",
+  "Pin chats": "Afixar chats",
+  "Keep the chats you use most at the top of the sidebar.": "Mantenha os chats que mais usa no topo da barra lateral.",
+  "One menu for every chat": "Um menu para cada chat",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "Afixe, mude o nome, abra ou copie a ligação de um chat a partir do menu ⋯.",
+  "Search from anywhere": "Pesquise a partir de qualquer lado",
+  "{0} finds any chat and opens it at the message that matched.": "{0} encontra qualquer chat e abre-o na mensagem correspondente.",
+  "Search your settings": "Pesquise nas definições",
+  "Type in Settings to find any setting on any page.": "Escreva nas Definições para encontrar qualquer definição em qualquer página.",
+  "Know when ChatGPT is waiting": "Saiba quando o ChatGPT está à espera",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Quando o ChatGPT lhe pede para permitir uma ferramenta, o chat avisa-o em vez de ficar parado.",
+  "One connection control": "Um único controlo de ligação",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Uma pequena cápsula na barra lateral mostra a ligação e avisa-o se esta cair."
 }

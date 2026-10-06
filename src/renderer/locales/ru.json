@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT ждёт вашего разрешения",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Чат приостановлен, пока вы не разрешите или не отклоните вызов инструмента в ChatGPT. Нажмите, чтобы открыть его.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT ждёт, пока вы разрешите или отклоните вызов инструмента в этом чате. Ничего не продолжится, пока вы не ответите там.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "На запрос ChatGPT о разрешении инструмента в этом чате дан ответ."
+  "The tool approval ChatGPT asked for in this chat was answered.": "На запрос ChatGPT о разрешении инструмента в этом чате дан ответ.",
+  "What's new": "Что нового",
+  "Full release notes": "Полные примечания к выпуску",
+  "Version {0}": "Версия {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "Закрепляйте чаты, ищите откуда угодно и знайте, когда ChatGPT ждёт вас.",
+  "Pin chats": "Закрепление чатов",
+  "Keep the chats you use most at the top of the sidebar.": "Держите самые нужные чаты наверху боковой панели.",
+  "One menu for every chat": "Одно меню для каждого чата",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "Закрепляйте, переименовывайте, открывайте чат или копируйте ссылку на него из меню ⋯.",
+  "Search from anywhere": "Поиск откуда угодно",
+  "{0} finds any chat and opens it at the message that matched.": "{0} находит любой чат и открывает его на найденном сообщении.",
+  "Search your settings": "Поиск по настройкам",
+  "Type in Settings to find any setting on any page.": "Начните вводить в Настройках, чтобы найти любую настройку на любой странице.",
+  "Know when ChatGPT is waiting": "Знайте, когда ChatGPT ждёт",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Когда ChatGPT просит разрешить инструмент, чат сообщает об этом, а не просто стоит.",
+  "One connection control": "Один элемент подключения",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Небольшая капсула в боковой панели показывает подключение и сообщает, если оно прервётся."
 }

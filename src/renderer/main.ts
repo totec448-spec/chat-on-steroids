@@ -13,6 +13,7 @@ import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
+import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -2498,6 +2499,9 @@ void (async () => {
   await refresh();
   // A first run has nothing set up, so open on the wizard rather than an empty Home.
   showTab(state && missingStep(state)?.step === 'folder' ? 'setup' : 'chat');
+  // What's New after a real update (#1172); a first run on the Setup wizard has nothing new to show.
+  const started = state as AppState | null;
+  if (started && missingStep(started)?.step !== 'folder') initWhatsNew(started.update.current, started.config.ui.lastSeenVersion);
   const entries = await run(api.getLog());
   const key = (entry: LogEntry): string => `${entry.time}\0${entry.level}\0${entry.agent ?? ''}\0${entry.message}`;
   const shown = new Map<string, number>();

@@ -11,6 +11,7 @@ Live checks for **VERSION**, on the packaged build installed like a user would, 
 - [ ] **UI sweep:** every page and panel in every language, with no console errors and no `{0}` or `undefined` in the text; `npm run verify:ui` passes.
 - [ ] **Changed controls:** each control this release changes, tried with real data (for example the model menu with an Instant, a Thinking and a Pro model). Does it make sense, not only work?
 - [ ] **Release notes:** `docs/release-notes/VERSION.md` is written for users and thanks every contributor.
+- [ ] **What's New:** `src/renderer/whats-new.ts` has this version's entry (the Highlights, shortened, translated into every app language), and it shows once after updating from the previous release.
 
 ### After publishing
 

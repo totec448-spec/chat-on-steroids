@@ -1988,5 +1988,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT onayını bekliyor",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT'de bir araç çağrısına izin verene veya reddedene kadar bir sohbet duraklatıldı. Açmak için tıkla.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT bu sohbette bir araç çağrısına izin vermeni veya reddetmeni bekliyor. Orada yanıt verene kadar hiçbir şey devam etmez.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT'nin bu sohbette istediği araç onayı yanıtlandı."
+  "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT'nin bu sohbette istediği araç onayı yanıtlandı.",
+  "What's new": "Yenilikler",
+  "Full release notes": "Tüm sürüm notları",
+  "Version {0}": "Sürüm {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "Sohbetlerini sabitle, her yerden ara ve ChatGPT seni beklediğinde haberin olsun.",
+  "Pin chats": "Sohbetleri sabitle",
+  "Keep the chats you use most at the top of the sidebar.": "En çok kullandığın sohbetleri kenar çubuğunun üstünde tut.",
+  "One menu for every chat": "Her sohbet için tek menü",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "Bir sohbeti ⋯ menüsünden sabitle, yeniden adlandır, aç veya bağlantısını kopyala.",
+  "Search from anywhere": "Her yerden ara",
+  "{0} finds any chat and opens it at the message that matched.": "{0} herhangi bir sohbeti bulur ve eşleşen mesajda açar.",
+  "Search your settings": "Ayarlarda ara",
+  "Type in Settings to find any setting on any page.": "Herhangi bir sayfadaki herhangi bir ayarı bulmak için Ayarlar'da yaz.",
+  "Know when ChatGPT is waiting": "ChatGPT beklediğinde haberin olsun",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "ChatGPT bir araca izin vermeni istediğinde sohbet olduğu yerde durmak yerine sana söyler.",
+  "One connection control": "Tek bağlantı kontrolü",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Kenar çubuğundaki küçük bir kapsül bağlantıyı gösterir ve koparsa haber verir."
 }
