@@ -4850,7 +4850,10 @@ it.each(['scrollend', 'no-movement-frame'])(
       pane.dispatchEvent(new w.Event('scroll'));
       pane.dispatchEvent(new w.Event('scrollend'));
     } else {
-      await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+      // Input that moved nothing expires after two frames and at least 100 ms.
+      const armed = w.performance.now();
+      for (let frames = 0; frames < 3 || w.performance.now() - armed < 150; frames++)
+        await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
     }
     // No fresh input: a repaint/clamp is not the reader moving away from the end.
     pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
@@ -4859,6 +4862,25 @@ it.each(['scrollend', 'no-movement-frame'])(
     expect(pane.scrollTop).toBe(pane.scrollHeight);
   }
 );
+
+it('counts a smooth wheel scroll that starts a frame after its wheel event as reading', async () => {
+  // A smooth scroll's first movement comes a frame after the wheel event. Expiring the wheel at that
+  // frame meant one notch up never counted, and the next delivery pulled the reader back down.
+  const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `notch-${i}`, message: text(`Item ${i + 1}`) }));
+  const { w, append } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  pane.scrollTop = pane.scrollHeight;
+  pane.dispatchEvent(new w.WheelEvent('wheel'));
+  await new Promise<void>(resolve => w.requestAnimationFrame(() => resolve()));
+  pane.scrollTop = 300; pane.dispatchEvent(new w.Event('scroll'));
+  await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message',
+    messageId: 'notch-answer', message: text('A growing answer'), final: false }]);
+  expect(pane.scrollTop).toBe(300);
+});
 
 it('keeps a slow scrolling gesture through its final position at the end', async () => {
   const rows = Array.from({ length: 40 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
