@@ -41,7 +41,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
+        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
@@ -74,13 +74,7 @@
         </button>
       </nav>
         <section class="sidebar-sessions">
-          <div class="sidebar-search">
-            <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
-            <input id="chatSearch" type="search" placeholder="Search chats" aria-label="Search chats" autocomplete="off" spellcheck="false" />
-            <button class="btn sidebar-search-clear" id="chatSearchClear" type="button" title="Clear search" aria-label="Clear search" hidden></button>
-          </div>
           <div class="scroll">
-            <div id="searchResults" aria-live="polite" hidden></div>
             <div id="sessionList">
               <details class="sidebar-session-section" id="projectsSection" open>
                 <summary class="sidebar-session-heading">
@@ -1326,6 +1320,16 @@
       <!-- --------------------------------------------------------------- nav -->
 
     </div>
+
+    <!-- Chat search (⌘K / Ctrl+K, or the magnifier beside the app name): recent chats, then matches. -->
+    <dialog class="search-dialog" id="searchDialog" aria-label="Search chats">
+      <div class="search-dialog-field">
+        <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+        <input id="chatSearch" type="search" placeholder="Search chats" aria-label="Search chats" aria-controls="searchResults" autocomplete="off" spellcheck="false" />
+        <button class="btn search-dialog-clear" id="chatSearchClear" type="button" title="Clear search" aria-label="Clear search" hidden></button>
+      </div>
+      <div class="search-dialog-results" id="searchResults" aria-live="polite"></div>
+    </dialog>
 
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">

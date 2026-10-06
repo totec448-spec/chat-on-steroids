@@ -12,6 +12,13 @@ import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/go
 import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
 
+/** jsdom has no modal dialogs: enough of showModal/close for the app's dialogs, close event included. */
+function installDialog(w: any): void {
+  const proto = w.HTMLDialogElement.prototype;
+  if (typeof proto.showModal !== 'function') proto.showModal = function (this: any) { this.open = true; };
+  if (typeof proto.close !== 'function') proto.close = function (this: any) { if (!this.open) return; this.open = false; this.dispatchEvent(new w.Event('close')); };
+}
+
 /** A row's menu item: opens the row's "⋯" menu (it lives in the document body) and returns the item. */
 function rowMenuItem(row: Element, action: string): HTMLButtonElement | null {
   const doc = row.ownerDocument;
@@ -24,7 +31,6 @@ function closeRowMenus(doc: Document): void {
   doc.querySelector('.row-menu')?.dispatchEvent(new (doc.defaultView as any).KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 }
 
-
 let dom: JSDOM | null = null;
 afterEach(() => {
   dom?.window.close();
@@ -35,6 +41,7 @@ afterEach(() => {
 it('does not overwrite a focused dirty settings field on an unsolicited state push', async () => {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+  installDialog(dom.window);
   const w = dom.window;
   w.HTMLElement.prototype.animate = vi.fn() as any;
   Object.assign(globalThis, {
@@ -216,6 +223,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
 it('serializes settings intent so rapid toggles and later UI changes cannot undo each other', async () => {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+  installDialog(dom.window);
   const w = dom.window;
   w.HTMLElement.prototype.animate = vi.fn() as any;
   Object.assign(globalThis, {
@@ -372,6 +380,7 @@ async function mountChat(
 ): Promise<GoalMount> {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+  installDialog(dom.window);
   const w = dom.window;
   w.HTMLElement.prototype.animate = vi.fn() as any;
   Object.assign(globalThis, { Event: w.Event });
@@ -696,7 +705,7 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   await vi.waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
 });
 
-it('searches chats from the sidebar: results replace the lists, matches are marked, Escape brings the lists back (#1107)', async () => {
+it('searches chats in a dialog opened beside the app name: recent chats first, then marked matches (#1117)', async () => {
   const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
     estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
@@ -716,14 +725,23 @@ it('searches chats from the sidebar: results replace the lists, matches are mark
   const field = doc.getElementById('chatSearch') as HTMLInputElement;
   const results = doc.getElementById('searchResults')!;
   const lists = doc.getElementById('sessionList')!;
+  const dialog = doc.getElementById('searchDialog') as HTMLDialogElement;
   await vi.waitFor(() => expect(doc.querySelector('[data-id="search-listed-0001"]')).not.toBeNull());
-  expect(results.hidden).toBe(true);
+  // No search field in the sidebar: one icon beside the app name opens the dialog.
+  expect(doc.querySelector('.sidebar #chatSearch')).toBeNull();
+  expect(dialog.open).toBe(false);
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  expect(dialog.open).toBe(true);
+  expect(doc.activeElement).toBe(field);
+  // Before anything is typed: the most recent chats.
+  await vi.waitFor(() => expect(results.querySelector('.search-heading')?.textContent).toBe('Recent'));
+  expect([...results.querySelectorAll('.search-result b')].map(title => title.textContent)).toEqual(['Listed chat']);
 
   field.value = 'bridge';
   field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(results.querySelector('.search-result')).not.toBeNull());
-  expect(lists.hidden).toBe(true);
-  expect(results.hidden).toBe(false);
+  await vi.waitFor(() => expect(results.querySelector('.search-snippet')).not.toBeNull());
+  // The chat lists keep their place behind the dialog.
+  expect(lists.hidden).toBe(false);
   expect((doc.getElementById('chatSearchClear') as HTMLButtonElement).hidden).toBe(false);
   expect(results.querySelector('.search-result b')!.textContent).toBe('Release planning');
   expect([...results.querySelectorAll('.search-snippet mark')].map(mark => mark.textContent)).toEqual(['bridge']);
@@ -732,22 +750,31 @@ it('searches chats from the sidebar: results replace the lists, matches are mark
   indexed = 3;
   await vi.waitFor(() => expect(results.querySelector('.search-status')).toBeNull());
 
+  // Opening a result closes the dialog and opens the chat.
   (results.querySelector('.search-result') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(dialog.open).toBe(false));
   await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
-  expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true);
+
+  // Opened again, the last query is still there, selected, and the open chat is marked.
+  (doc.getElementById('searchMenuItem') as HTMLButtonElement).click();
+  expect(dialog.open).toBe(true);
+  await vi.waitFor(() => expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true));
 
   field.value = 'nothing';
   field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
   await vi.waitFor(() => expect(results.textContent).toContain('No chats match'));
 
-  field.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await vi.waitFor(() => expect(lists.hidden).toBe(false));
-  expect(results.hidden).toBe(true);
+  // The clear button empties the query and brings the recent chats back.
+  (doc.getElementById('chatSearchClear') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(results.querySelector('.search-heading')).not.toBeNull());
   expect(field.value).toBe('');
+  // A click on the backdrop lands on the dialog itself and closes it.
+  dialog.dispatchEvent(new mounted.window.MouseEvent('click', { bubbles: true }));
+  await vi.waitFor(() => expect(dialog.open).toBe(false));
 });
 
 it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as const)(
-  'focuses chat search with the primary shortcut on %s, never from the terminal, and says when results were capped', async (platform, primary, other) => {
+  'opens chat search with the primary shortcut on %s, never from the terminal, and says when results were capped', async (platform, primary, other) => {
   vi.stubGlobal('navigator', { ...globalThis.navigator, platform });
   try {
     const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
@@ -776,6 +803,7 @@ it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as
     expect(press(input, primary)).toBe(true);
     expect(doc.activeElement).toBe(input);
     expect(press(doc.body, primary)).toBe(false);
+    expect((doc.getElementById('searchDialog') as HTMLDialogElement).open).toBe(true);
     expect(doc.activeElement).toBe(field);
 
     field.value = 'listed';

@@ -3507,8 +3507,14 @@ accent-folded with `foldCase`, which keeps UTF-16 lengths so ranges index the or
 first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16
 `[start, end)` ranges into `title` and `snippet.text`. While `indexed < total`, text results
 cover only indexed chats and the renderer asks again. `limited: true` means more chats matched than
-`results` holds; the sidebar then asks for another word. ⌘K (macOS) / Ctrl+K focuses the field,
-except inside the terminal. Primary-shortcut labels (`kbd[data-shortcut]`, the sidebar tooltip)
+`results` holds; the dialog then asks for another word. Search is a dialog (`#searchDialog`, #1117/#1120),
+not a sidebar field: the magnifier at the end of the app name's row, ⌘K (macOS) / Ctrl+K (except
+inside the terminal) and View → Search Chats open it. Empty, it lists up to 30 recent chats (helpers,
+sub-agents and diagnostics rows left out); it keeps one size while typing and fades in and out.
+Opening a text match calls `sessions:locate-match { id, query }` → `SessionSearchLocation | null`
+(the first user/assistant message holding a query word, read from the recording only then); the
+timeline shows it from the loaded page or loads the page around it as history, centered and briefly
+marked. Jump to latest from a history page whose end is not loaded opens the chat at its end. Primary-shortcut labels (`kbd[data-shortcut]`, the sidebar tooltip)
 come from `renderer/shortcuts.ts`: ⌘ on macOS, the localized Ctrl ("Strg") elsewhere.
 
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider

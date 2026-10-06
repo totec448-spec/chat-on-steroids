@@ -497,6 +497,10 @@ code {
 .sidebar-resize:hover, .sidebar-resize:focus-visible, .app.is-resizing-sidebar .sidebar-resize { background: linear-gradient(to bottom, transparent 18px, var(--accent-edge) 36px, transparent 88%) center / 1px 100% no-repeat; outline: none; }
 .app.is-resizing-sidebar, .app.is-resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
+/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list. */
+.sidebar-brand .sidebar-brand-search { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
+.sidebar-brand .sidebar-brand-search:hover, .sidebar-brand .sidebar-brand-search:focus-visible { color: var(--ink); background: var(--hover); }
+.sidebar-brand-search .ico { --ico: 16px; }
 .sidebar-brand strong { font-size: calc(15px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: .01em; }
 .sidebar-brand .mark { display: none; }
@@ -522,16 +526,36 @@ code {
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
 /* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
 .sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
-/* Chat search (#1107): one field above Projects and Chats; results take their place while it holds a query. */
-.sidebar-search { position: relative; display: flex; align-items: center; margin: 0 0 6px; }
-.sidebar-search > .ico { position: absolute; left: 10px; --ico: 14px; color: var(--faint); pointer-events: none; }
-.sidebar-search input { flex: 1; min-width: 0; height: 30px; padding: 0 30px 0 30px; border: 1px solid var(--line); border-radius: 8px;
-  background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); outline: none; }
-.sidebar-search input::placeholder { color: var(--faint); }
-.sidebar-search input:focus { border-color: var(--accent); }
-.sidebar-search input::-webkit-search-cancel-button { display: none; }
-.sidebar-search-clear { position: absolute; right: 4px; padding: 4px; border: 0; background: transparent; color: var(--faint); }
-.sidebar-search-clear .ico { --ico: 13px; }
+/* Chat search dialog (#1117): recent chats, then matches with the passage that matched. */
+/* One fixed size while typing: the results scroll inside it, the box never grows or shrinks. */
+.search-dialog { width: min(580px, calc(100vw - 40px)); height: min(460px, calc(100dvh - 140px)); max-height: none; margin: 12vh auto auto; padding: 0; overflow: hidden; color: var(--ink);
+  background: var(--card); border: 1px solid var(--edge); border-radius: var(--r-xl); box-shadow: 0 24px 90px #0006; }
+.search-dialog[open] { display: flex; flex-direction: column; animation: search-dialog-in 160ms cubic-bezier(.2, .8, .2, 1); }
+.search-dialog::backdrop { background: #0005; }
+.search-dialog[open]::backdrop { animation: search-backdrop-in 160ms ease-out; }
+.search-dialog.is-closing { animation: search-dialog-out 110ms ease-in forwards; }
+.search-dialog.is-closing::backdrop { animation: search-backdrop-out 110ms ease-in forwards; }
+@keyframes search-dialog-in { from { opacity: 0; transform: translateY(-6px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes search-dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-4px) scale(.985); } }
+@keyframes search-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes search-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .search-dialog[open], .search-dialog.is-closing, .search-dialog[open]::backdrop, .search-dialog.is-closing::backdrop { animation: none; }
+}
+/* A fixed row: the clear button keeps its place while hidden, so typing never moves the line below. */
+.search-dialog-field { display: flex; align-items: center; gap: 10px; flex: none; box-sizing: border-box; height: 54px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); }
+.search-dialog-field > .ico { --ico: 17px; color: var(--faint); }
+.search-dialog-field input { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit;
+  font-size: calc(15px * var(--text-scale, 1)); outline: none; }
+.search-dialog-field input::placeholder { color: var(--faint); }
+.search-dialog-field input::-webkit-search-cancel-button { display: none; }
+.search-dialog-clear { display: grid; place-items: center; flex: none; box-sizing: border-box; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--faint); }
+.search-dialog-clear[hidden] { display: grid; visibility: hidden; }
+.search-dialog-clear:hover { color: var(--ink); background: var(--hover); }
+.search-dialog-clear .ico { --ico: 14px; }
+/* The scrollbar's room is kept even without one, so rows never shift sideways when results grow. */
+.search-dialog-results { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 6px 8px 8px; }
+.search-heading { padding: 8px 10px 4px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; }
 .search-list { display: flex; flex-direction: column; }
 .search-result { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-height: 36px; padding: 7px 10px; margin: 2px 0;
   border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
@@ -540,6 +564,18 @@ code {
 .search-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--soft);
   font-size: calc(12px * var(--text-scale, 1)); line-height: 17px; overflow-wrap: anywhere; }
 .search-result mark { background: var(--accent-wash); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+/* The message a search result opened at: briefly washed, then back to normal. */
+.is-search-hit .said:not(.is-user) { border-radius: 8px; animation: search-hit 2.6s ease-out; }
+.is-search-hit .said.is-user > .user-message-text { animation: search-hit-ring 2.6s ease-out; }
+@keyframes search-hit {
+  0%, 35% { background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); }
+  100% { background: transparent; box-shadow: 0 0 0 8px transparent; }
+}
+@keyframes search-hit-ring { 0%, 35% { box-shadow: 0 0 0 2px var(--accent-edge); } 100% { box-shadow: 0 0 0 2px transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .is-search-hit .said:not(.is-user) { animation: none; background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); }
+  .is-search-hit .said.is-user > .user-message-text { animation: none; box-shadow: 0 0 0 2px var(--accent-edge); }
+}
 .search-status { padding: 8px 10px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
 .sidebar-sessions h2 { font-size: calc(10px * var(--text-scale, 1)); padding: 10px 8px; }
 .sidebar-sessions .foot { border: 0; padding: 12px 8px; font-size: calc(10px * var(--text-scale, 1)); }

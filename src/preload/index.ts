@@ -12,7 +12,7 @@ import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePre
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
-import type { RunningToolActivity, SessionChange, SessionSearchReply, ToolEditReview } from '../shared/session.js';
+import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, ToolEditReview } from '../shared/session.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
@@ -331,6 +331,7 @@ const api = {
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   /** Chats matching every word of `query`, by title first, then by what was said in them. */
   searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
+  locateSearchMatch: (id: string, query: string) => call<SessionSearchLocation | null>('sessions:locate-match', { id, query }),
   /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
   renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
