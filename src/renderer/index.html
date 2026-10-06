@@ -1285,10 +1285,15 @@
         </section>
 
         <!-- ======================================================== Activity -->
-        <section class="panel" data-panel="activity">
+        <section class="panel activity-panel" data-panel="activity">
+          <div class="settings-page-content activity-content">
+          <header class="settings-page-head">
+            <h1>Activity</h1>
+            <p>Recent local events and failures.</p>
+          </header>
           <section class="card">
             <h2>
-              Activity
+              <span class="sr-only">Activity</span>
               <span class="acts">
                 <span class="seg" id="logAgentFilter" hidden></span>
                 <span class="seg" id="logFilter">
@@ -1314,6 +1319,7 @@
             <p class="upline" id="updateLine" hidden></p>
             <p class="foot" id="versionLine"></p>
           </section>
+          </div>
         </section>
       </main>
 
