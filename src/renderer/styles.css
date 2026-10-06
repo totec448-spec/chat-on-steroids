@@ -585,6 +585,8 @@ code {
 .whats-new-icon .ico { --ico: 18px; --glyph: 18px; }
 /* Optical correction, measured by verify-whats-new: Phosphor draws the pin's ink a pixel low in its box. */
 .whats-new-icon .ph-push-pin-simple { translate: 0 -1px; }
+/* The lock's shackle lifts its ink above centre; half a pixel brings the body back. */
+.whats-new-icon .ph-lock-key { translate: 0 0.5px; }
 /* Whole-pixel line heights keep every row, and so every badge, on a whole pixel: glyphs stay crisp and centred. */
 .whats-new-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 1px; }
 .whats-new-words b { font-size: calc(13.5px * var(--text-scale, 1)); font-weight: 600; line-height: calc(18px * var(--text-scale, 1)); letter-spacing: -0.006em; }
