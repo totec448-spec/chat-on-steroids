@@ -1990,5 +1990,21 @@
   "ChatGPT is waiting for your approval": "ChatGPT attend votre autorisation",
   "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Un chat est en pause jusqu’à ce que vous autorisiez ou refusiez un appel d’outil dans ChatGPT. Cliquez pour l’ouvrir.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT attend que vous autorisiez ou refusiez un appel d’outil dans ce chat. Rien ne continue tant que vous n’y avez pas répondu.",
-  "The tool approval ChatGPT asked for in this chat was answered.": "La demande d’autorisation d’outil de ChatGPT dans ce chat a reçu une réponse."
+  "The tool approval ChatGPT asked for in this chat was answered.": "La demande d’autorisation d’outil de ChatGPT dans ce chat a reçu une réponse.",
+  "What's new": "Nouveautés",
+  "Full release notes": "Notes de version complètes",
+  "Version {0}": "Version {0}",
+  "Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.": "Épinglez vos chats, cherchez de n’importe où et sachez quand ChatGPT vous attend.",
+  "Pin chats": "Épingler des chats",
+  "Keep the chats you use most at the top of the sidebar.": "Gardez vos chats les plus utilisés en haut de la barre latérale.",
+  "One menu for every chat": "Un menu pour chaque chat",
+  "Pin, rename, open or copy a chat's link from its ⋯ menu.": "Épinglez, renommez, ouvrez ou copiez le lien d’un chat depuis son menu ⋯.",
+  "Search from anywhere": "Chercher de n’importe où",
+  "{0} finds any chat and opens it at the message that matched.": "{0} trouve n’importe quel chat et l’ouvre au message correspondant.",
+  "Search your settings": "Chercher dans les réglages",
+  "Type in Settings to find any setting on any page.": "Tapez dans les Réglages pour trouver n’importe quel réglage sur n’importe quelle page.",
+  "Know when ChatGPT is waiting": "Savoir quand ChatGPT attend",
+  "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Quand ChatGPT vous demande d’autoriser un outil, le chat vous le dit au lieu de rester immobile.",
+  "One connection control": "Une seule commande de connexion",
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Une petite capsule dans la barre latérale affiche la connexion et vous prévient si elle tombe."
 }

@@ -542,6 +542,79 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .search-dialog[open], .search-dialog.is-closing, .search-dialog[open]::backdrop, .search-dialog.is-closing::backdrop { animation: none; }
 }
+/*
+ * What's New (#1172), in the language of the browser sign-in card (cos-browser-sign-in.css): a card
+ * whose hairline catches light along its top edge over two soft shadows, rising in on a spring; the
+ * app's own tile sealed with an accent sparkle; highlights that arrive one after another; and the
+ * card's quiet centred actions.
+ */
+.whats-new-dialog { width: min(540px, calc(100vw - 40px)); max-height: min(740px, calc(100dvh - 40px)); margin: auto; padding: 0; overflow: hidden;
+  --whats-new-surface: var(--card); color: var(--ink); background: var(--whats-new-surface); border: 0; border-radius: 22px; text-align: center;
+  box-shadow: 0 0 0 1px var(--edge), inset 0 1px 0 color-mix(in srgb, var(--ink) 7%, transparent), 0 2px 6px #0003, 0 28px 70px -18px #000b; }
+/* Raised like the sign-in card in dark; in light the card tone is the lighter one, as the search window uses. */
+:root[data-theme='dark'] .whats-new-dialog { --whats-new-surface: var(--popover); }
+.whats-new-dialog[open] { display: flex; flex-direction: column; animation: whats-new-rise .6s cubic-bezier(.16, 1, .3, 1) .04s both; }
+.whats-new-dialog::backdrop { background: color-mix(in srgb, var(--page) 58%, transparent); }
+.whats-new-dialog[open]::backdrop { animation: search-backdrop-in .42s cubic-bezier(.2, .7, .2, 1) both; }
+.whats-new-dialog.is-closing { animation: whats-new-leave .22s cubic-bezier(.4, 0, 1, 1) both; }
+.whats-new-dialog.is-closing::backdrop { animation: search-backdrop-out .26s ease-in both; }
+
+/* Not the app's toolbar header: no border, gap or minimum height of its own. */
+.whats-new-head { display: flex; flex-direction: column; align-items: center; gap: 0; flex: none; min-height: 0; padding: 28px 30px 4px; border: 0; }
+.whats-new-hero { position: relative; margin-bottom: 22px; }
+.whats-new-tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--ink); color: var(--page);
+  box-shadow: 0 0 0 1px var(--line), 0 6px 16px -8px #000a; animation: whats-new-pop .5s cubic-bezier(.34, 1.4, .64, 1) .16s both; }
+.whats-new-tile .ico { --ico: 30px; stroke-width: 1.6; }
+/* The mark's drawing carries its ink a pixel left of its box (the folder tab) and half a pixel low (the speech tail); centred in the tile. */
+.whats-new-tile .ico { translate: 1px -0.5px; }
+.whats-new-seal { position: absolute; right: -7px; bottom: -7px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--whats-new-surface); box-shadow: 0 0 0 3px var(--whats-new-surface);
+  animation: whats-new-pop .45s cubic-bezier(.34, 1.4, .64, 1) .42s both; }
+.whats-new-seal .ico { --ico: 14px; --glyph: 14px; animation: whats-new-twinkle .7s cubic-bezier(.34, 1.4, .64, 1) .5s both; }
+.whats-new-version { margin-bottom: 6px; color: var(--accent); font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; line-height: calc(16px * var(--text-scale, 1)); }
+.whats-new-head h2 { margin: 0; font-size: calc(19px * var(--text-scale, 1)); font-weight: 600; line-height: calc(26px * var(--text-scale, 1)); letter-spacing: -0.016em; }
+.whats-new-lead { max-width: 380px; margin: 8px 0 0; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); line-height: calc(20px * var(--text-scale, 1)); text-wrap: balance; }
+
+/* The scrollbar's room is kept, so rows never shift sideways on a window too short for them all. */
+.whats-new-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; margin: 18px 0 0; padding: 0 18px 4px; list-style: none; text-align: start; }
+.whats-new-item { display: grid; grid-template-columns: 38px 1fr; align-items: start; gap: 13px; padding: 8px 8px; border-radius: 14px;
+  animation: whats-new-arrive .45s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(.22s + var(--i, 0) * 45ms); }
+.whats-new-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; background: var(--hover); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 6px 16px -10px #0008; }
+/* An even glyph in an even box in an even badge: every glyph lands on whole pixels. */
+.whats-new-icon .ico { --ico: 18px; --glyph: 18px; }
+/* Optical correction, measured by verify-whats-new: Phosphor draws the pin's ink a pixel low in its box. */
+.whats-new-icon .ph-push-pin-simple { translate: 0 -1px; }
+/* The lock's shackle lifts its ink above centre; half a pixel brings the body back. */
+.whats-new-icon .ph-lock-key { translate: 0 0.5px; }
+/* Whole-pixel line heights keep every row, and so every badge, on a whole pixel: glyphs stay crisp and centred. */
+.whats-new-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 1px; }
+.whats-new-words b { font-size: calc(13.5px * var(--text-scale, 1)); font-weight: 600; line-height: calc(18px * var(--text-scale, 1)); letter-spacing: -0.006em; }
+.whats-new-words span { color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); line-height: calc(18px * var(--text-scale, 1)); overflow-wrap: anywhere; }
+
+.whats-new-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex: none; padding: 12px 24px 18px; }
+.whats-new-link, .whats-new-done { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; font: inherit;
+  font-size: calc(12.5px * var(--text-scale, 1)); line-height: calc(18px * var(--text-scale, 1)); cursor: pointer; transition: background-color .14s, color .14s, transform .16s cubic-bezier(.16, 1, .3, 1); }
+.whats-new-link { padding: 8px 12px; border-radius: 10px; background: none; color: var(--faint); font-weight: 500; }
+.whats-new-link .ico { --ico: 14px; }
+.whats-new-link:hover { background: var(--hover); color: var(--ink); }
+/* The one strong action, in the hero tile's ink. */
+.whats-new-done { min-width: 108px; padding: 9px 18px; border-radius: 11px; background: var(--ink); color: var(--page); font-weight: 600;
+  box-shadow: 0 6px 16px -10px #000a; }
+.whats-new-done:hover { transform: translateY(-1px); }
+.whats-new-done:active { transform: translateY(0) scale(.98); }
+.whats-new-link:focus-visible, .whats-new-done:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@keyframes whats-new-rise { from { opacity: 0; transform: translateY(18px) scale(.96); } }
+@keyframes whats-new-leave { to { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes whats-new-pop { from { opacity: 0; transform: scale(.6); } }
+@keyframes whats-new-twinkle { from { opacity: 0; transform: rotate(-60deg) scale(.4); } }
+@keyframes whats-new-arrive { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) {
+  .whats-new-dialog[open], .whats-new-dialog.is-closing, .whats-new-dialog[open]::backdrop, .whats-new-dialog.is-closing::backdrop,
+  .whats-new-tile, .whats-new-seal, .whats-new-seal .ico, .whats-new-item { animation: none; }
+  .whats-new-done { transition: none; }
+}
 /* A fixed row: the clear button keeps its place while hidden, so typing never moves the line below. */
 .search-dialog-field { display: flex; align-items: center; gap: 10px; flex: none; box-sizing: border-box; height: 54px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); }
 .search-dialog-field > .ico { --ico: 17px; color: var(--faint); }
