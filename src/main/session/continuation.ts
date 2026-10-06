@@ -427,6 +427,8 @@ export interface ContinuationRecoveryHooks {
    * repair hook; ordinary callers must never receive a model-callable adoption path.
    */
   repairPrimeTransfer?: (fromConversationId: string, toConversationId: string) => boolean;
+  /** Whether a sub-agent fleet is led from this chat: only then is a missed move worth a word. */
+  hasPrimeFleet?: (conversationId: string) => boolean;
 }
 
 let recoveryHooks: ContinuationRecoveryHooks = {};
@@ -1244,7 +1246,13 @@ function publishCommittedProjection(
     // continuation WAL may repair the broker's derived A→B prime projection.
     const repaired = recoveryHooks.repairPrimeTransfer?.(entry.from, toConversationId) ?? false;
     if (!repaired && !commitPrimeTransfer(entry.from, toConversationId)) {
-      logWarn(`continuation ${entry.token.slice(0, 8)} recovered without a broker prime repair hook`);
+      // Every app start replays the committed handoffs it still keeps. A chat that never led
+      // sub-agents has no fleet to move, and saying otherwise on each start was only noise.
+      if (!recoveryHooks.repairPrimeTransfer) {
+        logWarn(`continuation ${entry.token.slice(0, 8)} recovered without a broker prime repair hook`);
+      } else if (recoveryHooks.hasPrimeFleet?.(entry.from)) {
+        logWarn(`continuation ${entry.token.slice(0, 8)} recovered, but its sub-agent fleet is still led from ${entry.from}`);
+      }
     }
   }
 }
