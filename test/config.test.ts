@@ -974,3 +974,33 @@ it('persists optional ordinary new-chat model defaults without inventing them fo
   expect(loaded.ui.defaultChatModel).toBe('gpt-5.6-sol');
   expect(loaded.ui.defaultChatReasoning).toBe('xhigh');
 });
+
+describe('a settings file the app cannot read as is', () => {
+  // VM test, 2026-10-06: Windows PowerShell 5.1 wrote config.json with a byte-order mark. The app
+  // fell back to recovery defaults and the next settings save overwrote the user's folders and tunnel.
+  const file = () => path.join(dir, 'config.json');
+  const backups = async () => (await fs.readdir(dir)).filter(name => name.startsWith('config.json.unreadable-'));
+  const clearBackups = async () => { for (const name of await backups()) await fs.rm(path.join(dir, name)); };
+
+  it('reads a file that starts with a byte-order mark like any other', async () => {
+    await clearBackups();
+    const config = { ...defaultConfig(), roots: [{ name: 'project', path: dir }] };
+    await fs.writeFile(file(), '﻿' + JSON.stringify(config), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.roots.map(root => root.name)).toEqual(['project']);
+    expect(await backups()).toEqual([]);
+  });
+
+  it.each([
+    ['broken JSON', '{"roots": ['],
+    ['the wrong shape', JSON.stringify({ roots: 'not a list' })]
+  ])('keeps a copy of a file with %s before anything can overwrite it', async (_label, content) => {
+    await clearBackups();
+    await fs.writeFile(file(), content, 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.readOnly).toBe(true);
+    const saved = await backups();
+    expect(saved).toHaveLength(1);
+    expect(await fs.readFile(path.join(dir, saved[0]!), 'utf8')).toBe(content);
+  });
+});
