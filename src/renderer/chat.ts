@@ -1015,9 +1015,30 @@ function paintSessions(): void {
     disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
     rows.push(disclosure);
   }
+  // A new node is not :hover until the pointer moves again: the row under it would lose its hover
+  // look for a moment, and a sub-agent arrow would jump back to the menu's column and slide out again.
+  // The row under the pointer is born pointed (until the pointer leaves), and an arrow that changed
+  // turns from where it was.
+  const pointedId = [projectList, chatList].map(list => list.querySelector<HTMLElement>('.sess:hover')?.dataset.id).find(Boolean);
+  const arrowsBefore = new Map([...projectList.querySelectorAll<HTMLElement>('.sess > .worker-toggle'), ...chatList.querySelectorAll<HTMLElement>('.sess > .worker-toggle')]
+    .map(toggle => [toggle.parentElement!.dataset.id, toggle.getAttribute('aria-expanded')]));
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
+  for (const list of [projectList, chatList]) {
+    const pointed = pointedId ? [...list.querySelectorAll<HTMLElement>('.sess')].find(row => row.dataset.id === pointedId) : undefined;
+    if (pointed) {
+      pointed.classList.add('is-pointed');
+      pointed.addEventListener('pointerleave', () => pointed.classList.remove('is-pointed'), { once: true });
+    }
+    for (const toggle of list.querySelectorAll<HTMLElement>('.sess > .worker-toggle')) {
+      const before = arrowsBefore.get(toggle.parentElement!.dataset.id);
+      const now = toggle.getAttribute('aria-expanded');
+      if (before === undefined || before === now) continue;
+      toggle.querySelector<SVGElement>('.disclosure-chevron')?.animate?.([{ transform: `rotate(${before === 'true' ? 90 : 0}deg)` }, { transform: `rotate(${now === 'true' ? 90 : 0}deg)` }],
+        { duration: 150, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+    }
+  }
   if (focusedProject && focusedControl) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);

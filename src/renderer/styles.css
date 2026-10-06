@@ -2224,7 +2224,7 @@ input[readonly] {
 /* ------------------------------------------------------- session list */
 
 .sess { position: relative; display: flex; align-items: center; min-height: 36px; padding: 7px 10px; margin: 2px 0; border-radius: 8px; cursor: pointer; }
-.sess:hover, .sess.is-sel { background: var(--hover); }
+.sess:hover, .sess.is-pointed, .sess.is-sel { background: var(--hover); }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
 .sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
@@ -2239,16 +2239,16 @@ input[readonly] {
    the title (and its pin mark or status) fades out under it instead of losing its ellipsis to a gap. */
 .sess-actions { position: absolute; inset-block: 0; right: 6px; display: flex; align-items: center; flex: none; gap: 1px;
   opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
-.sess:hover .sess-actions, .sess:focus-within .sess-actions, .sess:has(.row-menu-button[aria-expanded='true']) .sess-actions { opacity: 1; pointer-events: auto; }
-.sess:is(:hover, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top {
+.sess:hover .sess-actions, .sess.is-pointed .sess-actions, .sess:focus-within .sess-actions, .sess:has(.row-menu-button[aria-expanded='true']) .sess-actions { opacity: 1; pointer-events: auto; }
+.sess:is(:hover, .is-pointed, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top {
   -webkit-mask-image: linear-gradient(to left, transparent 0, transparent 30px, #000 54px); mask-image: linear-gradient(to left, transparent 0, transparent 30px, #000 54px); }
-.sess:is(:hover, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top b { text-overflow: clip; }
+.sess:is(:hover, .is-pointed, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top b { text-overflow: clip; }
 .sess:has(.sess-rename) .sess-top { -webkit-mask-image: none; mask-image: none; }
 /* A row with sub-agents: at rest its arrow sits in the column every row uses; on hover it slides
    left and the menu button takes that column. A transform, so the title never reflows: its end fades
    out under the arrow as it does under the button. */
 .sess > .worker-toggle { transform: translateX(3px); transition: transform 160ms ease; }
-.sess:is(:hover, :focus-within, :has(.row-menu-button[aria-expanded='true'])) > .worker-toggle { transform: translateX(-24px); }
+.sess:is(:hover, .is-pointed, :focus-within, :has(.row-menu-button[aria-expanded='true'])) > .worker-toggle { transform: translateX(-24px); }
 @media (prefers-reduced-motion: reduce) { .sess > .worker-toggle { transition: none; } }
 @media (prefers-reduced-motion: reduce) { .sess-actions { transition: none; } }
 /* While a chat is being named, its field takes the actions' place (#1107). */
