@@ -68,7 +68,7 @@ import { clearGoalObjective, clearGoalSwitch, goalObjectiveFor, goalSwitchFor, m
 import { writeDurableNow, writeDurableSoon } from '../durable.js';
 import { handoffMatchesContinuation, prepareHandoff, resumeBootstrapMatches } from './handoff.js';
 import { ensureHandoffRecorded, recordHandoff, recordNote, rebindConversation } from './recorder.js';
-import { endResumeClaim, noteResumeClaim, resetResumeGate } from './resume-gate.js';
+import { endResumeClaim, noteResumeClaim, noteResumeDispatch, resetResumeGate } from './resume-gate.js';
 import {
   ensureCommittedResumeHandoff,
   findSessionByConversation,
@@ -970,7 +970,7 @@ export async function dispatchContinuationDestinationSendNow(token: string): Pro
       ...current,
       destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null }
     }));
-    noteResumeClaim(entry.token);
+    noteResumeDispatch(entry.token);
     return true;
   });
 }
@@ -1005,6 +1005,7 @@ export async function releaseContinuationDestinationSendNow(token: string, unatt
       claimedBy: null,
       destinationSend: { state: 'not-attempted', conversationId: null, messageId: null }
     }));
+    endResumeClaim(entry.token);
     return true;
   });
 }
@@ -1209,7 +1210,13 @@ export async function claimContinuationNow(token: string, claimant: string): Pro
     // After the transition, never before it. A throw here leaves nothing claimed, and arming
     // first would have made every unrelated new chat wait out the window for a claim that
     // does not exist.
-    if (entry.state === 'claimed') noteResumeClaim(entry.token);
+    if (entry.state === 'claimed') {
+      if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
+        noteResumeDispatch(entry.token);
+      } else {
+        noteResumeClaim(entry.token);
+      }
+    }
     return { summary: entry.summary };
   });
 }
@@ -1759,7 +1766,13 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
     // collision it exists to prevent would be wide open for exactly the restart that is most
     // likely to hit it. Re-armed from now rather than from the original claim, because what
     // matters is how long from *here* that chat still has to appear.
-    if (entry.state === 'claimed') noteResumeClaim(entry.token);
+    if (entry.state === 'claimed') {
+      if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
+        noteResumeDispatch(entry.token);
+      } else {
+        noteResumeClaim(entry.token);
+      }
+    }
     byToken.set(entry.token, entry);
   }
   try {

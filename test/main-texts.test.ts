@@ -38,6 +38,30 @@ it('publishes every tray and notice text in the selected language, and again aft
   for (const source of MAIN_TEXTS) expect(sent[1]![source]).toBe(source);
 });
 
+it('publishes and restores all tunnel-loss notice texts in the selected language', async () => {
+  const sources = [
+    'Core connection lost',
+    'Desktop connection lost',
+    'Plugins connection lost',
+    'The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.'
+  ] as const;
+  expect(MAIN_TEXTS).toEqual(expect.arrayContaining([...sources]));
+  window.localStorage.setItem('cos.ui.language', 'de');
+  const { mainTexts } = await import('../src/renderer/main-texts.js');
+  const before = await import('../src/main/main-texts.js');
+  before.setMainTextTranslations(mainTexts());
+  for (const source of sources) {
+    expect(before.mainText(source)).toBe(de[source]);
+    expect(before.mainText(source)).not.toBe(source);
+  }
+  const saved = JSON.parse(JSON.stringify(before.mainTextTranslations()));
+
+  vi.resetModules();
+  const after = await import('../src/main/main-texts.js');
+  after.restoreMainTextTranslations(saved);
+  for (const source of sources) expect(after.mainText(source)).toBe(de[source]);
+});
+
 it('shows the published translation, keeps English for anything unknown, and repaints the tray', async () => {
   const texts = await import('../src/main/main-texts.js');
   const repaint = vi.fn();

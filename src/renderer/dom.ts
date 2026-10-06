@@ -43,13 +43,17 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-loop': 'arrows-clockwise',
   'i-monitor': 'monitor',
   'i-more': 'dots-three',
+  'i-more-vertical': 'dots-three-vertical',
   'i-out': 'arrow-square-out',
   'i-panel-bottom': 'fill:square-half-bottom',
   'i-panel-right': 'fill:square-half',
+  'i-palette': 'palette',
   'i-paw': 'paw-print',
   'i-page-next': 'caret-right',
   'i-page-previous': 'caret-left',
   'i-pencil': 'pencil-simple',
+  'i-pin': 'push-pin-simple',
+  'i-pinned': 'fill:push-pin-simple',
   'i-play': 'play',
   'i-plus': 'plus',
   'i-power': 'power',
@@ -117,22 +121,6 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 }
 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
-
-/** Filter complete settings sections so headings, controls and their context stay together. */
-export function filterSettingsSections(view: HTMLElement, search: string): void {
-  const fold = (text: string) => text.toLocaleLowerCase(currentLanguage());
-  const query = fold(search.trim());
-  let matches = 0;
-  for (const heading of view.querySelectorAll<HTMLElement>('.automation-section-head')) {
-    const pane = heading.nextElementSibling as HTMLElement | null;
-    if (!pane?.classList.contains('pane')) continue;
-    const visible = !query || fold(`${heading.textContent} ${pane.textContent}`).includes(query);
-    heading.hidden = pane.hidden = !visible;
-    if (visible) matches++;
-  }
-  const empty = view.querySelector<HTMLElement>('#settingsSearchEmpty');
-  if (empty) empty.hidden = !query || matches > 0;
-}
 
 let toastTimer: number | undefined;
 

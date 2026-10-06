@@ -152,6 +152,10 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   const effort = document.getElementById(effortId) as HTMLSelectElement | null;
   if (!model || !effort) return;
   const models = modelId === 'composerModel' ? composerModels() : catalog.models;
+  // No saved sub-agent default starts workers on ChatGPT's current model. The select says so as
+  // Automatic instead of naming a model nothing would use; a model picked there still gets its
+  // preferred effort.
+  const automaticModel = allowEmpty || modelId === 'workerModel';
   let nextModel = modelValue ?? model.value;
   let nextEffort = effortValue ?? effort.value;
   const observed = observedModel(nextModel);
@@ -160,7 +164,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     // cannot prove which efforts that alias supports. Retain both requested values
     // until the user deliberately selects a family; native selection proves the pair.
     const modelChoices = [...distinctModelChoices(models), { id: nextModel, label: `${observed.label} · ${nextModel}` }];
-    if (allowEmpty) modelChoices.unshift({ id: '', label: () => t('Automatic') });
+    if (automaticModel) modelChoices.unshift({ id: '', label: () => t('Automatic') });
     options(model, modelChoices, nextModel);
     const effortChoices = [{ id: nextEffort, label: () => nextEffort ? effortLabel(nextEffort) : t('Keep requested model settings') }];
     if (allowEmpty && nextEffort) effortChoices.unshift({ id: '', label: () => t('Automatic') });
@@ -168,7 +172,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     return;
   }
   nextModel = observed?.id ?? nextModel;
-  if (models.length && !nextModel && !allowEmpty && !(modelId === 'composerModel' && composerContext?.automatic)) {
+  if (models.length && !nextModel && !automaticModel && !(modelId === 'composerModel' && composerContext?.automatic)) {
     // A preference selects only a model/effort actually observed in this catalog.
     const preferred = models.find(item => /^gpt[ -]?6$/i.test(item.label) && item.efforts.includes('high'));
     nextModel = (preferred ?? models[0]!).id;
@@ -179,10 +183,10 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     nextEffort = supported.includes('high') ? 'high' : supported[0] ?? '';
   }
   const modelChoices = distinctModelChoices(models);
-  if (allowEmpty) modelChoices.unshift({ id: '', label: () => t('Automatic') });
+  if (automaticModel) modelChoices.unshift({ id: '', label: () => t('Automatic') });
   const effortChoices: Array<{ id: string; label: string | (() => string) }> =
     (models.find(item => item.id === nextModel)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) }));
-  if (allowEmpty) effortChoices.unshift({ id: '', label: () => t('Automatic') });
+  if (allowEmpty || (automaticModel && !nextModel)) effortChoices.unshift({ id: '', label: () => t('Automatic') });
   options(model, modelChoices, nextModel);
   options(effort, effortChoices, nextEffort);
 }
