@@ -50,7 +50,7 @@ import { TaskRequestError } from './task-request.js';
 import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
-import { getConfig } from './config.js';
+import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel } from '../shared/chat-models.js';
 import type { ReasoningEffort } from '../shared/session.js';
@@ -1795,7 +1795,12 @@ export function goalHelperSelection(): { model: string | null; reasoningEffort: 
   if (key) refreshForUnoffered(`goal helper ${key}`);
   if (key && key !== helperFallbackLogged) {
     helperFallbackLogged = key;
-    logWarn(`goal: the helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`);
+    const line = `goal: the helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`;
+    // Falling back from the built-in defaults is routine, not a problem: nobody chose them, and as a
+    // warning it showed as "1 problem" in Activity on every start for accounts without them.
+    const defaults = defaultConfig().goal;
+    if (settings.helperModel === defaults.helperModel && (settings.helperReasoning ?? 'high') === defaults.helperReasoning) logInfo(line);
+    else logWarn(line);
   }
   return { model, reasoningEffort };
 }
