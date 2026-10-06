@@ -432,8 +432,11 @@ code {
 
 .app-topbar > .btn { -webkit-app-region: no-drag; height: 100%; padding: 0 5px; }
 .app-topbar > .btn .ico { --ico: 14px; }
-/* The View menu's button stays lit while its menu is open, like a row's ⋮. */
+/* The View menu's button stays lit while its menu is open, like a row's ⋮. Its three lines draw
+   narrower and shorter than the sidebar toggle's frame beside it: a larger glyph gives them the
+   same width, so the pair reads as one set. */
 #viewMenu[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
+#viewMenu .ico { --glyph: 18.5px; }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
   position: fixed; z-index: 200; display: grid; gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
