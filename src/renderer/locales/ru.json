@@ -1261,7 +1261,6 @@
   "Seen {0}": "Зафиксировано {0}",
   "Paired · not active": "Сопряжено · не активно",
   "ChatGPT connector": "Коннектор ChatGPT",
-  "Browser companion": "Сопутствующее расширение браузера",
   "Extension": "Расширение",
   "Connection settings": "Настройки подключения",
   "Not seen": "Не зафиксировано",
@@ -1967,5 +1966,19 @@
   "Recent": "Недавние",
   "Pinned": "Закреплён",
   "Unpin this chat": "Открепить этот чат",
-  "Pin this chat to the top of its list": "Закрепить этот чат вверху списка"
+  "Pin this chat to the top of its list": "Закрепить этот чат вверху списка",
+  "Color": "Цвет",
+  "Open in browser": "Открыть в браузере",
+  "Block chat": "Заблокировать чат",
+  "Release chat": "Разблокировать чат",
+  "Trust chat": "Доверять чату",
+  "Untrust chat": "Отозвать доверие",
+  "Block unattributed calls": "Блокировать вызовы без привязки",
+  "More options": "Другие действия",
+  "Pin chat": "Закрепить чат",
+  "Unpin chat": "Открепить чат",
+  "Core connection lost": "Соединение с Core потеряно",
+  "Desktop connection lost": "Соединение с Desktop потеряно",
+  "Plugins connection lost": "Соединение с плагинами потеряно",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Туннель неожиданно отключился. Откройте Chat On Steroids, чтобы проверить соединение."
 }

@@ -1519,7 +1519,7 @@ it.each([false, true])('removes a project group in one click, keeps its chats an
   const api = (w as any).api;
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   (w.document.querySelector('.worker-toggle') as HTMLButtonElement).click();
-  (w.document.querySelector(`[data-new-project="${project.id}"]`) as HTMLButtonElement).click();
+  projectMenu(w, project.id); (w.document.querySelector(`.row-menu [data-new-project="${project.id}"]`) as HTMLButtonElement).click();
   input.value = 'Keep my draft';
   input.dispatchEvent(new w.Event('input', { bubbles: true }));
   if (selectedSkill) {
@@ -1534,7 +1534,7 @@ it.each([false, true])('removes a project group in one click, keeps its chats an
   (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
   await settle();
   api.removeProject = vi.fn(async () => ({ ok: true, data: { ...project, ungrouped: true } }));
-  (w.document.querySelector('.project-remove') as HTMLButtonElement).click();
+  projectMenu(w, project.id); menuItem(w, 'remove').click();
   await settle();
   expect(api.removeProject).toHaveBeenCalledExactlyOnceWith(project.id);
   expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
@@ -1552,14 +1552,69 @@ it.each([false, true])('removes a project group in one click, keeps its chats an
   expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: null, text: selectedSkill ? '/review\nKeep my draft' : 'Keep my draft' });
 });
 
-it('keeps the project visible when its removal fails', async () => {
+/** Opens a project's "⋯" menu; its items live in the document body, outside the repainted sidebar. */
+function projectMenu(w: any, id: string): HTMLButtonElement {
+  const button = w.document.querySelector(`.project-group[data-project-id="${id}"] .project-menu`) as HTMLButtonElement;
+  button.click();
+  return button;
+}
+const menuItem = (w: any, action: string): HTMLButtonElement => w.document.querySelector(`.row-menu [data-row-action="${action}"]`) as HTMLButtonElement;
+/** Opens the project's Color submenu and returns the choice for `color` ('none' clears it). */
+function colorChoice(w: any, id: string, color: string): HTMLButtonElement {
+  projectMenu(w, id);
+  menuItem(w, 'color').click();
+  return menuItem(w, `color-${color}`);
+}
+
+it('keeps the project visible when its removal fails, and lets the removal be tried again', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Keep', path: '/keep', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
-  (w as any).api.removeProject = async () => ({ ok: false, error: 'Could not save' });
-  (w.document.querySelector('.project-remove') as HTMLButtonElement).click();
+  (w as any).api.removeProject = vi.fn(async () => ({ ok: false, error: 'Could not save' }));
+  projectMenu(w, project.id); menuItem(w, 'remove').click();
   await settle();
   expect(w.document.querySelector('.project-group')).not.toBeNull();
-  expect((w.document.querySelector('.project-remove') as HTMLButtonElement).disabled).toBe(false);
+  projectMenu(w, project.id);
+  expect(menuItem(w, 'remove').disabled).toBe(false);
+  menuItem(w, 'remove').click(); await settle();
+  expect((w as any).api.removeProject).toHaveBeenCalledTimes(2);
+});
+
+it('offers a project\'s actions in one menu: a new chat, its color as a submenu, and removal', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
+  // No loose buttons on the row: one "⋯", and a right click opens the same menu.
+  expect(group.querySelector('.project-heading')!.querySelectorAll('button').length).toBe(1);
+  const button = projectMenu(w, project.id);
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
+  expect(menu.getAttribute('role')).toBe('menu');
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'color', 'remove']);
+  expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
+  expect(w.document.activeElement).toBe(menuItem(w, 'new-chat'));
+  // Keyboard: Down moves, Right opens the color submenu on the current choice, Left comes back.
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'color'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.querySelectorAll('.row-menu').length).toBe(2);
+  expect(w.document.activeElement).toBe(menuItem(w, 'color-none'));
+  expect(menuItem(w, 'color-none').getAttribute('aria-checked')).toBe('true');
+  w.document.querySelectorAll<HTMLElement>('.row-menu')[1]!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  expect(w.document.querySelectorAll('.row-menu').length).toBe(1);
+  expect(w.document.activeElement).toBe(menuItem(w, 'color'));
+  // Escape closes it and gives focus back to the row's button.
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(w.document.querySelector('.row-menu')).toBeNull();
+  expect(w.document.activeElement).toBe(button);
+  expect(button.getAttribute('aria-expanded')).toBe('false');
+  // A right click on the row opens the same menu; a click elsewhere closes it.
+  group.querySelector('.project-heading')!.dispatchEvent(new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  expect(menuItem(w, 'color')).not.toBeNull();
+  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
+  expect(w.document.querySelector('.row-menu')).toBeNull();
+  // New chat in this project.
+  projectMenu(w, project.id); menuItem(w, 'new-chat').click(); await settle();
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
 });
 
 it('picks and clears project color without changing project membership', async () => {
@@ -1569,32 +1624,18 @@ it('picks and clears project color without changing project membership', async (
   const { w } = await boot([], false, [], [project]);
   const api = (w as any).api;
   api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
-  const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
-  const color = group.querySelector<HTMLButtonElement>('.project-color')!;
-  expect(color.dataset.color).toBe('');
-  expect(color.getAttribute('aria-expanded')).toBe('false');
-  color.click(); await settle();
-  expect(color.getAttribute('aria-expanded')).toBe('true');
-  const none = group.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!;
-  const blue = group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
-  expect(w.document.activeElement).toBe(none);
-  none.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  expect(w.document.activeElement).toBe(blue);
-  blue.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  expect(color.getAttribute('aria-expanded')).toBe('false');
-  expect(w.document.activeElement).toBe(color);
-  color.click(); await settle();
-  group.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!.click(); await settle();
+  colorChoice(w, project.id, 'blue').click(); await settle();
   expect(api.setProjectColor).toHaveBeenNthCalledWith(1, project.id, 'blue');
   let refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
   expect(refreshed.dataset.projectColor).toBe('blue');
-  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('blue');
-  refreshed.querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
-  refreshed.querySelector<HTMLButtonElement>('[data-project-color-choice=""]')!.click(); await settle();
+  expect(colorChoice(w, project.id, 'blue').getAttribute('aria-checked')).toBe('true');
+  menuItem(w, 'color-none').click(); await settle();
   expect(api.setProjectColor).toHaveBeenNthCalledWith(2, project.id, null);
   refreshed = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
   expect(refreshed.dataset.projectColor).toBeUndefined();
-  expect(refreshed.querySelector<HTMLButtonElement>('.project-color')?.dataset.color).toBe('');
+  // Choosing the color it already has saves nothing.
+  colorChoice(w, project.id, 'none').click(); await settle();
+  expect(api.setProjectColor).toHaveBeenCalledTimes(2);
 });
 
 it.each([[false, true], [true, true], [true, false]])('preserves the keyboard color-save focus owner (focus moved: %s, focusin: %s)', async (moved, propagates) => {
@@ -1602,10 +1643,7 @@ it.each([[false, true], [true, true], [true, false]])('preserves the keyboard co
   const { w } = await boot([], false, [], [project]);
   let finish!: (value: unknown) => void;
   (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
-  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
-  color.focus(); color.click(); await settle();
-  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
-  blue.focus(); blue.click();
+  colorChoice(w, project.id, 'blue').click();
   const other = w.document.createElement('button'); other.textContent = 'Other control'; w.document.body.append(other);
   if (moved) {
     // An inactive Electron document can update activeElement without delivering focusin.
@@ -1614,27 +1652,28 @@ it.each([[false, true], [true, true], [true, false]])('preserves the keyboard co
     other.focus();
   }
   finish({ ok: true, data: { ...project, color: 'blue' } }); await settle();
-  const currentColor = w.document.querySelector<HTMLButtonElement>('.project-color')!;
-  expect(currentColor.dataset.color).toBe('blue');
-  expect(w.document.activeElement === (moved ? other : currentColor)).toBe(true);
+  const button = w.document.querySelector<HTMLButtonElement>('.project-menu')!;
+  expect(w.document.querySelector<HTMLElement>('.project-group')!.dataset.projectColor).toBe('blue');
+  expect(w.document.activeElement === (moved ? other : button)).toBe(true);
 });
 
-it.each([false, true])('a rejected color-save preserves the current focus owner (focus moved: %s)', async moved => {
+it.each([false, true])('a rejected color-save keeps the color and the current focus owner (focus moved: %s)', async moved => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
   let finish!: (value: unknown) => void;
   (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
-  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
-  color.focus(); color.click(); await settle();
-  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
-  blue.focus(); blue.click();
+  colorChoice(w, project.id, 'blue').click();
+  // While the save is pending, its choices wait for the answer.
+  expect(colorChoice(w, project.id, 'teal').disabled).toBe(true);
+  menuItem(w, 'color').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  w.document.querySelector<HTMLElement>('.row-menu')?.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  const button = w.document.querySelector<HTMLButtonElement>('.project-menu')!;
   const other = w.document.getElementById('chatInput')!;
   if (moved) other.focus();
   finish({ ok: false, error: 'Synthetic save refusal' }); await settle();
-  expect(color.disabled).toBe(false);
-  expect(color.dataset.color).toBe('');
-  const selected = w.document.querySelector('[data-project-color-choice=""]');
-  expect(w.document.activeElement === (moved ? other : selected)).toBe(true);
+  expect(w.document.querySelector<HTMLElement>('.project-group')!.dataset.projectColor).toBeUndefined();
+  expect(w.document.activeElement === (moved ? other : button)).toBe(true);
+  expect(colorChoice(w, project.id, 'blue').disabled).toBe(false);
 });
 
 it.each([false, true])('does not restore an old color-save focus after selecting another chat and returning (rejected: %s)', async rejected => {
@@ -1644,41 +1683,36 @@ it.each([false, true])('does not restore an old color-save focus after selecting
   const { w } = await boot([], true, [], [project], { sessions: [a, b] });
   let finish!: (value: unknown) => void;
   (w as any).api.setProjectColor = vi.fn(() => new Promise(resolve => { finish = resolve; }));
-  const color = w.document.querySelector<HTMLButtonElement>('.project-color')!;
-  color.focus(); color.click(); await settle();
-  const blue = w.document.querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
-  blue.focus(); blue.click();
-  w.document.querySelector<HTMLElement>('[data-id="color-chat-b"] [data-session-select]')!.click(); await settle();
-  w.document.querySelector<HTMLElement>('[data-id="color-chat-a"] [data-session-select]')!.click(); await settle();
-  const focused = w.document.activeElement;
+  colorChoice(w, project.id, 'blue').click();
+  // A real click on a chat row moves focus to it; jsdom's click() does not, so do both.
+  const choose = (id: string): void => { const row = w.document.querySelector<HTMLElement>(`[data-id="${id}"] [data-session-select]`)!; row.focus(); row.click(); };
+  choose('color-chat-b'); await settle();
+  choose('color-chat-a'); await settle();
   finish(rejected ? { ok: false, error: 'Synthetic save refusal' } : { ok: true, data: { ...project, color: 'blue' } }); await settle();
-  expect(w.document.querySelector<HTMLButtonElement>('.project-color')!.dataset.color).toBe(rejected ? '' : 'blue');
-  expect(w.document.activeElement === focused).toBe(true);
+  expect(w.document.querySelector<HTMLElement>('.project-group')!.dataset.projectColor).toBe(rejected ? undefined : 'blue');
+  // The old save does not pull focus back to the project's menu button.
+  expect(w.document.activeElement?.closest('.project-heading')).toBeNull();
 });
 
-it('names project colors in the interface language and keeps focus on the color button after a pick', async () => {
+it('names project colors in the interface language and keeps focus on the menu button after a pick', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
   const api = (w as any).api;
   api.setProjectColor = vi.fn(async (_id: string, color: string | null) => ({ ok: true, data: { ...project, ...(color ? { color } : {}) } }));
   const group = (): HTMLElement => w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
-  // The menu is already named "Change project color"; each choice is the color itself, in words
-  // a screen reader can say, never the internal value.
-  const blue = group().querySelector<HTMLButtonElement>('[data-project-color-choice="blue"]')!;
-  expect(blue.getAttribute('aria-label')).toBe('Blue');
+  // Each choice is the color itself, in words a screen reader can say, never the internal value.
   const { setLanguage } = await import('../src/renderer/i18n.js');
+  expect(colorChoice(w, project.id, 'blue').textContent).toBe('Blue');
   setLanguage('de');
-  expect(blue.getAttribute('aria-label')).toBe('Blau');
-  expect(blue.title).toBe('Blau');
+  expect(menuItem(w, 'color-blue').textContent).toBe('Blau');
+  expect(menuItem(w, 'color').textContent).toBe('Farbe');
   setLanguage('en');
 
-  // Picking repaints the sidebar. Focus must come back to the new color button, not fall to the page.
-  group().querySelector<HTMLButtonElement>('.project-color')!.click(); await settle();
-  group().querySelector<HTMLButtonElement>('[data-project-color-choice="teal"]')!.click(); await settle();
+  // Picking repaints the sidebar. Focus must come back to the new menu button, not fall to the page.
+  menuItem(w, 'color-teal').click(); await settle();
   expect(api.setProjectColor).toHaveBeenCalledWith(project.id, 'teal');
-  const button = group().querySelector<HTMLButtonElement>('.project-color')!;
-  expect(button.dataset.color).toBe('teal');
-  expect(w.document.activeElement).toBe(button);
+  expect(group().dataset.projectColor).toBe('teal');
+  expect(w.document.activeElement).toBe(group().querySelector<HTMLButtonElement>('.project-menu'));
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
@@ -1759,7 +1793,7 @@ it('groups project chats and restores each project composer with its selected id
   expect([...groups].map(group => group.open)).toEqual([false, false]);
   expect(groups[0]!.querySelector('[data-id]')?.getAttribute('data-id')).toBe(summary([]).id);
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
-  const choose = (id: string) => (w.document.querySelector(`[data-new-project="${id}"]`) as HTMLButtonElement).click();
+  const choose = (id: string) => { projectMenu(w, id); (w.document.querySelector(`.row-menu [data-new-project="${id}"]`) as HTMLButtonElement).click(); };
   choose(projects[0]!.id); expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[0]!.id}"]`)!.open).toBe(true); input.value = 'Alpha draft';
   choose(projects[1]!.id); expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[1]!.id}"]`)!.open).toBe(true); expect(input.value).toBe(''); input.value = 'Beta draft';
   (w.document.getElementById('newChat') as HTMLButtonElement).click();
@@ -1810,7 +1844,7 @@ it('reorders whole project groups without changing chat selection, ownership or 
   expect(ids()).toEqual(projects.map(project => project.id));
   expect(w.document.activeElement).toBe(groups()[1]!.querySelector('summary'));
   const saved = w.localStorage.getItem('chat-on-steroids.sidebar-order');
-  pointer(groups()[0]!.querySelector('.project-new')!, 'pointerdown', 10);
+  pointer(groups()[0]!.querySelector('.project-menu')!, 'pointerdown', 10);
   pointer(list, 'pointermove', 500); pointer(w as unknown as Window, 'pointerup', 500);
   expect(w.localStorage.getItem('chat-on-steroids.sidebar-order')).toBe(saved);
   expect(live.sent).toEqual([]);
@@ -4639,6 +4673,31 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   content.style.setProperty('--timeline-scroll-reserve', '300px');
   jump.click();
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
+});
+
+it('keeps the chat reading state out of Agents & automation, which shares its scroll pane', async () => {
+  const { w, append } = await boot([{ kind: 'assistant_message', seq: 1, time: T0 + 1000, source: 'extension', messageId: 'first', message: text('Hello'), final: false }]);
+  const pane = w.document.getElementById('chatBody')!;
+  const jump = w.document.getElementById('jumpLatest')!;
+  // The real navigation: the Agents & automation tab, then Back to chat.
+  const view = (name: string) => (w.document.querySelector(name === 'settings' ? 'nav button[data-tab="settings"]' : '#backToChat') as HTMLButtonElement).click();
+  Object.defineProperties(pane, { clientHeight: { value: 400, configurable: true }, scrollHeight: { value: 2000, configurable: true } });
+  pane.scrollTop = 1600;
+  // Settings open at their top, not at the chat's end, and offer no way back to a chat end.
+  view('settings');
+  expect(pane.scrollTop).toBe(0);
+  expect(jump.classList.contains('is-shown')).toBe(false);
+  // Reading the settings upwards is not reading the chat.
+  pane.scrollTop = 900;
+  pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -120 }));
+  pane.dispatchEvent(new w.Event('scroll'));
+  expect(jump.classList.contains('is-shown')).toBe(false);
+  // Back in the chat, it is still at its end and still follows new output.
+  view('timeline');
+  expect(pane.scrollTop).toBe(2000);
+  await append([{ kind: 'assistant_message', seq: 2, time: T0 + 2000, source: 'extension', messageId: 'later', message: text('More output'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+  expect(jump.classList.contains('is-shown')).toBe(false);
 });
 
 it('opens round participants in the existing dock without moving the prime reader or draft', async () => {

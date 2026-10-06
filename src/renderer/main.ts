@@ -13,6 +13,7 @@ import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
+import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -67,6 +68,10 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+const settingsSearch = initSettingsSearch({
+  open: tab => showTab(tab),
+  shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
+});
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -183,11 +188,12 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   $('tabs').hidden = !settings;
+  $('settingsFindBox').hidden = !settings;
+  // A page opened any way leaves the search; the page list comes back.
+  settingsSearch.reset();
   $('backToChat').hidden = !settings;
   document.querySelector<HTMLElement>('.sidebar-sessions')!.hidden = settings;
   $('newChat').hidden = settings;
-  if (name === 'settings') openChatView('settings');
-  else if (name === 'chat') openChatView('timeline');
 
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
@@ -196,6 +202,10 @@ function showTab(name: string): void {
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
+  // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
+  // pane cannot be scrolled to where each view starts.
+  if (name === 'settings') openChatView('settings');
+  else if (name === 'chat') openChatView('timeline');
   // The Chat panel is the only one that costs anything to keep fresh, so it only
   // reloads while it is on screen.
   chatVisible(name === 'chat' || name === 'settings');
@@ -203,6 +213,37 @@ function showTab(name: string): void {
   // a hidden element has no scroll height. Pin it now that it has one, so a panel always
   // opens on the newest line rather than on whatever was oldest in the buffer.
   for (const id of FEEDS) stickToNewest(id);
+}
+
+/** The last painted connection state; null before the first paint, so startup never "connects". */
+let previousConnectionState: AppState['status']['state'] | null = null;
+/** The capsule changing words: its width and the cross-fade, and the old words leaving. */
+let capsuleMorph: Animation[] = [];
+let capsuleMorphGhost: HTMLElement | undefined;
+
+function endCapsuleMorph(): void {
+  const running = capsuleMorph;
+  capsuleMorph = [];
+  running.forEach((animation) => animation.cancel());
+  capsuleMorphGhost?.remove();
+  capsuleMorphGhost = undefined;
+  document.getElementById('sidebarConnection')?.classList.remove('is-morphing');
+}
+
+/**
+ * The capsule's click. Disconnected, it does what it says: connect (or open Setup while a step is
+ * still missing). In every other state it opens the details, where Disconnect and the reasons live.
+ */
+async function connectionCapsuleAction(): Promise<void> {
+  // It says Connect, so it connects, with or without the details open.
+  if (state?.status.state === 'disconnected') {
+    setConnectionPopover(false);
+    if (missingStep(state)) { showTab('setup'); return; }
+    const next = await run(api.connect());
+    if (next) apply(next);
+    return;
+  }
+  setConnectionPopover(Boolean($('connectionPopover').hidden));
 }
 
 function setConnectionPopover(open: boolean): void {
@@ -233,12 +274,19 @@ window.addEventListener('resize', () => positionConnectionPopover());
 
 $('backToChat').addEventListener('click', () => showTab('chat'));
 $('workspaceSettings').addEventListener('click', () => showTab('home'));
-$('sidebarConnection').addEventListener('click', () => {
-  setConnectionPopover(Boolean($('connectionPopover').hidden));
+$('sidebarConnection').addEventListener('click', () => void connectionCapsuleAction());
+// The details stay one right click away in every state, the disconnected one included.
+$('sidebarConnection').addEventListener('contextmenu', event => {
+  event.preventDefault();
+  setConnectionPopover(true);
 });
 $('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
 $('sessionList').addEventListener('click', event => {
   if ((event.target as HTMLElement).closest('[data-id], [data-new-project]')) showTab('chat');
+}, { capture: true });
+// A project's "New chat in this project" lives in its row menu, outside the sidebar.
+document.addEventListener('click', event => {
+  if ((event.target as HTMLElement | null)?.closest?.('.row-menu [data-new-project]')) showTab('chat');
 }, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
@@ -1180,6 +1228,38 @@ function paintConnectButtons(next: AppState): void {
   }
 }
 
+/** How long Disconnecting stays on screen at least: often it is over before it could be read. */
+const DISCONNECTING_MIN_MS = 1100;
+let disconnectingSince = 0;
+let disconnectingHold = 0;
+
+/**
+ * The status the window paints. A Disconnecting that ends sooner than DISCONNECTING_MIN_MS keeps
+ * showing until then, and the real state is painted when the time is up. `state` always keeps the
+ * real status: nothing but the painting waits.
+ */
+function shownStatus(status: AppState['status']): AppState['status'] {
+  return disconnectingSince && status.state === 'disconnected' && Date.now() < disconnectingSince + DISCONNECTING_MIN_MS
+    ? { ...status, state: 'disconnecting' } : status;
+}
+
+function presentedStatus(status: AppState['status']): AppState['status'] {
+  if (status.state === 'disconnecting') {
+    if (!disconnectingSince) disconnectingSince = Date.now();
+    return status;
+  }
+  if (disconnectingSince) {
+    const left = disconnectingSince + DISCONNECTING_MIN_MS - Date.now();
+    if (left > 0 && status.state === 'disconnected') {
+      window.clearTimeout(disconnectingHold);
+      disconnectingHold = window.setTimeout(() => { if (state) apply(state); }, left);
+      return { ...status, state: 'disconnecting' };
+    }
+    disconnectingSince = 0;
+  }
+  return status;
+}
+
 function apply(next: AppState): void {
   // An older key/status response must not restore a profile retired by a newer switch.
   if ((next.config.tunnel.profileEpoch ?? 0) < (state?.config.tunnel.profileEpoch ?? 0)) return;
@@ -1187,7 +1267,8 @@ function apply(next: AppState): void {
   const previousState = state;
   state = next;
   applying = true;
-  const { config, status } = next;
+  const { config } = next;
+  const status = presentedStatus(next.status);
 
   const connected = status.state === 'connected';
   const offline = status.state === 'offline';
@@ -1201,21 +1282,95 @@ function apply(next: AppState): void {
   const appearanceUi = requestedSettings?.ui ?? config.ui;
   appearance.apply(appearanceUi);
 
-  const headerConnect = $<HTMLButtonElement>('headerConnect');
-  const wasVisible = !headerConnect.hidden;
-  headerConnect.hidden = connected;
-  headerConnect.disabled = busy;
-  ui(headerConnect, 'textContent', () => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…') : t('Connect'));
-  if (connected && wasVisible && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) $('sidebarConnection').animate([
-    { boxShadow: '0 0 0 0 var(--green)' }, { boxShadow: '0 0 0 12px transparent' }
-  ], { duration: 850, iterations: 2 });
-
-  // ---- global connection surface
+  // ---- the connection capsule: the one place connection lives (sidebar footer)
+  // Connected, it is a quiet dot. Otherwise it opens to say what to do or what is happening: Connect,
+  // Connecting…, or what went wrong. Its label keeps the last words while it closes, so the text
+  // fades with the width instead of vanishing first.
   const connectionTone = connected ? 'is-connected' : offline ? 'is-offline' : busy ? 'is-busy' : failed ? 'is-error' : '';
   const sidebarConnection = $('sidebarConnection');
-  sidebarConnection.className = `sidebar-connection${connectionTone ? ` ${connectionTone}` : ''}`;
+  const wasConnected = sidebarConnection.classList.contains('is-connected');
+  // Disconnecting is work in progress like connecting: the capsule says so with the same light and sheen,
+  // held on screen long enough to read (presentedStatus). The details stay calm (is-closing, no blink).
+  const labelled = !connected;
+  const capsuleTone = disconnecting ? 'is-closing' : connectionTone;
+  // Open to open (Connect → Connecting…, → Failed), only the words change, and a width that comes from
+  // text does not transition: measure it before and after and animate between the two. The capsule is
+  // anchored right, so it grows to the left, and the new words fade in as it does.
+  const wasLabelled = sidebarConnection.classList.contains('has-label');
+  const label = $('sidebarConnectionLabel');
+  const capsuleWords = (): string => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…')
+    // A failure says so in one short word; its reason is in the title and the details.
+    : offline ? t(STATUS_TEXT[status.state]) : failed ? t('Failed') : t('Connect');
+  // Connecting sends several updates with the same words: those change nothing, and a morph under way
+  // keeps going. New words morph from what is on screen now, the width mid-way included.
+  // Opening from the dot (Disconnecting…) morphs the same way, with no old words to fade.
+  const wordsBefore = label.textContent;
+  const opening = !wasLabelled && labelled && previousConnectionState !== null;
+  let morph = labelled && (opening || (wasLabelled && capsuleWords() !== wordsBefore)) && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const capsuleBefore = sidebarConnection.getBoundingClientRect();
+  const widthBefore = capsuleBefore.width;
+  // The old words leave from exactly where they were: measured from the right edge, which stays put.
+  const wordsRightBefore = capsuleBefore.right - label.getBoundingClientRect().right;
+  const wasBusy = sidebarConnection.classList.contains('is-busy');
+  // Closing to the dot is CSS's (the words leave first, then the width): a morph under way ends first.
+  if (morph || !labelled) endCapsuleMorph();
+  sidebarConnection.className = `sidebar-connection${disconnecting ? ' is-busy' : ''}${capsuleTone ? ` ${capsuleTone}` : ''}${labelled ? ' has-label' : ''}${capsuleMorph.length ? ' is-morphing' : ''}`;
+  if (labelled) ui(label, 'textContent', capsuleWords);
+  if (morph) {
+    sidebarConnection.classList.add('is-morphing');
+    // A narrow sidebar shows no words (container query): nothing to morph, the dot says it all.
+    if (window.getComputedStyle(label.parentElement!).opacity === '0') { endCapsuleMorph(); morph = false; }
+  }
+  if (morph) {
+    // One gesture: the capsule takes its new width while the words cross-fade at its centre. Centred,
+    // longer words overflow the narrower start by half the difference on each side, which the padding
+    // holds, so they are never cut and never wait; the old words leave from where they were.
+    // The dot's column comes or goes with failures; it settles at once, so the width measured is the
+    // final one and the morph alone moves it.
+    const widthAfter = sidebarConnection.getBoundingClientRect().width;
+    const easing = 'cubic-bezier(.22, 1, .36, 1)';
+    // Inside a frame that clips at the capsule's edge: a shrinking capsule never shows words outside it.
+    let ghost: HTMLElement | undefined;
+    if (!opening) {
+      ghost = sidebarConnection.appendChild(document.createElement('span'));
+      ghost.className = 'sidebar-connection-ghost';
+      ghost.setAttribute('aria-hidden', 'true');
+      const ghostWords = ghost.appendChild(document.createElement('span'));
+      if (wasBusy) ghostWords.className = 'is-busy';
+      ghostWords.style.right = `${wordsRightBefore - sidebarConnection.clientLeft}px`;
+      ghostWords.textContent = wordsBefore;
+    }
+    capsuleMorph = [
+      // Shrinking, the width waits a beat so the old words are mostly gone before the edge reaches them.
+      sidebarConnection.animate?.([{ width: `${widthBefore}px` }, { width: `${widthAfter}px` }],
+        { duration: 320, delay: widthAfter < widthBefore ? 60 : 0, easing, fill: 'backwards' }),
+      ghost?.animate?.([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: 'blur(2px)' }], { duration: widthAfter < widthBefore ? 110 : 160, easing: 'ease-out', fill: 'forwards' }),
+      // From the dot, the words emerge from the centre as the room opens (clipped just inside the border).
+      label.animate?.([{ opacity: 0, filter: 'blur(2px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: opening ? 300 : 260, delay: opening ? 20 : 60, easing, fill: 'backwards' })
+    ].filter((animation): animation is Animation => !!animation);
+    capsuleMorphGhost = ghost;
+    const done = capsuleMorph;
+    if (!done.length) endCapsuleMorph();
+    else void Promise.all(done.map((animation) => animation.finished)).then(() => { if (capsuleMorph === done) endCapsuleMorph(); }, () => undefined);
+  }
+  // Connecting succeeded: one soft ring from the dot, the moment the capsule closes.
+  if (connected && !wasConnected && previousConnectionState !== null && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    // It lands as the capsule draws in: a small overshoot, a green bloom, and the border answering once.
+    sidebarConnection.querySelector('.sidebar-connection-dot')?.animate?.([
+      { transform: 'scale(.4)', boxShadow: '0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent)' },
+      { transform: 'scale(1.25)', offset: .45 },
+      { transform: 'scale(1)', boxShadow: '0 0 0 10px transparent' }
+    ], { duration: 620, delay: 180, easing: 'cubic-bezier(.22, 1, .36, 1)', fill: 'backwards' });
+    sidebarConnection.animate?.([
+      { borderColor: 'color-mix(in srgb, var(--green) 70%, transparent)' }, { borderColor: 'var(--line)' }
+    ], { duration: 900, easing: 'ease-out' });
+  }
+  if (previousConnectionState !== null && previousConnectionState !== status.state) {
+    ui($('connectionAnnounce'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  }
+  previousConnectionState = status.state;
   const connectionPopover = $('connectionPopover');
-  connectionPopover.className = `connection-popover scroll${connectionTone ? ` ${connectionTone}` : ''}`;
+  connectionPopover.className = `connection-popover scroll${capsuleTone ? ` ${capsuleTone}` : ''}`;
   ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
 
   const id = config.tunnel.tunnelId;
@@ -1229,6 +1384,26 @@ function apply(next: AppState): void {
   ui(connectBtn, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
   connectBtn.disabled = disconnecting || (!running && missing !== null);
   connectBtn.title = !running && missing ? missing.text : '';
+  // One place per action: while the capsule itself says Connect or Disconnecting…, the details only
+  // describe. The panel is anchored at its bottom, so it shrinks or grows from the top; a returning
+  // action fades in.
+  const connectActions = connectBtn.closest<HTMLElement>('.connection-popover-actions')!;
+  const hideConnectActions = status.state === 'disconnected' || disconnecting;
+  if (connectActions.hidden !== hideConnectActions) {
+    const panel = $('connectionPopover');
+    const animate = !panel.hidden && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const heightBefore = animate ? panel.getBoundingClientRect().height : 0;
+    connectActions.hidden = hideConnectActions;
+    if (animate) {
+      const heightAfter = panel.getBoundingClientRect().height;
+      if (Math.abs(heightAfter - heightBefore) > 1) {
+        panel.animate?.([{ height: `${heightBefore}px`, overflow: 'hidden' }, { height: `${heightAfter}px`, overflow: 'hidden' }],
+          { duration: 340, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+      }
+      if (!hideConnectActions) connectActions.animate?.([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+        { duration: 260, delay: 120, easing: 'cubic-bezier(.22, 1, .36, 1)', fill: 'backwards' });
+    }
+  }
 
   // ---- out of date, app or extension
   paintUpdate(next);
@@ -1711,7 +1886,8 @@ function facts(next: AppState): HTMLElement[] {
  */
 function paintClock(): void {
   if (!state) return;
-  const { status, bridge } = state;
+  const { bridge } = state;
+  const status = shownStatus(state.status);
   const running = isRunning(status.state);
   const connected = status.state === 'connected';
   const disconnecting = status.state === 'disconnecting';
@@ -1738,7 +1914,7 @@ function paintClock(): void {
 
   const connectorRow = $('connectionPopoverConnector').parentElement!;
   const browserRow = $('connectionPopoverBrowser').parentElement!;
-  connectorRow.dataset.tone = connected ? 'ok' : disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel' ? 'wait' : 'bad';
+  connectorRow.dataset.tone = connected ? 'ok' : disconnecting ? 'closing' : status.state === 'starting-server' || status.state === 'connecting-tunnel' ? 'wait' : 'bad';
   browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
   ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
   ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
@@ -2159,14 +2335,6 @@ function installUpdate(): void {
 
 $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
-$('headerConnect').addEventListener('click', async () => {
-  if (!state) return;
-  if (missingStep(state)) { showTab('setup'); return; }
-  if (isRunning(state.status.state)) {
-    const disconnected = await run(api.disconnect()); if (!disconnected) return; apply(disconnected);
-  }
-  const connected = await run(api.connect()); if (connected) apply(connected);
-});
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 $('readyStart').addEventListener('click', () => showTab('chat'));

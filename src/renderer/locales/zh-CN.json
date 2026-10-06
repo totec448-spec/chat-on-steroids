@@ -819,7 +819,6 @@
   "Seen {0}": "最近活动于 {0}",
   "Paired · not active": "已配对 · 当前未活动",
   "ChatGPT connector": "ChatGPT 连接器",
-  "Browser companion": "浏览器配套扩展",
   "Extension": "扩展",
   "Connection settings": "连接设置",
   "Not seen": "未检测到",
@@ -1967,5 +1966,19 @@
   "Recent": "最近",
   "Pinned": "已置顶",
   "Unpin this chat": "取消置顶此聊天",
-  "Pin this chat to the top of its list": "将此聊天置顶到所在列表"
+  "Pin this chat to the top of its list": "将此聊天置顶到所在列表",
+  "Color": "颜色",
+  "Open in browser": "在浏览器中打开",
+  "Block chat": "阻止聊天",
+  "Release chat": "解除阻止",
+  "Trust chat": "信任聊天",
+  "Untrust chat": "取消信任",
+  "Block unattributed calls": "阻止未归属的调用",
+  "More options": "更多选项",
+  "Pin chat": "置顶聊天",
+  "Unpin chat": "取消置顶",
+  "Core connection lost": "Core 连接已断开",
+  "Desktop connection lost": "Desktop 连接已断开",
+  "Plugins connection lost": "插件连接已断开",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道连接意外断开。请打开 Chat On Steroids 检查连接。"
 }

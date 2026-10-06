@@ -1248,7 +1248,6 @@
   "Seen {0}": "Đã thấy {0}",
   "Paired · not active": "Đã ghép nối · chưa hoạt động",
   "ChatGPT connector": "Connector ChatGPT",
-  "Browser companion": "Tiện ích đồng hành trình duyệt",
   "Extension": "Tiện ích mở rộng",
   "Connection settings": "Cài đặt kết nối",
   "Not seen": "Chưa thấy",
@@ -1967,5 +1966,19 @@
   "Recent": "Gần đây",
   "Pinned": "Đã ghim",
   "Unpin this chat": "Bỏ ghim cuộc trò chuyện này",
-  "Pin this chat to the top of its list": "Ghim cuộc trò chuyện này lên đầu danh sách"
+  "Pin this chat to the top of its list": "Ghim cuộc trò chuyện này lên đầu danh sách",
+  "Color": "Màu",
+  "Open in browser": "Mở trong trình duyệt",
+  "Block chat": "Chặn cuộc trò chuyện",
+  "Release chat": "Bỏ chặn",
+  "Trust chat": "Tin cậy cuộc trò chuyện",
+  "Untrust chat": "Bỏ tin cậy",
+  "Block unattributed calls": "Chặn lệnh gọi chưa gán",
+  "More options": "Tùy chọn khác",
+  "Pin chat": "Ghim cuộc trò chuyện",
+  "Unpin chat": "Bỏ ghim",
+  "Core connection lost": "Mất kết nối Core",
+  "Desktop connection lost": "Mất kết nối Desktop",
+  "Plugins connection lost": "Mất kết nối Plugins",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tunnel bị ngắt kết nối ngoài dự kiến. Mở Chat On Steroids để kiểm tra kết nối."
 }

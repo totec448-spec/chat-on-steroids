@@ -819,7 +819,6 @@
   "Seen {0}": "最終確認：{0}",
   "Paired · not active": "ペアリング済み · 現在は非アクティブ",
   "ChatGPT connector": "ChatGPT コネクター",
-  "Browser companion": "ブラウザー連携用拡張機能",
   "Extension": "拡張機能",
   "Connection settings": "接続設定",
   "Not seen": "未検出",
@@ -1967,5 +1966,19 @@
   "Recent": "最近",
   "Pinned": "固定済み",
   "Unpin this chat": "このチャットの固定を解除",
-  "Pin this chat to the top of its list": "このチャットをリストの先頭に固定"
+  "Pin this chat to the top of its list": "このチャットをリストの先頭に固定",
+  "Color": "色",
+  "Open in browser": "ブラウザーで開く",
+  "Block chat": "チャットをブロック",
+  "Release chat": "ブロックを解除",
+  "Trust chat": "チャットを信頼",
+  "Untrust chat": "信頼を解除",
+  "Block unattributed calls": "帰属未確定の呼び出しをブロック",
+  "More options": "その他のオプション",
+  "Pin chat": "チャットを固定",
+  "Unpin chat": "固定を解除",
+  "Core connection lost": "Core への接続が切断されました",
+  "Desktop connection lost": "Desktop への接続が切断されました",
+  "Plugins connection lost": "プラグインへの接続が切断されました",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "トンネル接続が予期せず切断されました。Chat On Steroids を開いて接続を確認してください。"
 }

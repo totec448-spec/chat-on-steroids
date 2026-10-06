@@ -1237,7 +1237,6 @@
   "Seen {0}": "Visto {0}",
   "Paired · not active": "Pareada · inativa",
   "ChatGPT connector": "Conector do ChatGPT",
-  "Browser companion": "Extensão complementar do navegador",
   "Extension": "Extensão",
   "Connection settings": "Configurações de conexão",
   "Not seen": "Não visto",
@@ -1967,5 +1966,19 @@
   "Recent": "Recentes",
   "Pinned": "Fixado",
   "Unpin this chat": "Desafixar este chat",
-  "Pin this chat to the top of its list": "Fixar este chat no topo da lista"
+  "Pin this chat to the top of its list": "Fixar este chat no topo da lista",
+  "Color": "Cor",
+  "Open in browser": "Abrir no navegador",
+  "Block chat": "Bloquear chat",
+  "Release chat": "Liberar chat",
+  "Trust chat": "Confiar no chat",
+  "Untrust chat": "Remover confiança",
+  "Block unattributed calls": "Bloquear chamadas sem atribuição",
+  "More options": "Mais opções",
+  "Pin chat": "Fixar chat",
+  "Unpin chat": "Desafixar chat",
+  "Core connection lost": "Conexão com Core perdida",
+  "Desktop connection lost": "Conexão com Desktop perdida",
+  "Plugins connection lost": "Conexão com Plugins perdida",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "O túnel foi desconectado inesperadamente. Abra o Chat On Steroids para verificar a conexão."
 }

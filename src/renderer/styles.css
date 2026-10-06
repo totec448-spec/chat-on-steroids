@@ -438,6 +438,37 @@ code {
 .view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
 .view-menu-items { position: absolute; top: calc(100% + 5px); left: 0; z-index: 100; width: 260px; padding: 6px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003; }
 .view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
+/* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
+:is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
+  position: fixed; z-index: 200; display: grid; gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
+  background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
+  transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
+.row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
+@keyframes row-menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes row-menu-out { from { opacity: 1; } to { opacity: 0; } }
+.row-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; font: inherit; font-size: calc(13px * var(--text-scale, 1)); text-align: start; cursor: pointer;
+  transition: background-color 90ms ease, color 90ms ease; }
+.row-menu-item:hover:not(:disabled), .row-menu-item:focus-visible:not(:disabled), .row-menu-item[aria-expanded='true'] { background: var(--row-menu-hover); outline: none; }
+.row-menu-item.is-danger:hover:not(:disabled), .row-menu-item.is-danger:focus-visible:not(:disabled) { background: color-mix(in srgb, var(--popover, var(--card)) 84%, var(--red)); }
+.row-menu-item:hover > .ico:not(.row-menu-chevron, .row-menu-check), .row-menu-item:focus-visible > .ico:not(.row-menu-chevron, .row-menu-check) { color: var(--ink); }
+.row-menu-item.is-danger:hover > .ico, .row-menu-item.is-danger:focus-visible > .ico { color: var(--red); }
+.row-menu-item:focus { outline: none; }
+.row-menu-item:disabled { opacity: .45; cursor: default; }
+.row-menu-item > .ico { --ico: 15px; flex: none; color: var(--soft); }
+.row-menu-item.is-danger, .row-menu-item.is-danger > .ico { color: var(--red); }
+.row-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-menu-gap { flex: none; width: 15px; }
+.row-menu-item > .row-menu-chevron, .row-menu-item > .row-menu-check { --ico: 13px; margin-inline-start: auto; color: var(--faint); }
+.row-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
+.row-menu-swatch { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--edge); background: transparent; }
+.row-menu-swatch[data-color='blue'] { background: #4c7fc1; border-color: #0002; }
+.row-menu-swatch[data-color='green'] { background: #3f9b68; border-color: #0002; }
+.row-menu-swatch[data-color='amber'] { background: #c38b2f; border-color: #0002; }
+.row-menu-swatch[data-color='purple'] { background: #8063b2; border-color: #0002; }
+.row-menu-swatch[data-color='rose'] { background: #bd5d72; border-color: #0002; }
+.row-menu-swatch[data-color='teal'] { background: #388f91; border-color: #0002; }
+@media (prefers-reduced-motion: reduce) { .row-menu, .row-menu-leaving, .row-menu-item { animation: none; transition: none; } }
 .view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
 .view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
 .app.is-sidebar-collapsed { grid-template-columns: minmax(0, 0px) minmax(0, 1fr); }
@@ -553,15 +584,85 @@ code {
 .sidebar-bottom > .btn:hover,
 .sidebar-bottom > .btn.is-sel { background: var(--hover); color: var(--ink); }
 .connection-anchor { position: relative; flex: none; }
+/*
+ * The connection capsule. Connected: a 36px square with a green dot. Otherwise its label column
+ * opens (grid track 0fr → 1fr, so any translation's length animates) to say Connect, Connecting… or
+ * what went wrong. Neutral while simply disconnected; red only marks a failure, and only the dot.
+ */
 .sidebar-connection {
-  position: relative; width: 36px; height: 36px; display: grid; place-items: center; padding: 0;
+  position: relative; height: 36px; min-width: 36px; display: grid; grid-template-columns: 8px 0fr; column-gap: 0;
+  align-items: center; justify-content: center; padding: 0 13px;
   border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--soft); cursor: pointer;
+  font: inherit; font-size: calc(13px * var(--text-scale, 1)); font-weight: 500; white-space: nowrap;
+  /* Closing: the words leave first (below), then the capsule draws in. */
+  transition: grid-template-columns 240ms cubic-bezier(.65, 0, .35, 1) 90ms, column-gap 240ms cubic-bezier(.65, 0, .35, 1) 90ms,
+    padding 240ms cubic-bezier(.65, 0, .35, 1) 90ms, background-color 160ms ease, border-color 400ms ease, color 160ms ease;
 }
+/* Opening: the capsule widens first, then its words arrive. */
+.sidebar-connection.has-label {
+  grid-template-columns: 8px 1fr; column-gap: 8px; padding: 0 12px 0 11px; color: var(--ink); border-color: var(--edge);
+  transition: grid-template-columns 380ms cubic-bezier(.22, 1, .36, 1), column-gap 380ms cubic-bezier(.22, 1, .36, 1),
+    padding 380ms cubic-bezier(.22, 1, .36, 1), background-color 160ms ease, border-color 400ms ease, color 160ms ease;
+}
+.sidebar-connection-label { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateX(-3px);
+  transition: opacity 90ms ease, transform 90ms ease; }
+.sidebar-connection.has-label .sidebar-connection-label { opacity: 1; transform: none;
+  transition: opacity 260ms cubic-bezier(.22, 1, .36, 1) 150ms, transform 360ms cubic-bezier(.22, 1, .36, 1) 150ms; }
+/* Disconnected or connecting: the words alone (connecting has the border light and the sheen). The dot
+   means a settled state, so it shows only for a failure, and is the whole capsule once connected. */
+.sidebar-connection-dot { transition: transform 260ms cubic-bezier(.22, 1, .36, 1), opacity 200ms ease, background-color 260ms ease, box-shadow 260ms ease; }
+.sidebar-connection.has-label:not(.is-offline, .is-error) { grid-template-columns: 0px 1fr; column-gap: 0; padding: 0 14px; }
+.sidebar-connection.has-label:not(.is-offline, .is-error) .sidebar-connection-dot { transform: scale(0); opacity: 0; }
+.sidebar-connection.has-label:not(.is-offline, .is-error):hover { border-color: var(--accent-edge); background: var(--hover); }
+/* A narrow sidebar keeps the dot alone; its title and the details still say everything. */
+.sidebar-bottom { container-type: inline-size; }
+@container (max-width: 200px) {
+  .sidebar-connection.has-label, .sidebar-connection.has-label:not(.is-offline, .is-error) { grid-template-columns: 8px 0fr; column-gap: 0; padding: 0 13px; }
+  .sidebar-connection.has-label .sidebar-connection-label { opacity: 0; }
+  /* Without its word, the capsule needs its dot again. */
+  .sidebar-connection.has-label .sidebar-connection-dot, .sidebar-connection.has-label:not(.is-offline, .is-error) .sidebar-connection-dot { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .sidebar-connection, .sidebar-connection-label { transition: none; } }
 .sidebar-connection:hover, .sidebar-connection[aria-expanded='true'] { background: var(--hover); border-color: var(--edge); }
 .sidebar-connection:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: 1px; }
 .sidebar-connection-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 .sidebar-connection.is-connected .sidebar-connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 12%, transparent); }
-.sidebar-connection.is-busy .sidebar-connection-dot { background: var(--soft); animation: blink 1.1s ease-in-out infinite; }
+/* Working: a thin light travels around the border, as if searching, and the word carries the sheen
+   running turns wear. */
+@property --capsule-arc { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.sidebar-connection::before {
+  content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1.5px; pointer-events: none; opacity: 0;
+  background: conic-gradient(from var(--capsule-arc), transparent 0deg, transparent 170deg, color-mix(in srgb, var(--accent) 22%, transparent) 250deg, color-mix(in srgb, var(--accent) 75%, transparent) 320deg, var(--accent) 352deg, transparent 360deg);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 55%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  transition: opacity 300ms ease;
+}
+.sidebar-connection.is-busy::before { opacity: 1; animation: capsule-arc 1.8s linear infinite; }
+@keyframes capsule-arc { to { --capsule-arc: 360deg; } }
+.sidebar-connection.is-busy { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
+.sidebar-connection.is-busy .sidebar-connection-label {
+  color: transparent; background: linear-gradient(100deg, var(--soft) 36%, var(--ink) 50%, var(--soft) 64%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: turn-sheen 1.8s ease-in-out infinite;
+}
+/* Changing words: both are centred and uncut while the width moves (the padding holds the overflow),
+   the old ones fading over the new. The sheen waits: it paints only inside the label's box. */
+.sidebar-connection-label { position: relative; }
+.sidebar-connection.is-morphing { transition: background-color 160ms ease, border-color 400ms ease, color 160ms ease; }
+.sidebar-connection.is-morphing .sidebar-connection-label { display: flex; justify-content: center; overflow: visible;
+  color: inherit; background: none; animation: none; transition: none; clip-path: inset(-4px -12px); }
+.sidebar-connection.is-morphing.is-busy .sidebar-connection-label { color: var(--soft); }
+.sidebar-connection-ghost { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.sidebar-connection-ghost > span { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; }
+.sidebar-connection-ghost > .is-busy { color: var(--soft); }
+/* The dot keeps out of the words' way: a leaving dot goes at once, an arriving one waits for the old words to fade. */
+.sidebar-connection.is-morphing.has-label:not(.is-offline, .is-error) .sidebar-connection-dot { transition: none; }
+.sidebar-connection.is-morphing:is(.is-offline, .is-error) .sidebar-connection-dot { transition-delay: 140ms; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-connection::before, .sidebar-connection.is-busy::before { animation: none; opacity: 0; }
+  .sidebar-connection.is-busy .sidebar-connection-label { animation: none; }
+  .sidebar-connection.is-busy .sidebar-connection-label { color: var(--soft); background: none; }
+}
 .sidebar-connection.is-offline .sidebar-connection-dot,
 .sidebar-connection.is-error .sidebar-connection-dot { background: var(--red); }
 .connection-popover {
@@ -587,8 +688,13 @@ code {
 .connection-popover-row[data-tone='ok'] > i { border-color: var(--green); background: var(--green); }
 .connection-popover-row[data-tone='bad'] > i { border-color: var(--red); background: var(--red); }
 .connection-popover-row[data-tone='wait'] > i { animation: blink 1.1s ease-in-out infinite; }
+/* Disconnecting: the dots let go of their color quietly, without blinking. */
+.connection-popover-row[data-tone='closing'] > i { border-color: var(--faint); background: transparent; transition: border-color 260ms ease, background-color 260ms ease; }
+.connection-popover.is-closing .connection-popover-status-dot { background: var(--faint); }
 .connection-popover-actions { display: grid; grid-template-columns: 1fr; gap: 7px; margin-top: 7px; }
-.connection-popover-actions .btn { min-height: 32px; justify-content: center; padding: 4px 8px; background: transparent; font-size: calc(11.5px * var(--text-scale, 1)); }
+.connection-popover-actions[hidden] { display: none; }
+/* The capsule's own corner, so the control and its details read as one piece. */
+.connection-popover-actions .btn { min-height: 32px; justify-content: center; padding: 4px 8px; border-radius: 9px; background: transparent; font-size: calc(11.5px * var(--text-scale, 1)); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ------------------------------------------------------------------ header */
@@ -1331,14 +1437,16 @@ main {
 
 /* ------------------------------------------------------------------ health */
 
+/* The two figures sit optically centered between the card's top edge and the facts divider. */
 .big {
   display: flex;
   gap: 26px;
-  padding: 3px 14px 12px;
+  padding: 13px 14px 14px;
 }
 
 .big b {
   display: block;
+  line-height: 1.15;
   font-size: calc(22px * var(--text-scale, 1));
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -1355,6 +1463,9 @@ main {
 }
 
 .big span {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.3;
   font-size: calc(11px * var(--text-scale, 1));
   color: var(--faint);
 }
@@ -1787,15 +1898,16 @@ details.connector[open] > summary::before { rotate: 90deg; }
   transition: border-color 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out, box-shadow 160ms ease-out;
 }
 .setup-rail-mark::before { content: counter(setup-rail); }
-.setup-rail-mark .ico { display: none; --ico: 15px; }
+/* Phosphor's check sits low in its em box (its ink spans 64–208 of 256); lift it to the optical center. */
+.setup-rail-mark .ico { display: none; --ico: 15px; translate: 0 -1px; }
 .setup-rail-ready .setup-rail-mark::before { content: none; }
-.setup-rail-ready .setup-rail-mark .ico { display: block; }
+.setup-rail-ready .setup-rail-mark .ico { display: inline-flex; }
 .setup-rail-label { max-width: 100%; overflow: hidden; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .setup-rail button:hover .setup-rail-mark { border-color: var(--accent-edge); color: var(--ink); }
 .setup-rail button:hover .setup-rail-label { color: var(--ink); }
 .setup-rail li.is-done .setup-rail-mark { border-color: var(--green-line); background: var(--green-wash); color: var(--green); }
 .setup-rail li.is-done .setup-rail-mark::before { content: none; }
-.setup-rail li.is-done .setup-rail-mark .ico { display: block; }
+.setup-rail li.is-done .setup-rail-mark .ico { display: inline-flex; }
 .setup-rail li.is-current .setup-rail-mark { border-color: var(--accent-edge); background: var(--accent-wash); color: var(--ink); }
 .setup-rail button[aria-current="step"] .setup-rail-mark { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
 .setup-rail button[aria-current="step"] .setup-rail-label { color: var(--ink); font-weight: 650; }
@@ -2229,7 +2341,7 @@ input[readonly] {
 /* ------------------------------------------------------- session list */
 
 .sess { position: relative; display: flex; align-items: center; min-height: 36px; padding: 7px 10px; margin: 2px 0; border-radius: 8px; cursor: pointer; }
-.sess:hover, .sess.is-sel { background: var(--hover); }
+.sess:hover, .sess.is-pointed, .sess.is-sel { background: var(--hover); }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
 .sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
@@ -2240,16 +2352,26 @@ input[readonly] {
 @keyframes session-spin { to { transform: rotate(360deg); } }
 .session-status.is-unseen { width: 8px; height: 8px; background: var(--accent); }
 .session-status.is-failed { background: var(--red); }
-.sess-actions { display: none; align-items: center; flex: none; gap: 1px; margin-left: 4px; }
-.sess:hover .sess-actions, .sess:focus-within .sess-actions { display: flex; }
+/* The row's menu button floats over its end, so hovering never reflows the title or the list:
+   the title (and its pin mark or status) fades out under it instead of losing its ellipsis to a gap. */
+.sess-actions { position: absolute; inset-block: 0; right: 6px; display: flex; align-items: center; flex: none; gap: 1px;
+  opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.sess:hover .sess-actions, .sess.is-pointed .sess-actions, .sess:focus-within .sess-actions, .sess:has(.row-menu-button[aria-expanded='true']) .sess-actions { opacity: 1; pointer-events: auto; }
+.sess:is(:hover, .is-pointed, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, transparent 30px, #000 54px); mask-image: linear-gradient(to left, transparent 0, transparent 30px, #000 54px); }
+.sess:is(:hover, .is-pointed, :focus-within, :has(.row-menu-button[aria-expanded='true'])) .sess-top b { text-overflow: clip; }
+.sess:has(.sess-rename) .sess-top { -webkit-mask-image: none; mask-image: none; }
+/* A row with sub-agents: at rest its arrow sits in the column every row uses; on hover it slides
+   left and the menu button takes that column. A transform, so the title never reflows: its end fades
+   out under the arrow as it does under the button. */
+.sess > .worker-toggle { transform: translateX(3px); transition: transform 160ms ease; }
+.sess:is(:hover, .is-pointed, :focus-within, :has(.row-menu-button[aria-expanded='true'])) > .worker-toggle { transform: translateX(-24px); }
+@media (prefers-reduced-motion: reduce) { .sess > .worker-toggle { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .sess-actions { transition: none; } }
 /* While a chat is being named, its field takes the actions' place (#1107). */
 .sess:has(.sess-rename) .sess-actions { display: none; }
-.sess-action { padding: 3px; border: 0; background: transparent; }
 /* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
 .sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
-.sess:hover .sess-pin-mark, .sess:focus-within .sess-pin-mark { display: none; }
-.sess-pin.is-pinned { color: var(--accent); }
-.sess-block.is-blocked { color: var(--red); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
 .session-diagnostics .sess-top b { font-size: calc(13px * var(--text-scale, 1)); }
@@ -3599,34 +3721,26 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .project-group { margin: 8px 0; }
 .project-group[data-sort-scope] { position: relative; }
-.project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 8px; list-style: none; }
+.project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 6px 6px 8px; border-radius: 8px; list-style: none; }
+/* Like a chat row: the row lights up under the pointer, and its menu button sits in the chats' column. */
+.project-heading:hover, .project-heading:has(.project-menu[aria-expanded='true']) { background: var(--hover); }
 .project-heading[data-sort-handle] { cursor: grab; user-select: none; }
 .project-heading::-webkit-details-marker { display: none; }
-.project-color-wrap { position: relative; flex: 0 0 auto; display: grid; place-items: center; }
-.project-color { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; opacity: 0; }
-.project-color::before { content: ''; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--edge); background: var(--sunk); box-shadow: inset 0 0 0 2px var(--page); }
-.project-color:not([data-color='']) { opacity: 1; }
-.project-heading:hover .project-color, .project-heading:focus-within .project-color, .project-color[aria-expanded='true'] { opacity: 1; }
-.project-color[data-color='blue']::before, .project-color-choice[data-color='blue']::before { background: #4c7fc1; }
-.project-color[data-color='green']::before, .project-color-choice[data-color='green']::before { background: #3f9b68; }
-.project-color[data-color='amber']::before, .project-color-choice[data-color='amber']::before { background: #c38b2f; }
-.project-color[data-color='purple']::before, .project-color-choice[data-color='purple']::before { background: #8063b2; }
-.project-color[data-color='rose']::before, .project-color-choice[data-color='rose']::before { background: #bd5d72; }
-.project-color[data-color='teal']::before, .project-color-choice[data-color='teal']::before { background: #388f91; }
-.project-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.project-color-menu { position: absolute; z-index: 45; top: calc(100% + 4px); right: 0; display: grid; grid-template-columns: repeat(6, 28px); gap: 5px; width: max-content; padding: 6px; border: 1px solid var(--edge); border-radius: 10px; background: var(--popover, var(--card)); box-shadow: 0 8px 28px #0004; cursor: default; }
-.project-color-menu[hidden] { display: none; }
-.project-color-choice { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
-.project-color-choice:not([data-color=''])::before { content: ''; width: 16px; height: 16px; border-radius: 50%; border: 1px solid #0002; }
-.project-color-choice[data-color=''] { grid-column: 1 / -1; width: 100%; height: 26px; font-size: calc(11px * var(--text-scale, 1)); color: var(--soft); }
-.project-color-choice:hover:not(:disabled), .project-color-choice:focus-visible { background: var(--hover); }
-.project-color-choice[aria-checked='true'] { border-color: var(--soft); }
-.project-color-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-new { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; opacity: 0; }
-.project-heading:hover .project-new, .project-heading:focus-within .project-new { opacity: 1; }
-.project-remove { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; padding: 4px; color: var(--faint); opacity: 0; }
-.project-heading:hover .project-remove, .project-heading:focus-within .project-remove { opacity: 1; }
+/* A project's color tints its folder; the menu (⋯ or a right click) changes it. */
+.project-group[data-project-color='blue'] > .project-heading > .ico { color: #4c7fc1; }
+.project-group[data-project-color='green'] > .project-heading > .ico { color: #3f9b68; }
+.project-group[data-project-color='amber'] > .project-heading > .ico { color: #c38b2f; }
+.project-group[data-project-color='purple'] > .project-heading > .ico { color: #8063b2; }
+.project-group[data-project-color='rose'] > .project-heading > .ico { color: #bd5d72; }
+.project-group[data-project-color='teal'] > .project-heading > .ico { color: #388f91; }
+/* One "⋯" per row, shown on hover or focus and while its menu is open. */
+.row-menu-button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--faint); }
+.row-menu-button:hover, .row-menu-button[aria-expanded='true'] { color: var(--ink); background: var(--hover); }
+.row-menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.project-menu { opacity: 0; transition: opacity 120ms ease; }
+@media (prefers-reduced-motion: reduce) { .project-menu { transition: none; } }
+.project-heading:hover .project-menu, .project-heading:focus-within .project-menu, .project-menu[aria-expanded='true'] { opacity: 1; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
@@ -4010,8 +4124,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .queue-delivery[aria-pressed="true"] { color: var(--text); border-color: var(--soft); }
 
 /* Compact connection disclosure; extension-only preferences remain in the companion. */
-.connect-prompt { background: var(--red); color: white; border: 0; padding: 8px 18px; font-weight: 600; }
-.connect-prompt[hidden] { display: none; }
 @media (prefers-reduced-motion: no-preference) { .skill-autocomplete:not([hidden]) { animation: skill-reveal 120ms ease-out; } }
 @keyframes skill-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .slash-menu-section-title { padding: 6px 8px; color: var(--soft); font-size: 11px; }
