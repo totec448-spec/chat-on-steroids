@@ -1966,5 +1966,9 @@
   "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Sohbetleriniz sürüyor. Geri getirmek için menü çubuğu simgesinin menüsünden “Tarayıcıyı göster”i seçin.",
   "Pinned": "Sabitlendi",
   "Unpin this chat": "Bu sohbetin sabitlemesini kaldır",
-  "Pin this chat to the top of its list": "Bu sohbeti listesinin en üstüne sabitle"
+  "Pin this chat to the top of its list": "Bu sohbeti listesinin en üstüne sabitle",
+  "Core connection lost": "Core bağlantısı kesildi",
+  "Desktop connection lost": "Desktop bağlantısı kesildi",
+  "Plugins connection lost": "Eklentiler bağlantısı kesildi",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tünel bağlantısı beklenmedik şekilde kesildi. Bağlantıyı kontrol etmek için Chat On Steroids uygulamasını açın."
 }
