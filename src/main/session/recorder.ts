@@ -1784,6 +1784,8 @@ export interface ChatObservation {
   recoverable?: boolean;
   /** chat_error only: the DOM classifier identified a provider access limit, in any language. */
   blocking?: boolean;
+  /** chat_error only: provider Retry-After deadline for loading this exact conversation history. */
+  retryAt?: number;
   /** tool_evidence only: the connector requests this turn's message model holds. */
   calls?: PageCallEvidence[];
 }

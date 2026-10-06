@@ -2069,5 +2069,9 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "SQL sorgularını parametreler, net birleştirmeler ve sonuç kontrolüyle doğru ve güvenli biçimde yazın, inceleyin veya optimize edin.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Uzun belgeleri, yazışmaları veya dökümleri doğru biçimde özetleyin: ana noktalar, kararlar, açık sorular ve yapılacaklar.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Metni anlamı, tonu, biçimi ve terminolojiyi tutarlı tutarak doğru ve doğal biçimde çevirin.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Bir hedefi açık ve gerçekçi bir plana dönüştürün: kapsam, kilometre taşları, görevler, riskler ve bugün başlanabilecek ilk adım."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Bir hedefi açık ve gerçekçi bir plana dönüştürün: kapsam, kilometre taşları, görevler, riskler ve bugün başlanabilecek ilk adım.",
+  "ChatGPT history temporarily rate-limited": "ChatGPT geçmişi geçici olarak hız sınırına takıldı",
+  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "Otomatik kurtarma, ChatGPT’nin Retry-After süresi bitene kadar duraklatıldı. Daha erken yeniden yüklemek sınırı uzatabilir.",
+  "Retry allowed in {0}": "{0} sonra yeniden denenebilir",
+  "Retry window ended": "Yeniden deneme bekleme süresi sona erdi"
 }

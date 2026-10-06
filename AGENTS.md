@@ -635,7 +635,16 @@ Content requires the matching route and document epoch, retaining one-shot strea
 temporary ACK failures for at most 15 minutes using the existing observer/backoff. Missing stream
 metadata retains the Fiber path. Fetch reattachment at DOM readiness captures each downstream
 wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
-The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 2
+The same wrapper passively observes same-origin `GET /backend-api/conversations/<uuid>` responses
+that return HTTP 429. It reads no response body, request headers, cookies or credentials: only the
+exact conversation id and a bounded `Retry-After` deadline are projected as
+`cos-history-rate-limit`. Content accepts that projection only for its current exact route and
+records one blocking, non-recoverable `chat_error` with `retryAt`. While the deadline is live,
+ChatGPT's native conversation-load Retry button and CoS browser recovery both defer to it; the
+bridge rechecks the deadline at repair claim, preserves it across reversible bridge stop/start,
+and never treats the limit itself as recovery authority. A deferred Goal/compaction cold-browser
+start reuses the existing single recovery scheduler when the deadline expires.
+The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 4
 has an explicit refresh/disposal handle, also reached by existing MAIN-helper restoration.
 The same fetch wrapper observes exact same-origin POST `f/conversation/resume` HTTP 404s.
 Only `conversation_id` leaves a string JSON request body (bounded to 16 KiB); unsupported or
@@ -3578,7 +3587,9 @@ status updates preserve the user's current disclosure state.
 
 The recovery row above Goal/Loop shows read-only countdowns from `bridge.ts::sessionControlsFor`:
 activity-based silence and confirmed reload listening, an outbox/Goal native-busy deferral, and each unresolved
-attribution incident's exact candidate deadline. `renderer/recovery.ts` updates only the seconds
+attribution incident's exact candidate deadline. A live conversation-history `Retry-After` projects
+a `provider-limit` row that says when retry is allowed and never promises a reload.
+`renderer/recovery.ts` updates only the seconds
 using the existing visible-chat clock; zero says checking/pending, never sent/reloaded. Fresh
 work or attribution removes the relevant countdown, and native busy projects the same owner's
 extended deadline. Pro silence becomes visible after five minutes without work and counts
