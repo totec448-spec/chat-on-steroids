@@ -66,3 +66,17 @@ it('names the model the helper will actually use in progress, not the unusable s
   state.goal = { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' };
   expect(goalProgressFor('goal').model).toBe('gpt-5.6-sol');
 });
+
+it('logs a fallback from the untouched default helper as info, and from a chosen model as a warning', async () => {
+  // The built-in default is no choice of the user's. Its fallback counted as a problem in Activity on
+  // every start for accounts without it (2.1.29 pre-release check).
+  const { getLog } = await import('../src/main/logger.js');
+  const level = (model: string) => getLog().filter(entry => entry.message.includes(`helper model "${model}"`)).at(-1)?.level;
+  state.models = [{ id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] }];
+  state.goal = { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' };
+  expect(goalHelperSelection()).toEqual({ model: null, reasoningEffort: 'high' });
+  expect(level('gpt-5.6-sol')).toBe('info');
+  state.goal = { helperModel: 'gpt-5-4-thinking', helperReasoning: 'high' };
+  goalHelperSelection();
+  expect(level('gpt-5-4-thinking')).toBe('warn');
+});
