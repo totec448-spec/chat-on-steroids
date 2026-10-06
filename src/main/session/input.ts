@@ -134,6 +134,8 @@ export interface ToolInputBatch {
 export interface InputActivity { possible: boolean; exact: boolean; model?: 'pro' | 'other' | 'unknown'; turnId?: string }
 type InputDeliveryHooks = {
   recoveryAllowed?: (sessionId: string, conversationId: string) => boolean;
+  /** Whether running calls still hold this chat's automatic Continue; without it, any call does. */
+  callsHoldRecovery?: (conversationId: string) => boolean;
   activity?: (session: SessionSummary) => InputActivity;
   wakeDecision?: (entry: Readonly<InputEntry>, signal: AbortSignal) => Promise<void>;
   bindHelper?: (conversationId: string, sourceSessionId: string | null) => Promise<void>;
@@ -1110,11 +1112,13 @@ function releaseRecoveryClaim(row: InputEntry, error?: string): InputEntry {
 }
 async function recoveryCurrent(row: InputEntry): Promise<boolean> {
   const conversationId = row.silenceBoundary?.conversationId;
-  // Unassigned calls conservatively block every chat while attribution settles.
-  // They cannot prove that this frozen source resumed. Hold the ticket, rechecking
-  // around asynchronous validation; actual recorded work still retires it below.
-  return !!conversationId && inFlightToolCalls(conversationId) === 0 &&
-    await recoveryInvalidReason(row) === null && inFlightToolCalls(conversationId) === 0;
+  // Unassigned calls conservatively block every chat while attribution settles, for a bounded
+  // time once the chat was found silent (#1086). They cannot prove that this frozen source
+  // resumed. Hold the ticket, rechecking around asynchronous validation; actual recorded work
+  // still retires it below.
+  const held = (id: string) => deliveryHooks?.callsHoldRecovery ? deliveryHooks.callsHoldRecovery(id) : inFlightToolCalls(id) > 0;
+  return !!conversationId && !held(conversationId) &&
+    await recoveryInvalidReason(row) === null && !held(conversationId);
 }
 /** Keep the rejection on the existing outbox receipt so an audit can identify the veto. */
 async function recoveryInvalidReason(row: InputEntry): Promise<string | null> {

@@ -131,7 +131,7 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
 import { setLivePreview } from './live-preview.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
@@ -6475,6 +6475,40 @@ const compactionFilings = new Set<string>();
  */
 const lastAttributedCallAt = new Map<string, number>();
 export const GOAL_QUIET_MS = 60_000;
+/**
+ * How long tool calls of no known chat may hold one silent chat's recovery (#1086).
+ *
+ * A call whose chat is not proven yet might be this chat's, so recovery waits for it. But a silent
+ * chat's own call shows on its page, and the page soon proves it; calls that stay unknown while
+ * the chat is silent are another chat's. On 2026-10-05 a worker's call every 30 s kept one such
+ * call running almost all the time, and a recovered chat waited seventeen minutes for a Continue
+ * that never came. Its own calls still hold it for as long as they run.
+ */
+export const UNKNOWN_CALL_HOLD_MS = 3 * 60_000;
+const unknownCallHold = new WeakMap<ActivityGrant, number>();
+
+/**
+ * What running work keeps this grant's recovery waiting: its own calls always; calls of no known
+ * chat until UNKNOWN_CALL_HOLD_MS after the silence sweep first found them holding it. Only that
+ * sweep starts the clock (`measure`), so work done while the chat was busy never shortens it.
+ */
+function silenceHeldByCalls(conversationId: string, grant: ActivityGrant | undefined, now = Date.now(), measure = false): 'own' | 'unknown' | null {
+  if (runningToolProgress(conversationId)) return 'own';
+  if (runningToolCalls(conversationId) === 0) return null;
+  if (!grant) return 'unknown';
+  if (measure && !unknownCallHold.has(grant)) unknownCallHold.set(grant, now);
+  const since = unknownCallHold.get(grant);
+  return since === undefined || now - since < UNKNOWN_CALL_HOLD_MS ? 'unknown' : null;
+}
+
+/** The input outbox's check for an automatic Continue: the same bounded hold, over settling calls too. */
+export function recoveryHeldByCalls(conversationId: string): boolean {
+  if (inFlightToolCalls(conversationId) === 0) return false;
+  if (runningToolProgress(conversationId)) return true;
+  const grant = activeUntil.get(conversationId);
+  const since = grant ? unknownCallHold.get(grant) : undefined;
+  return since === undefined || Date.now() - since < UNKNOWN_CALL_HOLD_MS;
+}
 export const PRO_SILENCE_MS = 10 * 60_000;
 export const PRO_ACTIVITY_MS = 10 * 60_000;
 /**
@@ -6513,7 +6547,7 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
     liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id && !!row.activeTurnId);
   return { exact, model: grant?.sessionId === summary.id && (grant.turnId === summary.activeTurnId || mcpWindow) ? grant.model : 'unknown',
     ...(exact && (summary.activeTurnId || (mcpWindow && grant?.turnId)) ? { turnId: summary.activeTurnId || grant!.turnId! } : {}),
-    possible: exact || runningToolCalls(id) > 0 ||
+    possible: exact || !!silenceHeldByCalls(id, grant?.sessionId === summary.id ? grant : undefined) ||
     (expiry !== undefined && expiry !== null && expiry > Date.now()) };
 }
 export function sessionActivityExpiresAt(summary: SessionSummary): number | null | undefined {
@@ -6736,7 +6770,7 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
     if (!grant?.turnId || start?.turnId !== grant.turnId || goalActiveFor(conversationId)) continue;
     if (!grant || activeUntil.get(conversationId) !== grant ||
         (grant.model === 'pro' && !grant.thinkingFailed && now - grant.evidenceAt < PRO_SILENCE_MS)) continue;
-    if (goalPendingReplyFor(conversationId) || runningToolCalls(conversationId) > 0) continue;
+    if (goalPendingReplyFor(conversationId) || silenceHeldByCalls(conversationId, grant, now)) continue;
     if (continuationForSession(session.id)) continue;
     // Canonical message replacement leaves sequence gaps; the summary count is not a cursor.
     const [boundary] = await readRecentEvents(session.id, 1);
@@ -6757,9 +6791,9 @@ async function fileSilenceTickets(spent: readonly string[], now: number): Promis
         blocked: false,
         handledOnly: true,
         current: () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === held &&
-          runningToolCalls(conversationId) === 0 && !stopRequestedFor(conversationId) && !goalActiveFor(conversationId)
+          !silenceHeldByCalls(conversationId, grant) && !stopRequestedFor(conversationId) && !goalActiveFor(conversationId)
       });
-      if (activeUntil.get(conversationId) !== grant || runningToolCalls(conversationId) > 0) {
+      if (activeUntil.get(conversationId) !== grant || silenceHeldByCalls(conversationId, grant)) {
         const pending = goalPendingReplyFor(conversationId);
         if (pending?.turnId === turnId) await withdrawSilenceGoalReplyNow(conversationId, pending.replyId);
       }
@@ -6779,7 +6813,7 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
       !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId)) return false;
   const current = () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === repair &&
     !stopRequestedFor(conversationId) && !isChatBlocked(conversationId) &&
-    !continuationForSession(grant.sessionId) && runningToolCalls(conversationId) === 0 &&
+    !continuationForSession(grant.sessionId) && !silenceHeldByCalls(conversationId, grant) &&
     // Ordinary silence needs a quiet recorder. An exact failed-source receipt can
     // publish its existing listening deadline while an unrelated chat is recording;
     // grant identity and the outbox's source/work checks still fence renewed work.
@@ -7167,7 +7201,7 @@ async function silenceRepairCurrent(conversationId: string, repair: Repair): Pro
   const current = () => !!grant?.turnId && activeUntil.get(conversationId) === grant &&
     repairsInFlight.get(conversationId) === repair && !stopRequestedFor(conversationId) &&
     !isChatBlocked(conversationId) && !continuationForSession(repair.sessionId) &&
-    runningToolCalls(conversationId) === 0;
+    !silenceHeldByCalls(conversationId, grant);
   if (!current()) return false;
   return await silenceSourceCurrent(conversationId, grant!) && current();
 }
@@ -8007,14 +8041,17 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     const pro = await extendedSilenceWindowFor(conversationId, grant.sessionId);
     const afterTurn = recoveryInputAllowed(grant.sessionId, conversationId) || loopAfterTurnFor(conversationId) || await hasQueuedAfterTurnInput(grant.sessionId);
     if (activeUntil.get(conversationId) !== grant) continue;
-    if (runningToolProgress(conversationId) || (afterTurn && runningToolCalls(conversationId) > 0)) {
-      noteSilence(conversationId, grant, runningToolProgress(conversationId)
+    const heldBy = silenceHeldByCalls(conversationId, grant, now, true);
+    if (heldBy === 'own' || (afterTurn && heldBy === 'unknown')) {
+      noteSilence(conversationId, grant, heldBy === 'own'
         ? 'waiting: a tool call of this chat is still running'
         : 'waiting: a tool call whose chat is not known yet is running, and it might be this chat\'s');
       grant.until = now + GOAL_QUIET_MS;
       deferred = true;
       continue;
     }
+    if (afterTurn && runningToolCalls(conversationId) > 0)
+      noteSilence(conversationId, grant, `going ahead: tool calls whose chat is not known have held it for ${UNKNOWN_CALL_HOLD_MS / 60_000} minutes while it stayed silent`);
     // A blocked chat never gets the reload, so it can never get the confirmation this pass
     // otherwise waits for, and it would sit measured-silent in the ledger — and in the live set
     // the UI paints — for the rest of the process. Its silence is spent the moment it is
