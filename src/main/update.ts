@@ -62,6 +62,8 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
  * Six hours is slow enough to be invisible, and costs one request whenever there is nothing new.
  */
 const RECHECK_MS = 6 * 60 * 60_000;
+/** Opening Settings asks again when the last answer is older than this. */
+export const STALE_CHECK_MS = 10 * 60_000;
 
 /**
  * The artifact this exact installation can apply to itself, or null for one that cannot.
@@ -161,6 +163,16 @@ function set(next: Partial<UpdateStatus>): void {
 export function startUpdateChecks(): void {
   void checkForUpdates();
   setInterval(() => void checkForUpdates(), RECHECK_MS).unref();
+}
+
+/**
+ * Asks again when the last answer is old: opening Settings calls this. Settings say "Up to date"
+ * on the strength of the last check, and a six-hourly check can say that for hours after a
+ * release (2.1.27 did, after 2.1.28 was out). A pass already running is shared, as always.
+ */
+export function checkForUpdatesIfStale(now = Date.now()): Promise<void> {
+  if (status.checkedAt !== null && now - status.checkedAt < STALE_CHECK_MS) return pass ?? Promise.resolve();
+  return checkForUpdates();
 }
 
 /**
