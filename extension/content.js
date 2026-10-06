@@ -2187,7 +2187,17 @@
    * is what makes `lastChangeAt` mean anything.
    */
   function turnStalled() {
-    return turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS;
+    return turnStartedAt > 0 && Date.now() - stallClock() > STALL_MS;
+  }
+
+  /**
+   * `lastChangeAt`, held at now while ChatGPT's tool approval card waits for the user: that wait
+   * is not a stall, and calling it one told the user the turn had died (VM stress test,
+   * 2026-10-06). Once the card is answered, ten quiet minutes count from that moment.
+   */
+  function stallClock() {
+    if (turnStartedAt > 0 && CLF_DOM.approvalWaiting()) lastChangeAt = Math.max(lastChangeAt, Date.now());
+    return lastChangeAt;
   }
 
   /** Exact aliases match shared/chat-models.ts::isProModel (the extension is plain JS). */
@@ -2897,7 +2907,7 @@
       // generic stall, including when it appears after a long quiet run.
       const thinkingFailure = quietOutcome?.reason === 'thinking_failed' || visibleErrors.some(
         error => error.reason === 'thinking_failed' && localErrorGeneration(error) === turnId && !isStale(error.node));
-      if (!thinkingFailure && !stallReported && Date.now() - lastChangeAt > STALL_MS && !deliberateTurnLive()) {
+      if (!thinkingFailure && !stallReported && Date.now() - stallClock() > STALL_MS && !deliberateTurnLive()) {
         stallReported = true;
         emit({
           kind: 'chat_error',
