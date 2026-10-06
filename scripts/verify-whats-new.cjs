@@ -71,27 +71,36 @@ app.whenReady().then(async () => {
     for (const theme of ['dark','light']) {
       await open(`theme=${theme}&seen=2.1.28&version=2.1.29`);
       await until(`document.getElementById('whatsNewDialog').open`);
-      await pause(260);
+      await pause(1100);
       const view=await js(`(()=>{const d=document.getElementById('whatsNewDialog'),r=d.getBoundingClientRect(),list=document.getElementById('whatsNewList');
         return {left:r.left,right:innerWidth-r.right,top:r.top,bottom:innerHeight-r.bottom,items:list.children.length,
           title:document.getElementById('whatsNewTitle').textContent,version:document.getElementById('whatsNewVersion').textContent,
-          lead:document.getElementById('whatsNewLead').textContent,focus:document.activeElement.id,
+          lead:document.getElementById('whatsNewLead').textContent,focus:document.activeElement.id,ring:document.activeElement.matches(':focus-visible'),
           sideways:list.scrollWidth>list.clientWidth,fits:list.scrollHeight<=list.clientHeight,clipped:[...list.querySelectorAll('b,span')].some(e=>e.scrollWidth>e.clientWidth+1)}})()`);
       assert.equal(view.items,6,'Six highlights for 2.1.29');
       assert.equal(view.title,"What's new");
       assert.equal(view.version,'Version 2.1.29');
       assert.match(view.lead,/^Pin your chats/);
       assert.equal(view.focus,'whatsNewDone','"Got it" has the focus');
+      assert.equal(view.ring,false,'It opens without a focus ring; the keyboard brings one');
       assert.ok(Math.abs(view.left-view.right)<=1 && Math.abs(view.top-view.bottom)<=1,'The dialog is centred: '+JSON.stringify(view));
       assert.ok(!view.sideways && !view.clipped,'Nothing scrolls sideways or is cut: '+JSON.stringify(view));
       assert.ok(view.fits,'All highlights fit an ordinary window without scrolling: '+JSON.stringify(view));
       assert.equal(await js('window.seenCalls'),1,'The version is recorded once it has been shown');
       // Every glyph sits in the middle of its badge, and the sparkle in its mark.
-      for (const element of ["document.querySelector('.whats-new-mark')",...Array.from({length:6},(_, i)=>`document.querySelectorAll('.whats-new-icon')[${i}]`)]) {
+      for (const element of ["document.querySelector('.whats-new-tile')","document.querySelector('.whats-new-seal')",...Array.from({length:6},(_, i)=>`document.querySelectorAll('.whats-new-icon')[${i}]`)]) {
         // A rounded square's corners show the card through: square it off while measuring; the glyph stays put.
-        await js(`${element}.style.borderRadius='0'`);
+        // The seal sits over the tile's corner; it is measured on its own, so hide it for the tile.
+        const tile=element.includes('whats-new-tile');
+        if (tile) await js(`document.querySelector('.whats-new-seal').style.visibility='hidden'`);
+        const round=element.includes('whats-new-seal');
+        // The seal's disc and ring are accent over the tile; measure only its glyph, in ink on a card-coloured disc.
+        if (round) await js(`(s=>{s.style.background='var(--whats-new-surface)';s.style.boxShadow='none';s.style.color='var(--ink)'})(document.querySelector('.whats-new-seal'))`);
+        if (!round) await js(`${element}.style.borderRadius='0'`);
         const ink=await inkInsets(element);
-        await js(`${element}.style.borderRadius=''`);
+        if (!round) await js(`${element}.style.borderRadius=''`);
+        if (round) await js(`(s=>{s.style.background='';s.style.boxShadow='';s.style.color=''})(document.querySelector('.whats-new-seal'))`);
+        if (tile) await js(`document.querySelector('.whats-new-seal').style.visibility=''`);
         assert.ok(Math.abs(ink.left-ink.right)<=1.5 && Math.abs(ink.top-ink.bottom)<=1.5,`${element} is centred in ${theme}: ${JSON.stringify(ink)}`);
       }
       // As it opens: measuring scrolled the list; back to its top for the picture.
@@ -108,7 +117,7 @@ app.whenReady().then(async () => {
     // German, the longest of the catalogs here: translated, nothing cut, the actions in view.
     await open('lang=de&seen=2.1.28&version=2.1.29');
     await until(`document.getElementById('whatsNewDialog').open`);
-    await pause(260);
+    await pause(1100);
     const de=await js(`(()=>{const list=document.getElementById('whatsNewList'),a=document.querySelector('.whats-new-actions').getBoundingClientRect();
       return {title:document.getElementById('whatsNewTitle').textContent,done:document.getElementById('whatsNewDone').textContent.trim(),
         clipped:[...document.querySelectorAll('#whatsNewDialog b,#whatsNewDialog span,#whatsNewDialog button')].some(e=>e.scrollWidth>e.clientWidth+1),
@@ -120,7 +129,7 @@ app.whenReady().then(async () => {
     // Escape dismisses it the same way.
     await open('seen=2.1.28&version=2.1.29');
     await until(`document.getElementById('whatsNewDialog').open`);
-    await pause(260);
+    await pause(1100);
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
     await until(`!document.getElementById('whatsNewDialog').open`);
 
@@ -128,7 +137,7 @@ app.whenReady().then(async () => {
     win.setContentSize(720,460);
     await open('seen=2.1.28&version=2.1.29');
     await until(`document.getElementById('whatsNewDialog').open`);
-    await pause(260);
+    await pause(1100);
     const short=await js(`(()=>{const d=document.getElementById('whatsNewDialog').getBoundingClientRect(),a=document.querySelector('.whats-new-actions').getBoundingClientRect(),l=document.getElementById('whatsNewList');
       return {top:d.top,bottom:innerHeight-d.bottom,actionsBottom:innerHeight-a.bottom,scrolls:l.scrollHeight>l.clientHeight}})()`);
     assert.ok(short.top>=8 && short.bottom>=8 && short.actionsBottom>=8 && short.scrolls,'A short window keeps the dialog and its actions in view: '+JSON.stringify(short));
