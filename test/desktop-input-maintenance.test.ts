@@ -289,13 +289,13 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     fetch, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console
   });
   vm.runInContext(activeTabsSource, context);
-  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
+  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
   const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
@@ -430,6 +430,43 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     } else expect(observed).toEqual([true, false]);
     expect(h.create).not.toHaveBeenCalled();
     expect(h.update.mock.calls.some(([, patch]) => patch.active)).toBe(false);
+  });
+
+  it.each(['page-report', 'user-later'] as const)('tells the app that borrowing an idle chat\'s tab was its own doing (%s)', async variant => {
+    // #1086: a new chat took an idle app-owned chat's tab. The page then reported that chat as
+    // closed, the app read it as the user closing it on purpose, and paused its recovery for good.
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
+    h.tabs.push(tab);
+    const sender = { tab, documentId: 'reused-document', frameId: 0, url: tab.url };
+    const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    const originalFetch = h.fetch.getMockImplementation()!;
+    h.fetch.mockImplementation(async (url, init) => {
+      const response = await originalFetch(url, init);
+      return new URL(url).pathname === '/status'
+        ? { ...response, json: async () => ({ ...await response.json() as object, reusableConversations: [secondId] }) } : response;
+    });
+    h.sendMessage.mockImplementation(async (_id, message): Promise<any> => {
+      if (message.type === 'clf-input-reuse-state') return { safe: true, navigationEpoch: 1 };
+      if (message.type === 'clf-prepare-desktop-input') {
+        // The page moves to a new chat in the same document and reports the old one as left.
+        await h.closed({ conversationId: secondId }, sender, source);
+        tab.url = `https://chatgpt.com/?cos-input=${firstId}`;
+        return { ready: true };
+      }
+      return { ok: true };
+    });
+    await h.maintain();
+    const closes = () => h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/closed')
+      .map(([, init]) => JSON.parse(String(init!.body)));
+    expect(closes()).toEqual([{ conversationId: secondId, manual: false }]);
+    if (variant === 'user-later') {
+      // The record is spent: a later departure of the same chat is the user's again.
+      tab.url = `https://chatgpt.com/c/${secondId}`;
+      const back = await h.authorizeDocument({ ...sender, url: tab.url, documentId: 'reused-document' }, { navigationEpoch: 3 });
+      await h.closed({ conversationId: secondId }, { ...sender, url: tab.url }, back);
+      expect(closes().at(-1)).toEqual({ conversationId: secondId, manual: true });
+    }
   });
 
   it.each(['returned', 'absent', 'foreign', 'original-present'] as const)('resumes a pending exact-chat input only in an already returned tab (%s)', async state => {
