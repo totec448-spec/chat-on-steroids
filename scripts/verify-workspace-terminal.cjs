@@ -54,7 +54,9 @@ app.whenReady().then(async () => {
       onTerminalEvent:listener=>{const fn=(_,value)=>listener(value);ipcRenderer.on('workspaceTerminal:event',fn);return()=>ipcRenderer.removeListener('workspaceTerminal:event',fn)},
       writeClipboard:()=>Promise.resolve({ok:true,data:true})
     });`);
-  let win = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+  // A hidden window on Windows advances no animations, so the docks' slide-in never settles there
+  // and a click is measured mid-drawer. Shown, it behaves like the app itself (2026-10-06, VM 141).
+  let win = new BrowserWindow({ show: WINDOWS, width: 1100, height: 800, webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
   backend.registerWorkspaceTerminalIpc(() => win);
   const fixture = `
     window.errors=[];window.addEventListener('error',e=>window.errors.push(e.message));window.addEventListener('unhandledrejection',e=>window.errors.push(String(e.reason)));
