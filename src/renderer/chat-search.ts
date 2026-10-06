@@ -10,6 +10,7 @@
 import type { SessionSearchReply } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
 import { t, ui } from './i18n.js';
+import { closeRowMenu } from './row-menu.js';
 import { isMac, primaryShortcut } from './shortcuts.js';
 
 const api = window.api;
@@ -155,6 +156,8 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
 
   const open = (): void => {
     dialog.classList.remove('is-closing');
+    // A chat's row menu is not part of the dialog: left open, it stayed over the dialog and after it.
+    closeRowMenu();
     if (!dialog.open) dialog.showModal();
     field.focus();
     field.select();

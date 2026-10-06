@@ -135,10 +135,13 @@ app.whenReady().then(async () => {
   }
 
   // ⌘K (macOS) or Ctrl+K opens the dialog from anywhere, and the View menu names it the same way.
-  await js(`document.activeElement?.blur(); document.body.focus()`);
+  // A chat's open row menu closes with it: it stayed over the dialog, and open after it (2.1.29 QA).
+  await js(`document.querySelector('#sessionList .sess[data-id] [aria-haspopup=menu]').click()`);
+  await until(`document.querySelectorAll('.row-menu').length>0`);
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'K', modifiers: [mac ? 'meta' : 'control'] });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'K', modifiers: [mac ? 'meta' : 'control'] });
   await until(`document.getElementById('searchDialog').open && document.activeElement?.id === 'chatSearch'`);
+  assert.equal(await js(`document.querySelectorAll('.row-menu').length`), 0, 'The search dialog closes an open row menu');
   assert.equal(await js(`document.querySelector('#searchMenuItem kbd').textContent`), mac ? '⌘K' : 'Ctrl+K');
   assert.equal(await js(`document.querySelector('#sidebarMenuToggle kbd').textContent`), mac ? '⌘B' : 'Ctrl+B');
   assert.match(await js(`document.getElementById('sidebarToggle').title`), mac ? /\(⌘B\)$/ : /\(Ctrl\+B\)$/);
