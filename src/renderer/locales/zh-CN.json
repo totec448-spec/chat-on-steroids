@@ -2069,5 +2069,9 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "正确、安全地编写、审查或优化 SQL 查询：使用参数、清晰的连接，并核对结果。",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "准确总结长文档、讨论串或转录稿：要点、决定、未决问题和待办事项。",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "准确、自然地翻译文本，保持含义、语气、格式和术语一致。",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "把目标变成清晰、可行的计划：范围、里程碑、任务、风险，以及今天就能开始的第一步。"
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "把目标变成清晰、可行的计划：范围、里程碑、任务、风险，以及今天就能开始的第一步。",
+  "ChatGPT history temporarily rate-limited": "ChatGPT 历史记录暂时受到速率限制",
+  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "在 ChatGPT 的 Retry-After 时间窗结束前，自动恢复将暂停。提前重新加载可能会延长限制。",
+  "Retry allowed in {0}": "{0} 后可重试",
+  "Retry window ended": "重试等待时间已结束"
 }

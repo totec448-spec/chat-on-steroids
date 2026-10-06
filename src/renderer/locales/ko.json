@@ -2069,5 +2069,9 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "매개변수, 명확한 조인, 결과 확인을 통해 SQL 쿼리를 정확하고 안전하게 작성, 검토, 최적화합니다.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "긴 문서, 스레드, 녹취록을 정확하게 요약합니다. 핵심 내용, 결정 사항, 남은 질문, 할 일을 정리합니다.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "의미, 어조, 서식, 용어를 일관되게 유지하면서 정확하고 자연스럽게 번역합니다.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "목표를 명확하고 현실적인 계획으로 바꿉니다. 범위, 마일스톤, 작업, 위험, 오늘 시작할 수 있는 첫 단계를 정합니다."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "목표를 명확하고 현실적인 계획으로 바꿉니다. 범위, 마일스톤, 작업, 위험, 오늘 시작할 수 있는 첫 단계를 정합니다.",
+  "ChatGPT history temporarily rate-limited": "ChatGPT 기록이 일시적으로 요청 제한됨",
+  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "ChatGPT의 Retry-After 시간이 끝날 때까지 자동 복구가 일시 중지됩니다. 더 일찍 새로고침하면 제한이 더 길어질 수 있습니다.",
+  "Retry allowed in {0}": "{0} 후 재시도 가능",
+  "Retry window ended": "재시도 대기 시간이 끝났습니다"
 }

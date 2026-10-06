@@ -2069,5 +2069,9 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "Viết, rà soát hoặc tối ưu truy vấn SQL đúng và an toàn, với tham số, phép join rõ ràng và kiểm tra kết quả.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Tóm tắt chính xác tài liệu, chuỗi thảo luận hay bản ghi dài: ý chính, quyết định, câu hỏi còn mở và việc cần làm.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Dịch văn bản chính xác và tự nhiên, giữ nhất quán ý nghĩa, giọng điệu, định dạng và thuật ngữ.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Biến một mục tiêu thành kế hoạch rõ ràng, thực tế: phạm vi, cột mốc, nhiệm vụ, rủi ro và bước đầu tiên có thể bắt đầu ngay hôm nay."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Biến một mục tiêu thành kế hoạch rõ ràng, thực tế: phạm vi, cột mốc, nhiệm vụ, rủi ro và bước đầu tiên có thể bắt đầu ngay hôm nay.",
+  "ChatGPT history temporarily rate-limited": "Lịch sử ChatGPT tạm thời bị giới hạn tần suất",
+  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "Khôi phục tự động được tạm dừng cho đến khi khoảng Retry-After của ChatGPT kết thúc. Tải lại sớm hơn có thể kéo dài giới hạn.",
+  "Retry allowed in {0}": "Có thể thử lại sau {0}",
+  "Retry window ended": "Đã hết thời gian chờ thử lại"
 }

@@ -2069,5 +2069,9 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "Escrever, rever ou otimizar consultas SQL de forma correta e segura, com parâmetros, joins claros e uma verificação dos resultados.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Resumir com rigor documentos, conversas ou transcrições longos: pontos-chave, decisões, questões em aberto e próximas ações.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Traduzir texto com rigor e naturalidade, mantendo coerentes o sentido, o tom, a formatação e a terminologia.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Transformar um objetivo num plano claro e realista: âmbito, marcos, tarefas, riscos e um primeiro passo que pode começar hoje."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Transformar um objetivo num plano claro e realista: âmbito, marcos, tarefas, riscos e um primeiro passo que pode começar hoje.",
+  "ChatGPT history temporarily rate-limited": "Histórico do ChatGPT temporariamente limitado",
+  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "A recuperação automática fica em pausa até terminar o período Retry-After do ChatGPT. Recarregar mais cedo pode prolongar o limite.",
+  "Retry allowed in {0}": "Nova tentativa permitida em {0}",
+  "Retry window ended": "Período de nova tentativa terminado"
 }
