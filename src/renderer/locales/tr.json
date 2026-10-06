@@ -1980,5 +1980,8 @@
   "Core connection lost": "Core bağlantısı kesildi",
   "Desktop connection lost": "Desktop bağlantısı kesildi",
   "Plugins connection lost": "Eklentiler bağlantısı kesildi",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tünel bağlantısı beklenmedik şekilde kesildi. Bağlantıyı kontrol etmek için Chat On Steroids uygulamasını açın."
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tünel bağlantısı beklenmedik şekilde kesildi. Bağlantıyı kontrol etmek için Chat On Steroids uygulamasını açın.",
+  "Copy link": "Bağlantıyı kopyala",
+  "Copy this chat's ChatGPT link": "Bu sohbetin ChatGPT bağlantısını kopyala",
+  "Link copied": "Bağlantı kopyalandı"
 }

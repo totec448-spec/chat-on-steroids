@@ -1980,5 +1980,8 @@
   "Core connection lost": "Core 連線已中斷",
   "Desktop connection lost": "Desktop 連線已中斷",
   "Plugins connection lost": "外掛連線已中斷",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道連線意外中斷。請開啟 Chat On Steroids 檢查連線。"
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道連線意外中斷。請開啟 Chat On Steroids 檢查連線。",
+  "Copy link": "複製連結",
+  "Copy this chat's ChatGPT link": "複製此對話的 ChatGPT 連結",
+  "Link copied": "已複製連結"
 }

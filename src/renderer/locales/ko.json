@@ -1980,5 +1980,8 @@
   "Core connection lost": "Core 연결이 끊어졌습니다",
   "Desktop connection lost": "Desktop 연결이 끊어졌습니다",
   "Plugins connection lost": "플러그인 연결이 끊어졌습니다",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "터널 연결이 예기치 않게 끊어졌습니다. Chat On Steroids를 열어 연결 상태를 확인하세요."
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "터널 연결이 예기치 않게 끊어졌습니다. Chat On Steroids를 열어 연결 상태를 확인하세요.",
+  "Copy link": "링크 복사",
+  "Copy this chat's ChatGPT link": "이 채팅의 ChatGPT 링크 복사",
+  "Link copied": "링크를 복사했습니다"
 }
