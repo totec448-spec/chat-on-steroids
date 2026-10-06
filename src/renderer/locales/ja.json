@@ -1980,5 +1980,8 @@
   "Core connection lost": "Core への接続が切断されました",
   "Desktop connection lost": "Desktop への接続が切断されました",
   "Plugins connection lost": "プラグインへの接続が切断されました",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "トンネル接続が予期せず切断されました。Chat On Steroids を開いて接続を確認してください。"
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "トンネル接続が予期せず切断されました。Chat On Steroids を開いて接続を確認してください。",
+  "Copy link": "リンクをコピー",
+  "Copy this chat's ChatGPT link": "このチャットのChatGPTリンクをコピー",
+  "Link copied": "リンクをコピーしました"
 }
