@@ -841,9 +841,24 @@ main {
 
 /* Settings page layouts are owned by settings.css. */
 
+/* Titled like every other settings page; the log card fills the height under the title. */
 [data-panel='activity'] {
-  padding: 12px 14px 14px;
+  padding: 46px 36px 36px;
   grid-template-rows: minmax(0, 1fr);
+}
+
+.activity-content {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  [data-panel='activity'] { padding: 36px 24px 24px; }
+}
+
+@media (max-width: 520px) {
+  [data-panel='activity'] { padding: 24px 18px 18px; }
 }
 
 .top {
