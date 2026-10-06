@@ -90,7 +90,7 @@ import {
   publishBridgePortChange,
   companionDiagnostics,
   sessionInputActivity,
-  recoveryInputAllowed,
+  recoveryHeldByCalls, recoveryInputAllowed,
   sessionControlsFor, cancelAssistantRecovery, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
@@ -1593,6 +1593,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   configureInputDelivery({
     recoveryAllowed: recoveryInputAllowed,
+    callsHoldRecovery: recoveryHeldByCalls,
     activity: sessionInputActivity,
     wakeDecision: async (entry, signal) => {
       signal.throwIfAborted();
