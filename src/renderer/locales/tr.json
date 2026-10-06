@@ -1976,5 +1976,9 @@
   "Unpin this chat": "Bu sohbetin sabitlemesini kaldır",
   "Pin this chat to the top of its list": "Bu sohbeti listesinin en üstüne sabitle",
   "Pin chat": "Sohbeti sabitle",
-  "Unpin chat": "Sabitlemeyi kaldır"
+  "Unpin chat": "Sabitlemeyi kaldır",
+  "Core connection lost": "Core bağlantısı kesildi",
+  "Desktop connection lost": "Desktop bağlantısı kesildi",
+  "Plugins connection lost": "Eklentiler bağlantısı kesildi",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tünel bağlantısı beklenmedik şekilde kesildi. Bağlantıyı kontrol etmek için Chat On Steroids uygulamasını açın."
 }

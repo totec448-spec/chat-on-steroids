@@ -1976,5 +1976,9 @@
   "Unpin this chat": "取消釘選此聊天",
   "Pin this chat to the top of its list": "將此聊天釘選在所在清單頂端",
   "Pin chat": "釘選聊天",
-  "Unpin chat": "取消釘選"
+  "Unpin chat": "取消釘選",
+  "Core connection lost": "Core 連線已中斷",
+  "Desktop connection lost": "Desktop 連線已中斷",
+  "Plugins connection lost": "外掛連線已中斷",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道連線意外中斷。請開啟 Chat On Steroids 檢查連線。"
 }

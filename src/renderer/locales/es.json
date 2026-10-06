@@ -1976,5 +1976,9 @@
   "Unpin this chat": "Desfijar este chat",
   "Pin this chat to the top of its list": "Fijar este chat arriba de su lista",
   "Pin chat": "Fijar chat",
-  "Unpin chat": "Desfijar chat"
+  "Unpin chat": "Desfijar chat",
+  "Core connection lost": "Se perdió la conexión con Core",
+  "Desktop connection lost": "Se perdió la conexión con Desktop",
+  "Plugins connection lost": "Se perdió la conexión con Complementos",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "El túnel se desconectó inesperadamente. Abre Chat On Steroids para comprobar la conexión."
 }
