@@ -1966,5 +1966,9 @@
   "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "Os seus chats continuam. Escolha “Mostrar navegador” no menu do ícone da barra de menus para o voltar a abrir.",
   "Pinned": "Fixado",
   "Unpin this chat": "Desafixar este chat",
-  "Pin this chat to the top of its list": "Fixar este chat no topo da lista"
+  "Pin this chat to the top of its list": "Fixar este chat no topo da lista",
+  "Core connection lost": "Ligação ao Core perdida",
+  "Desktop connection lost": "Ligação ao Desktop perdida",
+  "Plugins connection lost": "Ligação aos Plugins perdida",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "O túnel foi desligado inesperadamente. Abra o Chat On Steroids para verificar a ligação."
 }
