@@ -2529,8 +2529,10 @@ var CLF_DOM = (() => {
           mentioning = false;
           for (const pending of mentionTimers) clearTimeout(pending);
           mentionTimers = [];
-          // Only the prompt as it was approved may be sent, with or without the token.
-          if (promptWithoutMentions(box) !== mentionPlain) return finish(false, 'draft-changed');
+          // Only the prompt as it was approved may be sent, with or without the token. Named apart
+          // from a user's edit: four worker wakes failed this way at once in #1086, all reported
+          // as draft-changed, so the log could not say which step refused them.
+          if (promptWithoutMentions(box) !== mentionPlain) return finish(false, 'mention-changed');
           mentionedDraft = draftText();
           const resume = resumeClick;
           resumeClick = null;
@@ -2568,7 +2570,7 @@ var CLF_DOM = (() => {
               priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
               mentionPlain = promptWithoutMentions(box);
               const added = addAppMention(box, mention);
-              if (added === false) return finish(false, 'draft-changed');
+              if (added === false) return finish(false, 'mention-not-restored');
               if (added) {
                 mentionAdded = true;
                 mentioning = true;
