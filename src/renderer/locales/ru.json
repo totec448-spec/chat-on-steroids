@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Туннель неожиданно отключился. Откройте Chat On Steroids, чтобы проверить соединение.",
   "Copy link": "Копировать ссылку",
   "Copy this chat's ChatGPT link": "Скопировать ссылку на этот чат в ChatGPT",
-  "Link copied": "Ссылка скопирована"
+  "Link copied": "Ссылка скопирована",
+  "ChatGPT is waiting for your approval": "ChatGPT ждёт вашего разрешения",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Чат приостановлен, пока вы не разрешите или не отклоните вызов инструмента в ChatGPT. Нажмите, чтобы открыть его.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT ждёт, пока вы разрешите или отклоните вызов инструмента в этом чате. Ничего не продолжится, пока вы не ответите там.",
+  "The tool approval ChatGPT asked for in this chat was answered.": "На запрос ChatGPT о разрешении инструмента в этом чате дан ответ."
 }

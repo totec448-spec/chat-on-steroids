@@ -79,6 +79,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
 
 const api = window.api;
@@ -2694,6 +2695,13 @@ function paintMessageReaction(box: HTMLElement, value: unknown): void {
   if (!existing) box.append(badge);
 }
 
+/** The approval row in the interface language. Literal `t()` calls keep the catalog audit able to see each key. */
+function approvalRowText(text: string): string {
+  if (text === APPROVAL_WAITING_TEXT) return t('ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.');
+  if (text === APPROVAL_ANSWERED_TEXT) return t('The tool approval ChatGPT asked for in this chat was answered.');
+  return text;
+}
+
 function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
@@ -2804,8 +2812,23 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       }
       return box;
     }
-    case 'progress':
-      return el('p', 'meta is-progress', event.message.text);
+    case 'progress': {
+      if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
+      // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
+      // writes the English source; only the user can answer the card, so the row opens the page.
+      const waiting = event.message.text === APPROVAL_WAITING_TEXT;
+      const line = el('p', `meta is-progress thinking-line approval-wait${waiting ? ' is-waiting' : ''}`);
+      line.append(icon(waiting ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'), el('span', '', () => approvalRowText(event.message.text)));
+      const owner = context?.id ?? selectedId;
+      if (waiting && owner) {
+        const open = el('button', 'btn') as HTMLButtonElement;
+        open.type = 'button';
+        open.append(icon('i-out'), el('span', '', () => t('Open in browser')));
+        open.addEventListener('click', () => void run(api.openSessionChat(owner)));
+        line.append(open);
+      }
+      return line;
+    }
     case 'page_tool': {
       const line = el('p', 'meta is-progress thinking-line');
       line.append(icon('i-globe', 'ico thinking-ico'), el('span', '', event.label));
