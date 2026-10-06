@@ -1976,5 +1976,9 @@
   "Unpin this chat": "取消置顶此聊天",
   "Pin this chat to the top of its list": "将此聊天置顶到所在列表",
   "Pin chat": "置顶聊天",
-  "Unpin chat": "取消置顶"
+  "Unpin chat": "取消置顶",
+  "Core connection lost": "Core 连接已断开",
+  "Desktop connection lost": "Desktop 连接已断开",
+  "Plugins connection lost": "插件连接已断开",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道连接意外断开。请打开 Chat On Steroids 检查连接。"
 }

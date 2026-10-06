@@ -1976,5 +1976,9 @@
   "Unpin this chat": "이 채팅 고정 해제",
   "Pin this chat to the top of its list": "이 채팅을 목록 맨 위에 고정",
   "Pin chat": "채팅 고정",
-  "Unpin chat": "고정 해제"
+  "Unpin chat": "고정 해제",
+  "Core connection lost": "Core 연결이 끊어졌습니다",
+  "Desktop connection lost": "Desktop 연결이 끊어졌습니다",
+  "Plugins connection lost": "플러그인 연결이 끊어졌습니다",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "터널 연결이 예기치 않게 끊어졌습니다. Chat On Steroids를 열어 연결 상태를 확인하세요."
 }

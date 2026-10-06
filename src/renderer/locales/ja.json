@@ -1976,5 +1976,9 @@
   "Unpin this chat": "このチャットの固定を解除",
   "Pin this chat to the top of its list": "このチャットをリストの先頭に固定",
   "Pin chat": "チャットを固定",
-  "Unpin chat": "固定を解除"
+  "Unpin chat": "固定を解除",
+  "Core connection lost": "Core への接続が切断されました",
+  "Desktop connection lost": "Desktop への接続が切断されました",
+  "Plugins connection lost": "プラグインへの接続が切断されました",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "トンネル接続が予期せず切断されました。Chat On Steroids を開いて接続を確認してください。"
 }
