@@ -123,6 +123,8 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.activeElement.dataset.rowAction`),'color-none','The submenu opens on the current color');
     await screenshot('project-menu-color.png');
     press('Down');
+    // Input events are handled asynchronously; a slow runner read the focus before the key landed.
+    for(let i=0;i<100 && await js(`document.activeElement.dataset.rowAction==='color-none'`);i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.activeElement.dataset.rowAction`),'color-blue');
     press('Enter');
     for(let i=0;i<100 && await js(`document.querySelector('.project-group').dataset.projectColor!=='blue'`);i++) await new Promise(r=>setTimeout(r,10));
@@ -139,10 +141,12 @@ app.whenReady().then(async () => {
       document.querySelector('.row-menu [data-row-action="color"]').click();
       document.querySelector('.row-menu [data-row-action="color-green"]').focus()`);
     press('Enter');
+    for(let i=0;i<100 && await js(`typeof window.completeColorSave!=='function'`);i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`typeof window.completeColorSave`),'function');
     const composerPoint = await js(`(() => {const r=document.getElementById('chatInput').getBoundingClientRect();return {x:Math.round(r.left+20),y:Math.round(r.top+r.height/2)}})()`);
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...composerPoint});
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...composerPoint});
+    for(let i=0;i<100 && await js(`document.activeElement!==document.getElementById('chatInput')`);i++) await new Promise(r=>setTimeout(r,10));
     assert.equal(await js(`document.activeElement===document.getElementById('chatInput')`),true);
     await js(`window.completeColorSave()`);
     for(let i=0;i<100 && await js(`document.querySelector('.project-group').dataset.projectColor!=='green'`);i++) await new Promise(r=>setTimeout(r,10));

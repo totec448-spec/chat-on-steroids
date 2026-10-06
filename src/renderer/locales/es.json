@@ -36,6 +36,7 @@
   "Continue an interrupted answer when the app can verify the unfinished turn.": "Continúa una respuesta interrumpida cuando la aplicación puede verificar que el turno no terminó.",
   "Recovery timing details": "Detalles de los tiempos de recuperación",
   "Unverified": "Sin verificar",
+  "This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.": "Esta cuenta de ChatGPT no ofrece este modelo, así que se usa el modelo actual de ChatGPT.",
   "Failed": "Falló",
   "Finished": "Finalizado",
   "Could not copy text.": "No se pudo copiar el texto.",

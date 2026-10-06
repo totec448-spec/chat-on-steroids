@@ -443,6 +443,9 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   expect(select('workerModel').selectedOptions[0]!.disabled).toBe(true);
   expect(select('workerModel').selectedOptions[0]!.textContent).toBe('unseen');
   expect(dom.window.document.getElementById('workerModelVerification')!.textContent).toBe('Unverified');
+  // The badge says what runs instead, not just that something is wrong.
+  expect(dom.window.document.getElementById('workerModelVerification')!.title)
+    .toBe("This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.");
   expect(dom.window.document.getElementById('helperModelVerification')!.hasAttribute('hidden')).toBe(true);
   expect(select('helperModel').value).toBe('first');
   // Selects without the badge still say so in the option itself.
