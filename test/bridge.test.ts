@@ -2480,6 +2480,9 @@ describe('automatic compaction', () => {
     const handout = (await request('GET', '/status')).body.repairs
       .filter((row: { conversationId: string }) => row.conversationId === conversationId);
     expect(handout).toEqual([expect.objectContaining({ reason: 'compaction' })]);
+    // The browser may also claim it, and so open the chat's tab again. A refused claim left the
+    // offer unclaimed until the app gave up ("no page; not offering again"), 2026-10-06 on 2.1.28.
+    expect((await request('POST', '/repairs/claim', { body: { token: handout[0].token } })).body.allowed).toBe(true);
   });
 
   it('keeps the concrete pre-send failure and refuses a stale page abort of a newer ticket', async () => {
