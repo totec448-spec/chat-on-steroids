@@ -82,4 +82,5 @@ app.whenReady().then(async () => {
     assert.ok(await gap()>=200, 'switched off, growth outside a repaint is not followed: gap '+(await gap()));
     console.log('PASS: the chat follows growth at its end, holds a reader who scrolled up, resumes at the end, and stays put when switched off.');
   } finally { win?.destroy(); await server.close(); app.quit(); }
-});
+// A failed assertion must fail the check: quitting alone exits 0 and reads as a pass.
+}).catch(error => { console.error(error); app.exit(1); });

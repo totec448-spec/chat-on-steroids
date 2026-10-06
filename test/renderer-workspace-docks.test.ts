@@ -6,7 +6,7 @@ let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
 function setup() {
-  dom = new JSDOM('<div class="app"><button id="headerConnect"></button><main data-panel="chat"><article class="is-session"></article></main></div>', { pretendToBeVisual: true });
+  dom = new JSDOM('<div class="app"><header><span class="state"></span></header><main data-panel="chat"><article class="is-session"></article></main></div>', { pretendToBeVisual: true });
   Object.assign(globalThis, { document: dom.window.document, window: dom.window });
   const host = document.querySelector<HTMLElement>('main')!;
   return { host, docks: createWorkspaceDocks(host) };

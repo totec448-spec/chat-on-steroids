@@ -1237,7 +1237,6 @@
   "Seen {0}": "{0} 확인됨",
   "Paired · not active": "페어링됨 · 비활성",
   "ChatGPT connector": "ChatGPT 커넥터",
-  "Browser companion": "브라우저 컴패니언",
   "Extension": "확장 프로그램",
   "Connection settings": "연결 설정",
   "Not seen": "확인되지 않음",
@@ -1967,5 +1966,19 @@
   "Recent": "최근",
   "Pinned": "고정됨",
   "Unpin this chat": "이 채팅 고정 해제",
-  "Pin this chat to the top of its list": "이 채팅을 목록 맨 위에 고정"
+  "Pin this chat to the top of its list": "이 채팅을 목록 맨 위에 고정",
+  "Color": "색상",
+  "Open in browser": "브라우저에서 열기",
+  "Block chat": "채팅 차단",
+  "Release chat": "차단 해제",
+  "Trust chat": "채팅 신뢰",
+  "Untrust chat": "신뢰 해제",
+  "Block unattributed calls": "귀속되지 않은 호출 차단",
+  "More options": "추가 옵션",
+  "Pin chat": "채팅 고정",
+  "Unpin chat": "고정 해제",
+  "Core connection lost": "Core 연결이 끊어졌습니다",
+  "Desktop connection lost": "Desktop 연결이 끊어졌습니다",
+  "Plugins connection lost": "플러그인 연결이 끊어졌습니다",
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "터널 연결이 예기치 않게 끊어졌습니다. Chat On Steroids를 열어 연결 상태를 확인하세요."
 }
