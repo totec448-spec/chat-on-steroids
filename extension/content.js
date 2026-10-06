@@ -11311,7 +11311,7 @@
   }
 
   /** Matches the app's WORKER_REDEEM_MS: past it the app has already failed the command. */
-  const REDEEM_RETRY_WINDOW_MS = 20_000;
+  const REDEEM_RETRY_WINDOW_MS = 45_000;
 
   async function deliverCommand(id, fromUrl = true, reportClaim = () => undefined, attempt = null) {
     // Which conversation, if any, this delivery is entitled to type into.
