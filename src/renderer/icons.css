@@ -39,6 +39,7 @@
 
 .ph.ph-activity::before { content: '\e000'; }
 .ph.ph-arrow-clockwise::before { content: '\e036'; }
+.ph.ph-arrow-counter-clockwise::before { content: '\e038'; }
 .ph.ph-arrow-down::before { content: '\e03e'; }
 .ph.ph-arrow-left::before { content: '\e058'; }
 .ph.ph-arrow-right::before { content: '\e06c'; }
@@ -71,6 +72,7 @@
 .ph.ph-lightning::before { content: '\e2de'; }
 .ph.ph-browser::before { content: '\e0f4'; }
 .ph.ph-brain::before { content: '\e74e'; }
+.ph.ph-list::before { content: '\e2f0'; }
 .ph.ph-list-checks::before { content: '\eadc'; }
 .ph.ph-lock-key::before { content: '\e2fe'; }
 .ph.ph-magnifying-glass::before { content: '\e30c'; }

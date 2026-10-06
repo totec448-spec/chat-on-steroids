@@ -5,7 +5,7 @@
  * other systems show the keyboard's Ctrl key in the UI language ("Strg" in German). The workspace
  * panels' Ctrl+Shift+1–4 really are Ctrl everywhere and keep their own label.
  */
-import { t, ui } from './i18n.js';
+import { t } from './i18n.js';
 
 export function isMac(): boolean {
   return /^Mac/.test(navigator.platform);
@@ -14,11 +14,4 @@ export function isMac(): boolean {
 /** "⌘K" on macOS, "Ctrl+K" (or "Strg+K") elsewhere. */
 export function primaryShortcut(key: string): string {
   return isMac() ? `⌘${key}` : `${t('Ctrl')}+${key}`;
-}
-
-/** Labels every `<kbd data-shortcut="K">`, and keeps it current when the language changes. */
-export function labelPrimaryShortcuts(root: ParentNode = document): void {
-  for (const node of root.querySelectorAll<HTMLElement>('kbd[data-shortcut]')) {
-    ui(node, 'textContent', () => primaryShortcut(node.dataset.shortcut ?? ''));
-  }
 }

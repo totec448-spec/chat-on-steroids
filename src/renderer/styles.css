@@ -430,14 +430,10 @@ code {
 :root[data-theme='dark'] .app[data-screen='chat'] .card.is-session { background: transparent; }
 .app-topbar { position: relative; z-index: 130; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 6px; height: env(titlebar-area-height, 28px); padding: 0 10px; padding-left: max(10px, calc(env(titlebar-area-x, 0px) + 4px)); padding-right: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))); background: var(--page); -webkit-app-region: drag; }
 
-.app-topbar > .btn, .view-menu { -webkit-app-region: no-drag; height: 100%; }
-.app-topbar > .btn { padding: 0 5px; }
+.app-topbar > .btn { -webkit-app-region: no-drag; height: 100%; padding: 0 5px; }
 .app-topbar > .btn .ico { --ico: 14px; }
-.view-menu { position: relative; font-size: calc(12px * var(--text-scale, 1)); }
-.view-menu > summary { display: flex; align-items: center; height: 100%; list-style: none; cursor: pointer; padding: 0 9px; border-radius: 6px; }
-.view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
-.view-menu-items { position: absolute; top: calc(100% + 5px); left: 0; z-index: 100; width: 260px; padding: 6px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003; }
-.view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
+/* The View menu's button stays lit while its menu is open, like a row's ⋮. */
+#viewMenu[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
   position: fixed; z-index: 200; display: grid; gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
@@ -469,8 +465,11 @@ code {
 .row-menu-swatch[data-color='rose'] { background: #bd5d72; border-color: #0002; }
 .row-menu-swatch[data-color='teal'] { background: #388f91; border-color: #0002; }
 @media (prefers-reduced-motion: reduce) { .row-menu, .row-menu-leaving, .row-menu-item { animation: none; transition: none; } }
-.view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
-.view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
+/* The View menu's items carry their shortcut at the end, and Actual size its live zoom. */
+.row-menu-label:has(+ .row-menu-hint) { flex: 0 1 auto; }
+.row-menu-hint { flex: none; margin-inline-end: auto; color: var(--faint); font-variant-numeric: tabular-nums; }
+.row-menu-shortcut { flex: none; margin-inline-start: 16px; color: var(--faint); font: inherit; font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.row-menu-item:is(:hover, :focus-visible) > .row-menu-shortcut { color: var(--soft); }
 .app.is-sidebar-collapsed { grid-template-columns: minmax(0, 0px) minmax(0, 1fr); }
 .app.is-resizing-sidebar { transition: none; }
 .app.is-sidebar-collapsed .sidebar { clip-path: inset(0 100% 0 0); opacity: 0; transform: translateX(-14px); visibility: hidden; pointer-events: none; transition: clip-path 180ms ease-in, opacity 150ms ease-in, transform 180ms ease-in, visibility 0s 180ms; }
