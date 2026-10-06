@@ -3103,39 +3103,63 @@ var CLF_DOM = (() => {
   const PROJECT_SOURCE_READY_MS = 60_000;
   const PROJECT_TRANSITION_MS = 12_000;
 
-  /** Enter a Project through its source chat's native link. Cold /project loads can error. */
-  async function enterProject(entry, stillCurrent = () => true) {
-    if (!entry || !/^g-p-[0-9a-f]{32}$/.test(entry.id) || conversationId() !== entry.sourceConversationId) return false;
+  /**
+   * Enter a Project through its source chat's native link. Cold /project loads can error.
+   * The failure callback reports only which existing fail-closed boundary ended the attempt; it
+   * does not change navigation, retry, ownership or Send behavior.
+   */
+  async function enterProject(entry, stillCurrent = () => true, failure = () => {}) {
+    const reportFailure = reason => { try { failure(reason); } catch {} };
+    if (!entry || !/^g-p-[0-9a-f]{32}$/.test(entry.id) || conversationId() !== entry.sourceConversationId) {
+      reportFailure('invalid-entry');
+      return false;
+    }
     return new Promise(resolve => {
-      let clicked = false, done = false;
-      const interrupt = event => { if (event.isTrusted) finish(false); };
-      const finish = result => {
+      let clicked = false, done = false, lastObservation = 'source-not-ready';
+      const interrupt = event => { if (event.isTrusted) finish(false, 'user-interrupted'); };
+      const finish = (result, reason = 'unknown') => {
         if (done) return;
         done = true; observer.disconnect(); clearTimeout(timer);
         document.removeEventListener('pointerdown', interrupt, true);
         document.removeEventListener('keydown', interrupt, true);
+        if (!result) reportFailure(reason);
         resolve(result);
       };
       const check = () => {
         if (done) return;
-        if (!stillCurrent()) return finish(false);
+        if (!stillCurrent()) return finish(false, 'current-lost');
         // Since October 2026 ChatGPT keeps the same editor element from the chat to the Project
         // home, so a new editor is no evidence. The Project route with the source's turns gone and
         // an empty, writable editor is; the caller still refuses to send while a chat id remains.
         // Turns of the earlier pages ChatGPT keeps mounted, undisplayed, are not on this page.
-        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composerSubmitReady() &&
-            !turns().some(turn => !onKeptPage(turn.node))) return finish(true);
+        if (clicked && projectHomeId() === entry.id) {
+          if (!composer()?.isConnected || !composerSubmitReady()) {
+            lastObservation = 'composer-not-ready';
+            return;
+          }
+          if (turns().some(turn => !onKeptPage(turn.node))) {
+            lastObservation = 'source-turns-remain';
+            return;
+          }
+          return finish(true);
+        }
         if (conversationId() !== entry.sourceConversationId) {
-          if (projectHomeId() !== entry.id) finish(false);
+          if (projectHomeId() !== entry.id) finish(false, clicked ? 'wrong-route-after-click' : 'wrong-route-before-click');
           return;
         }
-        if (clicked) return;
+        if (clicked) {
+          lastObservation = 'source-route';
+          return;
+        }
         // The native Project chrome can arrive before the source chat finishes loading. Its link
         // alone is not readiness: an early click can be swallowed during hydration.
         // Preserve the source draft/generation and spend our one click only once its
         // actual editor is mounted and ready.
         const source = composer();
-        if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
+        if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) {
+          lastObservation = 'source-not-ready';
+          return;
+        }
         // The exact same-origin Project-home target is the native entry. ChatGPT has moved this
         // control across several shells: its folder icon lost a test id in early October, then the
         // link itself moved outside both <header> and [role="banner"]. Do not bind navigation to
@@ -3145,19 +3169,29 @@ var CLF_DOM = (() => {
           !link.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(link) &&
           new URL(link.href, location.href).origin === location.origin &&
           projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
-        if (links.length !== 1) return;
+        if (links.length !== 1) {
+          lastObservation = 'candidate-count-' + links.length;
+          return;
+        }
         clicked = true;
+        lastObservation = 'source-route';
         // Loading the source and following its link are separate page transitions.
         // Reuse the same deadline timer; source loading must not consume the budget
         // for observing the replacement editor after the one permitted click.
         clearTimeout(timer);
-        timer = setTimeout(() => finish(false), PROJECT_TRANSITION_MS);
+        timer = setTimeout(
+          () => finish(false, 'transition-timeout:last=' + lastObservation),
+          PROJECT_TRANSITION_MS
+        );
         links[0].click();
         check();
       };
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
-      let timer = setTimeout(() => finish(false), PROJECT_SOURCE_READY_MS);
+      let timer = setTimeout(
+        () => finish(false, 'source-ready-timeout:last=' + lastObservation),
+        PROJECT_SOURCE_READY_MS
+      );
       document.addEventListener('pointerdown', interrupt, true);
       document.addEventListener('keydown', interrupt, true);
       check();

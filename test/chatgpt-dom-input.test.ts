@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 interface DomApi {
   insertPrompt(text: string, mode?: boolean | 'append', failure?: (reason: string) => void): boolean;
-  enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean): Promise<boolean>;
+  enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean,
+    failure?: (reason: string) => void): Promise<boolean>;
   composer(): HTMLElement | null;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
   generating(): boolean;
@@ -359,11 +360,14 @@ describe('native Project entry readiness', () => {
 
   it('refuses two header links to the same Project instead of guessing', async () => {
     const link = sourceLink(`<a href="/g/${entry.id}/project"><span>A</span></a><a href="/g/${entry.id}/project"><span>B</span></a>`);
+    box.textContent = '';
     const clicks = vi.fn((event: Event) => event.preventDefault());
     document.querySelectorAll('header a').forEach(node => node.addEventListener('click', clicks));
-    const entered = api.enterProject(entry);
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
     await vi.advanceTimersByTimeAsync(61_000);
     expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith('source-ready-timeout:last=candidate-count-2');
     expect(clicks).not.toHaveBeenCalled();
     void link;
   });
@@ -413,25 +417,64 @@ describe('native Project entry readiness', () => {
     let clicks = 0;
     link.addEventListener('click', event => { event.preventDefault(); clicks++; });
     box.textContent = '';
-    const entered = api.enterProject(entry);
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
     await vi.advanceTimersByTimeAsync(12_500);
     expect(clicks).toBe(1);
     expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith('transition-timeout:last=source-route');
   });
 
-  it.each(['missing', 'draft', 'cancelled', 'foreign-route'])('never clicks an unready or retired source: %s', async reason => {
+  it('reports a Project route whose editor never becomes ready after the one click', async () => {
+    const link = sourceLink();
+    box.textContent = '';
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.remove();
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+  });
+
+  it('reports visible source turns as the last observation when the Project transition times out', async () => {
+    const link = sourceLink();
+    box.textContent = '';
+    user('Earlier turn');
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith('transition-timeout:last=source-turns-remain');
+  });
+
+  it.each([
+    ['missing', 'source-ready-timeout:last=source-not-ready'],
+    ['draft', 'source-ready-timeout:last=source-not-ready'],
+    ['cancelled', 'current-lost'],
+    ['foreign-route', 'wrong-route-before-click']
+  ])('never clicks an unready or retired source: %s', async (reason, expectedFailure) => {
     const link = sourceLink();
     box.textContent = reason === 'draft' ? 'Keep my draft' : '';
     box.remove();
     let current = true;
     const clicks = vi.fn((event: Event) => event.preventDefault());
     link.addEventListener('click', clicks);
-    const entered = api.enterProject(entry, () => current);
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, () => current, failure);
     if (reason === 'cancelled') current = false;
     if (reason === 'foreign-route') dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-1111-4222-8333-444444444444' });
     if (reason !== 'missing') document.querySelector('form')!.prepend(box);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith(expectedFailure);
     expect(clicks).not.toHaveBeenCalled();
     if (reason === 'draft') expect(box.textContent).toBe('Keep my draft');
   });

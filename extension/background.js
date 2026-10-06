@@ -1307,11 +1307,12 @@ async function redeemCommand(id, client, conversationId = null, projectEntry = f
   return { ok: true, command };
 }
 
-function commandAckPayload(id, status, error, conversationId, agent, client, turnId) {
+function commandAckPayload(id, status, error, conversationId, agent, client, turnId, detail) {
   return {
     id,
     status,
     error: error || undefined,
+    ...(typeof detail === 'string' && detail.length <= 160 ? { detail } : {}),
     conversationId: conversationId || undefined,
     agent: agent || undefined,
     client: client || undefined,
@@ -1350,7 +1351,8 @@ async function drainCommandAcks(targetId = null) {
         entry.conversationId,
         entry.agent,
         entry.client,
-        entry.turnId
+        entry.turnId,
+        entry.detail
       );
       const result = await call(inputReceipt ? '/input/ack' : '/commands/ack', { method: 'POST', body: JSON.stringify(payload) });
       if (entry.id === targetId) targetResult = result;
@@ -1390,10 +1392,10 @@ async function drainCommandAcks(targetId = null) {
   }
 }
 
-async function ackCommand(id, status, error, conversationId, agent, client, source = null, turnId) {
+async function ackCommand(id, status, error, conversationId, agent, client, source = null, turnId, detail) {
   await load();
   if (!id) return { ok: false, status: 400, error: 'bad_command_id' };
-  const payload = commandAckPayload(id, status, error, conversationId, agent, client, turnId);
+  const payload = commandAckPayload(id, status, error, conversationId, agent, client, turnId, detail);
   const queued = {
     ...payload,
     provisional: payload.conversationId ? null : tabKey(source),
@@ -4150,7 +4152,9 @@ const HANDLERS = {
       message.conversationId,
       message.agent,
       message.client,
-      source
+      source,
+      undefined,
+      message.detail
     );
     // ackCommand first made this irreversible page result durable in the browser-owned outbox.
     // From that point recovery must never reopen the pre-send marker, even if the bridge HTTP
