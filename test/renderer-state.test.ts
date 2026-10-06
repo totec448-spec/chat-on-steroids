@@ -12,6 +12,19 @@ import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/go
 import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
 
+/** A row's menu item: opens the row's "⋯" menu (it lives in the document body) and returns the item. */
+function rowMenuItem(row: Element, action: string): HTMLButtonElement | null {
+  const doc = row.ownerDocument;
+  closeRowMenus(doc);
+  (row.querySelector('.row-menu-button') as HTMLButtonElement).click();
+  return doc.querySelector<HTMLButtonElement>(`.row-menu [data-row-action="${action}"]`);
+}
+/** Closes whatever row menu is open, as Escape does. */
+function closeRowMenus(doc: Document): void {
+  doc.querySelector('.row-menu')?.dispatchEvent(new (doc.defaultView as any).KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+}
+
+
 let dom: JSDOM | null = null;
 afterEach(() => {
   dom?.window.close();
@@ -488,7 +501,7 @@ it('starts project groups collapsed and deliberately expands the project selecte
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
   await vi.waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
-  (group().querySelector('.project-new') as HTMLButtonElement).click();
+  rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!.click();
   expect(group().open).toBe(true);
 });
 
@@ -549,15 +562,17 @@ it('keeps strict chat allowlisting separate from Block and exposes explicit Trus
   mounted.push(structuredClone(mounted.state));
   const primeRow = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
   const workerRow = () => doc.querySelector<HTMLElement>(`[data-id="${workerSession.id}"]`)!;
-  await vi.waitFor(() => expect(primeRow().querySelector('.sess-trust')).not.toBeNull());
-  expect(workerRow().querySelector('.sess-trust')).toBeNull();
-  expect(workerRow().querySelector('.sess-block')).not.toBeNull();
+  await vi.waitFor(() => expect(rowMenuItem(primeRow(), 'trust')).not.toBeNull());
+  closeRowMenus(doc);
+  expect(rowMenuItem(workerRow(), 'trust')).toBeNull();
+  expect(doc.querySelector('.row-menu [data-row-action="block"]')).not.toBeNull();
+  closeRowMenus(doc);
 
-  (primeRow().querySelector('.sess-trust') as HTMLButtonElement).click();
+  rowMenuItem(primeRow(), 'trust')!.click();
   await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, session.conversationId, true));
   expect(setSessionBlocked).not.toHaveBeenCalled();
 
-  (primeRow().querySelector('.sess-block') as HTMLButtonElement).click();
+  rowMenuItem(primeRow(), 'block')!.click();
   await vi.waitFor(() => expect(setSessionBlocked).toHaveBeenCalledWith(session.id, true));
 });
 
@@ -586,13 +601,47 @@ it('shows committed resume inheritance as trusted and revokes it through the cur
   mounted.state.config.multiAgent.strictChatAllowlist = true;
   mounted.push(structuredClone(mounted.state));
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
-  await vi.waitFor(() => expect(row().querySelector('.sess-trust')).not.toBeNull());
-  const trust = row().querySelector('.sess-trust') as HTMLButtonElement;
-  expect(trust.classList.contains('is-trusted')).toBe(true);
-  const block = row().querySelector('.sess-block') as HTMLButtonElement;
-  expect(block.classList.contains('is-blocked')).toBe(false);
+  await vi.waitFor(() => expect(rowMenuItem(row(), 'trust')).not.toBeNull());
+  const trust = rowMenuItem(row(), 'trust')!;
+  expect(trust.textContent).toBe('Untrust chat');
+  expect(doc.querySelector('.row-menu [data-row-action="block"]')!.textContent).toBe('Block chat');
   trust.click();
   await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, current, false));
+});
+
+it('offers a chat\'s actions in one menu, by kind of row, and opens it with a right click too', async () => {
+  const base = { startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
+  const chat = { ...base, id: 'menu-chat-0001', title: 'A chat', conversationId: 'menu-conversation-0001', chatIds: ['menu-conversation-0001'] };
+  const loose = { ...base, id: 'menu-loose-0001', title: '', conversationId: null, chatIds: [] };
+  const deleteSession = vi.fn(async () => ({ ok: true, data: true }));
+  const openSessionChat = vi.fn(async () => ({ ok: true, data: true }));
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    deleteSession, openSessionChat
+  });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
+  await vi.waitFor(() => expect(row(chat.id)).not.toBeNull());
+  // One button on the row, no loose icons.
+  expect(row(chat.id).querySelectorAll('.sess-actions button').length).toBe(1);
+  const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
+  rowMenuItem(row(chat.id), 'rename');
+  expect(actions()).toEqual(['pin', 'rename', 'open', 'block', 'remove']);
+  expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
+  closeRowMenus(doc);
+  // A row that is not a chat offers only what applies to it.
+  await vi.waitFor(() => expect(row(loose.id)).not.toBeNull());
+  rowMenuItem(row(loose.id), 'block');
+  expect(actions()).toEqual(['block', 'remove']);
+  closeRowMenus(doc);
+  // A right click opens the same menu; its items run their action.
+  row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
+  doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="open"]')!.click();
+  await vi.waitFor(() => expect(openSessionChat).toHaveBeenCalledWith(chat.id));
+  expect(doc.querySelector('.row-menu')).toBeNull();
 });
 
 it('names a chat in place: Enter saves, Escape keeps the old name, empty restores ChatGPT\'s title, repaints keep the field (#1107)', async () => {
@@ -611,13 +660,13 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   const doc = mounted.window.document;
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
   const field = () => row().querySelector<HTMLInputElement>('.sess-rename');
-  await vi.waitFor(() => expect(row().querySelector('button.sess-name')).not.toBeNull());
+  await vi.waitFor(() => expect(row().querySelector('.row-menu-button')).not.toBeNull());
   expect(field()).toBeNull();
   const press = (key: string) => field()!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key, bubbles: true }));
   const type = (text: string) => { field()!.value = text; field()!.dispatchEvent(new mounted.window.Event('input', { bubbles: true })); };
 
   // Escape: nothing is saved, the title is back.
-  row().querySelector<HTMLButtonElement>('button.sess-name')!.click();
+  rowMenuItem(row(), 'rename')!.click();
   await vi.waitFor(() => expect(field()).not.toBeNull());
   expect(field()!.value).toBe('ChatGPT title');
   type('Never saved');
@@ -627,7 +676,7 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   expect(row().querySelector('.sess-top b')!.textContent).toBe('ChatGPT title');
 
   // The sidebar repaints while the user types; the field and its text survive.
-  row().querySelector<HTMLButtonElement>('button.sess-name')!.click();
+  rowMenuItem(row(), 'rename')!.click();
   await vi.waitFor(() => expect(field()).not.toBeNull());
   type('  Release   prep  ');
   const editing = field();
@@ -640,7 +689,7 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   await vi.waitFor(() => expect(renameSession).toHaveBeenCalledWith(session.id, 'Release   prep'));
 
   // Empty asks for ChatGPT's title again.
-  row().querySelector<HTMLButtonElement>('button.sess-name')!.click();
+  rowMenuItem(row(), 'rename')!.click();
   await vi.waitFor(() => expect(field()).not.toBeNull());
   type('   ');
   press('Enter');
@@ -759,9 +808,9 @@ it('shows an inherited Block ahead of Trust on a committed resumed row', async (
   mounted.state.config.multiAgent.strictChatAllowlist = true;
   mounted.push(structuredClone(mounted.state));
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
-  await vi.waitFor(() => expect(row().querySelector('.sess-trust')).not.toBeNull());
-  expect((row().querySelector('.sess-block') as HTMLButtonElement).classList.contains('is-blocked')).toBe(true);
-  expect((row().querySelector('.sess-trust') as HTMLButtonElement).classList.contains('is-trusted')).toBe(false);
+  await vi.waitFor(() => expect(rowMenuItem(row(), 'trust')).not.toBeNull());
+  expect(doc.querySelector('.row-menu [data-row-action="block"]')!.textContent).toBe('Release chat');
+  expect(doc.querySelector('.row-menu [data-row-action="trust"]')!.textContent).toBe('Trust chat');
 });
 
 it('saves strict chat allowlisting and disables the unattributed switch while strict mode is on', async () => {
@@ -2643,7 +2692,7 @@ it('shows each startup log line once and in order when lines arrive while the lo
     .toEqual(['app started', 'session catalog ready', 'renderer state ready', 'window loaded']);
 });
 
-it.each(['.project-color', '.project-new'])('keeps keyboard focus on a project row button (%s) across an activity repaint', async selector => {
+it.each(['.project-menu'])('keeps keyboard focus on a project row button (%s) across an activity repaint', async selector => {
   // Seen live on Windows: after picking a project color, focus went back to the color button and
   // the next sidebar repaint dropped it to the page. Only the project heading kept its focus.
   const { project, session } = projectSidebarFixture();

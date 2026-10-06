@@ -119,6 +119,31 @@ app.whenReady().then(async () => {
   assert.equal(await js(`document.getElementById('chatInput').value`),'Keep the prime draft');
   assert.equal(await js(`document.querySelector('.sess.is-sel').dataset.id`),'composer-preview');
   await capture('after-history.png');
+  // The sidebar's sub-agent arrow, clicked with the pointer resting on its row: the list repaints, and
+  // the new row keeps its hover look, so the arrow stays aside for the menu instead of jumping back
+  // into the menu's column and sliding out again. When the pointer leaves, the row lets go.
+  const arrow=`document.querySelector('#sessionList .sess[data-id="composer-preview"] > .worker-toggle')`;
+  const arrowX=()=>js(`Math.round(new DOMMatrix(getComputedStyle(${arrow}).transform).m41)`);
+  const rowPoint=await js(`(()=>{const r=${arrow}.parentElement.getBoundingClientRect();return {x:Math.round(r.left+r.width/3),y:Math.round(r.top+r.height/2)}})()`);
+  win.webContents.sendInputEvent({type:'mouseMove',...rowPoint}); await pause(150); await settle();
+  // Hovered, the arrow has slid aside: aim at where it is now.
+  const arrowPoint=await js(`(()=>{const r=${arrow}.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+  win.webContents.sendInputEvent({type:'mouseMove',...arrowPoint}); await pause(150);
+  // Its tooltip is the same one throughout: a repaint does not blink it away and back.
+  await until(`!!document.getElementById('sessionTooltip')`);
+  await js(`window.tipsMade=0;new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.id==='sessionTooltip')window.tipsMade++;}).observe(document.body,{childList:true})`);
+  for (const expanded of ['true','false']) {
+    const before=await arrowX();
+    win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...arrowPoint});
+    win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...arrowPoint});
+    await until(`${arrow}.getAttribute('aria-expanded')==='${expanded}'`);
+    assert.equal(await arrowX(),before,'The arrow keeps its place through the repaint ('+expanded+')');
+  }
+  await pause(200);
+  assert.deepEqual(await js(`({made:window.tipsMade,shown:!!document.getElementById('sessionTooltip')})`),{made:0,shown:true},'The tooltip stays through the repaints');
+  win.webContents.sendInputEvent({type:'mouseMove',x:900,y:600});
+  await until(`!document.querySelector('#sessionList .sess.is-pointed')`); await settle();
+  assert.ok(await arrowX()>0,'At rest again once the pointer has left');
   await js(`document.getElementById('rightDockToggle').click();document.getElementById('jumpLatest').click()`);
   await until(`Math.abs(document.getElementById('chatBody').scrollHeight-document.getElementById('chatBody').clientHeight-document.getElementById('chatBody').scrollTop)<=2`);
   win.setContentSize(760,960);await until('innerWidth===760');await settle();
