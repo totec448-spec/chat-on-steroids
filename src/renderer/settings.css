@@ -203,11 +203,8 @@
 .usage-days-daily .usage-bars-scale { margin-top: 0; }
 .app[data-screen='settings'] #chatBody { flex: 1; padding: 46px 36px 64px; }
 .automation-content { min-width: 0; }
-.automation-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
-.automation-page-head > div:first-child { min-width: 0; }
-.automation-search { flex: 0 1 320px; min-width: 220px; }
 .automation-section-head { margin-top: 32px; }
-.automation-content > #settingsSearchEmpty + .automation-section-head { margin-top: 0; }
+.automation-page-head + .automation-section-head { margin-top: 0; }
 .automation-section-head .settings-section-title { margin: 0; }
 .automation-content > .pane { padding: 4px 18px; gap: 0; overflow: visible; }
 .automation-content .setting { min-height: 64px; padding: 14px 0; gap: 16px; }
@@ -220,8 +217,6 @@
 .automation-content :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (max-width: 1100px) {
   .app[data-screen='settings'] #chatBody { padding: 36px 24px 52px; }
-  .automation-page-head { align-items: flex-start; flex-direction: column; gap: 18px; }
-  .automation-search { flex: none; width: min(320px, 100%); min-width: 0; }
 }
 @media (max-width: 850px) {
   .automation-content .setting { flex-wrap: wrap; }
@@ -230,7 +225,6 @@
 }
 @media (max-width: 520px) {
   .app[data-screen='settings'] #chatBody { padding: 24px 18px 40px; }
-  .automation-search { width: 100%; }
 }
 /* Contain native select repaints at fractional zoom; top-layer menus stay unclipped. */
 .appearance-panel select, [data-view='settings'] select { contain: paint; }
@@ -370,3 +364,11 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .app[data-screen='settings'] #tabs,
 .app:is([data-screen='chat'], [data-screen='library']) .sidebar-sessions { animation: sidebar-content-in 200ms cubic-bezier(.16, 1, .3, 1); }
 .app:is([data-screen='chat'], [data-screen='library']) #sidebarPrimary { animation: sidebar-content-in 170ms cubic-bezier(.16, 1, .3, 1); }
+
+/* Settings search: above the page list, as chat search sits above the chats. While the field holds
+   a query its results take the list's place; the setting opened from them is washed briefly. */
+.app[data-screen='settings'] .settings-find { margin: 0 0 10px; animation: sidebar-content-in 200ms cubic-bezier(.16, 1, .3, 1); }
+.settings-find-results { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.is-found { animation: setting-found 1600ms ease-out; }
+@keyframes setting-found { from, 35% { background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
+@media (prefers-reduced-motion: reduce) { .is-found { animation: none; background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }

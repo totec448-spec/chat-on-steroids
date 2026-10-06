@@ -2,8 +2,9 @@ import { onLanguageChange, t } from './i18n.js';
 import type { MainText } from '../shared/main-texts.js';
 
 /**
- * The tray menu, Session finish notice and CoS browser tray notice in the selected language. The main process shows them
- * and has no catalogs, so this document translates the exact source texts and hands them over.
+ * The tray menu, Session finish notice, tunnel-loss notices and CoS browser tray notice in the
+ * selected language. The main process has no catalogs, so this document translates the exact
+ * source texts and hands them over.
  * Literal `t()` calls keep the catalog audit able to see each key.
  */
 export function mainTexts(): Record<MainText, string> {
@@ -17,6 +18,11 @@ export function mainTexts(): Record<MainText, string> {
     'Connected': t('Connected'),
     'No internet': t('No internet'),
     'Not connected': t('Not connected'),
+    'Core connection lost': t('Core connection lost'),
+    'Desktop connection lost': t('Desktop connection lost'),
+    'Plugins connection lost': t('Plugins connection lost'),
+    'The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.':
+      t('The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.'),
     'Astra is wrapping up': t('Astra is wrapping up'),
     'Send an automatic Goal or write your next instruction.': t('Send an automatic Goal or write your next instruction.'),
     'Send Automatic Goal': t('Send Automatic Goal'),
