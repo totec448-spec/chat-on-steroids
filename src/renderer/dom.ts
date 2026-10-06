@@ -122,22 +122,6 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-/** Filter complete settings sections so headings, controls and their context stay together. */
-export function filterSettingsSections(view: HTMLElement, search: string): void {
-  const fold = (text: string) => text.toLocaleLowerCase(currentLanguage());
-  const query = fold(search.trim());
-  let matches = 0;
-  for (const heading of view.querySelectorAll<HTMLElement>('.automation-section-head')) {
-    const pane = heading.nextElementSibling as HTMLElement | null;
-    if (!pane?.classList.contains('pane')) continue;
-    const visible = !query || fold(`${heading.textContent} ${pane.textContent}`).includes(query);
-    heading.hidden = pane.hidden = !visible;
-    if (visible) matches++;
-  }
-  const empty = view.querySelector<HTMLElement>('#settingsSearchEmpty');
-  if (empty) empty.hidden = !query || matches > 0;
-}
-
 let toastTimer: number | undefined;
 
 export function toast(message: string): void {

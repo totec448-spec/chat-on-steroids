@@ -231,7 +231,84 @@ app.whenReady().then(async () => {
       })()`);
       for (const result of dockChecks) assert.deepEqual(result, { fullWidth: true, hidden: true, contentVisible: true, restored: true });
     }
-    console.log('Settings layout passed: six pages, two themes, two widths, two zooms, live Usage renderer and long folder paths.');
+    // Optical alignment, measured on real pixels: a box can be centered while its glyph is not.
+    // Insets are CSS px from the element's inner edges to the first drawn pixel on each side.
+    const inkInsets = async element => {
+      // Settings scroll smoothly; the rect is read only after an instant scroll has landed.
+      await js(`${element}.scrollIntoView({ block: 'center', behavior: 'instant' })`);
+      await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      const box = await js(`(() => { const el = ${element}, r = el.getBoundingClientRect(), s = getComputedStyle(el);
+        return { x: r.left, y: r.top, width: r.width, height: r.height, border: parseFloat(s.borderTopWidth) || 0,
+          round: parseFloat(s.borderTopLeftRadius) >= r.width / 2 - 1 }; })()`);
+      const rect = { x: Math.floor(box.x), y: Math.floor(box.y) };
+      rect.width = Math.ceil(box.x + box.width) - rect.x; rect.height = Math.ceil(box.y + box.height) - rect.y;
+      const image = await win.webContents.capturePage(rect);
+      // The capture is in device pixels while its reported scale factor can stay 1.
+      const { width, height } = image.getSize(), bitmap = image.toBitmap(), scale = width / rect.width;
+      const at = (x, y) => { const i = (y * width + x) * 4; return [bitmap[i], bitmap[i + 1], bitmap[i + 2]]; };
+      // Inside the border; a round element is read inside its circle so the edge never counts as ink.
+      const left = (box.x - rect.x + box.border + 1) * scale, top = (box.y - rect.y + box.border + 1) * scale;
+      const right = (box.x - rect.x + box.width - box.border - 1) * scale, bottom = (box.y - rect.y + box.height - box.border - 1) * scale;
+      const cx = (left + right) / 2, cy = (top + bottom) / 2, radius = (right - left) / 2;
+      const inside = (x, y) => !box.round || (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= radius ** 2;
+      const counts = new Map();
+      for (let y = Math.ceil(top); y < bottom; y++) for (let x = Math.ceil(left); x < right; x++) if (inside(x, y)) {
+        const key = at(x, y).join(); counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      const fill = [...counts].sort((a, b) => b[1] - a[1])[0][0].split(',').map(Number);
+      const diff = (x, y) => at(x, y).reduce((sum, value, i) => sum + Math.abs(value - fill[i]), 0);
+      let strongest = 0;
+      for (let y = Math.ceil(top); y < bottom; y++) for (let x = Math.ceil(left); x < right; x++) if (inside(x, y)) strongest = Math.max(strongest, diff(x, y));
+      const threshold = Math.max(36, strongest * 0.4), ink = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+      for (let y = Math.ceil(top); y < bottom; y++) for (let x = Math.ceil(left); x < right; x++) if (inside(x, y) && diff(x, y) > threshold) {
+        ink.left = Math.min(ink.left, x); ink.right = Math.max(ink.right, x + 1); ink.top = Math.min(ink.top, y); ink.bottom = Math.max(ink.bottom, y + 1);
+      }
+      assert.ok(Number.isFinite(ink.left), 'Something is drawn in ' + element);
+      return { left: (ink.left - left) / scale, right: (right - ink.right) / scale, top: (ink.top - top) / scale, bottom: (bottom - ink.bottom) / scale };
+    };
+    const showPage = page => js(`(() => {
+      for (const panel of document.querySelectorAll('.panel')) panel.classList.toggle('is-active', panel.dataset.panel === '${page}');
+      for (const view of document.querySelectorAll('[data-view]')) view.hidden = view.dataset.view !== 'settings';
+      for (const animation of document.getAnimations()) if (Number.isFinite(animation.effect.getComputedTiming().endTime)) animation.finish();
+    })()`);
+    const offCenter = [];
+    win.setSize(1440, 950); win.webContents.setZoomFactor(1);
+    for (const theme of ['dark', 'light']) {
+      await js(`document.documentElement.dataset.theme = '${theme}'`);
+      // Every Setup step's check mark, done and ready; the green marks once sat low and right.
+      await showPage('setup');
+      await js(`document.querySelectorAll('.setup-rail li').forEach(li => { li.classList.add('is-done'); li.classList.remove('is-current'); })`);
+      const marks = await js(`document.querySelectorAll('.setup-rail-mark').length`);
+      assert.ok(marks >= 7, 'All Setup steps are on the rail');
+      for (let index = 0; index < marks; index++) {
+        const ink = await inkInsets(`document.querySelectorAll('.setup-rail-mark')[${index}]`);
+        // At 1x a device pixel is a whole CSS pixel, so snapping alone can leave 1 px; the bug was 2.5–3.7 px.
+        if (Math.abs(ink.left - ink.right) > 1.5 || Math.abs(ink.top - ink.bottom) > 1.5) offCenter.push({ theme, element: `.setup-rail-mark #${index + 1}`, ink });
+      }
+      await js(`document.querySelectorAll('.setup-rail li').forEach(li => li.classList.remove('is-done'))`);
+      // Every other round badge that holds only an icon, on every settings page.
+      for (const page of ['home', 'general', 'appearance', 'usage', 'setup', 'activity']) {
+        await showPage(page);
+        const count = await js(`(window.iconBadges = [...document.querySelector('[data-panel="${page}"]').querySelectorAll('*')].filter(el => {
+          if (el.closest('.setup-rail') || !el.checkVisibility() || el.textContent.trim()) return false;
+          const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+          return r.width >= 14 && r.width <= 72 && Math.abs(r.width - r.height) < 1 && parseFloat(s.borderTopLeftRadius) >= r.width / 2 - 1
+            && (s.backgroundColor !== 'rgba(0, 0, 0, 0)' || parseFloat(s.borderTopWidth) > 0) && !!el.querySelector('.ph, svg');
+        })).length`);
+        for (let index = 0; index < count; index++) {
+          const ink = await inkInsets(`window.iconBadges[${index}]`);
+          if (Math.abs(ink.left - ink.right) > 1.5 || Math.abs(ink.top - ink.bottom) > 1.5)
+            offCenter.push({ theme, page, element: await js(`window.iconBadges[${index}].className`), ink });
+        }
+      }
+      // Health: the two figures sit as far from the card's top edge as from the divider below them.
+      await showPage('home');
+      await js(`document.getElementById('bigHandshake').textContent = '20s'; document.getElementById('bigRequest').textContent = '4h'`);
+      const health = await inkInsets(`document.querySelector('.workspace-health .big')`);
+      if (Math.abs(health.top - health.bottom) > 2) offCenter.push({ theme, element: 'Health figures', ink: health });
+    }
+    assert.deepEqual(offCenter, [], 'Glyphs and figures sit optically centered: ' + JSON.stringify(offCenter));
+    console.log('Settings layout passed: six pages, two themes, two widths, two zooms, live Usage renderer and long folder paths, centered marks.');
   } finally { win.destroy(); }
   app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

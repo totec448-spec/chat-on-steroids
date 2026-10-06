@@ -13,6 +13,7 @@ import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
+import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -67,6 +68,10 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+const settingsSearch = initSettingsSearch({
+  open: tab => showTab(tab),
+  shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
+});
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -183,11 +188,12 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   $('tabs').hidden = !settings;
+  $('settingsFindBox').hidden = !settings;
+  // A page opened any way leaves the search; the page list comes back.
+  settingsSearch.reset();
   $('backToChat').hidden = !settings;
   document.querySelector<HTMLElement>('.sidebar-sessions')!.hidden = settings;
   $('newChat').hidden = settings;
-  if (name === 'settings') openChatView('settings');
-  else if (name === 'chat') openChatView('timeline');
 
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
@@ -196,6 +202,10 @@ function showTab(name: string): void {
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
+  // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
+  // pane cannot be scrolled to where each view starts.
+  if (name === 'settings') openChatView('settings');
+  else if (name === 'chat') openChatView('timeline');
   // The Chat panel is the only one that costs anything to keep fresh, so it only
   // reloads while it is on screen.
   chatVisible(name === 'chat' || name === 'settings');

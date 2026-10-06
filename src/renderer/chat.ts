@@ -78,7 +78,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, setIcon, toast } from './dom.js';
+import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
 
 const api = window.api;
@@ -2304,9 +2304,20 @@ function distanceFromTail(): number {
   return pane.scrollHeight - reserve - pane.clientHeight - pane.scrollTop;
 }
 
+/**
+ * The chat and Agents & automation share one scroll pane (#chatBody). Reading position, following,
+ * the jump control and history paging belong to the chat alone, so they act only while it shows.
+ */
+function timelineShown(): boolean {
+  return !$('timelineContent').hidden;
+}
+
+/** The chat's own scroll position while another view of the pane is shown. */
+let timelineScrollTop: number | null = null;
+
 function paintJumpLatest(): void {
   const jump = document.getElementById('jumpLatest');
-  if (jump) jump.classList.toggle('is-shown', !!selectedId && distanceFromTail() > JUMP_DISTANCE);
+  if (jump) jump.classList.toggle('is-shown', !!selectedId && timelineShown() && distanceFromTail() > JUMP_DISTANCE);
 }
 
 function jumpToLatest(): void {
@@ -2449,7 +2460,7 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
 /** A batch is storage work, not a wheel detent. Fill the requested visible edge
  * through hidden events/collapsed activity, yielding between bounded IPC reads. */
 function requestHistory(direction: number, opening = false): void {
-  if (!selectedId || detailFor !== selectedId || !direction) return;
+  if (!selectedId || detailFor !== selectedId || !direction || !timelineShown()) return;
   historyDemand = { sessionId: selectedId, selection: selectionGeneration, direction, opening };
   void fillTimelineHistory();
 }
@@ -3591,7 +3602,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   reconcileChildren($('timeline'), groupImageRows(groupToolRows(timelineRows)));
   paintPendingInputs();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
-  if (!holdSentMessage()) restoreViewport();
+  if (timelineShown() && !holdSentMessage()) restoreViewport();
   paintJumpLatest();
 
   const facts: string[] = [];
@@ -5476,6 +5487,9 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  const pane = $('chatBody');
+  const leavingTimeline = timelineShown() && name !== 'timeline';
+  if (leavingTimeline) timelineScrollTop = pane.scrollTop;
   $('composer').hidden = name === 'settings';
   $('composerDock').hidden = name === 'settings';
   $('inputQueue').hidden = name !== 'timeline';
@@ -5486,6 +5500,14 @@ function showView(name: string): void {
     view.hidden = view.dataset.view !== name;
   }
   $('chatSettingsBtn').classList.toggle('is-on', name === 'settings');
+  // Another view starts at its top; the chat comes back where its reader left it, or at its end
+  // when it was following.
+  if (leavingTimeline) pane.scrollTop = 0;
+  else if (name === 'timeline' && timelineScrollTop !== null) {
+    pane.scrollTop = readerAtEnd && !sendAnchor && !readingAfterSend ? pane.scrollHeight : timelineScrollTop;
+    timelineScrollTop = null;
+  }
+  paintJumpLatest();
 }
 
 function selectSession(id: string): void {
@@ -5877,9 +5899,6 @@ export function initChat(next: Deps): void {
       if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
     } finally { button.disabled = false; }
   });
-  $('settingsSearch').addEventListener('input', () => {
-    filterSettingsSections(document.querySelector<HTMLElement>('[data-view="settings"]')!, $<HTMLInputElement>('settingsSearch').value);
-  });
   const composerMenus = [...document.querySelectorAll<HTMLDetailsElement>('.composer-menu, .session-controls')];
   document.addEventListener('click', (event) => {
     for (const menu of composerMenus) if (!menu.contains(event.target as Node) || ((event.target as HTMLElement).closest('button') && !(event.target as HTMLElement).closest('[data-keep-menu]'))) menu.open = false;
@@ -5975,7 +5994,7 @@ export function initChat(next: Deps): void {
     }, { passive: true, capture: true });
     window.addEventListener('keydown', event => { if (event.key === 'Escape' && heldPointer?.released) clearIntent(); }, { capture: true });
     pane.addEventListener('scroll', () => {
-      if (intent?.generation === selectionGeneration) {
+      if (intent?.generation === selectionGeneration && timelineShown()) {
         intent.scrolled = true;
         if (heldPointer?.released) heldPointer = null;
         // The absolute end, reserve included: scrolling up out of an underfilled page's blank
@@ -6068,7 +6087,7 @@ export function initChat(next: Deps): void {
     let lastHeight = historyPane.clientHeight;
     new ResizeObserver(() => {
       const height = historyPane.clientHeight;
-      if (height !== lastHeight && readerAtEnd && !sendAnchor && !readingAfterSend) historyPane.scrollTop = historyPane.scrollHeight;
+      if (height !== lastHeight && timelineShown() && readerAtEnd && !sendAnchor && !readingAfterSend) historyPane.scrollTop = historyPane.scrollHeight;
       lastHeight = height;
     }).observe(historyPane);
   }
@@ -6086,6 +6105,7 @@ export function initChat(next: Deps): void {
     // badge can move the height by a rounding pixel, and following that moved every message.
     let observedHeight = $('chatBody').scrollHeight;
     const observer = new ResizeObserver(() => {
+      if (!timelineShown()) return;
       holdSentMessage();
       // Growth that no repaint saw (a row expanding, an image loading, streamed text): follow it
       // while the reader is at the end. Older history pages never follow.

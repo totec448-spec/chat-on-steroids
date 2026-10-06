@@ -17,7 +17,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { filterSettingsSections } from '../src/renderer/dom.js';
+import { collectSettings, searchSettings } from '../src/renderer/settings-search.js';
 import { sessionWorkingAt } from '../src/shared/session-activity.js';
 import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
 
@@ -40,23 +40,26 @@ beforeAll(async () => {
   menuSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'row-menu.ts'), 'utf8');
 });
 
-it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
-  const view = document.querySelector<HTMLElement>('[data-view="settings"]')!;
-  const sections = [...view.querySelectorAll<HTMLElement>('.automation-section-head')];
+it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
+  const entries = collectSettings(document);
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'appearance']));
+  const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
+  expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
+  expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
+  // Names come before descriptions; words match in any order, across a name and its section.
+  expect(searchSettings(entries, 'privacy', 'en').map(entry => entry.title).slice(0, 2)).toEqual(['Privacy', 'Privacy screenshots']);
+  expect(searchSettings(entries, 'typography font', 'en').map(entry => entry.title)).toEqual(['Font']);
+  // A Setup step is found by its name, although only the open step shows.
+  expect(searchSettings(entries, 'api key', 'en')[0]!.target.dataset.railStep).toBe('key');
+  // Conditional rows hidden on their page are not offered.
   const conditional = document.getElementById('goalModels')!;
   expect(conditional.hidden).toBe(true);
-  filterSettingsSections(view, '  SESSION FINISH  ');
-  expect(sections.filter(section => !section.hidden).map(section => section.querySelector('h2')?.textContent)).toEqual(['Keep the turn open']);
-  for (const section of sections) expect((section.nextElementSibling as HTMLElement).hidden).toBe(section.hidden);
-  expect(document.getElementById('finishTool')!.closest('.pane')!.hasAttribute('hidden')).toBe(false);
-  expect(document.getElementById('goalKey')!.closest('.pane')!.hasAttribute('hidden')).toBe(true);
-  filterSettingsSections(view, 'no-such-setting-123');
-  expect(sections.every(section => section.hidden)).toBe(true);
-  expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(false);
-  filterSettingsSections(view, '');
-  expect(sections.every(section => !section.hidden && !(section.nextElementSibling as HTMLElement).hidden)).toBe(true);
-  expect(conditional.hidden).toBe(true);
-  expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(true);
+  expect(entries.some(entry => conditional.contains(entry.target))).toBe(false);
+  expect(searchSettings(entries, 'no-such-setting-123', 'en')).toEqual([]);
+  expect(searchSettings(entries, '   ', 'en')).toEqual([]);
+  // Titles are the setting's name alone, never its description or the choices of its menu.
+  const language = searchSettings(entries, 'language', 'en')[0]!;
+  expect([language.title, language.section]).toEqual(['Language', 'Preferences']);
 });
 
 it('limits the existing tool-detail preference to handoff briefs', () => {
