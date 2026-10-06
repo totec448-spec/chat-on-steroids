@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "터널 연결이 예기치 않게 끊어졌습니다. Chat On Steroids를 열어 연결 상태를 확인하세요.",
   "Copy link": "링크 복사",
   "Copy this chat's ChatGPT link": "이 채팅의 ChatGPT 링크 복사",
-  "Link copied": "링크를 복사했습니다"
+  "Link copied": "링크를 복사했습니다",
+  "ChatGPT is waiting for your approval": "ChatGPT가 승인을 기다리고 있습니다",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT에서 도구 호출을 허용하거나 거부할 때까지 채팅이 일시 중지됩니다. 클릭하여 여세요.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT가 이 채팅에서 도구 호출을 허용하거나 거부하기를 기다리고 있습니다. 그곳에서 응답할 때까지 아무것도 진행되지 않습니다.",
+  "The tool approval ChatGPT asked for in this chat was answered.": "이 채팅에서 ChatGPT가 요청한 도구 승인에 응답했습니다."
 }

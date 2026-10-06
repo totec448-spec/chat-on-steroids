@@ -21,7 +21,7 @@ import {
   shutdownConnection,
   suspendConnectionLossNotices
 } from './connection.js';
-import { registerIpc } from './ipc.js';
+import { openSessionChat, registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
@@ -288,12 +288,16 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   notice.show();
   return true;
 });
-setStuckNotifier((title, body, sessionId) => {
+setStuckNotifier((title, body, sessionId, opens = 'app') => {
   // A person looking at the app already has the timeline note this accompanies; interrupting
   // them with the same sentence is noise, exactly as the finish notice treats a focused window.
   if (window?.isFocused() || !Notification.isSupported()) return false;
   const notice = new Notification({ title, body });
   notice.on('click', () => {
+    if (opens === 'browser') {
+      void openSessionChat(sessionId).catch(error => logWarn(`approval notice: ${error.message}`));
+      return;
+    }
     showWindow();
     if (!window) return;
     const target = window.webContents;

@@ -1984,5 +1984,9 @@
   "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "Tunnel bị ngắt kết nối ngoài dự kiến. Mở Chat On Steroids để kiểm tra kết nối.",
   "Copy link": "Sao chép liên kết",
   "Copy this chat's ChatGPT link": "Sao chép liên kết ChatGPT của cuộc trò chuyện này",
-  "Link copied": "Đã sao chép liên kết"
+  "Link copied": "Đã sao chép liên kết",
+  "ChatGPT is waiting for your approval": "ChatGPT đang chờ bạn phê duyệt",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Một cuộc trò chuyện tạm dừng cho đến khi bạn cho phép hoặc từ chối một lệnh gọi công cụ trong ChatGPT. Nhấp để mở.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT đang chờ bạn cho phép hoặc từ chối một lệnh gọi công cụ trong cuộc trò chuyện này. Không có gì tiếp tục cho đến khi bạn trả lời ở đó.",
+  "The tool approval ChatGPT asked for in this chat was answered.": "Yêu cầu phê duyệt công cụ mà ChatGPT đưa ra trong cuộc trò chuyện này đã được trả lời."
 }

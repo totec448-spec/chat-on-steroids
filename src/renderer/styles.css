@@ -2474,6 +2474,11 @@ input[readonly] {
   font-weight: 600;
 }
 
+/* ChatGPT's tool approval card is waiting: the one row in a quiet chat that needs the user. */
+.meta.approval-wait.is-waiting { color: var(--ink); }
+.meta.approval-wait.is-waiting .thinking-ico { color: var(--ink); }
+.meta.approval-wait .btn { margin-left: 2px; padding: 3px 9px; }
+
 .meta.is-bad {
   color: var(--red);
 }

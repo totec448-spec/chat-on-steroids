@@ -1224,6 +1224,15 @@ assistant-error reload also logs whether the chat is still under the silence wat
 automatic Continue after it only comes from that watch (#1086: a log that went quiet after the
 reload could not say which of these held).
 
+ChatGPT's own tool approval card ("Allow ChatGPT to use …?", root `data-codex-approval-surface`)
+holds a call before it is sent, so nothing reaches the app and only the user can answer it. The
+page reports it on every `/activity` poll as optional `approval=1|0` (older extensions omit it);
+`src/main/approval-wait.ts` keeps the episode fresh for 75 s. While it stands, silence recovery
+(before the no-recorded-call verdict), `recoveryHeldByCalls`, the worker sleep sweep and the page's
+ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
+`src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
+stop-notice-style desktop notice whose click opens the chat's page. The app never answers the card.
+
 At ordinary silence recovery, a never-offered immediate correction takes priority over generated
 Goal/Loop work and is sent as a normal native user message. Include at most the next eligible
 visible queue checkpoint in that same message, never the whole queue or an additional Loop

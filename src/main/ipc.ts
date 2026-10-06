@@ -545,6 +545,18 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
   });
 }
 
+/** Shows a recorded chat's ChatGPT page: its open tab when there is one, else a new one. */
+export async function openSessionChat(id: string): Promise<void> {
+  const summary = await getSession(id);
+  const conversationId = summary?.conversationId;
+  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+    throw new Error('This session has no valid ChatGPT conversation');
+  }
+  // The extension's own browser first: the OS may pick another browser or account (#882).
+  // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
+  if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
+}
+
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
@@ -1336,14 +1348,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   handle('sessions:openChat', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
-    const summary = await getSession(id);
-    const conversationId = summary?.conversationId;
-    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
-      throw new Error('This session has no valid ChatGPT conversation');
-    }
-    // The extension's own browser first: the OS may pick another browser or account (#882).
-    // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
-    if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
+    await openSessionChat(id);
     return true;
   });
 
