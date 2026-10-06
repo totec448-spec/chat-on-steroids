@@ -70,9 +70,20 @@ app.whenReady().then(async () => {
     // Shrink the window too, like opening the bottom terminal.
     win.setContentSize(1100,560); await pause(700);
     v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'stays at the end when the window shrinks: '+JSON.stringify(v));
+    const pane=await js(`(()=>{const r=document.getElementById('chatBody').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+    // One wheel notch is reading too. This is the page's first wheel input, like a reader's first
+    // notch after a while: its smooth scroll starts a frame after the wheel event, and the app used to
+    // stop counting the wheel at that very frame. The reader stayed "at the end", and the next resize
+    // pulled them back down.
+    win.webContents.sendInputEvent({type:'mouseWheel',x:pane.x,y:pane.y,deltaX:0,deltaY:240}); await pause(700);
+    v=await view(); const notch=v.top;
+    assert.ok(v.gap>50, 'one wheel notch scrolled up: '+JSON.stringify(v));
+    win.setContentSize(1100,480); await pause(700);
+    v=await view(); assert.ok(Math.abs(v.top-notch)<=2, 'one wheel notch keeps its place when the window shrinks: '+JSON.stringify({...v,notch}));
+    win.setContentSize(1100,560); await pause(700);
+    await js(`document.getElementById('jumpLatest').click()`); await pause(700);
     // A reader who scrolled up keeps their place. Only the reader's own scrolling counts as reading
     // (a script setting scrollTop does not), so scroll with the wheel.
-    const pane=await js(`(()=>{const r=document.getElementById('chatBody').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
     for(let i=0;i<4;i++){win.webContents.sendInputEvent({type:'mouseWheel',x:pane.x,y:pane.y,deltaX:0,deltaY:240});await pause(120);}
     await pause(500);
     v=await view(); const place=v.top;
