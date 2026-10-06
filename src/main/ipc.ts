@@ -142,7 +142,7 @@ import { loadCosBrowser, syncCosBrowser } from './cos-browser/selection.js';
 import { onConnectorProofChange } from './connector-proof.js';
 import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import { openInPreferredBrowser } from './browser.js';
-import { manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
+import { checkForUpdatesIfStale, manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -1130,6 +1130,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // "Get update" for an installation that cannot update itself: the exact published file for
   // this machine and the announced version, opened in the user's browser. The renderer names
   // nothing; the URL is built here from the checked release and this process's platform.
+  // Opening Settings: ask GitHub again if the last answer is older than ten minutes. The status
+  // reaches the window through the ordinary state push; this returns before the check does.
+  handle('update:refresh', async () => {
+    void checkForUpdatesIfStale();
+    return true;
+  });
+
   handle('update:download', async () => {
     await shell.openExternal(manualDownloadUrl(updateStatus().latest));
     return true;

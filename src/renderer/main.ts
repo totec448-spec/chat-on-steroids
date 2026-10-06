@@ -181,6 +181,8 @@ function showTab(name: string): void {
   if (name === 'skills') openSkillsLibrary();
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
   const settings = name !== 'chat' && !library;
+  // Opening Settings asks whether "Up to date" is still true (the check itself waits ten minutes).
+  if (settings && document.querySelector<HTMLElement>('.app')!.dataset.screen !== 'settings') void api.refreshUpdate();
   document.querySelector<HTMLElement>('.app')!.dataset.screen = library ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
   $('sidebarPrimary').hidden = settings;
