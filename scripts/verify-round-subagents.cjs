@@ -129,6 +129,9 @@ app.whenReady().then(async () => {
   // Hovered, the arrow has slid aside: aim at where it is now.
   const arrowPoint=await js(`(()=>{const r=${arrow}.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
   win.webContents.sendInputEvent({type:'mouseMove',...arrowPoint}); await pause(150);
+  // Its tooltip is the same one throughout: a repaint does not blink it away and back.
+  await until(`!!document.getElementById('sessionTooltip')`);
+  await js(`window.tipsMade=0;new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.id==='sessionTooltip')window.tipsMade++;}).observe(document.body,{childList:true})`);
   for (const expanded of ['true','false']) {
     const before=await arrowX();
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...arrowPoint});
@@ -136,6 +139,8 @@ app.whenReady().then(async () => {
     await until(`${arrow}.getAttribute('aria-expanded')==='${expanded}'`);
     assert.equal(await arrowX(),before,'The arrow keeps its place through the repaint ('+expanded+')');
   }
+  await pause(200);
+  assert.deepEqual(await js(`({made:window.tipsMade,shown:!!document.getElementById('sessionTooltip')})`),{made:0,shown:true},'The tooltip stays through the repaints');
   win.webContents.sendInputEvent({type:'mouseMove',x:900,y:600});
   await until(`!document.querySelector('#sessionList .sess.is-pointed')`); await settle();
   assert.ok(await arrowX()>0,'At rest again once the pointer has left');
