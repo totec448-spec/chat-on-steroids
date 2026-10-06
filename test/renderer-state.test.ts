@@ -1139,6 +1139,20 @@ it('adds and selects setup profiles and rejects an older profile status response
   await vi.waitFor(() => expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe(initial.config.tunnel.tunnelId));
 });
 
+it('asks whether an update came out when Settings open, not on every page inside them', async () => {
+  const refreshUpdate = vi.fn(async () => ({ ok: true, data: true }));
+  const { window: w } = await mountChat({}, [], { refreshUpdate });
+  const doc = w.document;
+  expect(refreshUpdate).not.toHaveBeenCalled();
+  (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
+  expect(refreshUpdate).toHaveBeenCalledTimes(1);
+  for (const tab of ['general', 'activity', 'usage']) (doc.querySelector(`#tabs button[data-tab="${tab}"]`) as HTMLButtonElement).click();
+  expect(refreshUpdate).toHaveBeenCalledTimes(1);
+  (doc.getElementById('backToChat') as HTMLButtonElement).click();
+  (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
+  expect(refreshUpdate).toHaveBeenCalledTimes(2);
+});
+
 it('searches every settings page from the sidebar and opens the setting it finds', async () => {
   const { window: w } = await mountChat();
   const doc = w.document;

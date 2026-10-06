@@ -4257,7 +4257,7 @@ hand-editing staged binaries. Native and editor dependencies need actual runtime
 package, and verify that runtime's relevant flow. An installer exit code or version label is
 insufficient. A dirty-tree snapshot request does not authorize exposing all local Git history.
 
-`update.ts` checks immediately and every six hours with one in-flight pass. Download to a
+`update.ts` checks immediately and every six hours with one in-flight pass; opening Settings (`update:refresh`) checks again when the last answer is over ten minutes old. Download to a
 partial file, verify SHA-256 before staging/adoption, and rehash at ordinary quit before handing
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
