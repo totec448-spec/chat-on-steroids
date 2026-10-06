@@ -18,7 +18,7 @@ const RELEASES: Readonly<Record<string, Release>> = {
     lead: () => t('Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.'),
     highlights: [
       { icon: 'i-pin', title: () => t('Pin chats'), text: () => t('Keep the chats you use most at the top of the sidebar.') },
-      { icon: 'i-more', title: () => t('One menu for every chat'), text: () => t("Pin, rename, open or copy a chat's link from its ⋯ menu.") },
+      { icon: 'i-more', title: () => t('One menu for every chat'), text: () => t("Pin, rename, open or copy a chat's link from its ⋯ menu.") },
       { icon: 'i-search', title: () => t('Search from anywhere'), text: () => t('{0} finds any chat and opens it at the message that matched.', [primaryShortcut('K')]) },
       { icon: 'i-gear', title: () => t('Search your settings'), text: () => t('Type in Settings to find any setting on any page.') },
       { icon: 'i-lock', title: () => t('Know when ChatGPT is waiting'), text: () => t('When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.') },
@@ -37,8 +37,10 @@ export function paintWhatsNew(version: string): boolean {
   if (!release) return false;
   ui($('whatsNewVersion'), 'textContent', () => t('Version {0}', [version]));
   ui($('whatsNewLead'), 'textContent', release.lead);
-  $('whatsNewList').replaceChildren(...release.highlights.map(item => {
+  $('whatsNewList').replaceChildren(...release.highlights.map((item, index) => {
     const row = el('li', 'whats-new-item');
+    // The rows arrive one after another, after the card and its tile.
+    row.style.setProperty('--i', String(index));
     const badge = el('span', 'whats-new-icon');
     badge.append(icon(item.icon));
     const words = el('div', 'whats-new-words');
@@ -59,7 +61,7 @@ function wire(dialog: HTMLDialogElement): void {
     dialog.classList.add('is-closing');
     const done = (): void => { dialog.classList.remove('is-closing'); if (dialog.open) dialog.close(); };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) done();
-    else { dialog.addEventListener('animationend', done, { once: true }); window.setTimeout(done, 200); }
+    else { dialog.addEventListener('animationend', done, { once: true }); window.setTimeout(done, 280); }
   };
   $('whatsNewDone').addEventListener('click', close);
   $('whatsNewNotes').addEventListener('click', () => {
@@ -89,7 +91,8 @@ export function initWhatsNew(current: string | null, lastSeen: string | undefine
   window.setTimeout(() => {
     if (dialog.open || document.querySelector('dialog[open]')) return;
     dialog.showModal();
-    $('whatsNewDone').focus();
+    // Enter answers it at once; the focus ring appears only once the keyboard is used.
+    $('whatsNewDone').focus({ focusVisible: false } as FocusOptions);
     void run(window.api.markWhatsNewSeen());
   }, 600);
 }
