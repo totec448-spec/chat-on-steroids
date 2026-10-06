@@ -78,7 +78,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, disclosureChevron, el, filterSettingsSections, icon, run, setIcon, toast } from './dom.js';
+import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -5921,9 +5921,6 @@ export function initChat(next: Deps): void {
       expandedProjects.add(project.id);
       if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
     } finally { button.disabled = false; }
-  });
-  $('settingsSearch').addEventListener('input', () => {
-    filterSettingsSections(document.querySelector<HTMLElement>('[data-view="settings"]')!, $<HTMLInputElement>('settingsSearch').value);
   });
   const composerMenus = [...document.querySelectorAll<HTMLDetailsElement>('.composer-menu, .session-controls')];
   document.addEventListener('click', (event) => {
