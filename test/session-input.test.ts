@@ -126,6 +126,22 @@ describe('durable user input ownership', () => {
     now += 120_000;
     expect(await retryUnclaimedInput(row.id)).toBeNull();
   });
+  it('does not retry a pickup timeout after the user dismissed its browser chat', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+
+    // retryUnclaimedBrowserInputs only opens the chat after retryUnclaimedInput returns a row.
+    // A manual browser dismissal must therefore leave this same row failed and produce no wake.
+    openings.set(sessionId, Object.assign({ id: sessionId, conversationId: binding.conversationId,
+      origin: { kind: binding.origin } }, { browserRecoveryDismissedAt: now }));
+    now += 120_000;
+    expect(await retryUnclaimedInput(row.id)).toBeNull();
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
+    expect((await listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('pickupRetryCount');
+  });
   it('does not requeue a never-claimed input after Automatic Continue is turned off', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
     const row = await enqueueInput(input());

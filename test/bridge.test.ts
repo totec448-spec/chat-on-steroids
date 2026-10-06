@@ -13967,6 +13967,63 @@ describe('the goal loop over the bridge', () => {
     }
   });
 
+  it('does not reopen a manually dismissed chat for a failed unclaimed input at bridge startup', async () => {
+    const realSetTimeout = setTimeout;
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    const before = getConfig();
+    const chat = 'cafe0177-0000-4000-8000-000000000177';
+    try {
+      await writeDurableNow('session-input', []);
+      await saveConfig({ ...before, ui: { ...before.ui, autoContinue: true } });
+      await pair();
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'dismissed retry case', messageId: 'dismissed-retry-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'dismissed-retry-turn' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'dismissed-retry-turn', outcome: 'completed' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const row = await input.enqueueInput({ id: 'abca0177-0000-4000-8000-000000000177', sessionId: session.id,
+        text: 'safe synthetic browser retry', mode: 'auto', dueAt: Date.now(), model: 'gpt-5.6-sol', reasoningEffort: null });
+      await request('POST', '/closed', { body: { conversationId: chat, manual: true } });
+      expect((await getSession(session.id))?.browserRecoveryDismissedAt).toBeDefined();
+
+      // Seed only the durable state produced by the known pre-Send timeout. Startup runs the
+      // real retry monitor; the dismissed-session check must refuse it before wakeBrowserUrl.
+      const rows = await input.listInputs();
+      await writeDurableNow('session-input', rows.map(entry => entry.id === row.id ? {
+        ...entry,
+        state: 'failed' as const,
+        transportIntent: 'browser' as const,
+        error: 'Not sent: the browser did not pick up this message within 60 seconds.',
+        createdAt: Date.now() - 180_000,
+        pickupFailedAt: Date.now() - 120_000
+      } : entry));
+      input.resetInputForTests();
+
+      await stopBridge();
+      const port = await startBridge();
+      expect(port).not.toBeNull();
+      base = `http://127.0.0.1:${port}`;
+      // startBridge starts the monitor without awaiting its best-effort scan.
+      await new Promise<void>(resolve => realSetTimeout(resolve, 50));
+
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+      expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
+      expect((await input.listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('pickupRetryCount');
+    } finally {
+      if (bridgePort() === null) {
+        const port = await startBridge();
+        if (port !== null) base = `http://127.0.0.1:${port}`;
+      }
+      await saveConfig(before);
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
   it('shares the durable retry budget when a queued input gives its source turn back to Goal', async () => {
     vi.useFakeTimers();
     const input = await import('../src/main/session/input.js');
