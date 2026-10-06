@@ -4675,6 +4675,31 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
 });
 
+it('keeps the chat reading state out of Agents & automation, which shares its scroll pane', async () => {
+  const { w, append } = await boot([{ kind: 'assistant_message', seq: 1, time: T0 + 1000, source: 'extension', messageId: 'first', message: text('Hello'), final: false }]);
+  const pane = w.document.getElementById('chatBody')!;
+  const jump = w.document.getElementById('jumpLatest')!;
+  // The real navigation: the Agents & automation tab, then Back to chat.
+  const view = (name: string) => (w.document.querySelector(name === 'settings' ? 'nav button[data-tab="settings"]' : '#backToChat') as HTMLButtonElement).click();
+  Object.defineProperties(pane, { clientHeight: { value: 400, configurable: true }, scrollHeight: { value: 2000, configurable: true } });
+  pane.scrollTop = 1600;
+  // Settings open at their top, not at the chat's end, and offer no way back to a chat end.
+  view('settings');
+  expect(pane.scrollTop).toBe(0);
+  expect(jump.classList.contains('is-shown')).toBe(false);
+  // Reading the settings upwards is not reading the chat.
+  pane.scrollTop = 900;
+  pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -120 }));
+  pane.dispatchEvent(new w.Event('scroll'));
+  expect(jump.classList.contains('is-shown')).toBe(false);
+  // Back in the chat, it is still at its end and still follows new output.
+  view('timeline');
+  expect(pane.scrollTop).toBe(2000);
+  await append([{ kind: 'assistant_message', seq: 2, time: T0 + 2000, source: 'extension', messageId: 'later', message: text('More output'), final: false }]);
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+  expect(jump.classList.contains('is-shown')).toBe(false);
+});
+
 it('opens round participants in the existing dock without moving the prime reader or draft', async () => {
   const report = (seq: number, worker: string): SessionEvent => ({ kind: 'agent_message', seq, time: T0 + seq * 1000,
     source: 'app', from: worker, to: 'prime', messageId: `report-${seq}`, delivery: 'delivered', message: text('Verified the build') });

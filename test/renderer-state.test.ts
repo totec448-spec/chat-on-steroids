@@ -1054,10 +1054,55 @@ it('adds and selects setup profiles and rejects an older profile status response
   await vi.waitFor(() => expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe(initial.config.tunnel.tunnelId));
 });
 
+it('searches every settings page from the sidebar and opens the setting it finds', async () => {
+  const { window: w } = await mountChat();
+  const doc = w.document;
+  const field = doc.getElementById('settingsFind') as HTMLInputElement;
+  const box = doc.getElementById('settingsFindBox')!, pages = doc.getElementById('tabs')!, results = doc.getElementById('settingsFindResults')!;
+  const frame = () => new Promise(resolve => w.requestAnimationFrame(resolve));
+  const type = (text: string) => { field.value = text; field.dispatchEvent(new w.Event('input')); };
+  const rows = () => [...results.querySelectorAll<HTMLButtonElement>('.search-result')];
+  expect(box.hidden).toBe(true);
+  (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
+  expect(box.hidden).toBe(false);
+  // While the field holds a query, its results take the page list's place.
+  type('privacy screenshots');
+  expect([pages.hidden, results.hidden]).toEqual([true, false]);
+  expect(rows().map(row => [row.querySelector('b')!.textContent, row.querySelector('.search-snippet')!.textContent])).toEqual([['Privacy screenshots', 'General › Privacy']]);
+  expect(rows()[0]!.querySelectorAll('mark')).toHaveLength(2);
+  rows()[0]!.click(); await frame();
+  // Its page opens with the list back, the setting marked and its control focused.
+  expect(doc.querySelector('[data-panel="general"]')!.classList.contains('is-active')).toBe(true);
+  expect([field.value, pages.hidden, results.hidden]).toEqual(['', false, true]);
+  expect(doc.getElementById('privacyScreenshots')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
+  expect(doc.activeElement).toBe(doc.getElementById('privacyScreenshots'));
+  // Enter opens the best match, here on Agents & automation.
+  type('session finish');
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await frame();
+  expect(doc.querySelector('[data-panel="chat"]')!.classList.contains('is-active')).toBe(true);
+  expect(doc.querySelector<HTMLElement>('[data-view="settings"]')!.hidden).toBe(false);
+  expect(doc.activeElement).toBe(doc.getElementById('finishTool'));
+  // Nothing found says so; Escape empties the field and brings the list back.
+  type('no-such-setting-123');
+  expect(rows()).toHaveLength(0);
+  expect(results.textContent).toContain('No settings match your search.');
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect([field.value, pages.hidden, results.hidden]).toEqual(['', false, true]);
+  // Ctrl+F (⌘F on macOS) reaches the field only while Settings are open; leaving them hides it.
+  const mac = /^Mac/.test(navigator.platform);
+  const find = () => { const event = new w.KeyboardEvent('keydown', { key: 'f', ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }); doc.body.dispatchEvent(event); return event.defaultPrevented; };
+  (doc.getElementById('chatBody') as HTMLElement).focus();
+  expect(find()).toBe(true);
+  expect(doc.activeElement).toBe(field);
+  (doc.getElementById('backToChat') as HTMLButtonElement).click();
+  expect(box.hidden).toBe(true);
+  expect(find()).toBe(false);
+});
+
 it('attaches pasted screenshot files with previews while preserving ordinary text paste', async () => {
   const dropFiles = vi.fn(async () => ({ ok: true, data: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'screenshot.png', size: 4, mimeType: 'image/png', preview: 'data:image/webp;base64,AAAA' }] }));
   const mounted = await mountChat({}, [], { dropFiles });
-  const w = mounted.window, input = w.document.getElementById('settingsSearch') as HTMLInputElement;
+  const w = mounted.window, input = w.document.getElementById('settingsFind') as HTMLInputElement;
   input.focus();
   const file = new w.File(['image'], 'screenshot.png', { type: 'image/png' });
   const paste = new w.Event('paste', { bubbles: true, cancelable: true });
