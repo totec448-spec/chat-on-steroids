@@ -61,6 +61,7 @@ import { findSessionByConversation, getSession, readEvents, readHandoff, readRec
 import { foldProgress } from '../shared/session.js';
 import { modelFacingText } from '../shared/content-reference.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
+import { BROWSER_PICKUP_MAX_ATTEMPTS } from '../shared/recovery.js';
 
 /** A finish-only preference has authority only while the finish tool is available. */
 export async function astraFinishOnly(sessionId: string, conversationId: string): Promise<boolean> {
@@ -417,6 +418,10 @@ interface GoalReplyObligation {
   listenUntil?: number;
   /** A native Stop is claimed once for this final, including across app restart. */
   recoveryStopClaimed?: true;
+  /** This exact reply's browser pickup budget survives app restart. */
+  pickupAttempts?: number;
+  pickupNextAt?: number;
+  pickupStoppedAt?: number;
   conversationId: string;
   sessionId: string;
   replyId: string;
@@ -503,6 +508,13 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
       ...(Number.isSafeInteger(raw.listenUntil) && raw.listenUntil! > 0 ? { listenUntil: raw.listenUntil } : {}),
       ...(raw.silencePro === true ? { silencePro: true } : {}),
       ...(raw.recoveryStopClaimed === true ? { recoveryStopClaimed: true } : {}),
+      ...(Number.isSafeInteger(raw.pickupAttempts) && raw.pickupAttempts! >= 0
+        ? { pickupAttempts: Math.min(BROWSER_PICKUP_MAX_ATTEMPTS, raw.pickupAttempts!) } : {}),
+      ...(Number.isSafeInteger(raw.pickupNextAt) && raw.pickupNextAt! > 0 ? { pickupNextAt: raw.pickupNextAt } : {}),
+      ...(Number.isSafeInteger(raw.pickupStoppedAt) && raw.pickupStoppedAt! > 0
+        ? { pickupStoppedAt: raw.pickupStoppedAt }
+        : Number.isSafeInteger(raw.pickupAttempts) && raw.pickupAttempts! >= BROWSER_PICKUP_MAX_ATTEMPTS
+          ? { pickupStoppedAt: raw.acceptedAt } : {}),
       ...(raw.explicitActivation === true ? { explicitActivation: true } : {}),
       eventSeq: raw.eventSeq,
       acceptedAt: raw.acceptedAt,
@@ -543,7 +555,7 @@ export function goalDraftNeedsIntervention(conversationId: string): boolean {
 
 export function goalPendingReplyFor(
   conversationId: string
-): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt' | 'silenceSourceTurnId' | 'silencePro' | 'listenUntil' | 'explicitActivation'> | null {
+): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt' | 'silenceSourceTurnId' | 'silencePro' | 'listenUntil' | 'explicitActivation' | 'pickupAttempts' | 'pickupNextAt' | 'pickupStoppedAt'> | null {
   const reply = goalReplies.get(conversationId);
   // Expiry is read here as well as pruned on write, because the ledger is only pruned when
   // something writes to it. A chat reopened after the window must not be offered work the
@@ -554,7 +566,10 @@ export function goalPendingReplyFor(
       ...(reply.explicitActivation ? { explicitActivation: true as const } : {}),
       ...(reply.silenceSourceTurnId ? { silenceSourceTurnId: reply.silenceSourceTurnId } : {}),
       ...(reply.listenUntil ? { listenUntil: reply.listenUntil } : {}),
-      ...(reply.silencePro ? { silencePro: true } : {}) }
+      ...(reply.silencePro ? { silencePro: true } : {}),
+      ...(reply.pickupAttempts !== undefined ? { pickupAttempts: reply.pickupAttempts } : {}),
+      ...(reply.pickupNextAt ? { pickupNextAt: reply.pickupNextAt } : {}),
+      ...(reply.pickupStoppedAt ? { pickupStoppedAt: reply.pickupStoppedAt } : {}) }
     : null;
 }
 
@@ -568,18 +583,72 @@ export function goalPendingReplyFor(
  */
 export function pendingGoalReplies(
   now = Date.now()
-): Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> {
-  const owed: Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> = [];
+): Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }> {
+  const owed: Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }> = [];
   for (const reply of goalReplies.values()) {
     if (reply.state !== 'pending' || now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) continue;
     owed.push({
       conversationId: reply.conversationId,
       sessionId: reply.sessionId,
       replyId: reply.replyId,
-      acceptedAt: reply.acceptedAt
+      acceptedAt: reply.acceptedAt,
+      pickupAttempts: reply.pickupAttempts ?? 0,
+      ...(reply.pickupNextAt ? { pickupNextAt: reply.pickupNextAt } : {}),
+      ...(reply.pickupStoppedAt ? { pickupStoppedAt: reply.pickupStoppedAt } : {})
     });
   }
   return owed.sort((a, b) => b.acceptedAt - a.acceptedAt);
+}
+
+/** Durably reserves one reload for this exact Goal reply before the browser can act. */
+export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number): Promise<{
+  attempts: number; nextAt?: number; stoppedAt?: number
+} | null> {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.state !== 'pending' || reply.replyId !== replyId || reply.pickupStoppedAt ||
+      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_MAX_ATTEMPTS) return null;
+  const previous = { ...reply };
+  reply.pickupAttempts = (reply.pickupAttempts ?? 0) + 1;
+  if (reply.pickupAttempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
+    reply.pickupStoppedAt = at;
+    delete reply.pickupNextAt;
+  } else if (nextAt !== undefined) reply.pickupNextAt = nextAt;
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    if (goalReplies.get(conversationId) === reply) goalReplies.set(conversationId, previous);
+    persistGoalRepliesSoon();
+    throw error;
+  }
+  return { attempts: reply.pickupAttempts, ...(reply.pickupNextAt ? { nextAt: reply.pickupNextAt } : {}),
+    ...(reply.pickupStoppedAt ? { stoppedAt: reply.pickupStoppedAt } : {}) };
+}
+
+/** Mirrors a shared source-turn pickup budget onto its Goal owner, including while Goal is Off. */
+export async function syncGoalPickupRecoveryNow(conversationId: string, replyId: string, state: {
+  attempts: number; nextAt?: number; stoppedAt?: number
+}): Promise<boolean> {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.replyId !== replyId || !Number.isSafeInteger(state.attempts) || state.attempts < 0) return false;
+  const attempts = Math.min(BROWSER_PICKUP_MAX_ATTEMPTS, Math.max(reply.pickupAttempts ?? 0, state.attempts));
+  const stoppedAt = reply.pickupStoppedAt ?? state.stoppedAt;
+  const nextAt = stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? undefined
+    : state.attempts >= (reply.pickupAttempts ?? 0) ? state.nextAt ?? reply.pickupNextAt : reply.pickupNextAt;
+  if (reply.pickupAttempts === attempts && reply.pickupStoppedAt === stoppedAt && reply.pickupNextAt === nextAt) return true;
+  const previous = { ...reply };
+  reply.pickupAttempts = attempts;
+  if (stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
+    reply.pickupStoppedAt = stoppedAt ?? Date.now();
+    delete reply.pickupNextAt;
+  } else if (nextAt !== undefined) reply.pickupNextAt = nextAt;
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    if (goalReplies.get(conversationId) === reply) goalReplies.set(conversationId, previous);
+    persistGoalRepliesSoon();
+    throw error;
+  }
+  return true;
 }
 
 /** Freezes Goal eligibility at the durable recorder boundary. */
@@ -626,6 +695,9 @@ export async function acceptGoalReplyNow(input: {
     ...(input.silenceSourceTurnId ? { silenceSourceTurnId: input.silenceSourceTurnId.slice(0, 200) } : {}),
     ...(input.silencePro ? { silencePro: true } : {}),
     ...(input.listenUntil ? { listenUntil: input.listenUntil } : {}),
+    ...(provisionalUpgrade && current?.pickupAttempts !== undefined ? { pickupAttempts: current.pickupAttempts } : {}),
+    ...(provisionalUpgrade && current?.pickupNextAt ? { pickupNextAt: current.pickupNextAt } : {}),
+    ...(provisionalUpgrade && current?.pickupStoppedAt ? { pickupStoppedAt: current.pickupStoppedAt } : {}),
     eventSeq: input.eventSeq,
     // `/goal/draft` may have had to persist the local turn before Fiber exposed ChatGPT's
     // stable assistant id. The later id strengthens that same row; it must not re-evaluate
@@ -1386,8 +1458,7 @@ export async function setGoalReplyActiveNow(conversationId: string, active: bool
 
   const previous = { ...before };
   before.state = active ? 'pending' : 'handled';
-  // A deliberate On is a new pickup episode for the same stable final reply. It gets the
-  // recovery schedule from now, not from when that answer happened under an Off switch.
+  // Re-arming the same stable reply cannot refund its shared source-turn recovery budget.
   if (active) before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
   if (active) before.explicitActivation = true;
   const acceptedAt = before.acceptedAt;

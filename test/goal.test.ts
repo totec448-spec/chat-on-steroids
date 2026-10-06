@@ -1879,6 +1879,27 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalPendingReplyFor('invalid-provisional')).toBeNull();
   });
 
+  it('persists the three-reload Goal pickup stop and refuses a fourth attempt after restore', async () => {
+    const conversationId = 'goal-pickup-bound';
+    const session = await createSession({ title: 'Bounded Goal pickup', conversationId });
+    const acceptedAt = Date.now();
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'goal-reply-bound',
+      turnId: 'goal-turn-bound', eventSeq: 42, blocked: false });
+
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 120_000, acceptedAt + 420_000))
+      .toEqual({ attempts: 1, nextAt: acceptedAt + 420_000 });
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 420_000, acceptedAt + 1_020_000))
+      .toEqual({ attempts: 2, nextAt: acceptedAt + 1_020_000 });
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 1_020_000, acceptedAt + 1_920_000))
+      .toEqual({ attempts: 3, stoppedAt: acceptedAt + 1_020_000 });
+
+    const saved = goal.snapshotGoalReplies();
+    goal.resetGoalStateForTests();
+    goal.restoreGoalReplies(saved);
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: acceptedAt + 1_020_000 });
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 1_920_000)).toBeNull();
+  });
+
   it('upgrades a decided provisional turn to the stable reply without reopening it', async () => {
     const conversationId = 'c-reply-provisional-upgrade';
     const turnId = 'g-reply-provisional-upgrade';

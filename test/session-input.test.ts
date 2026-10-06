@@ -8,7 +8,7 @@ import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writ
 import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
-  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy,
+  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
   noteInputStartupError
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
@@ -21,7 +21,7 @@ const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) =
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
 const openings = vi.hoisted(() => new Map<string, { id: string; conversationId: string | null; origin: { kind: string } }>());
-const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, goalEnabled: false, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number; seq?: number } }));
+const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, goalEnabled: false, finishReleased: false, recoveryAllowed: true, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number; seq?: number } }));
 vi.mock('../src/main/session/store.js', () => ({
   sessionsRoot: () => path.join(directory, 'sessions'),
   listUsageSessions: vi.fn(async () => []),
@@ -66,7 +66,7 @@ beforeEach(async () => {
   resetInputForTests();
   automate.mockReset();
   changed.mockReset();
-  configureInputDelivery({ applyAutomation: automate, changed });
+  configureInputDelivery({ applyAutomation: automate, changed, recoveryAllowed: () => binding.recoveryAllowed });
   resetDurableForTests();
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-input-'));
   initDurableStore(directory);
@@ -77,6 +77,7 @@ beforeEach(async () => {
   binding.activeTurnId = null;
   binding.lastToolCallAt = null;
   binding.finishEnabled = true; binding.goalEnabled = false; binding.finishReleased = false; binding.model = 'gpt-6-astra'; binding.leadMinutes = 5; binding.impulseMinutes = 0;
+  binding.recoveryAllowed = true;
   binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: 0 };
   now = 1000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -107,6 +108,74 @@ describe('durable user input ownership', () => {
     expect(after?.state).toBe(state);
     if (held) expect(after?.error).toBe(held);
     else expect(after?.error).toContain('did not pick up this message');
+  });
+  it('requeues one proven pre-Send browser pickup timeout on the same row, then stops retrying', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    expect(row.transportIntent).toBe('browser');
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed', pickupFailedAt: now,
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    now += 120_000;
+    const retried = await retryUnclaimedInput(row.id);
+    expect(retried).toMatchObject({ id: row.id, state: 'queued', pickupRetryCount: 1 });
+    expect(retried).not.toHaveProperty('sendAuthorizedAt');
+    expect(retried).not.toHaveProperty('deliveredAt');
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ id: row.id, state: 'failed', pickupRetryCount: 1 });
+    now += 120_000;
+    expect(await retryUnclaimedInput(row.id)).toBeNull();
+  });
+  it('does not retry a pickup timeout after the user dismissed its browser chat', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+
+    // retryUnclaimedBrowserInputs only opens the chat after retryUnclaimedInput returns a row.
+    // A manual browser dismissal must therefore leave this same row failed and produce no wake.
+    openings.set(sessionId, Object.assign({ id: sessionId, conversationId: binding.conversationId,
+      origin: { kind: binding.origin } }, { browserRecoveryDismissedAt: now }));
+    now += 120_000;
+    expect(await retryUnclaimedInput(row.id)).toBeNull();
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
+    expect((await listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('pickupRetryCount');
+  });
+  it('does not requeue a never-claimed input after Automatic Continue is turned off', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    now += 60_001;
+    await listInputs();
+    now += 120_000;
+    binding.recoveryAllowed = false;
+    expect(await retryUnclaimedInput(row.id)).toBeNull();
+    const retained = (await listInputs()).find(entry => entry.id === row.id);
+    expect(retained?.state).toBe('failed');
+    expect(retained?.pickupRetryCount).toBeUndefined();
+  });
+  it('never auto-retries an authorized or legacy unmarked pickup failure', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const authorized = await enqueueInput(input());
+    now += 60_001;
+    await listInputs();
+    const rows = await listInputs();
+    await writeDurableNow('session-input', rows.map(row => row.id === authorized.id
+      ? { ...row, state: 'failed' as const, pickupFailedAt: now - 120_000, sendAuthorizedAt: now - 30_000 }
+      : row));
+    resetInputForTests();
+    now += 120_000;
+    expect(await retryUnclaimedInput(authorized.id)).toBeNull();
+    const legacy = await enqueueInput(input());
+    now += 60_001;
+    await listInputs();
+    const legacyRows = await listInputs();
+    await writeDurableNow('session-input', legacyRows.map(row => row.id === legacy.id
+      ? { ...row, state: 'failed' as const, pickupFailedAt: undefined, error: 'Not sent: the browser did not pick up this message within 60 seconds.' }
+      : row));
+    resetInputForTests();
+    now += 120_000;
+    expect(await retryUnclaimedInput(legacy.id)).toBeNull();
   });
   it('gives a released hold its full 60 seconds for the browser to pick it up', async () => {
     binding.finishEnabled = false;
