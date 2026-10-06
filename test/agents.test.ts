@@ -504,6 +504,31 @@ describe('a worker wake ChatGPT restored as the chat draft (#882)', () => {
     expect(own.api.clearRevivalResidue()).toBe(false);
     own.dom.window.close();
   });
+
+  it('reclaims the wake on a computer whose Core carries a name suffix', async () => {
+    // With a connector suffix the closing sentence names this computer's Core ("Report with the
+    // agents tool of Chat On Steroids Core (Windows): …"); a leftover of that wake has to be
+    // reclaimed exactly like the plain one, or every later wake into the chat fails.
+    const previous = getConfig();
+    await saveConfig({ ...previous, connectorSuffix: 'Windows' });
+    try {
+      startSwarm(1);
+      const worker = startWorker('worker-1');
+      finishAgent(worker.caller, 'first round done');
+      stageMessages(prime, [{ to: 'worker-1', text: 'Check the R11 inputs read-only and report.' }]).commit();
+      const wake = pendingWorkerRevivals()[0]!.text;
+      expect(wake).toContain('the agents tool of Chat On Steroids Core (Windows):');
+
+      const left = domWithDraft(wake);
+      expect(left.api.clearRevivalResidue()).toBe(true);
+      expect(left.box.textContent).toBe('');
+      left.dom.window.close();
+
+      const edited = domWithDraft(`${wake} Also check the totals.`);
+      expect(edited.api.clearRevivalResidue()).toBe(false);
+      edited.dom.window.close();
+    } finally { await saveConfig(previous); }
+  });
 });
 
 describe('account-observed worker admission', () => {
