@@ -21,6 +21,8 @@ const REFRESH_MS = 3000;
 const RECENT_CHATS = 30;
 
 export interface ChatSearch {
+  /** Opens the search dialog (its button, ⌘K / Ctrl+K and the View menu). */
+  open(): void;
   /** Chats changed: an open search runs again, so new words and titles are found. */
   refresh(): void;
   /** The search dialog is open with a query and its results are shown. */
@@ -194,7 +196,6 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     event.preventDefault();
     open();
   });
-  $('searchMenuItem').addEventListener('click', open);
   opener.addEventListener('click', open);
   // A click on the backdrop lands on the dialog itself, never on its contents.
   dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
@@ -217,6 +218,7 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
   });
 
   return {
+    open,
     // Chats change many times a second while they run; a running search catches up at most every
     // few seconds instead of re-reading the busy chat on every change.
     refresh: () => { if (dialog.open && query() && Date.now() - searchedAt > REFRESH_MS) later(); },

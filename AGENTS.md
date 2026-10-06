@@ -4000,8 +4000,12 @@ is missing; in every other state a click opens the popover, and a right click al
 confirmed connection pulses the dot once as the capsule closes; state changes are announced
 politely (`#connectionAnnounce`). Reduced
 motion drops the transitions; a sidebar narrower than 200px keeps the dot alone. Setup stays
-reachable from Settings and from the capsule when configuration is incomplete. The View menu has its own foreground
-stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
+reachable from Settings and from the capsule when configuration is incomplete. The View menu is
+one icon button (≡) in the title bar opening the row menus' menu (`row-menu.ts`, `view-menu.ts`):
+each action with its icon and this keyboard's shortcut (not the sidebar toggle, which sits beside it), a
+pets label that says what it will do (Show/Hide desktop pets), zoom steps that keep it open with Actual size's value updating
+(a zoom's resize repositions it instead of closing it), and Show browser (the CoS browser) only while the
+built-in browser is the ChatGPT browser. Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
 authority-bearing `/status` response. One pending diagnostic page read is shared; current
