@@ -7,6 +7,7 @@
  * The happy paths matter too, but they are the cheap half.
  */
 
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -7298,6 +7299,28 @@ describe('a worker chat that never opens', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('gives a slow new tab time to pick up its worker task', async () => {
+    // VM stress test, 2026-10-06: two worker tabs loading next to a Loop's tabs took longer than
+    // 20 s to redeem, and both workers failed. A single tab there needs about 15 s at the 90th percentile.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'slow page' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).not.toBe('failed');
+      expect((await redeem(id)).agent).toBe('worker-1');
+      expect(opened).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps the page's redeem retries as long as the app waits for them", () => {
+    const content = readFileSync('extension/content.js', 'utf8');
+    const window = Number(/const REDEEM_RETRY_WINDOW_MS = ([\d_]+);/.exec(content)?.[1]?.replace(/_/g, ''));
+    expect(window).toBe(WORKER_REDEEM_MS);
   });
 
   it('fails an unredeemed opening without duplicating it or holding its sibling', async () => {
