@@ -36,6 +36,7 @@
   "Continue an interrupted answer when the app can verify the unfinished turn.": "アプリがターンの未完了を確認できた場合に、中断された回答を再開します。",
   "Recovery timing details": "復旧のタイミングの詳細",
   "Unverified": "未確認",
+  "This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.": "この ChatGPT アカウントではこのモデルを利用できないため、ChatGPT の現在のモデルを使用します。",
   "Failed": "失敗",
   "Finished": "完了",
   "Could not copy text.": "テキストをコピーできませんでした。",

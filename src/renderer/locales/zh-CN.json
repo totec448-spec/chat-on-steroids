@@ -36,6 +36,7 @@
   "Continue an interrupted answer when the app can verify the unfinished turn.": "当应用能够确认回复尚未完成时继续中断的回答。",
   "Recovery timing details": "恢复时间详情",
   "Unverified": "未验证",
+  "This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.": "此 ChatGPT 账户不提供此模型，因此将使用 ChatGPT 当前的模型。",
   "Failed": "失败",
   "Finished": "已完成",
   "Could not copy text.": "无法复制文本。",
