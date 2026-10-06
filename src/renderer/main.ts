@@ -13,6 +13,7 @@ import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
+import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -67,6 +68,10 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+const settingsSearch = initSettingsSearch({
+  open: tab => showTab(tab),
+  shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
+});
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -183,6 +188,9 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   $('tabs').hidden = !settings;
+  $('settingsFindBox').hidden = !settings;
+  // A page opened any way leaves the search; the page list comes back.
+  settingsSearch.reset();
   $('backToChat').hidden = !settings;
   document.querySelector<HTMLElement>('.sidebar-sessions')!.hidden = settings;
   $('newChat').hidden = settings;

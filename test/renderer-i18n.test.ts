@@ -311,17 +311,10 @@ describe('app interface localization', () => {
   });
 });
 
-it('matches both Turkish I pairs when filtering complete settings sections', async () => {
+it('matches both Turkish I pairs when searching settings', async () => {
   window.localStorage.setItem('cos.ui.language', 'tr');
-  const { filterSettingsSections } = await import('../src/renderer/dom.js');
-  const view = document.createElement('section');
-  view.innerHTML = '<h2 class="automation-section-head">İzinler</h2><div class="pane">IŞIK</div><p id="settingsSearchEmpty"></p>';
-  for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) {
-    filterSettingsSections(view, query);
-    expect(view.querySelector<HTMLElement>('.pane')!.hidden).toBe(false);
-    expect(view.querySelector<HTMLElement>('h2')!.hidden).toBe(false);
-  }
-  filterSettingsSections(view, 'missing');
-  expect(view.querySelector<HTMLElement>('.pane')!.hidden).toBe(true);
-  expect(view.querySelector<HTMLElement>('#settingsSearchEmpty')!.hidden).toBe(false);
+  const { searchSettings } = await import('../src/renderer/settings-search.js');
+  const entries = [{ tab: 'home', page: 'Çalışma alanı', section: 'İzinler', title: 'IŞIK', detail: '', target: document.createElement('div') }];
+  for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) expect(searchSettings(entries, query)).toHaveLength(1);
+  expect(searchSettings(entries, 'missing')).toEqual([]);
 });
