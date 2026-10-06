@@ -13862,8 +13862,8 @@ describe('the goal loop over the bridge', () => {
    * was — the reply landed at 21:56:46 and the app first heard a Goal was owed at 22:00:33,
    * when a human reloaded the page by hand.
    *
-   * The schedule starts at two minutes, then two, five, ten and fifteen. Further
-   * confirmed attempts retain fifteen minutes until the durable obligation expires.
+   * The first reload follows two minutes of grace, then two more follow five and ten minutes.
+   * A third confirmed miss is terminal for this episode, but the durable debt remains visible.
    */
   it('hands one queued Goal recovery to the shared browser startup owner and revokes it on Off', async () => {
     vi.useFakeTimers();
@@ -13902,21 +13902,11 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  /**
-   * A page that will not take the next message, said out loud.
-   *
-   * The pickup schedule runs for twelve hours — every two, five, ten, then fifteen minutes — and
-   * in all that time the only trace is one `info` line per attempt. Measured on 2026-09-24: a
-   * chat whose turn had frozen was offered its rescue, the page never collected it, the app
-   * reloaded on schedule, and the chat sat until its owner noticed and typed. Three times in one
-   * morning, each time the person found it before the app said anything.
-   *
-   * The schedule is unchanged — a page can still come back hours later — but the person who can
-   * fix it in one line now hears about it.
-   */
-  it('says once that a page is not collecting its next message, and keeps trying anyway', async () => {
+  /** A missing page pickup gets a durable, visible stop instead of an endless reload loop. */
+  it('stops queued pickup after three persisted reload attempts and preserves the original input', async () => {
     vi.useFakeTimers();
-    const { resetInputForTests, enqueueInput } = await import('../src/main/session/input.js');
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput } = input;
     resetInputForTests();
     try {
       await writeDurableNow('session-input', []);
@@ -13943,25 +13933,33 @@ describe('the goal loop over the bridge', () => {
         expect(repair).toMatchObject({ conversationId: chat, reason: 'goal' });
         await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
       }
-      const said = async (): Promise<number> => (await readEvents(session.id, { kinds: ['note'] }))
-        .flatMap(event => event.kind === 'note' ? [event.message.text] : [])
-        .filter(text => /will not take/i.test(text)).length;
-      expect(await said(), 'two reloads is still an ordinary slow pickup').toBe(0);
-
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       await sweepStaleSwarm(Date.now());
       const third = (await request('GET', '/status')).body.repairs?.[0];
       expect(third).toMatchObject({ conversationId: chat, reason: 'goal' });
       await request('GET', `/status?repaired=${third.token}&repairAction=reloaded`);
 
-      expect(await said(), 'the chat was left waiting without a word').toBe(1);
+      const row = (await input.listInputs()).find(entry => entry.id === 'abca0175-0000-4000-8000-000000000175');
+      expect(row).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
+      expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
+        kind: 'pickup-stopped', deadline: Date.now(), attempts: 3, next: 'queue'
+      });
 
-      // Still trying, and still only said once.
+      // Dropping in-memory bridge/input state models a restart. Durable ownership restores the
+      // stopped state, so another sweep cannot reset the budget or reload this page again.
+      resetBridgeForTests();
+      resetInputForTests();
+      await pair();
+      expect((await input.listInputs()).find(entry => entry.id === row!.id)).toMatchObject({
+        text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now() }
+      });
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await sweepStaleSwarm(Date.now());
-      const fourth = (await request('GET', '/status')).body.repairs?.[0];
-      expect(fourth, 'the schedule gave up instead of carrying on').toMatchObject({ conversationId: chat, reason: 'goal' });
-      expect(await said(), 'it repeated itself').toBe(1);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat)).toBe(false);
+      expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', attempts: 3, next: 'queue' }));
+      expect(recoveryBrowserWake).toHaveBeenCalledTimes(3);
     } finally {
       await writeDurableNow('session-input', []);
       resetInputForTests();
@@ -13969,8 +13967,52 @@ describe('the goal loop over the bridge', () => {
     }
   });
 
+  it('shares the durable retry budget when a queued input gives its source turn back to Goal', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0176-0000-4000-8000-000000000176';
+      const goal = await import('../src/main/goal.js');
+      await goal.setGoalSwitchNow(chat, 'goal', true);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'shared-budget-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'shared-budget-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const row = await input.enqueueInput({ id: 'abca0176-0000-4000-8000-000000000176', sessionId: session.id,
+        text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'shared-budget-turn', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), messageId: 'shared-budget-final', turnId: 'shared-budget-turn',
+          text: 'First part done.', state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+
+      for (const [index, gap] of [2, 5, 10].entries()) {
+        await vi.advanceTimersByTimeAsync(gap * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+        expect(repair, `shared reload ${index + 1}`).toMatchObject({ reason: 'goal' });
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+        expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: index + 1 });
+        if (index === 0) expect(await input.cancelInput(row.id)).toBe(true);
+      }
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: Date.now() });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(false);
+    } finally {
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
   it('gives a queued head the bounded pickup schedule without an enabled Goal', async () => {
-    const { enqueueInput, cancelInput, reorderQueuedInputs, resetInputForTests } = await import('../src/main/session/input.js');
+    const { enqueueInput, cancelInput, listInputs, reorderQueuedInputs, resetInputForTests } = await import('../src/main/session/input.js');
     vi.useFakeTimers();
     resetInputForTests();
     try {
@@ -13991,7 +14033,7 @@ describe('the goal loop over the bridge', () => {
         { kind: 'turn_end', time: Date.now(), turnId: 'queued-watch-turn', outcome: 'completed' }
       ] } });
       await recordFinalForTest(chat, 'queued-watch-turn');
-      for (const [index, minutes] of [2, 5, 10, 15].entries()) {
+      for (const [index, minutes] of [2, 5, 10].entries()) {
         await vi.advanceTimersByTimeAsync(minutes * 60_000);
         await sweepStaleSwarm(Date.now());
         const authority = recoveryBrowserWake.mock.calls.at(-1)?.[3];
@@ -14004,6 +14046,11 @@ describe('the goal loop over the bridge', () => {
         if (index === 1) expect(await cancelInput(second)).toBe(true);
         if (index === 2) await request('POST', '/settings', { body: { conversationId: chat, goal: false } });
       }
+      const stopped = (await listInputs()).find(item => item.id === id);
+      expect(stopped).toMatchObject({ text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs).toEqual([]);
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs).toEqual([]);
@@ -14040,11 +14087,13 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.each([false, true])('recovers pending Goal work past five attempts until expiry, including restored debt (%s)', async restored => {
+  it.each([false, true])('bounds Goal pickup at three reloads, including restored debt (%s)', async restored => {
     vi.useFakeTimers();
     try {
       await pair();
       const chat = 'cafe0073-0000-4000-8000-000000000073';
+      const goal = await import('../src/main/goal.js');
+      await goal.setGoalSwitchNow(chat, 'goal', true);
       await request('POST', '/events', {
         body: {
           conversationId: chat,
@@ -14074,10 +14123,11 @@ describe('the goal loop over the bridge', () => {
           }]
         }
       });
-      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
+      const activity = (await request('GET', `/activity?conversationId=${chat}`)).body;
+      expect(activity.goal.pending).not.toBeNull();
+      const sessionId = activity.sessionId as string;
 
       if (restored) {
-        const goal = await import('../src/main/goal.js');
         const saved = goal.snapshotGoalReplies();
         // The durable obligation predates bridge startup, as it would after an app restart.
         resetBridgeForTests();
@@ -14096,10 +14146,9 @@ describe('the goal loop over the bridge', () => {
       await vi.advanceTimersByTimeAsync(2 * 60_000 - 1_000);
       expect(await takeRepair()).toBeNull();
 
-      // Two minutes, then 2 / 5 / 10 / 15 between the retries. Each reload is confirmed the way
-      // the extension confirms it, so what is measured here is the schedule and not a handout
-      // being retried because nobody said it worked.
-      const gaps = [1_000, 5 * 60_000, 10 * 60_000, 15 * 60_000, 15 * 60_000, 15 * 60_000, 15 * 60_000];
+      // Two minutes, then five and ten between retries. Each reload is confirmed the way the
+      // extension confirms it, so this measures three completed attempts, not an unclaimed offer.
+      const gaps = [1_000, 5 * 60_000, 10 * 60_000];
       for (const [index, gap] of gaps.entries()) {
         await vi.advanceTimersByTimeAsync(gap);
         const handout = await takeRepair();
@@ -14114,9 +14163,26 @@ describe('the goal loop over the bridge', () => {
         expect((await request('GET', '/status')).body.repairs).toEqual([]);
         expect((await request('GET', '/status')).body.repairs).toEqual([]);
         expect((await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`)).status).toBe(200);
-        // And never twice for the same step: the next one is owed only after its own gap.
+        // No second reload is queued until the next persisted deadline.
         expect(await takeRepair()).toBeNull();
       }
+
+      expect((await sessionControlsFor(sessionId)).recovery).toContainEqual(expect.objectContaining({
+        kind: 'pickup-stopped', attempts: 3, next: 'goal'
+      }));
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: Date.now() });
+      expect(await goal.setGoalReplyActiveNow(chat, false)).toBe(true);
+      expect(await goal.setGoalReplyActiveNow(chat, true)).toBe(true);
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: expect.any(Number) });
+      const stoppedSnapshot = goal.snapshotGoalReplies();
+      const switchSnapshot = goal.snapshotGoalSwitches();
+      resetBridgeForTests();
+      goal.resetGoalStateForTests();
+      goal.restoreGoalReplies(stoppedSnapshot);
+      goal.restoreGoalSwitches(switchSnapshot);
+      await pair();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(await takeRepair()).toBeNull();
 
       // The existing durable expiry still bounds unattended browser recovery.
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);

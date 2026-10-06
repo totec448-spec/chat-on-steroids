@@ -23,7 +23,7 @@ import { finishInstruction } from '../../shared/finish.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
-import { recoveryMessage, recoveryBusyMs } from '../../shared/recovery.js';
+import { BROWSER_PICKUP_MAX_ATTEMPTS, recoveryMessage, recoveryBusyMs } from '../../shared/recovery.js';
 import { invokedSkills } from '../../shared/skill-invocation.js';
 import { SKILL_ID_PATTERN } from '../../shared/skills.js';
 import { autoSelectManagedSkills } from '../skill-routing.js';
@@ -94,6 +94,9 @@ const entrySchema = inputArgs.extend({
   pickupFailedAt: z.number().optional(),
   /** One automatic retry is permitted for an exact, never-authorized browser pickup. */
   pickupRetryCount: z.number().int().nonnegative().optional(),
+  /** Browser reload budget for this exact queued input; survives app restart. */
+  pickupRecovery: z.object({ attempts: z.number().int().min(0).max(BROWSER_PICKUP_MAX_ATTEMPTS),
+    nextAt: z.number().int().positive().optional(), stoppedAt: z.number().int().positive().optional() }).optional(),
   cancelledByUser: z.literal(true).optional(),
   error: z.string().max(200).optional(),
   owner: z.string().nullable(),
@@ -827,6 +830,74 @@ export function listInputs(): Promise<InputEntry[]> {
     return ordered(await load()).map((entry) => ({ ...entry }));
   });
 }
+export interface PickupRecoveryState { attempts: number; nextAt?: number; stoppedAt?: number }
+
+async function rowsForPickupSource(current: InputEntry[], sessionId: string, sourceTurnId: string): Promise<InputEntry[]> {
+  const matching: InputEntry[] = [];
+  for (const entry of current) {
+    if (entry.sessionId !== sessionId || entry.purpose === 'decision' || entry.opening) continue;
+    if (await eligibleStageEnd(entry) === sourceTurnId) matching.push(entry);
+  }
+  return matching;
+}
+
+function mergedPickupState(rows: InputEntry[], inherited?: PickupRecoveryState): PickupRecoveryState {
+  const attempts = Math.min(BROWSER_PICKUP_MAX_ATTEMPTS,
+    Math.max(inherited?.attempts ?? 0, ...rows.map(row => row.pickupRecovery?.attempts ?? 0)));
+  const stoppedAt = inherited?.stoppedAt ?? rows.find(row => row.pickupRecovery?.stoppedAt)?.pickupRecovery?.stoppedAt;
+  if (stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) return {
+    attempts, stoppedAt: stoppedAt ?? rows.find(row => row.pickupRecovery?.stoppedAt)?.pickupRecovery?.stoppedAt ?? Date.now()
+  };
+  const nextAt = inherited?.attempts === attempts ? inherited.nextAt : undefined;
+  return { attempts, ...(nextAt ?? rows.find(row => row.pickupRecovery?.attempts === attempts)?.pickupRecovery?.nextAt
+    ? { nextAt: nextAt ?? rows.find(row => row.pickupRecovery?.attempts === attempts)?.pickupRecovery?.nextAt } : {}) };
+}
+
+/** Copies a source-turn budget to every durable input owner, so reorder/replacement cannot reset it. */
+export function syncQueuedPickupRecoveryNow(inputId: string, sourceTurnId: string, state: PickupRecoveryState): Promise<PickupRecoveryState | null> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === inputId && entry.state === 'queued');
+    if (!row?.sessionId || row.purpose === 'decision' || await eligibleStageEnd(row) !== sourceTurnId) return null;
+    const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
+    const merged = mergedPickupState(matches, state);
+    const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, merged)
+      ? { ...entry, pickupRecovery: merged } : entry);
+    if (next.some((entry, index) => entry !== current[index])) await commit(next);
+    return merged;
+  });
+}
+
+function samePickupState(a: PickupRecoveryState | undefined, b: PickupRecoveryState): boolean {
+  return a?.attempts === b.attempts && a?.nextAt === b.nextAt && a?.stoppedAt === b.stoppedAt;
+}
+
+/** Reserve a source-turn reload against all of its queued owners before browser handout. */
+export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState): Promise<PickupRecoveryState | null> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === inputId);
+    if (!row || !row.sessionId || row.purpose === 'decision' || row.state !== 'queued' ||
+        await eligibleStageEnd(row) !== sourceTurnId) return null;
+    const session = await getSession(row.sessionId);
+    if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
+    const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
+    const prior = mergedPickupState(matches, inherited);
+    if (prior.stoppedAt || prior.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
+      const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
+        ? { ...entry, pickupRecovery: prior } : entry);
+      if (next.some((entry, index) => entry !== current[index])) await commit(next);
+      return null;
+    }
+    const attempts = prior.attempts + 1;
+    const pickupRecovery = attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? { attempts, stoppedAt: at }
+      : { attempts, ...(nextAt !== undefined ? { nextAt } : {}) };
+    const next = current.map(entry => matches.includes(entry) ? { ...entry, pickupRecovery } : entry);
+    await commit(next);
+    return { attempts, ...('nextAt' in pickupRecovery && pickupRecovery.nextAt ? { nextAt: pickupRecovery.nextAt } : {}),
+      ...('stoppedAt' in pickupRecovery && pickupRecovery.stoppedAt ? { stoppedAt: pickupRecovery.stoppedAt } : {}) };
+  });
+}
 /** A sent receipt survives a recorder failure. Existing outbox reads retry publication,
  * never transport; the stable canonical key makes a lost recording ACK idempotent. */
 async function publishHistory(): Promise<void> {
@@ -1072,10 +1143,10 @@ export async function hasQueuedAfterTurnInput(sessionId: string): Promise<boolea
 
 /** Read the same visible head as claims, including its still-running listening window.
  * Historical restored tickets without an acceptance timestamp never arm browser recovery. */
-export function pendingQueuedPickups(): Promise<Array<{ conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean }>> {
+export function pendingQueuedPickups(): Promise<Array<{ inputId: string; conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }>> {
   return serial(async () => {
     const rows = await load();
-    const result: Array<{ conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean }> = [];
+    const result: Array<{ inputId: string; conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }> = [];
     const pending = ordered(rows).filter(row => row.sessionId && row.purpose !== 'decision' && ['queued', 'browser', 'tool'].includes(row.state));
     for (const sessionId of new Set(pending.map(row => row.sessionId))) {
       const candidates = pending.filter(row => row.sessionId === sessionId);
@@ -1093,9 +1164,14 @@ export function pendingQueuedPickups(): Promise<Array<{ conversationId: string; 
       const acceptedAt = row.silenceBoundary?.acceptedAt ?? (!row.silenceBoundary && completed ? end.time : undefined);
       if (acceptedAt === undefined) continue;
       const selection = session.selectedModel;
-      result.push({ conversationId: session.conversationId, sessionId: row.sessionId, sourceTurnId, acceptedAt,
+      const sourceOwners = await rowsForPickupSource(rows, row.sessionId, sourceTurnId);
+      const pickupRecovery = mergedPickupState(sourceOwners);
+      result.push({ inputId: row.id, conversationId: session.conversationId, sessionId: row.sessionId, sourceTurnId, acceptedAt,
         listenUntil: completed && !row.silenceBoundary?.nativeBusy ? 0 : row.silenceBoundary?.listenUntil ?? 0,
-        pro: selection?.conversationId === session.conversationId && isProModel(selection.model, selection.reasoningEffort) });
+        pro: selection?.conversationId === session.conversationId && isProModel(selection.model, selection.reasoningEffort),
+        pickupAttempts: pickupRecovery.attempts,
+        ...(pickupRecovery.nextAt ? { pickupNextAt: pickupRecovery.nextAt } : {}),
+        ...(pickupRecovery.stoppedAt ? { pickupStoppedAt: pickupRecovery.stoppedAt } : {}) });
     }
     return result;
   });

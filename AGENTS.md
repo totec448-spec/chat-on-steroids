@@ -2384,8 +2384,12 @@ existing Goal reply ledger. The exact final is checked before its one durable St
 again in the native page. Unfinished Continue keeps its Stop claim in the existing outbox.
 Both use the same native Stop/idle helper, then send on that document. There is **no immediate
 reload after Stop**. Undelivered Continue, queued input and Goal/Loop decisions share one
-pickup projection and the 2/5/10/15-minute reload schedule (fifteen repeats), with a twelve-hour
-source lifetime. Native-busy polls do not postpone that schedule. A silence episode retiring
+pickup projection and the bounded 2/5/10-minute reload schedule (three reloads total). The
+attempt count and next deadline are stored with the exact Goal reply or queued input, so an app
+restart cannot reset the limit. After the third uncollected reload, recovery stops and the composer
+shows a persistent stop status while the original obligation remains saved. A queue item can still
+be sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
+lifetime remains a separate retirement bound. Native-busy polls do not postpone that schedule. A silence episode retiring
 cannot delete a new pickup repair belonging to its durable ticket.
 
 Continue text, source question/work, busy deadline and exclusive send custody live in the
@@ -2572,7 +2576,7 @@ chats retain their no-reload behavior for these blocking notices; no new grant c
 | Page silence | Exactly attributed local MCP in the current source turn plus the model-specific shared silence deadline; native progress renews it but does not grant initial intervention authority. |
 | Assistant error | Exact turn/error, per-turn retry budget and cooldown; repair the broken page without fabricating a new task. |
 | Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |
-| Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; the shared 2/5/10/15-minute pickup schedule follows its initial silence/busy wait. |
+| Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; the shared three-reload 2/5/10-minute pickup schedule follows its initial silence/busy wait, then stops visibly with its durable obligation retained. |
 | Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
 
 An automatic handoff's opened chat holds its attempt for up to 15 minutes, but a page that reports
@@ -2670,12 +2674,12 @@ filed automatically: recovery uses Continue until a canonical final appears.
 Automatic Continue reuses the durable input owner, but its frozen text and source are not
 editable or reorderable as authored tasks. Queue mutation APIs exclude recovery rows; the
 renderer labels them Automatic Continue and preserves cancellation before browser handout.
-Continue, queue and Goal/Loop share pickup gaps of 2/5/10/15 minutes, then retain fifteen until
-expiry, including Pro after its initial ten-minute (Thinking failed: five-minute) silence and
-conditional five-minute wait.
-Reordering, replacing the head on the same
-source and Goal Off cannot reset the backoff. Missing pickup ACK retains its original action
-custody; status polling does not issue a fresh token. Startup restores eligible durable debt
+Continue, queue and Goal/Loop share three pickup reloads after 2, 5 and 10 minutes, then stop
+visibly while retaining the durable obligation. The count survives restart and cannot be reset by
+reordering, replacing the head on the same source or Goal Off/On. A new source turn begins a new
+episode. The initial Pro ten-minute (Thinking failed: five-minute) silence and conditional five-minute wait remain separate.
+Missing pickup ACK retains its original action custody; status polling does not issue a fresh token.
+Startup restores eligible durable debt
 with the normal first grace period. A twelve-hour source age retires automatic pickup authority
 without deleting queued text. Newer questions veto older Goal debt. Fresh
 source/session/stop/block/continuation and listening checks apply again at repair handout.
@@ -3169,7 +3173,7 @@ activation setter records that exemption in the existing reply ledger; browser p
 reply-ID prefixes cannot grant it. Recheck restored automatic debt, provider start and delivery.
 This condition does not change ordinary Goal mode or user-message delivery.
 Automatic tickets retain exact source ownership. Native busy uses the shared one/five-minute
-wait and one Stop claim; uncollected tickets use the shared 2/5/10/15 pickup schedule (§14).
+wait and one Stop claim; uncollected tickets use the shared bounded three-reload 2/5/10 pickup schedule (§14).
 A chat that started its own workers defers that pickup and the automatic decision
 `session_finish` would otherwise draft until the last of them stops, when the switch asks
 for it (§16). The debt is deferred, never spent.
