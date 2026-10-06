@@ -931,7 +931,8 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   const popover = doc.getElementById('connectionPopover') as HTMLElement;
   expect(doc.querySelector('#chatTitle')!.closest('header')!.querySelector('#connectBtn')).toBeNull();
   expect(trigger.closest('.sidebar-bottom')).not.toBeNull();
-  expect(trigger.textContent?.trim()).toBe('');
+  // Connected: the quiet dot alone, its label column closed.
+  expect(trigger.classList.contains('has-label')).toBe(false);
   expect(trigger.getAttribute('aria-label')).toMatch(/Connected.*verified/i);
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
 
@@ -966,6 +967,20 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   expect(popover.hidden).toBe(true);
 });
 
+it('keeps a quick Disconnecting on screen long enough to read, then shows the real state', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  const title = () => doc.getElementById('connectionPopoverTitle')!.textContent;
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'connected' } });
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnecting' } });
+  expect(title()).toBe('Disconnecting');
+  // Over in a blink: the window still says Disconnecting for a moment.
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnected' } });
+  expect(title()).toBe('Disconnecting');
+  await vi.waitFor(() => expect(title()).toBe('Not connected'), { timeout: 2500 });
+  expect(doc.getElementById('sidebarConnectionLabel')!.textContent).toBe('Connect');
+});
+
 it('keeps the Settings footer action visible while settings are open', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
@@ -990,34 +1005,50 @@ it('shows connection status once and keeps diagnostics out of the desktop popove
   const popover = doc.getElementById('connectionPopover')!;
   const trigger = doc.getElementById('sidebarConnection') as HTMLButtonElement;
   const button = doc.getElementById('connectionPopoverToggle') as HTMLButtonElement;
+  const label = doc.getElementById('sidebarConnectionLabel')!;
+  // Disconnected, the capsule says what to do, and a click does it instead of opening the details.
+  expect(trigger.classList.contains('has-label')).toBe(true);
+  expect(label.textContent).toBe('Connect');
   trigger.click();
+  expect(popover.hidden).toBe(true);
+  // The details stay one right click away.
+  trigger.dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe('Not connected');
   expect(popover.textContent).not.toContain('Connection is off');
   expect(popover.querySelector('details')).toBeNull();
   expect(popover.querySelectorAll('button')).toHaveLength(1);
 
-  for (const [state, title, action, disabled] of [
-    ['starting-server', 'Starting', 'Disconnect', false],
-    ['connecting-tunnel', 'Connecting', 'Disconnect', false],
-    ['connected', 'Connected', 'Disconnect', false],
-    ['offline', 'No internet', 'Disconnect', false],
-    ['disconnecting', 'Disconnecting', 'Disconnecting…', true],
-    ['auth-failed', 'Sign-in failed', 'Connect', false],
-    ['tunnel-unavailable', 'Tunnel unavailable', 'Connect', false],
-    ['disconnected', 'Not connected', 'Connect', false]
+  for (const [state, title, action, disabled, capsule] of [
+    ['starting-server', 'Starting', 'Disconnect', false, 'Connecting…'],
+    ['connecting-tunnel', 'Connecting', 'Disconnect', false, 'Connecting…'],
+    ['connected', 'Connected', 'Disconnect', false, null],
+    ['offline', 'No internet', 'Disconnect', false, 'No internet'],
+    ['disconnecting', 'Disconnecting', 'Disconnecting…', true, 'Disconnecting…'],
+    ['auth-failed', 'Sign-in failed', 'Connect', false, 'Failed'],
+    ['tunnel-unavailable', 'Tunnel unavailable', 'Connect', false, 'Failed'],
+    ['disconnected', 'Not connected', 'Connect', false, 'Connect']
   ] as const) {
     mounted.push({ ...mounted.state, status: { ...mounted.state.status, state } });
     expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe(title);
     expect(button.textContent).toBe(action);
     expect(button.disabled).toBe(disabled);
     expect(popover.hidden).toBe(false);
+    // The capsule: a short word while it has something to say (Disconnecting… included), the dot alone
+    // once connected.
+    expect(trigger.classList.contains('has-label')).toBe(capsule !== null);
+    if (capsule) expect(label.textContent).toBe(capsule);
+    // The details offer an action only when the capsule does not already show it.
+    expect((button.parentElement as HTMLElement).hidden).toBe(state === 'disconnected' || state === 'disconnecting');
+    // A state change is announced once, politely.
+    expect(doc.getElementById('connectionAnnounce')!.textContent).toBe(title);
   }
 
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('pt-BR');
   expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe('Não conectado');
   expect(popover.textContent).not.toContain('A conexão está desativada');
-  trigger.click(); trigger.click();
+  trigger.click();
+  trigger.dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   doc.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   expect(popover.hidden).toBe(true);
   expect(doc.activeElement).toBe(trigger);
