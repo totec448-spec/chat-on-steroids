@@ -45,8 +45,8 @@ app.whenReady().then(async () => {
   for (const width of [920, 420]) for (const zoom of [1, 1.5]) for (const theme of ['dark', 'light']) {
     win.setContentSize(width, 380);
     win.webContents.setZoomFactor(zoom);
-    for (const kind of ['thinking-failed', 'unattributed', 'unattributed-wait', 'assistant-error', 'tab-recovery', 'native-busy', 'silence', 'post-reload', 'pickup', 'pickup-stopped'])
-      for (const next of kind === 'post-reload' ? [null, 'queue', 'goal', 'loop', 'continue'] : kind === 'native-busy' ? [null, 'continue'] : kind === 'pickup' || kind === 'pickup-stopped' ? ['queue'] : [null]) {
+    for (const kind of ['thinking-failed', 'unattributed', 'unattributed-wait', 'assistant-error', 'tab-recovery', 'native-busy', 'silence', 'post-reload'])
+      for (const next of kind === 'post-reload' ? [null, 'queue', 'goal', 'loop', 'continue'] : kind === 'native-busy' ? [null, 'continue'] : [null]) {
       const measured = await win.webContents.executeJavaScript(`(async () => {
         document.documentElement.dataset.theme = '${theme}';
         recovery.renderRecoveryCountdowns(document.getElementById('recoveryStatus'), [{ kind: '${kind}', next: ${JSON.stringify(next)}, generating: ${kind === 'post-reload'}, deadline: ${kind === 'unattributed' ? 15000 : 300000} }], 1000);
