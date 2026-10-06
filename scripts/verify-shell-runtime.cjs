@@ -80,9 +80,11 @@ async function evaluate(expression) {
 }
 (async () => {
   try {
+    // A cold headless Chrome on a hosted Windows runner took longer than the old 10 s to write
+    // its port file; one that quit never will, so stop waiting and say which it was.
     let port;
-    for (let at = 0; at < 100; at++) { try { port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n'); break; } catch { await delay(100); } }
-    assert(port);
+    for (let at = 0; at < 600 && browser.exitCode === null; at++) { try { port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n'); break; } catch { await delay(100); } }
+    assert(port, browser.exitCode === null ? 'Chrome wrote no DevToolsActivePort within 60 s' : `Chrome exited with ${browser.exitCode} before writing DevToolsActivePort`);
     socket = new WebSocket(`ws://127.0.0.1:${port[0]}${port[1]}`);
     await new Promise(resolve => socket.once('open', resolve));
     socket.on('message', raw => {
