@@ -52,7 +52,7 @@ import {
   onSwarmPersist,
   onSwarmPersistNow,
   pauseSwarmForDisable,
-  repairPrimeConversationAfterRecovery,
+  primeFleetIn, repairPrimeConversationAfterRecovery,
   reconcileAgentRequestOwners,
   restoreRetiredWorkers,
   restoreSwarm,
@@ -501,7 +501,8 @@ void app.whenReady().then(async () => {
   // Continuation recovery is after swarm restore because an interrupted durable rebind may
   // have to finish publishing the prime transfer that was frozen in that snapshot.
   setContinuationRecoveryHooks({
-    repairPrimeTransfer: repairPrimeConversationAfterRecovery
+    repairPrimeTransfer: repairPrimeConversationAfterRecovery,
+    hasPrimeFleet: primeFleetIn
   });
   const savedContinuations = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
   if (windowActivation.isDisabled()) return;
