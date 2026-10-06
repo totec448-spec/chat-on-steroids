@@ -226,7 +226,8 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".file-pdf-canvas:not([hidden])")');
     assert.ok(await js(`(()=>{const c=document.querySelector('.file-pdf-canvas');return c.width*c.height>100&&c.width*c.height<=16*1024*1024;})()`));
     await screenshot('pdf-rendered');
-    await js(`document.getElementById('sidebarConnection').click()`);
+    // Disconnected, a click on the capsule connects; its details are one right click away.
+    await js(`document.getElementById('sidebarConnection').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))`);
     assert.equal(await js('document.getElementById("connectionPopoverTitle").textContent'), 'Not connected');
     assert.equal(await js('document.querySelector("#connectionPopover details")'), null);
     const bounds=await js(`(()=>{const r=document.getElementById('connectionPopover').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,fits:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight};})()`);
@@ -277,11 +278,11 @@ app.whenReady().then(async () => {
     assert.equal(await js('document.getElementById("uiLanguage").value'),'zh-TW');
     await screenshot('traditional-chinese-settings');
     // Every opening is compact, including when translucency creates a sidebar stacking context.
-    await js(`document.documentElement.dataset.translucentSidebar='true';document.getElementById('sidebarConnection').click()`);
+    await js(`document.documentElement.dataset.translucentSidebar='true';document.getElementById('sidebarConnection').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))`);
     assert.equal(await js('document.getElementById("connectionAdvanced")'),null);
     assert.equal(await js('document.getElementById("connectionPopoverSettings")'),null);
     assert.equal(await js('document.getElementById("connectionAdvancedOverwrite")'),null);
-    await js(`document.getElementById('sidebarConnection').click();document.getElementById('sidebarConnection').click()`);
+    await js(`document.getElementById('sidebarConnection').click();document.getElementById('sidebarConnection').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))`);
     assert.equal(await js('document.querySelector("#connectionPopover details")'),null);
     assert.equal(await js('document.getElementById("connectionPopover").hidden'),false);
     await screenshot('connection-compact');
@@ -311,8 +312,8 @@ app.whenReady().then(async () => {
     assert.ok(await js(`(()=>{const n=document.getElementById('composerAddSkill'),r=n.getBoundingClientRect();return r.width>0&&r.height>0&&n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`));
     await js(`document.getElementById('composerAddSkill').click()`);
     assert.ok(await js('document.getElementById("chatInput").value.startsWith("Please add the following skills to my COS skills:")'));
-    await js(`window.fixture.readyConnection();document.getElementById('headerConnect').click()`);
-    await until('document.getElementById("headerConnect").hidden && document.getElementById("sidebarConnection").classList.contains("is-connected")');
+    await js(`window.fixture.readyConnection();document.getElementById('sidebarConnection').click()`);
+    await until('!document.getElementById("sidebarConnection").classList.contains("has-label") && document.getElementById("sidebarConnection").classList.contains("is-connected")');
     const errors=await js('window.fixtureErrors');
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,agentMonitor:{latestActivity:true,actionCount:true},errors},null,2));

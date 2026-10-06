@@ -3934,10 +3934,19 @@ tooltips. The header states connection status once; no redundant off/verificatio
 appears. Verification/last-seen ages remain in tooltips. Advanced session capture, request IDs
 and runtime diagnostics belong to the companion extension, not this desktop popover. Its only
 action is Connect/Disconnect; opening it does not request companion diagnostics.
-Extension-only Overwrite/Timestamps and the redundant settings link are absent. A red header
-Connect action remains visible while disconnected and disappears only on confirmed connection,
-briefly highlighting the footer status (respecting reduced motion). Setup stays reachable from
-Settings and from Connect when configuration is incomplete. The View menu has its own foreground
+Extension-only Overwrite/Timestamps and the redundant settings link are absent. The footer
+status is the one connection control (the header has none): connected, a 36px square with a
+green dot; otherwise a capsule that says Connect, Connecting…/Disconnecting…, No internet or
+Failed (the full reason stays in its title and the popover). Opening from the dot or changing
+words is one morph: the width animates while the words cross-fade, centred and never cut; the old
+words fade where they were, clipped to the capsule. A Disconnecting stays on screen at least
+1.1s. Simply disconnected, it is the word alone and a click connects, or opens Setup while a step
+is missing; in every other state a click opens the popover, and a right click always does. Busy
+(connecting or disconnecting) runs a light around the border and a sheen on the words; a
+confirmed connection pulses the dot once as the capsule closes; state changes are announced
+politely (`#connectionAnnounce`). Reduced
+motion drops the transitions; a sidebar narrower than 200px keeps the dot alone. Setup stays
+reachable from Settings and from the capsule when configuration is incomplete. The View menu has its own foreground
 stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the

@@ -40,7 +40,7 @@ export function createWorkspaceDocks(host: HTMLElement) {
   ui(expandToggle, 'aria-label', () => t(expanded ? 'Restore right panel' : 'Expand right panel'));
   expandToggle.hidden = true;
   const controls = el('div', 'header-dock-controls'); controls.append(expandToggle, bottomToggle, rightToggle);
-  document.getElementById('headerConnect')!.after(controls);
+  document.querySelector('header > .state')!.prepend(controls);
 
   const right = el('aside', 'work-dock work-dock-right'); right.id = 'workDockRight'; right.hidden = true;
   ui(right, 'aria-label', () => t('Right panel'));
