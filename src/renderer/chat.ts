@@ -498,6 +498,16 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   return badges;
 }
 
+/** The chat whose tooltip a click put away, until the pointer leaves its row. */
+let sessionTooltipDismissed: string | null = null;
+
+function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
+  tip.textContent = row.title;
+  const bounds = row.getBoundingClientRect();
+  tip.style.left = `${Math.min(bounds.right + 10, window.innerWidth - 290)}px`;
+  tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
+}
+
 function sessionRow(summary: SessionSummary): HTMLElement {
   const row = el('div', 'sess');
   row.dataset.id = summary.id;
@@ -526,19 +536,29 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   }
   ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
-    document.getElementById('sessionTooltip')?.remove();
+    if (sessionTooltipDismissed === summary.id) return;
+    // The same chat's tooltip, from before a repaint, stays as it is: recreating it would blink.
+    const current = document.getElementById('sessionTooltip');
+    if (current?.dataset.for === summary.id) { placeSessionTooltip(current, row); return; }
+    current?.remove();
     // An open row menu is what the pointer is reading; the tooltip would cover it.
     if (document.querySelector('.row-menu')) return;
-    const tip = el('div', 'session-tooltip', row.title);
-    tip.id = 'sessionTooltip'; tip.setAttribute('role', 'tooltip');
-    const bounds = row.getBoundingClientRect();
-    tip.style.left = `${Math.min(bounds.right + 10, window.innerWidth - 290)}px`;
-    tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
+    const tip = el('div', 'session-tooltip');
+    tip.id = 'sessionTooltip'; tip.setAttribute('role', 'tooltip'); tip.dataset.for = summary.id;
+    placeSessionTooltip(tip, row);
     document.body.append(tip);
   };
   row.addEventListener('pointerenter', showTip);
-  row.addEventListener('pointerleave', () => document.getElementById('sessionTooltip')?.remove());
-  row.addEventListener('click', () => document.getElementById('sessionTooltip')?.remove());
+  row.addEventListener('pointerleave', () => {
+    if (sessionTooltipDismissed === summary.id) sessionTooltipDismissed = null;
+    document.getElementById('sessionTooltip')?.remove();
+  });
+  // A pointer's click puts the tooltip away until the pointer leaves the row, through the repaint that
+  // follows. A keyboard's click puts nothing away: no pointer would leave to bring the tooltip back.
+  row.addEventListener('click', () => {
+    if (row.matches(':hover')) sessionTooltipDismissed = summary.id;
+    document.getElementById('sessionTooltip')?.remove();
+  });
   // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
   // its previous priority (blocked/active/worker finished/failed).
   const status = badges.find((badge) => badge.tone);
@@ -889,7 +909,6 @@ function paintSessions(): void {
   // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
   // Korean) lives in that exact node. The edit's end repaints with everything that changed.
   if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
-  document.getElementById('sessionTooltip')?.remove();
   const projectList = $('projectList'), chatList = $('chatList');
   // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure
   // or one of its buttons) attached to its exact project, without moving focus from the
@@ -1017,20 +1036,27 @@ function paintSessions(): void {
   }
   // A new node is not :hover until the pointer moves again: the row under it would lose its hover
   // look for a moment, and a sub-agent arrow would jump back to the menu's column and slide out again.
-  // The row under the pointer is born pointed (until the pointer leaves), and an arrow that changed
-  // turns from where it was.
+  // The row under the pointer is born pointed (until the pointer leaves), keeps its tooltip, and an
+  // arrow that changed turns from where it was.
   const pointedId = [projectList, chatList].map(list => list.querySelector<HTMLElement>('.sess:hover')?.dataset.id).find(Boolean);
   const arrowsBefore = new Map([...projectList.querySelectorAll<HTMLElement>('.sess > .worker-toggle'), ...chatList.querySelectorAll<HTMLElement>('.sess > .worker-toggle')]
     .map(toggle => [toggle.parentElement!.dataset.id, toggle.getAttribute('aria-expanded')]));
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
+  const pointed = pointedId
+    ? [...projectList.querySelectorAll<HTMLElement>('.sess'), ...chatList.querySelectorAll<HTMLElement>('.sess')].find(row => row.dataset.id === pointedId)
+    : undefined;
+  if (pointed) {
+    pointed.classList.add('is-pointed');
+    pointed.addEventListener('pointerleave', () => pointed.classList.remove('is-pointed'), { once: true });
+  }
+  // The tooltip of the row still under the pointer follows the new row (its text may have changed);
+  // any other tooltip goes with its row.
+  const tooltip = document.getElementById('sessionTooltip');
+  if (tooltip && pointed && tooltip.dataset.for === pointedId) placeSessionTooltip(tooltip, pointed);
+  else tooltip?.remove();
   for (const list of [projectList, chatList]) {
-    const pointed = pointedId ? [...list.querySelectorAll<HTMLElement>('.sess')].find(row => row.dataset.id === pointedId) : undefined;
-    if (pointed) {
-      pointed.classList.add('is-pointed');
-      pointed.addEventListener('pointerleave', () => pointed.classList.remove('is-pointed'), { once: true });
-    }
     for (const toggle of list.querySelectorAll<HTMLElement>('.sess > .worker-toggle')) {
       const before = arrowsBefore.get(toggle.parentElement!.dataset.id);
       const now = toggle.getAttribute('aria-expanded');
