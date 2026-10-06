@@ -282,7 +282,8 @@ app.whenReady().then(async () => {
       assert.ok(marks >= 7, 'All Setup steps are on the rail');
       for (let index = 0; index < marks; index++) {
         const ink = await inkInsets(`document.querySelectorAll('.setup-rail-mark')[${index}]`);
-        if (Math.abs(ink.left - ink.right) > 1 || Math.abs(ink.top - ink.bottom) > 1) offCenter.push({ theme, element: `.setup-rail-mark #${index + 1}`, ink });
+        // At 1x a device pixel is a whole CSS pixel, so snapping alone can leave 1 px; the bug was 2.5–3.7 px.
+        if (Math.abs(ink.left - ink.right) > 1.5 || Math.abs(ink.top - ink.bottom) > 1.5) offCenter.push({ theme, element: `.setup-rail-mark #${index + 1}`, ink });
       }
       await js(`document.querySelectorAll('.setup-rail li').forEach(li => li.classList.remove('is-done'))`);
       // Every other round badge that holds only an icon, on every settings page.
@@ -296,7 +297,7 @@ app.whenReady().then(async () => {
         })).length`);
         for (let index = 0; index < count; index++) {
           const ink = await inkInsets(`window.iconBadges[${index}]`);
-          if (Math.abs(ink.left - ink.right) > 1.25 || Math.abs(ink.top - ink.bottom) > 1.25)
+          if (Math.abs(ink.left - ink.right) > 1.5 || Math.abs(ink.top - ink.bottom) > 1.5)
             offCenter.push({ theme, page, element: await js(`window.iconBadges[${index}].className`), ink });
         }
       }
