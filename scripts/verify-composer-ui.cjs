@@ -219,6 +219,19 @@ app.whenReady().then(async () => {
   await capture('editor');
   await js(`(()=>{const field=document.getElementById('sessionObjective');field.value='Keep refining the dashboard until every panel passes review.';field.dispatchEvent(new Event('input',{bubbles:true}))})()`); await pause(150);
   await capture('editor-filled');
+  // Round icon controls in the composer and the sidebar draw their glyph centered, measured on
+  // real pixels like the settings pages' marks (a box can be centered while its glyph is not).
+  const { inkInsets, ROUND_ICON_BADGES } = require('./fixtures/ink.cjs');
+  const badges = await js(`(window.inkBadges = [...${ROUND_ICON_BADGES}(document.getElementById('composer')), ...${ROUND_ICON_BADGES}(document.querySelector('.sidebar'))]).length`);
+  assert.ok(badges >= 1, 'The composer has round icon controls to measure');
+  const offCenter = [];
+  for (let index = 0; index < badges; index++) {
+    const ink = await inkInsets(win, js, `window.inkBadges[${index}]`);
+    if (Math.abs(ink.left - ink.right) > 1.5 || Math.abs(ink.top - ink.bottom) > 1.5)
+      offCenter.push({ element: await js(`window.inkBadges[${index}].id || window.inkBadges[${index}].className`), ink });
+  }
+  assert.deepEqual(offCenter, [], 'Round composer and sidebar icons are centered: ' + JSON.stringify(offCenter));
+  checks.push(`${badges} round icon controls centered`);
   // The incumbent height observer also produces this Chromium notification when
   // a draft grows (reproduced against the frozen approved preview). Report it,
   // while keeping actual renderer exceptions fatal.
