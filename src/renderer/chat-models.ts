@@ -118,7 +118,11 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
     }
     const unverified = !!value && !choices.some(choice => choice.id === value);
     badge.hidden = !unverified;
-    if (unverified) ui(badge, 'textContent', () => t('Unverified'));
+    if (unverified) {
+      ui(badge, 'textContent', () => t('Unverified'));
+      // Workers and the Goal helper both fall back to ChatGPT's current model (#499); say so.
+      ui(badge, 'title', () => t("This ChatGPT account doesn't offer this model, so ChatGPT's current model is used."));
+    }
   }
 }
 
