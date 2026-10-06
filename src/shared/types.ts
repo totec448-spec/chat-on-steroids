@@ -160,6 +160,8 @@ export interface UiPrefs {
   mentionCore?: boolean;
   /** The interface language the window last reported; the browser extension follows it. */
   language?: import('./ui-language.js').UiLanguage;
+  /** The version this install last started as; What's New shows once per real update (#1172). */
+  lastSeenVersion?: string;
   /**
    * The extension's own preferences as it last reported them stored. The app keeps them so a
    * reinstalled extension, which starts with empty storage under a new id, gets them back.
