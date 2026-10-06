@@ -1980,5 +1980,8 @@
   "Core connection lost": "Se perdió la conexión con Core",
   "Desktop connection lost": "Se perdió la conexión con Desktop",
   "Plugins connection lost": "Se perdió la conexión con Complementos",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "El túnel se desconectó inesperadamente. Abre Chat On Steroids para comprobar la conexión."
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "El túnel se desconectó inesperadamente. Abre Chat On Steroids para comprobar la conexión.",
+  "Copy link": "Copiar enlace",
+  "Copy this chat's ChatGPT link": "Copiar el enlace de ChatGPT de este chat",
+  "Link copied": "Enlace copiado"
 }

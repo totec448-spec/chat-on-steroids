@@ -1980,5 +1980,8 @@
   "Core connection lost": "Core 连接已断开",
   "Desktop connection lost": "Desktop 连接已断开",
   "Plugins connection lost": "插件连接已断开",
-  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道连接意外断开。请打开 Chat On Steroids 检查连接。"
+  "The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.": "隧道连接意外断开。请打开 Chat On Steroids 检查连接。",
+  "Copy link": "复制链接",
+  "Copy this chat's ChatGPT link": "复制此对话的 ChatGPT 链接",
+  "Link copied": "链接已复制"
 }
