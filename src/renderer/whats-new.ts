@@ -52,10 +52,23 @@ export function paintWhatsNew(version: string): boolean {
   return true;
 }
 
+/**
+ * Centred in a window of odd width or height, the dialog starts half a pixel off the pixel grid
+ * and every icon in it blurs and drifts by that half pixel. Its own size is whole pixels, so
+ * shifting it back by the remainder keeps it centred within half a pixel and crisp.
+ */
+function snapToPixels(dialog: HTMLDialogElement): void {
+  if (!dialog.open) return;
+  const x = (window.innerWidth - dialog.offsetWidth) / 2;
+  const y = (window.innerHeight - dialog.offsetHeight) / 2;
+  dialog.style.translate = `${Math.floor(x) - x}px ${Math.floor(y) - y}px`;
+}
+
 let wired = false;
 function wire(dialog: HTMLDialogElement): void {
   if (wired) return;
   wired = true;
+  window.addEventListener('resize', () => snapToPixels(dialog));
   const close = (): void => {
     if (!dialog.open || dialog.classList.contains('is-closing')) return;
     dialog.classList.add('is-closing');
@@ -91,6 +104,7 @@ export function initWhatsNew(current: string | null, lastSeen: string | undefine
   window.setTimeout(() => {
     if (dialog.open || document.querySelector('dialog[open]')) return;
     dialog.showModal();
+    snapToPixels(dialog);
     // Enter answers it at once; the focus ring appears only once the keyboard is used.
     $('whatsNewDone').focus({ focusVisible: false } as FocusOptions);
     void run(window.api.markWhatsNewSeen());
