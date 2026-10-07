@@ -2050,7 +2050,7 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   const doc = mounted.window.document;
   const general = doc.querySelector('[data-panel="general"]')!;
   const setup = doc.querySelector('[data-panel="setup"]')!;
-  for (const id of ['followOutput', 'playfulStatus', 'mentionCore', 'privacyScreenshots', 'developerMode', 'controlApiEnabled', 'controlApiAllowActions']) {
+  for (const id of ['followOutput', 'playfulStatus', 'mentionCore', 'privacyScreenshots', 'desktopControlGuard', 'developerMode', 'controlApiEnabled', 'controlApiAllowActions']) {
     expect(general.contains(doc.getElementById(id)), id).toBe(true);
     expect(setup.contains(doc.getElementById(id)), id).toBe(false);
   }
@@ -2064,6 +2064,12 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   follow.checked = false;
   follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
+
+  const desktopGuard = doc.getElementById('desktopControlGuard') as HTMLInputElement;
+  expect(desktopGuard.checked).toBe(false);
+  desktopGuard.checked = true;
+  desktopGuard.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.desktopControlGuard).toBe(true));
 });
 
 it('always requires the live browser because recording is an invariant', async () => {

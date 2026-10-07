@@ -31,7 +31,17 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.'),
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
-      t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.')
+      t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
+    'Desktop control': t('Desktop control'),
+    '{0} is about to control your desktop.': t('{0} is about to control your desktop.'),
+    'Starting automatically in {0} seconds.': t('Starting automatically in {0} seconds.'),
+    'Starting automatically in 1 second.': t('Starting automatically in 1 second.'),
+    'Start now': t('Start now'),
+    'Stop': t('Stop'),
+    'Desktop control stopped': t('Desktop control stopped'),
+    '{0} cannot send desktop input until you allow it again.':
+      t('{0} cannot send desktop input until you allow it again.'),
+    'Allow again': t('Allow again')
   };
 }
 

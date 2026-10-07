@@ -14,6 +14,17 @@ const desktop = vi.hoisted(() => {
     actAndCapture: vi.fn()
   };
 });
+const desktopGuard = vi.hoisted(() => ({
+  enabled: false,
+  admit: vi.fn(async (_operation: string): Promise<any> => ({ allowed: true, request: { ownerKey: 'test' } })),
+  finish: vi.fn()
+}));
+vi.mock('../src/main/desktop-control-guard.js', () => ({
+  desktopControlGuardEnabled: () => desktopGuard.enabled,
+  admitDesktopControl: desktopGuard.admit,
+  finishDesktopControlGuard: desktopGuard.finish,
+  desktopControlOutcomeForError: () => 'failure'
+}));
 
 vi.mock('../src/main/computer/index.js', () => ({
   ComputerError: desktop.ComputerError,
@@ -29,6 +40,13 @@ vi.mock('../src/main/computer/index.js', () => ({
 }));
 
 import { registerMacOSDesktopTools as registerDesktopTools } from '../src/main/mcp/tools-desktop-macos.js';
+
+beforeEach(() => {
+  desktopGuard.enabled = false;
+  desktopGuard.admit.mockReset();
+  desktopGuard.admit.mockResolvedValue({ allowed: true, request: { ownerKey: 'test' } });
+  desktopGuard.finish.mockReset();
+});
 
 function caps(over: Partial<Capabilities>): Capabilities {
   return {
@@ -124,6 +142,48 @@ describe('Desktop computer browser chords', () => {
     const result = await computer.handler({ actions: [{ type: 'keypress', keys: ['ctrl', 'r'] }] });
     expect(result.isError).toBeFalsy();
     expect(desktop.activeWindow).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['click_ref', { type: 'click_ref', ref: 'ref-1' }],
+    ['set_value', { type: 'set_value', ref: 'ref-1', text: 'value' }],
+    ['click', { type: 'click', x: 10, y: 20 }],
+    ['double_click', { type: 'double_click', x: 10, y: 20 }],
+    ['move', { type: 'move', x: 10, y: 20 }],
+    ['scroll', { type: 'scroll', x: 10, y: 20, scroll_y: 120 }],
+    ['drag', { type: 'drag', path: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }],
+    ['type', { type: 'type', text: 'hello' }],
+    ['keypress', { type: 'keypress', keys: ['ctrl', 'r'] }],
+    ['focus', { type: 'focus', window: 42 }]
+  ])('admits an input-bearing macOS batch before native work: %s', async (_kind, action) => {
+    desktopGuard.enabled = true;
+    desktop.actAndCapture.mockResolvedValueOnce(acted);
+    const computer = desktopSurface({ control: true }).get('computer')!;
+
+    const result = await computer.handler({ actions: [action] });
+
+    expect(result.isError).toBeFalsy();
+    expect(desktopGuard.admit).toHaveBeenCalledExactlyOnceWith('computer');
+    expect(desktop.actAndCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it('bypasses Guard for wait/clipboard-only batches and runs no native input after refusal', async () => {
+    desktopGuard.enabled = true;
+    desktop.actAndCapture.mockResolvedValueOnce({
+      ...acted, completedCount: 3, routes: ['local', 'local', 'local'], clipboard: ['clip']
+    });
+    const clipboard = desktopSurface({ clipboardRead: true, clipboardWrite: true }).get('computer')!;
+    await clipboard.handler({
+      actions: [{ type: 'wait', ms: 0 }, { type: 'read_clipboard' }, { type: 'write_clipboard', text: 'next' }]
+    });
+    expect(desktopGuard.admit).not.toHaveBeenCalled();
+
+    desktop.actAndCapture.mockClear();
+    desktopGuard.admit.mockResolvedValueOnce({ allowed: false, reason: 'DESKTOP_GUARD_STOPPED: test refusal' });
+    const computer = desktopSurface({ control: true }).get('computer')!;
+    const result = await computer.handler({ actions: [{ type: 'type', text: 'blocked' }] });
+    expect(result.isError).toBe(true);
+    expect(desktop.actAndCapture).not.toHaveBeenCalled();
   });
 });
 

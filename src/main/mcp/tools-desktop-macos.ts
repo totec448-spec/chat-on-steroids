@@ -32,6 +32,13 @@ import {
 } from '../computer/index.js';
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { logInfo } from '../logger.js';
+import {
+  admitDesktopControl,
+  desktopControlGuardEnabled,
+  desktopControlOutcomeForError,
+  finishDesktopControlGuard,
+  type DesktopControlAdmission
+} from '../desktop-control-guard.js';
 import { noteCount, noteDetail } from './call-context.js';
 import {
   cropArg,
@@ -542,22 +549,37 @@ export function registerMacOSDesktopTools(reg: SurfaceRegistrar): void {
                     timeoutMs: verify.timeout_ms
                   }
             : undefined;
+          const hasDesktopInput = parsed.some(action =>
+            action.type !== 'wait' && action.type !== 'read_clipboard' && action.type !== 'write_clipboard'
+          );
+          let admission: DesktopControlAdmission | null = null;
+          if (hasDesktopInput && desktopControlGuardEnabled()) {
+            admission = await admitDesktopControl('computer');
+            if (!admission.allowed) return fail(admission.reason);
+          }
           // One lock, one operation: the picture that verifies these actions must be taken
           // before anyone else can touch the desktop.
-          const result = await actAndCapture(parsed, {
-            frameId,
-            verify: parsedVerify,
-            capture:
-              wantsCapture
-                ? {
-                    window: captureWindow,
-                    full: captureFull,
-                    maxWidth: captureMaxWidth,
-                    crop: captureCrop,
-                    preferActiveWindow: ctx.privacyScreenshots
-                  }
-                : undefined
-          });
+          let result: Awaited<ReturnType<typeof actAndCapture>>;
+          try {
+            result = await actAndCapture(parsed, {
+              frameId,
+              verify: parsedVerify,
+              capture:
+                wantsCapture
+                  ? {
+                      window: captureWindow,
+                      full: captureFull,
+                      maxWidth: captureMaxWidth,
+                      crop: captureCrop,
+                      preferActiveWindow: ctx.privacyScreenshots
+                    }
+                  : undefined
+            });
+            finishDesktopControlGuard(admission, 'success');
+          } catch (error) {
+            finishDesktopControlGuard(admission, desktopControlOutcomeForError(error));
+            throw error;
+          }
           const cursor = result.cursor;
           const pointer = cursor
             ? cursor.image

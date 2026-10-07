@@ -9,6 +9,13 @@ export function mainText(source: MainText): string {
   return translations.get(source) ?? source;
 }
 
+/** Format a translated main-process text without exposing arbitrary renderer/provider copy. */
+export function formatMainText(source: MainText, args: readonly unknown[]): string {
+  return mainText(source).replace(/\{(\d+)\}/g, (match, index: string) =>
+    Number(index) < args.length ? String(args[Number(index)]) : match
+  );
+}
+
 /** Repaints surfaces that hold a text, such as the tray menu, after the language changed. */
 export function onMainTextsChange(listener: () => void): () => void {
   listeners.add(listener);
