@@ -8,6 +8,7 @@ import {
   initConfigPath,
   loadConfig,
   saveConfig,
+  settingsRecovered,
   updateConfig
 } from '../src/main/config.js';
 import { DESKTOP_CAPABILITIES, type Capability, type Config } from '../src/shared/types.js';
@@ -177,13 +178,16 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), controlApi: { enabled: false, allowActions: true } });
     expect((await loadConfig()).controlApi).toEqual({ enabled: false, allowActions: false });
   });
-  it('defaults automatic plugin refresh off for fresh and legacy settings while preserving explicit opt-in', async () => {
-    expect(defaultConfig().ui.autoRefreshPlugins).toBe(false);
+  it('refreshes plugins automatically on a fresh install, keeps legacy settings off and preserves explicit choices', async () => {
+    // A permission chosen in Setup changes the tool list; a new user has nothing else telling them to refresh.
+    expect(defaultConfig().ui.autoRefreshPlugins).toBe(true);
     const legacy = defaultConfig(); delete legacy.ui.autoRefreshPlugins;
     await saveConfig(legacy);
     expect((await loadConfig()).ui.autoRefreshPlugins).toBe(false);
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
     expect((await loadConfig()).ui.autoRefreshPlugins).toBe(true);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } });
+    expect((await loadConfig()).ui.autoRefreshPlugins).toBe(false);
   });
   it('defaults automatic Skill selection off for fresh and legacy settings while preserving explicit opt-in', async () => {
     expect(defaultConfig().ui.autoSelectSkills).toBe(false);
@@ -604,6 +608,18 @@ describe('shipped defaults', () => {
     expect(loaded.capabilities.command).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
+    expect(loaded.ui.autoRefreshPlugins).toBe(false);
+  });
+
+  it('says a recovered config started read-only until read-only is switched off', async () => {
+    await fs.writeFile(path.join(dir, 'config.json'), '{ definitely-not-json', 'utf8');
+    const recovered = await loadConfig();
+    expect(settingsRecovered()).toBe(true);
+    // Another save that keeps read-only, such as adding a folder, leaves the reason on screen.
+    await saveConfig({ ...recovered, roots: [] });
+    expect(settingsRecovered()).toBe(true);
+    await saveConfig({ ...recovered, readOnly: false });
+    expect(settingsRecovered()).toBe(false);
   });
 
   it('keeps the global worker admission cap off for legacy configs and preserves an explicit opt-in', async () => {

@@ -541,14 +541,15 @@
                 <ol>
                   <li><button type="button" data-rail-step="browser"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Extension</span></button></li>
                   <li><button type="button" data-rail-step="folder"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Folder</span></button></li>
+                  <li><button type="button" data-rail-step="access"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Access</span></button></li>
                   <li><button type="button" data-rail-step="tunnel"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Tunnel</span></button></li>
                   <li><button type="button" data-rail-step="key"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">API key</span></button></li>
                   <li><button type="button" data-rail-step="connect"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Connect</span></button></li>
-                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">ChatGPT</span></button></li>
+                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Plugins</span></button></li>
                   <li class="setup-rail-ready"><button type="button" data-rail-step="ready"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Ready</span></button></li>
                 </ol>
               </nav>
-              <div class="setup-progress" id="setupProgress" role="progressbar" aria-labelledby="setupTitle" aria-valuemin="0" aria-valuenow="0" aria-valuemax="6">
+              <div class="setup-progress" id="setupProgress" role="progressbar" aria-labelledby="setupTitle" aria-valuemin="0" aria-valuenow="0" aria-valuemax="7">
                 <span class="setup-progress-text" id="setupProgressText"></span>
               </div>
             </div>
@@ -633,6 +634,31 @@
                       <span class="connect-label">Add</span>
                     </button>
                   </div>
+                </div>
+              </li>
+              <!-- What ChatGPT may do. Read-only and Desktop decide which tools and which connectors
+                   exist, so the choice belongs here, before the plugins are made, not in a setting
+                   a new user never opens. -->
+              <li class="step" data-step="access">
+                <div class="step-mark">
+                  <i class="ico tick ph ph-check" aria-hidden="true"></i>
+                </div>
+                <div class="step-body">
+                  <h3 id="accessTitle">Choose what ChatGPT can do</h3>
+                  <p class="step-lead">Only inside the folders you share. You can change it later in Workspace.</p>
+                  <p class="hint is-warn" id="accessRecovered" hidden>The settings file could not be read, so the app started in read-only mode. Choose access again.</p>
+                  <div class="browser-choice access-choice" role="radiogroup" aria-labelledby="accessTitle">
+                    <button class="browser-option" type="button" role="radio" data-access="full"><i class="ico ph ph-monitor" aria-hidden="true"></i><b>Full access</b><em>Edit files, run commands, and use your browser and desktop apps.</em></button>
+                    <button class="browser-option" type="button" role="radio" data-access="files"><i class="ico ph ph-terminal-window" aria-hidden="true"></i><b>Files and terminal</b><em>Edit files and run commands. No browser or desktop control.</em></button>
+                    <button class="browser-option" type="button" role="radio" data-access="read"><i class="ico ph ph-eye" aria-hidden="true"></i><b>Read only</b><em>Read and search files. ChatGPT can't change anything or run commands.</em></button>
+                  </div>
+                  <p class="hint" id="accessNote" hidden></p>
+                  <!-- Workspace's own permission switches, not a copy: the app moves that one surface
+                       here while Setup is on screen, so there is a single place permissions live. -->
+                  <details class="setup-optional access-fine" id="accessFine">
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Fine-tune permissions</summary>
+                    <div id="accessFineSlot"></div>
+                  </details>
                 </div>
               </li>
               <!-- 3 -->
@@ -810,6 +836,11 @@
                     </div>
                   </div>
                   <ul class="ready-checks" id="readyChecks"></ul>
+                  <div class="ready-limited" id="readyLimited" role="status" hidden>
+                    <i class="ico ph ph-warning" aria-hidden="true"></i>
+                    <p>Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.</p>
+                    <button class="btn" id="readyChangeAccess" type="button">Change access</button>
+                  </div>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="readyStart" type="button"><i class="ico ph ph-chat-circle" aria-hidden="true"></i>Start a chat</button>
                   </div>
@@ -1008,7 +1039,7 @@
                   <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the companion from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
-                  <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT, so a permission change reaches it without a manual refresh.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
                   <p class="muted">Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
