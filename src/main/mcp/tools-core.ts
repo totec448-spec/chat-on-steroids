@@ -1230,7 +1230,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         workers: z
           .array(
             z.object({
-              label: z.string().max(60).optional().describe('Short name shown to the user, e.g. "Security".'),
+              label: z.string().max(60).optional().describe('Name its job in 1-3 words, e.g. "Tests"; shown to the user.'),
               task: z
                 .string()
                 .min(1)
@@ -1263,7 +1263,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .array(
             z.object({
               to: z.string().min(1).max(40).describe('Recipient.'),
-              text: z.string().min(1).max(4000).describe('What to say.')
+              text: z.string().min(1).max(4000).describe('What to say.'),
+              label: z.string().trim().min(1).max(60).optional().describe('New job name when waking.')
             }).strict()
           )
           .min(1)

@@ -56,6 +56,15 @@ function observedModel(value: string) {
   return resolveChatModel(catalog.models, value);
 }
 
+/**
+ * A model and effort as the composer shows them ("GPT-6 Sol · High", "… · Instant"), for any
+ * observed choice; a model this account's catalog does not list keeps its id.
+ */
+export function chatModelName(model: string, reasoningEffort: string | undefined): string {
+  const label = observedModel(model)?.label ?? model;
+  return reasoningEffort ? chatModelDisplayLabel(label, reasoningEffort as ReasoningEffort, effortLabel(reasoningEffort)) : label;
+}
+
 function paintComposerContext(): void {
   if (!composerContext || composerContext.edited) return;
   if (composerContext.scope === null) {
