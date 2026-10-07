@@ -43,6 +43,7 @@ import {
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
   capabilityTools,
+  CAPABILITIES,
   DESKTOP_CAPABILITIES,
   WRITE_CAPABILITIES
 } from '../shared/types.js';
@@ -179,8 +180,19 @@ const externalSetupLinks = [...document.querySelectorAll<HTMLButtonElement>('#wi
     return other;
   });
 
+// One set of permission switches. Setup's fine control borrows Workspace's own surface while Setup is
+// on screen, so the two pages cannot disagree or save over each other.
+const permissionSurface = document.querySelector<HTMLElement>('.workspace-permissions > .settings-surface')!;
+const permissionHome = permissionSurface.parentElement!;
+
+function placePermissions(tab: string): void {
+  const target = tab === 'setup' ? $('accessFineSlot') : permissionHome;
+  if (permissionSurface.parentElement !== target) target.append(permissionSurface);
+}
+
 function showTab(name: string): void {
   if (name === 'skills') openSkillsLibrary();
+  placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
   const settings = name !== 'chat' && !library;
   // Opening Settings asks whether "Up to date" is still true (the check itself waits ten minutes).
@@ -833,6 +845,76 @@ function missingStep(
     return { step: 'connect', text: t("cloudflared was not found on this computer.") };
   }
   return null;
+}
+
+/** Setup's three access choices, and `custom` for any other mix saved in Workspace. */
+type AccessLevel = 'full' | 'files' | 'read' | 'custom';
+const FILES_AND_TERMINAL = CAPABILITIES.filter(cap => !DESKTOP_CAPABILITIES.includes(cap));
+
+/** The Desktop permissions this host can grant: browser control everywhere, the rest only with a native backend. */
+function hostDesktopCapabilities(next: AppState): Capability[] {
+  const native = next.platform?.desktopAutomation ?? true;
+  return DESKTOP_CAPABILITIES.filter(cap => native || cap === 'screen' || cap === 'control');
+}
+
+/** What the saved permissions amount to, in Setup's terms. */
+function accessLevel(next: AppState): AccessLevel {
+  const { config } = next;
+  if (config.readOnly) return 'read';
+  if (!FILES_AND_TERMINAL.every(cap => config.capabilities[cap])) return 'custom';
+  const desktop = hostDesktopCapabilities(next);
+  if (desktop.every(cap => config.capabilities[cap])) return 'full';
+  return desktop.some(cap => config.capabilities[cap]) ? 'custom' : 'files';
+}
+
+/**
+ * Whether ChatGPT can do the work the app is for: edit files and run commands. Read-only, or a mix
+ * without them, connects and lists tools all the same, so nothing else would say why every edit fails.
+ */
+function accessWorks(next: AppState): boolean {
+  const { config } = next;
+  return !config.readOnly && config.capabilities.create && config.capabilities.edit && config.capabilities.command;
+}
+
+/** Sets the permission switches to one of Setup's choices and saves them with read-only. */
+function chooseAccess(level: Exclude<AccessLevel, 'custom'>): void {
+  if (!state) return;
+  // Read-only keeps the switches as they are, so choosing again restores the same mix.
+  if (level !== 'read') {
+    const desktop = hostDesktopCapabilities(state);
+    for (const cap of FILES_AND_TERMINAL) capInput(cap).checked = true;
+    for (const cap of DESKTOP_CAPABILITIES) capInput(cap).checked = level === 'full' && desktop.includes(cap);
+  }
+  void save({ readOnly: level === 'read' });
+}
+
+/** The access step: which choice is on, and the one line that matters for it. */
+function paintAccess(next: AppState): void {
+  const level = accessLevel(next);
+  for (const option of document.querySelectorAll<HTMLButtonElement>('[data-access]')) {
+    const on = option.dataset.access === level;
+    option.setAttribute('aria-checked', String(on));
+    // One stop in the radio group: the chosen card, else the first.
+    option.tabIndex = on || (level === 'custom' && option.dataset.access === 'full') ? 0 : -1;
+  }
+  $('accessRecovered').hidden = !next.settingsRecovered;
+  const access = next.desktopAccess;
+  const macConsent = next.platform?.family === 'macos' && level === 'full' && !!access &&
+    (access.screen !== 'granted' || access.accessibility !== 'granted');
+  const note = $('accessNote');
+  const text = () => level === 'read'
+    ? t("ChatGPT can only read files. Choose another option so it can edit files and run commands.")
+    : level === 'custom'
+      ? accessWorks(next)
+        ? t("Custom permissions, set in Workspace.")
+        : t("These permissions keep ChatGPT from editing files or running commands. Choose an option above, or change them in Workspace.")
+      : macConsent
+        ? t("On macOS, desktop control also needs Screen Recording and Accessibility in System Settings.")
+        : '';
+  // Full access and Files and terminal need no words: the chosen card says it.
+  note.hidden = text() === '';
+  note.classList.toggle('is-warn', !accessWorks(next) || macConsent);
+  ui(note, 'textContent', text);
 }
 
 /**
@@ -1625,9 +1707,12 @@ function apply(next: AppState): void {
   cards.replaceChildren(...connectorCards(next));
 
   // Step marks: everything before the first unfinished step counts as done.
-  const order = ['browser', 'folder', 'tunnel', 'key', 'connect', 'chatgpt'];
+  const order = ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
   const done = new Set<string>();
   if (config.roots.length > 0 || missingStep(next)?.step !== 'folder') done.add('folder');
+  paintAccess(next);
+  // Any choice finishes the step, read-only too: Ready then says what is limited and how to undo it.
+  done.add('access');
   if (!openai || TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) done.add('tunnel');
   if (!openai || next.hasApiKey) done.add('key');
   if (connected) done.add('connect');
@@ -1694,7 +1779,7 @@ function apply(next: AppState): void {
       nav.querySelector<HTMLButtonElement>('[data-step-nav="next"]')!.disabled = !browserProgress.ready;
     }
   }
-  paintReady(shown, done, cosBrowser, allSet);
+  paintReady(shown, done, cosBrowser, allSet, accessLevel(next), !accessWorks(next));
 
   const needsBinary = config.tunnel.kind !== 'manual';
   ui($('binaryState'), 'textContent', () => !needsBinary
@@ -1771,6 +1856,13 @@ function connectorCards(next: AppState): HTMLElement[] {
 
     if (!surface.available) {
       card.append(el('p', 'hint', () => t(surface.detail)));
+      // The permission that publishes Desktop is one click away, in the same switches as Workspace.
+      if (surface.id === 'desktop') {
+        const change = el('button', 'btn', () => t("Change access"));
+        change.setAttribute('type', 'button');
+        change.addEventListener('click', () => openSetupStep('access'));
+        card.append(change);
+      }
       return card;
     }
 
@@ -1937,6 +2029,7 @@ function step(name: string): HTMLElement {
 const READY_CHECKS: Record<string, { done: string; cos?: string }> = {
   browser: { done: 'Browser connected', cos: 'Signed in to ChatGPT' },
   folder: { done: 'Folder shared' },
+  access: { done: 'ChatGPT can edit files and run commands' },
   tunnel: { done: 'Tunnel created' },
   key: { done: 'API key stored' },
   connect: { done: 'Tunnel running' },
@@ -1947,21 +2040,29 @@ const READY_CHECKS: Record<string, { done: string; cos?: string }> = {
  * Ready: every check of the steps above, passed or not. All passing says so plainly and offers the
  * chat; anything still open is listed as a way back to its step, never as a failure.
  */
-function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, allSet: boolean): void {
+function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, allSet: boolean, access: AccessLevel, limited: boolean): void {
   ui($('readyTitle'), 'textContent', () => allSet ? t('You’re all set!') : t('Almost there'));
-  ui($('readyLead'), 'textContent', () => allSet
-    ? t('ChatGPT can now work in your folders. Ask it anything in a new chat.')
-    : t('Finish the steps still open below.'));
+  ui($('readyLead'), 'textContent', () => !allSet
+    ? t('Finish the steps still open below.')
+    : limited
+      ? t("ChatGPT can now read your folders. Ask it anything in a new chat.")
+      : t('ChatGPT can now work in your folders. Ask it anything in a new chat.'));
+  // Limited access still ends setup, but never quietly: what is missing, and the way back to change it.
+  $('readyLimited').hidden = !limited;
   $('readyStart').hidden = !allSet;
   step('ready').classList.toggle('is-all-set', allSet);
   const list = $('readyChecks');
   const rows = shown.map(name => {
     const check = READY_CHECKS[name]!;
     const passed = done.has(name);
-    const row = el('li', `ready-check${passed ? ' is-passed' : ''}`);
-    const label = () => t(cosBrowser && check.cos ? check.cos : check.done);
+    const narrowed = name === 'access' && limited;
+    const row = el('li', `ready-check${passed ? ' is-passed' : ''}${narrowed ? ' is-limited' : ''}`);
+    // Limited access is done but says what it leaves out.
+    const label = () => narrowed
+      ? t(access === 'read' ? 'ChatGPT can only read files' : "ChatGPT can't edit files or run commands")
+      : t(cosBrowser && check.cos ? check.cos : check.done);
     if (passed) {
-      row.append(icon('i-check-circle'), el('span', '', label));
+      row.append(icon(narrowed ? 'i-warning' : 'i-check-circle'), el('span', '', label));
     } else {
       const go = el('button', 'ready-go');
       go.setAttribute('type', 'button');
@@ -1996,6 +2097,23 @@ function openSetupStep(name: string): void {
   showTab('setup');
   document.querySelector('.setup-track')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
+
+for (const option of document.querySelectorAll<HTMLButtonElement>('[data-access]')) {
+  option.addEventListener('click', () => chooseAccess(option.dataset.access as Exclude<AccessLevel, 'custom'>));
+}
+$('readyChangeAccess').addEventListener('click', () => openSetupStep('access'));
+// Arrow keys move the choice, as in any radio group.
+document.querySelector('.access-choice')?.addEventListener('keydown', (event) => {
+  const key = (event as KeyboardEvent).key;
+  const move = key === 'ArrowRight' || key === 'ArrowDown' ? 1 : key === 'ArrowLeft' || key === 'ArrowUp' ? -1 : 0;
+  if (!move) return;
+  event.preventDefault();
+  const options = [...document.querySelectorAll<HTMLButtonElement>('[data-access]')];
+  const at = options.indexOf(document.activeElement as HTMLButtonElement);
+  const target = options[(Math.max(at, 0) + move + options.length) % options.length]!;
+  target.focus();
+  target.click();
+});
 
 // Back and Next under each step, built once: every step moves the same way.
 for (const body of document.querySelectorAll<HTMLElement>('#wizard > .step > .step-body')) {

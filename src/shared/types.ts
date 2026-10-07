@@ -751,6 +751,8 @@ export interface AppState {
   update: UpdateStatus;
   /** Present only on macOS once the in-process native backend has reported its live TCC state. */
   desktopAccess?: MacOSDesktopAccessStatus | null;
+  /** This run's settings file could not be read, so the app started read-only; cleared once read-only is off. */
+  settingsRecovered?: boolean;
 }
 
 export const DEFAULT_CAPABILITIES: Capabilities = {
