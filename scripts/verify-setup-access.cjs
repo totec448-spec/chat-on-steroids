@@ -45,9 +45,11 @@ app.whenReady().then(async () => {
   const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),
     server:{host:'127.0.0.1',port:0},plugins:[{name:'setup-access-fixture',configureServer(vite) {
       vite.middlewares.use('/fixture.html',async (_req,res)=>{
-        const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8')
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-          .replace('</body>','<script type="module">'+fixture+'</script></body>');
+        // The page's one script tag, by its exact text: the fixture loads main.ts itself, after the API.
+        const entry='<script type="module" src="./main.ts"></script>';
+        const page=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
+        if(!page.includes(entry)) throw new Error('index.html no longer loads main.ts as this check expects');
+        const html=page.replace(entry,'').replace('</body>','<script type="module">'+fixture+'</script></body>');
         res.setHeader('Content-Type','text/html');res.end(await vite.transformIndexHtml('/fixture.html',html));
       });
     }}]});
