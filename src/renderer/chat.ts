@@ -177,19 +177,17 @@ function projectMenuItems(id: string): RowMenuItem[] {
   const removing = removingProject.has(id);
   const remoteItems: RowMenuItem[] = remote ? [
     {
-      action: 'verify-chatgpt-project', label: () => `ChatGPT · ${t('Refresh')}`,
+      action: 'verify-chatgpt-project', icon: 'i-retry', label: () => t('Refresh ChatGPT Project link'),
       disabled: busy || removing || !source,
-      title: () => source ? `ChatGPT ${t('Project')} · ${remote.projectId}` : `${t('Project')} · ${t('Refresh')}`,
       run: () => { if (source) void saveChatGptProjectLink('verify', id, source.id); }
     },
     {
-      action: 'unlink-chatgpt-project', label: () => `ChatGPT · ${t('Remove')} ${t('Link')}`, separated: true, disabled: busy || removing,
+      action: 'unlink-chatgpt-project', icon: 'i-unlink', label: () => t('Remove ChatGPT Project link'), separated: true, disabled: busy || removing,
       run: () => { void saveChatGptProjectLink('unlink', id); }
     }
   ] : [{
-    action: 'link-chatgpt-project', label: () => `ChatGPT · ${t('Link')}`,
+    action: 'link-chatgpt-project', icon: 'i-link', label: () => t('Link ChatGPT Project'),
     disabled: busy || removing || !source,
-    title: () => source ? `ChatGPT ${t('Project')}` : `${t('Project')} · ${t('Link')}`,
     run: () => { if (source) void saveChatGptProjectLink('link', id, source.id); }
   }];
   return [
@@ -1035,10 +1033,11 @@ function paintSessions(): void {
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
     heading.append(icon('i-folder'), label);
     if (project?.remote?.provider === 'chatgpt') {
-      const remote = el('span', 'project-remote-status', () => '✓');
-      const freshness = ago(project.remote.lastObservedAt);
-      remote.setAttribute('aria-label', `ChatGPT ${t('Project')} · ${freshness}`);
-      remote.title = `ChatGPT ${t('Project')} · ${project.remote.projectId} · ${freshness}`;
+      const remote = icon('i-check-circle', 'ico project-remote-status');
+      const observedAt = project.remote.lastObservedAt;
+      const status = () => t('Linked to a ChatGPT Project · checked {0}', [ago(observedAt)]);
+      ui(remote, 'aria-label', status);
+      ui(remote, 'title', status);
       heading.append(remote);
     }
     section.append(heading);

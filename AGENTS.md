@@ -845,8 +845,11 @@ it; it finds its row's button again by owner (`data-row-menu`), stays inside the
 submenus beside their item, and is keyboard-driven (arrows, Right/Left for submenus, Escape gives
 focus back to the button). A project's menu: New chat in this project (`data-new-project`, which
 also shows the chat screen), Color (a submenu: None and the palette as radio items, each calling
-the same `projects:color` owner; choices wait while a save is pending), ChatGPT Project Link/Refresh
-and Remove Link when applicable, then Remove. A chat's
+the same `projects:color` owner; choices wait while a save is pending), Link ChatGPT Project or
+Refresh/Remove ChatGPT Project link when applicable, then Remove. These actions use complete
+localized labels and ordinary row-menu icons. A linked row shows a check-circle whose accessible
+status says when the exact Project link was last observed; it never exposes the provider routing id.
+A chat's
 menu: Rename and Open in browser, Block/Release and, in strict mode, Trust/Untrust, then Remove;
 the Unattributed row offers only its app-wide Block/Allow (never in strict mode) and Remove.
 Choosing an item gives focus back to the row's button before the action runs, so a color save's

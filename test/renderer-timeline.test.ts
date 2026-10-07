@@ -1593,7 +1593,10 @@ it('offers a project\'s actions in one menu: a new chat, its color as a submenu,
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
   expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'link-chatgpt-project', 'color', 'remove']);
-  expect(menuItem(w, 'link-chatgpt-project').disabled).toBe(true);
+  const link = menuItem(w, 'link-chatgpt-project');
+  expect(link.disabled).toBe(true);
+  expect(link.textContent?.trim()).toBe('Link ChatGPT Project');
+  expect(link.querySelector('.ph-link')).not.toBeNull();
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'new-chat'));
   // Keyboard: Down moves, Right opens the color submenu on the current choice, Left comes back.
@@ -1638,16 +1641,24 @@ it('links, verifies and unlinks the selected Project chat without changing its l
   expect(menuItem(w, 'remove').disabled).toBe(true);
   w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
   finishLink({ ok: true, data: { ...project, remote } }); await settle();
-  expect(w.document.querySelector(`.project-group[data-project-id="${project.id}"] .project-remote-status`)).not.toBeNull();
+  const status = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"] .project-remote-status`)!;
+  expect(status.tagName).toBe('I');
+  expect(status.classList.contains('ph-check-circle')).toBe(true);
+  expect(status.title).toContain('Linked to a ChatGPT Project · checked ');
+  expect(status.title).not.toContain(remote.projectId);
+  expect(status.getAttribute('aria-label')).toBe(status.title);
 
-  projectMenu(w, project.id); menuItem(w, 'verify-chatgpt-project').click(); await settle();
+  projectMenu(w, project.id);
+  const refresh = menuItem(w, 'verify-chatgpt-project');
+  expect(refresh.textContent?.trim()).toBe('Refresh ChatGPT Project link');
+  expect(refresh.querySelector('.ph-arrow-clockwise')).not.toBeNull();
+  refresh.click(); await settle();
   expect(api.verifyChatGptProject).toHaveBeenCalledWith(project.id, '2026-09-02-test0001');
 
   projectMenu(w, project.id);
   const unlink = menuItem(w, 'unlink-chatgpt-project');
-  expect(unlink.textContent).toContain('Remove');
-  expect(unlink.textContent).toContain('Link');
-  expect(unlink.textContent).not.toContain('Disconnect');
+  expect(unlink.textContent?.trim()).toBe('Remove ChatGPT Project link');
+  expect(unlink.querySelector('.ph-link-break')).not.toBeNull();
   unlink.click(); await settle();
   expect(api.unlinkChatGptProject).toHaveBeenCalledWith(project.id);
   expect(w.document.querySelector(`.project-group[data-project-id="${project.id}"] .project-remote-status`)).toBeNull();

@@ -3747,7 +3747,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .project-heading[data-sort-handle] { cursor: grab; user-select: none; }
 .project-heading::-webkit-details-marker { display: none; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-remote-status { flex: 0 0 auto; font-size: 11px; font-weight: 700; opacity: .7; }
+.project-remote-status { --ico: 12px; flex: 0 0 auto; opacity: .7; }
 /* A project's color tints its folder; the menu (⋯ or a right click) changes it. */
 .project-group[data-project-color='blue'] > .project-heading > .ico { color: #4c7fc1; }
 .project-group[data-project-color='green'] > .project-heading > .ico { color: #3f9b68; }
