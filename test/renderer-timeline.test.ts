@@ -11,7 +11,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
   tabs: () => [], newTab: () => null, selectTab: vi.fn(), closeTab: vi.fn()
 }) }));
-vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
+vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}, { toggle: () => {}, isVisible: () => false }) }));
 vi.mock('../src/renderer/file-code-editor.js', () => ({
   createProjectDiffViewer: async ({ parent, baseText, currentText }: { parent: HTMLElement; baseText: string; currentText: string }) => {
     const view = parent.ownerDocument.createElement('pre');

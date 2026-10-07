@@ -3,7 +3,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
   tabs: vi.fn(() => []), selectTab: vi.fn(), closeTab: vi.fn()
 }) }));
 // Native animation/media APIs are covered by pet DOM and real Electron tests.
-vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
+vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}, { toggle: () => {}, isVisible: () => false }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
@@ -781,8 +781,9 @@ it('searches chats in a dialog opened beside the app name: recent chats first, t
   await vi.waitFor(() => expect(dialog.open).toBe(false));
   await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
 
-  // Opened again, the last query is still there, selected, and the open chat is marked.
-  (doc.getElementById('searchMenuItem') as HTMLButtonElement).click();
+  // Opened again (from the View menu), the last query is still there, selected, and the open chat is marked.
+  (doc.getElementById('viewMenu') as HTMLButtonElement).click();
+  (doc.querySelector('.row-menu [data-row-action="search"]') as HTMLButtonElement).click();
   expect(dialog.open).toBe(true);
   await vi.waitFor(() => expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true));
 
