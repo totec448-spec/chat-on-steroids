@@ -29,11 +29,15 @@ export interface UsageOverview {
 export interface UsageMessageDay { date: string; gpt56: number; gpt6: number }
 export type UsageMessageFamily = 'gpt-5.6' | 'gpt-6';
 
-/** Explicit recorded version identities only; unknown suffixes remain unclassified. */
+/**
+ * Explicit recorded version identities only; unknown suffixes remain unclassified. ChatGPT records its
+ * Instant and Thinking lanes as `gpt-6` and `gpt-6-thinking` (`gpt-5-6-instant`, `gpt-5-6-thinking`
+ * for 5.6), observed 2026-10-07; each lane counts toward its generation.
+ */
 export function usageMessageFamily(model: string | undefined): UsageMessageFamily | null {
   const id = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');
-  if (/^(?:gpt-?)?5[.-]6(?:-(?:thinking|pro|sol|terra|luna))?$/.test(id) || id === 'sol') return 'gpt-5.6';
-  if (/^(?:gpt-?)?6(?:\.0)?(?:-(?:pro|astra))?$/.test(id) || id === 'astra') return 'gpt-6';
+  if (/^(?:gpt-?)?5[.-]6(?:-(?:instant|thinking|pro|sol|terra|luna))?$/.test(id) || id === 'sol') return 'gpt-5.6';
+  if (/^(?:gpt-?)?6(?:\.0)?(?:-(?:instant|thinking|pro|astra))?$/.test(id) || id === 'astra') return 'gpt-6';
   return null;
 }
 
@@ -73,7 +77,7 @@ export const DEFAULT_USAGE_FORMULA: UsageFormula = {
 // account availability or browser selection authority. Effort remains independent.
 const usageAliases: Readonly<Record<string, string>> = {
   '5.6': 'gpt-5.6-sol', 'gpt-5.6': 'gpt-5.6-sol', 'gpt-5-6': 'gpt-5.6-sol',
-  'gpt-5-6-thinking': 'gpt-5.6-sol', 'gpt-5-6-pro': 'gpt-5.6-sol',
+  'gpt-5-6-instant': 'gpt-5.6-sol', 'gpt-5-6-thinking': 'gpt-5.6-sol', 'gpt-5-6-pro': 'gpt-5.6-sol',
   '6': 'gpt-6-astra', 'gpt-6-pro': 'gpt-6-astra',
   // ChatGPT labels these "5.5"; the API has one GPT-5.5 model with a cached-input rate.
   '5.5': 'gpt-5.5', 'gpt-5-5': 'gpt-5.5', 'gpt-5-5-instant': 'gpt-5.5', 'gpt-5-5-thinking': 'gpt-5.5'
