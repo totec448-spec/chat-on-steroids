@@ -42,6 +42,7 @@ it('bounds dragging, releases capture, preserves width through collapse and smal
   expect(app.style.getPropertyValue('--sidebar-width')).toBe('180px');
   handle.dispatchEvent(new dom.window.MouseEvent('dblclick'));
   expect(app.style.getPropertyValue('--sidebar-width')).toBe('');
-  expect(doc.getElementById('zoomIn')!.closest('#viewMenu')).not.toBeNull();
-  expect(sidebar.querySelector('#zoomIn')).toBeNull();
+  // The View menu's button lives in the title bar beside this toggle, not in the sidebar it hides.
+  expect(sidebar.querySelector('#viewMenu')).toBeNull();
+  expect(doc.getElementById('sidebarToggle')!.nextElementSibling!.id).toBe('viewMenu');
 });

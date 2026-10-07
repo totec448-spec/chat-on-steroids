@@ -5553,6 +5553,11 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
 
 // ------------------------------------------------------------------- wiring
 
+/** Opens the search dialog, as ⌘K / Ctrl+K does (the View menu). */
+export function openChatSearch(): void {
+  chatSearch?.open();
+}
+
 /**
  * Switches the session card's body.
  *
