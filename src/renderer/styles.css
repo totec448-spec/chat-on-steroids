@@ -3833,9 +3833,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .row-menu-button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--faint); }
 .row-menu-button:hover, .row-menu-button[aria-expanded='true'] { color: var(--ink); background: var(--hover); }
 .row-menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.project-menu { opacity: 0; transition: opacity 120ms ease; }
-@media (prefers-reduced-motion: reduce) { .project-menu { transition: none; } }
-.project-heading:hover .project-menu, .project-heading:focus-within .project-menu, .project-menu[aria-expanded='true'] { opacity: 1; }
+/* The new chat button and the menu appear together, on hover or focus and while the menu is open. */
+:is(.project-new, .project-menu) { opacity: 0; transition: opacity 120ms ease; }
+@media (prefers-reduced-motion: reduce) { :is(.project-new, .project-menu) { transition: none; } }
+.project-heading:is(:hover, :focus-within, :has(.project-menu[aria-expanded='true'])) :is(.project-new, .project-menu) { opacity: 1; }
+/* Its center 27px from the menu's, where a chat row's sub-agent arrow sits beside its "⋯" on hover. */
+.project-heading > .project-new { width: 24px; margin-inline-end: -7px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
