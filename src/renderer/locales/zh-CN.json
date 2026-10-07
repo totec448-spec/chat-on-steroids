@@ -2006,5 +2006,16 @@
   "Know when ChatGPT is waiting": "知道 ChatGPT 何时在等你",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "当 ChatGPT 请求你允许某个工具时，聊天会告诉你，而不是停在那里。",
   "One connection control": "一个连接控件",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "侧边栏中的小胶囊显示连接状态，并在断开时提醒你。"
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "侧边栏中的小胶囊显示连接状态，并在断开时提醒你。",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "每次更新后都能看到变化，长时间运行的停止和恢复也更平稳。",
+  "What's new, after every update": "每次更新后的新功能",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "每次更新后都会显示一次这样的简短摘要，并附有完整发布说明的链接。",
+  "Clear stops for stuck messages": "卡住的消息会明确停止",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "如果 ChatGPT 一直没有取走排队的消息，应用会尝试三次，然后告诉你，并保留这条排队消息。",
+  "Steadier sub-agents": "更稳定的子智能体",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "网络较慢时，新的工作者标签页有更多时间，工作者也不会再被自己未发送的消息卡住。",
+  "Your settings stay put": "设置不会丢失",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "应用无法读取的设置文件不再导致全部重置：应用会照常读取，或保留一份副本。",
+  "Recovery stays on": "恢复保持开启",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "当应用把一个空闲对话的标签页用于新对话时，该对话仍保留自动恢复。"
 }

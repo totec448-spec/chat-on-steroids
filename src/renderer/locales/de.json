@@ -2006,5 +2006,16 @@
   "Know when ChatGPT is waiting": "Sehen, wann ChatGPT wartet",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Wenn ChatGPT dich bittet, ein Tool zuzulassen, sagt es dir der Chat, statt stillzustehen.",
   "One connection control": "Eine Verbindungsanzeige",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Eine Kapsel in der Seitenleiste zeigt die Verbindung und meldet Abbrüche."
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Eine Kapsel in der Seitenleiste zeigt die Verbindung und meldet Abbrüche.",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "Sieh nach jedem Update, was neu ist, und lange Läufe stoppen und erholen sich ruhiger.",
+  "What's new, after every update": "Neuigkeiten nach jedem Update",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "Nach jedem Update erscheint einmal eine kurze Übersicht wie diese, mit Link zu allen Details.",
+  "Clear stops for stuck messages": "Klarer Stopp bei hängenden Nachrichten",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "Holt ChatGPT eine Nachricht in der Warteschlange nie ab, versucht es die App dreimal, sagt es dir und behält sie.",
+  "Steadier sub-agents": "Stabilere Sub-Agenten",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "Neue Worker-Tabs bekommen bei langsamer Verbindung mehr Zeit, und ein Worker hängt nicht mehr an seiner eigenen ungesendeten Nachricht.",
+  "Your settings stay put": "Deine Einstellungen bleiben",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Eine unlesbare Einstellungsdatei setzt nicht mehr alles zurück: Die App liest sie trotzdem oder behält eine Kopie.",
+  "Recovery stays on": "Wiederherstellung bleibt an",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Nutzt die App den Tab eines ruhigen Chats für einen neuen Chat, behält dieser Chat seine automatische Wiederherstellung."
 }
