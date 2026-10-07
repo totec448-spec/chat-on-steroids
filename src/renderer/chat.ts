@@ -6069,7 +6069,7 @@ export function initChat(next: Deps): void {
       noteIntent();
     }, { passive: true, capture: true });
     const releasePointer = (event: PointerEvent): void => {
-      if (heldPointer?.id !== event.pointerId) return;
+      if (!heldPointer || heldPointer.id !== event.pointerId) return;
       const generation = heldPointer.generation;
       // Chromium's middle-click toggle starts moving after the button was released in its
       // deadzone. Keep that pending input until its first scroll, or an explicit cancellation.
