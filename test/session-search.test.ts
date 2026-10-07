@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import {
-  createSession, deleteSession, flushSessions, initSessionStore, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
+  createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
 } from '../src/main/session/store.js';
 import { foldCase, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
 import { positionOf } from '../src/shared/chronology.js';
@@ -18,6 +18,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await searchIndexingSettled(); resetSessionSearchForTests();
+  vi.restoreAllMocks();
   await flushDurable(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
 });
 
@@ -99,6 +100,31 @@ it('reuses a stored index after a restart instead of reading the chat again', as
 it('leaves helper chats out, as the sidebar does', async () => {
   await chat('Helper', [['user', 'internal helper words']], 'helper');
   expect(await search('internal')).toMatchObject({ results: [], total: 0 });
+});
+
+it('ranks an older title match before newer text matches even at a small result limit', async () => {
+  let clock = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => ++clock);
+  const title = await chat('Needle in the title', [['user', 'ordinary words']]);
+  for (let index = 0; index < 5; index++) await chat(`Recent ${index}`, [['user', 'needle in the text']]);
+  await search('needle');
+  const reply = await searchSessions('needle', 2);
+  expect(reply.results[0]!.id).toBe(title);
+  expect(reply.results).toHaveLength(2);
+  expect(reply.limited).toBe(true);
+});
+
+it('does not return superseded words while a changed chat awaits reindexing', async () => {
+  const id = await chat('Revision', [['user', 'obsolete needle']]);
+  await search('needle');
+  const original = (await readEvents(id, { kinds: ['user_message'] }))[0]!;
+  if (original.kind !== 'user_message') throw new Error('Missing original question');
+  await upsertMessageEvent(id, { ...original, time: original.time + 10,
+    message: { text: 'replacement words', chars: 17, truncated: false } });
+  await flushSessions();
+  expect((await searchSessions('needle')).results).toEqual([]);
+  await searchIndexingSettled();
+  expect((await search('replacement')).results.map(result => result.id)).toEqual([id]);
 });
 
 it('marks matches at the right place, also around characters whose lowercase is longer', () => {
