@@ -1,8 +1,9 @@
 /**
  * The one menu behind a sidebar row's "⋯" button and its right click: a project's or a chat's
- * actions, with submenus (a project's color). It lives in the document body, outside the sidebar
- * the activity repaints many times a second, so a repaint never closes or rebuilds it; it finds
- * its row's button again by `owner` to place itself and to give focus back.
+ * actions, with submenus (a project's color). The title bar's View menu is the same menu. It lives
+ * in the document body, outside the sidebar the activity repaints many times a second, so a repaint
+ * never closes or rebuilds it; it finds its row's button again by `owner` to place itself and to
+ * give focus back.
  *
  * One menu is open at a time. It stays inside the window, opening upwards or leftwards when there
  * is no room, and a submenu opens beside its item. Keyboard: arrows move, Right opens a submenu,
@@ -27,8 +28,14 @@ export interface RowMenuItem {
   disabled?: boolean;
   /** Items of a submenu, opened beside this item. */
   submenu?: () => RowMenuItem[];
-  /** Runs after the menu has closed. */
+  /** Its keyboard shortcut, shown at the end of the item, e.g. "Ctrl+B". */
+  shortcut?: () => string;
+  /** A short live value after the label, e.g. the zoom "110%"; `refreshRowMenu` repaints it. */
+  hint?: () => string;
+  /** Runs after the menu has closed, or with it still open when `keepOpen`. */
   run?: () => void;
+  /** The menu stays open (zoom steps: one click after another, the value updating in place). */
+  keepOpen?: boolean;
   /** Starts a group: a separator line above this item. */
   separated?: boolean;
   /** Data attributes for the item's button, e.g. `newProject` for `data-new-project`. */
@@ -49,7 +56,7 @@ export interface RowMenuOptions {
 const EDGE = 8;
 const SUBMENU_DELAY_MS = 120;
 
-let current: { options: RowMenuOptions; levels: HTMLElement[]; openTimer: number } | null = null;
+let current: { options: RowMenuOptions; levels: HTMLElement[]; openTimer: number; refreshers: Array<() => void>; pixelRatio: number } | null = null;
 const listeners = new Set<() => void>();
 
 /** Whether the menu of this row is open; rows paint their button's expanded state from it. */
@@ -87,21 +94,21 @@ export function toggleRowMenu(options: RowMenuOptions): void {
   openRowMenu(options);
 }
 
+/** Repaints the open menu's live values (`hint`), e.g. after a zoom step. */
+export function refreshRowMenu(): void {
+  for (const refresh of current?.refreshers ?? []) refresh();
+}
+
 export function openRowMenu(options: RowMenuOptions): void {
   closeRowMenu();
-  current = { options, levels: [], openTimer: 0 };
+  current = { options, levels: [], openTimer: 0, refreshers: [], pixelRatio: window.devicePixelRatio };
   // Marked open first: a row shows its button only while hovered, focused or open, and a menu
   // opened from the keyboard must measure the button where it is, not where it is hidden.
   options.anchor()?.setAttribute('aria-expanded', 'true');
   const menu = level(options.items(), options.label, 0);
   document.body.append(menu);
   current.levels.push(menu);
-  if (options.at) placeAt(menu, options.at.x, options.at.y);
-  else {
-    const anchor = options.anchor();
-    const box = anchor?.getBoundingClientRect();
-    if (box && box.width > 0) placeBeside(menu, box, 'below'); else placeAt(menu, EDGE, EDGE);
-  }
+  place(menu, options);
   document.addEventListener('pointerdown', outside, true);
   document.addEventListener('scroll', scrolled, true);
   window.addEventListener('resize', resized);
@@ -137,7 +144,25 @@ function scrolled(event: Event): void {
   closeRowMenu();
 }
 
-function resized(): void { closeRowMenu(); }
+/** At the pointer of a right click, or below the row's button. */
+function place(menu: HTMLElement, options: RowMenuOptions): void {
+  if (options.at) { placeAt(menu, options.at.x, options.at.y); return; }
+  const box = options.anchor()?.getBoundingClientRect();
+  if (box && box.width > 0) placeBeside(menu, box, 'below'); else placeAt(menu, EDGE, EDGE);
+}
+
+/**
+ * A resized or blurred window closes the menu. A zoom step resizes the page too (its pixel ratio
+ * changes): the menu that made it stays, below its button again, with any submenu closed.
+ */
+function resized(event: Event): void {
+  if (!current) return;
+  if (event.type !== 'resize' || window.devicePixelRatio === current.pixelRatio) { closeRowMenu(); return; }
+  current.pixelRatio = window.devicePixelRatio;
+  closeLevelsBelow(0);
+  const [menu] = current.levels;
+  if (menu) place(menu, current.options);
+}
 
 /** One level of the menu: its items, separators and keyboard. */
 function level(items: RowMenuItem[], label: () => string, depth: number): HTMLElement {
@@ -171,6 +196,13 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
   else button.append(el('span', 'row-menu-gap'));
   const text = el('span', 'row-menu-label', item.label);
   button.append(text);
+  if (item.hint) {
+    const hint = item.hint;
+    const value = el('span', 'row-menu-hint', hint);
+    button.append(value);
+    current?.refreshers.push(() => { value.textContent = hint(); });
+  }
+  if (item.shortcut) button.append(el('kbd', 'row-menu-shortcut', item.shortcut));
   if (item.title) ui(button, 'title', item.title);
   if (item.submenu) {
     button.setAttribute('aria-haspopup', 'menu');
@@ -187,6 +219,7 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
     button.addEventListener('click', event => {
       event.stopPropagation();
       if (button.disabled) return;
+      if (item.keepOpen) { item.run?.(); refreshRowMenu(); return; }
       // Focus goes back to the row's button first: an action that moves it (renaming, a new
       // chat's field) still does, and one that repaints the sidebar finds it there to keep.
       closeRowMenu(true);

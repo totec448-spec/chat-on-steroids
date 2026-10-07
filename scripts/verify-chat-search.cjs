@@ -142,8 +142,6 @@ app.whenReady().then(async () => {
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'K', modifiers: [mac ? 'meta' : 'control'] });
   await until(`document.getElementById('searchDialog').open && document.activeElement?.id === 'chatSearch'`);
   assert.equal(await js(`document.querySelectorAll('.row-menu').length`), 0, 'The search dialog closes an open row menu');
-  assert.equal(await js(`document.querySelector('#searchMenuItem kbd').textContent`), mac ? '⌘K' : 'Ctrl+K');
-  assert.equal(await js(`document.querySelector('#sidebarMenuToggle kbd').textContent`), mac ? '⌘B' : 'Ctrl+B');
   assert.match(await js(`document.getElementById('sidebarToggle').title`), mac ? /\(⌘B\)$/ : /\(Ctrl\+B\)$/);
 
   // Keyboard: Down enters the results, Up returns to the field, Enter opens the first match.

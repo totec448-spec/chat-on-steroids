@@ -754,11 +754,14 @@ describe('Core app mention on app-owned sends (#861)', () => {
     redrawingEditor();
     let clicked = false;
     button.addEventListener('click', () => { clicked = true; });
-    const result = api.send({ mention });
+    const reasons: string[] = [];
+    const result = api.send({ mention, explain: why => reasons.push(why) });
     box.prepend(document.createTextNode('typed by the user '));
     await vi.advanceTimersByTimeAsync(10);
     expect(await result).toBe(false);
     expect(clicked).toBe(false);
+    // Its own reason, apart from an edit before the mention step (#1086).
+    expect(reasons).toEqual(['mention-changed']);
   });
   it('adds the mention only after the caller authorized the unchanged prompt', async () => {
     // Measured 2026-10-01: added at readiness, the token made the app's draft lease refuse

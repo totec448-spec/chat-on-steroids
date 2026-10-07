@@ -1,5 +1,5 @@
 import { t, ui } from './i18n.js';
-import { labelPrimaryShortcuts, primaryShortcut } from './shortcuts.js';
+import { primaryShortcut } from './shortcuts.js';
 
 /** A renderer-only layout preference, independent of chat selection and app config. */
 export function initSidebarResize(): void {
@@ -7,7 +7,6 @@ export function initSidebarResize(): void {
   const sidebar = document.getElementById('sidebar')!;
   const handle = document.getElementById('sidebarResize')!;
   const toggle = document.getElementById('sidebarToggle')!;
-  const menu = document.getElementById('viewMenu') as HTMLDetailsElement;
   const key = 'chat-on-steroids.sidebar-width';
   const minimum = 180;
   const maximum = () => Math.max(minimum, Math.min(480, window.innerWidth / 2));
@@ -78,18 +77,12 @@ export function initSidebarResize(): void {
   }
   // The shortcut as this keyboard prints it: ⌘B on macOS, Ctrl+B (Strg+B) elsewhere.
   ui(toggle, 'title', () => `${t('Toggle sidebar')} (${primaryShortcut('B')})`);
-  labelPrimaryShortcuts();
   toggle.addEventListener('click', toggleSidebar);
-  document.getElementById('sidebarMenuToggle')!.addEventListener('click', toggleSidebar);
   document.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'b') {
       event.preventDefault();
       if (!event.repeat) toggleSidebar();
     }
-    if (event.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary')?.focus(); }
-  });
-  document.addEventListener('click', (event) => {
-    if (!menu.contains(event.target as Node) || (event.target as Element).closest('button')) menu.open = false;
   });
   window.addEventListener('resize', render);
   render();
