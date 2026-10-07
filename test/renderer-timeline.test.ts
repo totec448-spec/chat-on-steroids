@@ -352,6 +352,13 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   };
 }
 
+it('ignores a pointer release when the timeline owns no pointer press', async () => {
+  const { w } = await boot([]);
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  w.dispatchEvent(new w.MouseEvent('pointerup'));
+  expect(error).not.toHaveBeenCalled();
+});
+
 it('makes parent and worker session selectors keyboard-focusable and activates them with Enter/Space', async () => {
   const parent: SessionSummary = { ...summary([]), id: 'parent-session', title: 'Parent', conversationId: 'parent-chat', chatIds: ['parent-chat'] };
   const worker: SessionSummary = { ...summary([]), id: 'worker-session', title: 'Worker', conversationId: 'worker-chat', chatIds: ['worker-chat'],
