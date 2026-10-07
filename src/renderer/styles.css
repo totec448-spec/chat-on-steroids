@@ -3573,12 +3573,12 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .tool-group-body { padding: 4px 0 0 0; }
 .tool-group-body .ev { margin: 0; }
 .tool-group-body .tool > summary, .tool-group-body .agent-communication > summary { min-height: 24px; }
-.agent-avatar { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 6px; font-size: calc(9px * var(--text-scale, 1)); line-height: 1; background: #7d6198; color: #fff; }
-.agent-avatar[data-color='1'] { background: #ac793a; }
-.agent-avatar[data-color='2'] { background: #527c96; }
-.agent-avatar[data-color='3'] { background: #608a72; }
-.agent-avatar[data-color='4'] { background: #a46486; }
-.agent-avatar[data-color='5'] { background: #827f4d; }
+.agent-avatar { --hue: #7d6198; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 6px; font-size: calc(9px * var(--text-scale, 1)); line-height: 1; background: var(--hue); color: #fff; }
+.agent-avatar[data-color='1'] { --hue: #ac793a; }
+.agent-avatar[data-color='2'] { --hue: #527c96; }
+.agent-avatar[data-color='3'] { --hue: #608a72; }
+.agent-avatar[data-color='4'] { --hue: #a46486; }
+.agent-avatar[data-color='5'] { --hue: #827f4d; }
 
 /* Composer popovers mirror the small, contextual controls in the native reference. */
 .composer-menu { position: relative; flex-shrink: 0; }
@@ -3856,22 +3856,64 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-header .agent-back { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border-radius: 7px; color: var(--soft); }
 .agent-panel-header .agent-back:hover { background: var(--hover); color: var(--ink); }
 .agent-back .ico { --ico: 16px; --glyph: 16px; }
-.agent-panel-body { min-height: 0; overflow-y: auto; padding: 24px; }
-.agent-panel-body h3 { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); font-weight: 450; margin: 12px 0 18px; }
-.agent-panel-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
-.agent-panel-row:hover, .agent-panel-row:focus-visible { background: var(--hover); border-color: var(--edge); outline: none; }
-.agent-panel-row:focus-visible { box-shadow: inset 2px 0 var(--accent); }
-.agent-panel-row .agent-avatar { width: 28px; height: 28px; flex-basis: 28px; font-size: calc(12px * var(--text-scale, 1)); }
-.agent-card-content { display: grid; gap: 4px; flex: 1; min-width: 0; }
-.agent-card-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-card-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); }
-.agent-card-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: calc(10px * var(--text-scale, 1)) var(--mono); }
-.agent-card-task { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
-.agent-card-activity { overflow: hidden; color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.agent-card-meta { color: var(--faint); font: calc(10px * var(--text-scale, 1)) var(--mono); }
-.agent-status-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.agent-panel-row[data-state='working'] .agent-status-dot, .agent-panel-row[data-state='active'] .agent-status-dot { background: var(--green); }
-.agent-panel-row[data-state='failed'] .agent-status-dot { background: var(--red); }
+.agent-panel-body { min-height: 0; overflow-y: auto; padding: 14px 12px 24px; }
+/*
+ * Sub-agents: a roster, not a stack of boxes. Each worker is one quiet row (the sidebar's hover and
+ * radius) whose avatar carries the state; working, the connection capsule's light travels around it
+ * and the current action carries the turn's sheen. Name and time, the task, then one line of facts.
+ */
+.agent-panel-body h3 { display: flex; align-items: baseline; gap: 6px; margin: 18px 12px 6px; color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; letter-spacing: .01em; font-variant-numeric: tabular-nums; }
+.agent-panel-body h3:first-child { margin-top: 4px; }
+.agent-panel-body h3 + .meta { margin: 0 12px 8px; color: var(--faint); font-size: calc(13px * var(--text-scale, 1)); }
+.agent-panel-row { position: relative; display: flex; align-items: flex-start; gap: 12px; width: 100%; margin: 1px 0; padding: 10px 12px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer;
+  transition: background-color 120ms ease; }
+.agent-panel-row:hover { background: var(--hover); }
+.agent-panel-row:focus-visible { outline: 2px solid var(--accent-edge); outline-offset: -2px; background: var(--hover); }
+/* The round's workers, when the panel opens on them: one glow, in the app's own selection tone,\n   that settles into the plain row. */
+.agent-panel-row.is-arriving { --arrive: color-mix(in srgb, var(--ink) 7%, var(--hover)); animation: agent-arrive 1600ms cubic-bezier(.22, 1, .36, 1); }
+@keyframes agent-arrive { 0%, 30% { background-color: var(--arrive); } 100% { background-color: transparent; } }
+.agent-card-avatar { position: relative; flex: none; display: grid; margin-top: 1px; }
+.agent-panel-row .agent-avatar { width: 32px; height: 32px; flex-basis: 32px; border-radius: 9px; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600;
+  background: color-mix(in srgb, var(--hue) 24%, var(--card)); color: color-mix(in srgb, var(--hue) 46%, var(--ink)); }
+.agent-card-presence { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--faint); box-shadow: 0 0 0 2px var(--page); transition: background-color 200ms ease; }
+.agent-panel-row:hover .agent-card-presence { box-shadow: 0 0 0 2px var(--hover); }
+.agent-panel-row:is([data-state='working'], [data-state='active']) .agent-card-presence { background: var(--green); }
+.agent-panel-row:is([data-state='invited'], [data-state='waking']) .agent-card-presence { background: var(--accent); }
+.agent-panel-row[data-state='failed'] .agent-card-presence { background: var(--red); }
+.agent-panel-row:is([data-state='sleeping'], [data-state='history']) .agent-card-presence { background: color-mix(in srgb, var(--faint) 70%, var(--page)); }
+/* Working: the light that travels the connection capsule's border, around the avatar. */
+.agent-panel-row:is([data-state='working'], [data-state='active']) .agent-card-avatar::before {
+  content: ''; position: absolute; inset: -3px; border-radius: 12px; padding: 1.5px; pointer-events: none;
+  background: conic-gradient(from var(--capsule-arc), transparent 0deg, transparent 180deg, color-mix(in srgb, var(--green) 30%, transparent) 260deg, var(--green) 350deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: capsule-arc 2.4s linear infinite; animation-delay: var(--phase, 0ms); }
+.agent-card-content { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.agent-card-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.agent-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.01em; }
+.agent-card-time { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.agent-card-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft);
+  font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; }
+/* The current action, while working: one line in the turn's sheen. */
+.agent-card-activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4;
+  color: transparent; background: linear-gradient(100deg, var(--soft) 36%, var(--ink) 50%, var(--soft) 64%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: turn-sheen 1.8s ease-in-out infinite; animation-delay: var(--phase, 0ms); }
+.agent-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; margin-top: 2px; color: var(--faint);
+  font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.agent-card-state { color: var(--soft); font-weight: 500; }
+.agent-panel-row:is([data-state='working'], [data-state='active']) .agent-card-state { color: var(--green); }
+.agent-panel-row[data-state='failed'] .agent-card-state, .agent-card-health { color: var(--red); }
+.agent-card-sep { color: var(--line); }
+@media (prefers-reduced-motion: reduce) {
+  .agent-panel-row, .agent-card-presence { transition: none; }
+  .agent-panel-row.is-arriving { animation: none; background: var(--arrive); }
+  .agent-panel-row .agent-card-avatar::before { animation: none; }
+  .agent-card-activity { animation: none; color: var(--soft); background: none; }
+}
 .agent-panel-body .ev { display: block; margin: 24px 0; }
 .agent-panel-body :is(.ev-tool_call, .ev-page_tool, .ev-agent_message) { margin: 0; }
 .agent-panel-body .ev-body { min-width: 0; }
@@ -4347,7 +4389,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .activity-workers:hover { color: var(--accent); background: var(--sunk); }
 .activity-workers:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tool-group[open] > summary > .activity-workers { display: none; }
-.agent-panel-row.is-round-worker { background: var(--accent-wash); box-shadow: inset 3px 0 var(--accent); }
 
 /*
  * Ready: the closing step. A badge that turns green when every check passes, the checks as a

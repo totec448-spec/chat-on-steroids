@@ -5,7 +5,7 @@ import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t } from './i18n.js';
 import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
-import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel } from './chat-models.js';
+import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
@@ -2405,7 +2405,9 @@ function roundWorkers(ids: string[], button = el('button', 'activity-workers') a
       worker.origin?.kind === 'worker' && worker.origin.fromSessionId === owner));
     if (!current.length) return;
     readTimeline();
-    agentPanel?.showWorkers(current);
+    // From the keyboard (a click with no pointer detail), focus follows to the round's first worker;
+    // a mouse click leaves it, so the row settles plain after its glow instead of keeping a ring.
+    agentPanel?.showWorkers(current, event.detail === 0);
     paintJumpLatest();
   };
   return button;
@@ -5675,7 +5677,8 @@ export function initChat(next: Deps): void {
     onShow: () => { filePanel?.hide(); docks.adopt('agents'); },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); },
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
-    agent: worker => swarm?.agents.find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
+    modelLabel: chatModelName,
+    agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
       !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
     render: (source, id, current) => {
       let boundary = '';

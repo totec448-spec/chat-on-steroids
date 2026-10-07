@@ -18,12 +18,13 @@ import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState }
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
 import { connectorName } from '../shared/connector-names.js';
+import { workerBrief } from '../shared/worker-brief.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace, bindAgentWorkspace } from './workspace.js';
 import { requestCorrelation } from './session/correlation.js';
-import { getSession, findSessionByConversation } from './session/store.js';
+import { getSession, findSessionByConversation, recordWorkerAssignment } from './session/store.js';
 import { continuationForSession } from './session/continuation.js';
 
 export const PRIME_ID = 'prime';
@@ -470,6 +471,9 @@ export async function persistCriticalSwarmNow(): Promise<boolean> {
         // succeeded. See snapshotSwarm() and stageMessages().
         const snapshot = snapshotSwarmIncludingUnpublished();
         await handler(snapshot);
+        // Presentation only (names and tasks for history): it follows the durable write and never
+        // holds up the acceptance this barrier exists for.
+        void archiveWorkerAssignments(snapshot);
         persistedCriticalRevision = Math.max(persistedCriticalRevision, targetRevision);
       }
       return true;
@@ -1282,15 +1286,7 @@ export function identify(caller: Caller): AgentInfo {
  * instruction for everyone in the run, the task is this worker's job — and a worker that
  * cannot tell them apart is one that reports back on the house rules.
  */
-function briefFor(context: string, task: string): string {
-  if (!context) return task;
-  return `Shared context for every worker in this run:
-${context}
-
-Your task:
-${task}`;
-}
-
+const briefFor = workerBrief;
 function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): Agent {
   return {
     info: {
@@ -2270,7 +2266,7 @@ export function stagePrimeMessage(
  */
 export function stageMessages(
   caller: Caller,
-  items: ReadonlyArray<{ to: string; text: string }>
+  items: ReadonlyArray<{ to: string; text: string; label?: string }>
 ): StagedAgentMessages {
   caller = exactCaller(caller);
   requireFamilySelection(caller);
@@ -2302,7 +2298,7 @@ export function stageMessages(
 
 function stageMessagesActive(
   caller: Caller,
-  items: ReadonlyArray<{ to: string; text: string }>,
+  items: ReadonlyArray<{ to: string; text: string; label?: string }>,
   resumedDormant: boolean
 ): StagedAgentMessages {
   const run = runForCaller(caller);
@@ -2326,6 +2322,7 @@ function stageMessagesActive(
   const perRecipient = new Map<string, number>();
   /** Sleeping recipients this batch is about to wake, and therefore about to take a slot for. */
   const reserved = new Set<Agent>();
+  const labels = new Map<Agent, string>();
   for (const [index, item] of items.entries()) {
     const where = items.length > 1 ? ` (message ${index + 1} of ${items.length})` : '';
     const trimmed = item.text?.trim() ?? '';
@@ -2349,6 +2346,15 @@ function stageMessagesActive(
       );
     }
     assertRoute(from, to);
+    if (item.label !== undefined) {
+      const label = item.label.trim();
+      if (!label || label.length > MAX_LABEL_CHARS) throw new AgentError('Worker label must contain 1–60 characters.');
+      if (from.info.role !== 'prime' || to.info.role !== 'worker' || to.info.state !== 'sleeping') {
+        throw new AgentError('label is only valid when the prime wakes a sleeping worker.');
+      }
+      if (labels.has(to) && labels.get(to) !== label) throw new AgentError('Conflicting labels for the same worker.');
+      labels.set(to, label);
+    }
     if (isOver(to.info.state)) {
       throw new AgentError(
         to.info.state === 'failed'
@@ -2414,7 +2420,7 @@ function stageMessagesActive(
   }
   // Reservation is part of the same all-or-nothing plan as the queue entries: every check
   // above has passed by now, so no recipient can still turn out to be unreachable.
-  const previousAssignments = new Map([...reserved].map((agent) => [agent, beginRevival(agent)]));
+  const previousAssignments = new Map([...reserved].map((agent) => [agent, beginRevival(agent, labels.get(agent))]));
   changed();
   const messages = planned.map(({ message }) => ({ ...message }));
   let settled = false;
@@ -2466,7 +2472,7 @@ function stageMessagesActive(
 /** Immediate broker API used by internal/unit callers that do not expose a durable-acceptance result. */
 export function sendMessages(
   caller: Caller,
-  items: ReadonlyArray<{ to: string; text: string }>
+  items: ReadonlyArray<{ to: string; text: string; label?: string }>
 ): AgentMessage[] {
   const staged = stageMessages(caller, items);
   staged.commit();
@@ -3305,7 +3311,7 @@ type WorkerAssignment = Pick<
  * slot, so the transition into `waking` — which {@link occupiesSlot} counts — happens here,
  * synchronously, before anything touches the browser.
  */
-function beginRevival(agent: Agent): WorkerAssignment {
+function beginRevival(agent: Agent, label?: string): WorkerAssignment {
   const previous = {
     label: agent.info.label,
     task: agent.info.task,
@@ -3314,10 +3320,10 @@ function beginRevival(agent: Agent): WorkerAssignment {
     silenceRecoveryTurnId: agent.info.silenceRecoveryTurnId,
     silenceRecoveryRequestOriginMax: agent.info.silenceRecoveryRequestOriginMax
   };
-  // The accepted inbox owns this assignment. A spawn label is not a label for later work,
-  // and an old report must not masquerade as the result of the waking assignment. Keep that
+  // The prime explicitly names new work; an omitted label preserves the existing name.
+  // An old report must not masquerade as the result of the waking assignment. Keep that
   // report in the prime's existing inbox/history; status carries only a bounded task preview.
-  agent.info.label = agent.info.id;
+  if (label !== undefined) agent.info.label = label;
   agent.info.task = agent.queue
     .filter((message) => message.ackedAt === null && !message.offeredViaRevival)
     .map((message) => message.text).join('\n\n').slice(0, MAX_TASK_CHARS);
@@ -4291,6 +4297,8 @@ function stateForAgents(agents: Map<string, Agent>, running: boolean, retainedHi
 export function swarmState(runId?: string): SwarmState {
   const visible = [...runs.values()].filter(r => !unpublishedRuns.has(r) && (runId === undefined || r.runId === runId));
   return { enabled: getConfig().multiAgent.enabled, running: visible.length > 0, retainedHistory: dormantRuns.size > 0,
+    retainedWorkers: [...dormantRuns.values()].filter(r => runId === undefined || answersTo(r, runId))
+      .flatMap(r => stateForAgents(r.agents, false).agents.filter(agent => agent.role === 'worker')),
     agents: visible.flatMap(r => stateForAgents(r.agents, true).agents) };
 }
 
@@ -4740,6 +4748,35 @@ export function snapshotSwarm(): SwarmSnapshot | null {
   return buildSwarmSnapshot(false);
 }
 
+/** What each worker conversation's archive last received, so unchanged workers skip the store. */
+const archivedAssignments = new Map<string, string>();
+
+/**
+ * Project only a snapshot whose broker write succeeded. Also migrate saved history before TTL
+ * pruning. Callers do not wait on it, so it never rejects: a malformed entry is skipped.
+ */
+export async function archiveWorkerAssignments(snapshot: SwarmSnapshot | null): Promise<void> {
+  if (!snapshot || ![4, 5, 6, 7].includes(snapshot.version) || !Number.isFinite(snapshot.savedAt)) return;
+  const groups = snapshot.version >= 6 && Array.isArray(snapshot.activeRuns)
+    ? snapshot.activeRuns : [{ agents: snapshot.agents }];
+  const workers = [...groups, ...(Array.isArray(snapshot.dormantRuns) ? snapshot.dormantRuns : [])]
+    .flatMap(group => Array.isArray(group?.agents) ? group.agents : []);
+  for (const agent of workers) {
+    const info = agent?.info;
+    if (info?.role !== 'worker' || typeof info.conversationId !== 'string' || typeof info.id !== 'string' ||
+        typeof info.label !== 'string' || typeof info.task !== 'string') continue;
+    const key = JSON.stringify([info.id, info.label, info.task]);
+    if (archivedAssignments.get(info.conversationId) === key) continue;
+    try {
+      await recordWorkerAssignment({ conversationId: info.conversationId, agentId: info.id,
+        label: info.label, task: info.task, recordedAt: snapshot.savedAt });
+      archivedAssignments.set(info.conversationId, key);
+    } catch (err) {
+      logWarn(`could not archive worker presentation: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
 /**
  * Snapshot used only by the explicit critical acceptance barrier.
  *
@@ -5110,6 +5147,7 @@ export function resetAgentsForTests(): void {
   requestOwnerRecoveryAgain = false;
   runs.clear();
   dormantRuns.clear();
+  archivedAssignments.clear();
   consecutiveWakeFailures.clear();
   pageGenerating.clear();
   unpublishedRuns.clear();
