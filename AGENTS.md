@@ -2074,6 +2074,9 @@ Native Send/Stop controls belong to the current composer's form and must be rend
 transcript/extension surfaces. Hidden, inert or quoted controls grant no action; multiple Send
 buttons are ambiguous. The existing transcript observer also follows composer-side relabel/hide
 mutations so hidden tabs notice Stop transitions without waiting for a throttled timer.
+While an answer is live in a hidden ChatGPT tab, native prose mutations also drive
+rate-limited capture without relying on the throttled 250 ms debounce. Stop/terminal
+transitions keep their separate urgent check; a partial snapshot never ends a turn.
 Submission observes native Send readiness and acceptance within one 30-second deadline, freezes
 the editor/text/document, and clicks once. It never substitutes synthetic Enter. Goal-token and
 desktop-input authorization run when Send becomes ready, followed by a fresh local owner check.

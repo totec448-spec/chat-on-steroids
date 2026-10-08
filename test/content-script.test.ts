@@ -20311,6 +20311,67 @@ describe('the goal loop', () => {
     expect(drafts(live)).toHaveLength(0);
   });
 
+  it('streams assistant prose from a hidden tab even when Chromium throttles its transcript timer', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'hidden-live-answer', []);
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([{ section, turn: { turnId: 'hidden-live-answer' } }]);
+    await settle();
+    const opened = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    // When the app is in front, Chromium may delay the ChatGPT tab's debounce even
+    // while ChatGPT is adding text to its own transcript.
+    const normalTimeout = live.window.setTimeout;
+    Object.defineProperty(live.document, 'visibilityState', { configurable: true, value: 'hidden' });
+    live.window.setTimeout = (() => 799) as unknown as typeof live.window.setTimeout;
+    live.advance(1000);
+    let scans = 0;
+    const onAsk = (event: any) => {
+      if (event.data?.source !== 'clf-fiber-ask') return;
+      scans++;
+      const scanToken = event.data.nonce;
+      const text = section.querySelector('.markdown')?.textContent || '';
+      section.setAttribute('data-clf-fiber-turn', [scanToken, 0].join(':'));
+      live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+        data: { source: 'clf-fiber-reply', nonce: scanToken, scanToken, v: 21, scanOk: true, rows: [],
+          turns: [{ index: 0, turnId: 'hidden-live-answer', conversationId: CHAT,
+            endMessageId: null, calls: [], activities: [],
+            messages: [{ messageId: 'hidden-live-prose', rawMessageId: 'native-hidden-live-prose',
+              stable: true, rawText: text, renderedHtml: '<p>' + text + '</p>' }] }] },
+        source: live!.window as unknown as Window
+      }));
+    };
+    live.window.addEventListener('message', onAsk);
+    try {
+      prose(live.document, section, 'native-hidden-live-prose', 'Still writing the answer.');
+      await vi.waitFor(() => expect(scans).toBeGreaterThan(0), { timeout: 1500 });
+      await vi.waitFor(() => expect(emitted(live!.sent, 'assistant_message')).toContainEqual(
+        expect.objectContaining({ event: expect.objectContaining({
+          text: 'Still writing the answer.', turnId: opened, state: 'streaming'
+        }) })
+      ), { timeout: 1500 });
+      const authored = section.querySelector('.markdown')!;
+      authored.textContent = 'Still writing the answer, one more word.';
+      await new Promise(resolve => globalThis.setTimeout(resolve, 20));
+      expect(scans).toBe(1); // A word-by-word answer cannot cause a scan per token.
+
+      live.advance(251);
+      authored.textContent = 'The second paragraph is underway.';
+      await vi.waitFor(() => expect(scans).toBe(2), { timeout: 1500 });
+      await vi.waitFor(() => expect(emitted(live!.sent, 'assistant_message')).toContainEqual(
+        expect.objectContaining({ event: expect.objectContaining({
+          text: 'The second paragraph is underway.', turnId: opened, state: 'streaming'
+        }) })
+      ), { timeout: 1500 });
+    } finally {
+      live.window.removeEventListener('message', onAsk);
+      live.window.setTimeout = normalTimeout;
+    }
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+  });
+
   it('starts Goal from a hidden-tab final mutation without waiting for a throttled timer', async () => {
     live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
     await live.hook.pullActivity();
@@ -20401,27 +20462,21 @@ describe('the goal loop', () => {
     await settle();
     const opened = emitted(live.sent, 'turn_start')[0]!.event.turnId as string;
 
-    // The final prose lands while Stop still exists. watchTranscript() sees that transcript
-    // mutation, but Chrome can freeze its 250 ms debounce before it ever runs. The next and
-    // only mutation is Stop being removed under the composer, outside TURN_SECTION. The old
-    // observer filtered that mutation out before checking generating -> quiet and Goal then
-    // sat on CHATGPT (PARTIAL) until the user typed another message.
+    // The prose lands while Stop still exists. A hidden-tab live capture may observe
+    // that interim revision immediately; only the later Stop change proves completion.
     const instantTimeout = live.window.setTimeout;
     Object.defineProperty(live.document, 'visibilityState', { configurable: true, value: 'hidden' });
     live.window.setTimeout = (() => 778) as unknown as typeof live.window.setTimeout;
-    prose(live.document, section, 'a-hidden-stop-only', 'The final answer was already visible.');
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
-
     let scans = 0;
     const onAsk = (event: any) => {
       if (!event.data || event.data.source !== 'clf-fiber-ask') return;
       scans++;
       const scanToken = event.data.nonce;
+      const terminal = !(live!.window as any).CLF_DOM.generating();
       section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
-      // Goal's own settle loop is not what this regression freezes. Once the terminal Fiber
-      // reply was actually requested, restore normal harness timers so the downstream draft can
-      // run. Old code never requests it because the Stop mutation is outside the transcript.
-      live!.window.setTimeout = instantTimeout;
+      // A live partial cannot unlock the timer. Restore it only once Stop has gone,
+      // so the existing terminal/Goal path remains a distinct verified boundary.
+      if (terminal) live!.window.setTimeout = instantTimeout;
       live!.window.dispatchEvent(
         new live!.window.MessageEvent('message', {
           data: {
@@ -20435,7 +20490,7 @@ describe('the goal loop', () => {
               index: 0,
               turnId: 'turn-hidden-stop-only',
               conversationId: CHAT,
-              endMessageId: 'site-hidden-stop-only',
+              endMessageId: terminal ? 'site-hidden-stop-only' : null,
               calls: [],
               messages: [{
                 messageId: 'site-hidden-stop-only',
@@ -20453,6 +20508,8 @@ describe('the goal loop', () => {
     };
     live.window.addEventListener('message', onAsk);
     try {
+      prose(live.document, section, 'a-hidden-stop-only', 'The final answer was already visible.');
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
       const stop = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
       if (change === 'removed') stop.remove();
       if (change === 'relabelled') stop.dataset.testid = 'send-button';

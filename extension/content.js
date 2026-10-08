@@ -3180,6 +3180,7 @@
     let timer = null;
     let urgentQueued = false;
     let idlePresentationPending = false;
+    let lastHiddenLiveObservationAt = 0;
     const observer = new MutationObserver((records) => {
       if (!recorderHandle.healthy() || !sameChat()) return;
       // Attribute-only native updates matter when React reuses the submit button.
@@ -3239,6 +3240,24 @@
         record.type === 'characterData'
           ? nativeAuthoredNode(record.target)
           : [...(record.addedNodes || []), ...(record.removedNodes || [])].some(nativeAuthoredNode));
+      // Chrome throttles timers in hidden ChatGPT tabs, which is the normal state while
+      // the user reads the desktop app. The 250ms timeout below can then sit pending
+      // even as native answer text keeps arriving. A mutation is already proof that
+      // the transcript changed: sample it directly, capped at the same 250ms cadence,
+      // rather than relying on another background timer to start live capture.
+      if (generating && document.visibilityState === 'hidden' &&
+          Date.now() - lastHiddenLiveObservationAt >= TRANSCRIPT_OBSERVE_MS) {
+        lastHiddenLiveObservationAt = Date.now();
+        if (!urgentQueued) {
+          urgentQueued = true;
+          void Promise.resolve().then(() => {
+            urgentQueued = false;
+            if (!alive || !sameChat() || !generating) return;
+            observe();
+          });
+        }
+        return;
+      }
       // end_turn closes execution, not the provider's final rendered revision.
       // A hidden tab may hydrate the remaining final text after the request-id
       // settle window has ended. Reuse this observer and its exact settled owner
