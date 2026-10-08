@@ -128,28 +128,6 @@
           </div>
         </div>
       </aside>
-      <!-- ------------------------------------------------------------ header -->
-      <header>
-        <span id="chatTitle">New chat</span>
-        <span id="chatProjectContext" class="chat-project-context" hidden>
-          <span aria-hidden="true">/</span>
-          <span id="chatProjectName"></span>
-        </span>
-        <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
-        <span class="title">
-          Chat On Steroids
-          <span id="headerSub">Not set up yet</span>
-        </span>
-        <span class="state">
-          <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
-               lives in the tray and is closed to it, so "installs the next time you start it"
-               can mean days. This is the press that means now. -->
-          <button class="btn btn-install" id="installUpdate" type="button" hidden>
-            <i class="ico ph ph-lightning" aria-hidden="true"></i>
-            <span>Install update</span>
-          </button>
-        </span>
-      </header>
 
       <!-- Everything this app knows about being out of date, in one line. Painted from
            state.update plus the extension version the bridge already reports; see
@@ -857,6 +835,29 @@
           <!-- ------------------------------------------------ session body -->
           <!-- The main session grid keeps transcript scrolling separate from the composer. -->
           <section class="card is-session">
+            <!-- The chat's own header: the first row of the chat column, so the right panel beside the
+                 column runs from the title bar to the bottom, and expanding the panel hides it with the chat. -->
+            <header class="chat-head">
+              <span id="chatTitle">New chat</span>
+              <span id="chatProjectContext" class="chat-project-context" hidden>
+                <span aria-hidden="true">/</span>
+                <span id="chatProjectName"></span>
+              </span>
+              <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
+              <span class="title">
+                Chat On Steroids
+                <span id="headerSub">Not set up yet</span>
+              </span>
+              <span class="state">
+                <!-- Only ever visible with a downloaded, digest-checked update waiting. This app
+                     lives in the tray and is closed to it, so "installs the next time you start it"
+                     can mean days. This is the press that means now. -->
+                <button class="btn btn-install" id="installUpdate" type="button" hidden>
+                  <i class="ico ph ph-lightning" aria-hidden="true"></i>
+                  <span>Install update</span>
+                </button>
+              </span>
+            </header>
             <button id="chatSettingsBtn" type="button" hidden>Chat settings</button>
             <div class="subhead">
               <span class="seg" id="chatView" hidden>
