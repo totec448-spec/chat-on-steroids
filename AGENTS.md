@@ -2103,7 +2103,7 @@ Model names and recovery policy checked against native picker metadata on **2026
 
 | Display family / compatible short name | Execution identity / selected effort | Silence refresh |
 | --- | --- | --- |
-| GPT-6 / 6 | `gpt-6` (Instant), `gpt-6-thinking` (Medium/High) | 2 minutes, then 1 minute listening |
+| GPT-6 / 6 | `gpt-6` (Instant: ChatGPT's automatic lane, which decides per answer whether to reason), `gpt-6-thinking` (Medium/High) | 2 minutes, then 1 minute listening |
 | GPT-5.6 Sol / GPT-5.6 / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-instant`, `gpt-5-6-thinking`; Instant/Medium/High | 2 minutes, then 1 minute listening after confirmed refresh |
 | GPT-5.5 / 5.5 | `gpt-5-5-instant`, `gpt-5-5-thinking`; non-Pro efforts up to High | 2 minutes, then 1 minute listening |
 | Any non-Pro family at Extra high / Max / Ultra | selected `xhigh`, `max` or `ultra` effort | 20 minutes (Thinking failed: 2), then 1 minute listening |
@@ -2144,6 +2144,11 @@ Within one version, lanes under one name with distinct efforts (GPT-6's `gpt-6` 
 as an alias, so the composer offers Instant, Medium and High together and each effort still
 selects its own lane. A colliding effort keeps the lanes apart. A name given by number alone
 reads in full (5.6 is GPT-5.6), as in the September picker.
+GPT-6's Instant position is ChatGPT's automatic lane, not a fixed model (observed 2026-10-08): the
+picker sends `gpt-6` ("chooses how long to think"), and ChatGPT's server answers with `gpt-6` or
+switches to `gpt-6-thinking` without an effort, as it judges each request. The account also lists
+a fixed `gpt-6-instant` ("immediate answers"), but no picker view offers it and `?model=` does not
+select it; the app offers exactly what the native picker offers and never substitutes a hidden slug.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
 The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
