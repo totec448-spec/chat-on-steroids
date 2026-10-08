@@ -3423,6 +3423,22 @@ const HANDLERS = {
     const result = await call('/models', { method: 'POST', body });
     return result;
   },
+  /**
+   * This page shows ChatGPT's "could not be loaded" surface for its chat. Its Retry (pressed by the
+   * page's own recovery or by the user) can take the tab to ChatGPT's home page; that chat leaving
+   * this document is then not the user deciding to close it (#1086, 2026-10-06). Recorded like a
+   * borrowed tab, so the departure reaches the app as non-manual and recovery is not paused.
+   */
+  async load_failure(message, _sender, source) {
+    await load();
+    const conversationId = cleanConversationId(message.conversationId);
+    const key = String(source.tab);
+    if (!conversationId || !ownsDocument(source) || tabConversations[key] !== conversationId) return { ok: false };
+    tabReuses[key] = { documentId: source.documentId, conversationId, at: Date.now() };
+    tabReuses = Object.fromEntries(Object.entries(tabReuses).slice(-200));
+    void persistLive().catch(() => undefined);
+    return { ok: true };
+  },
   async core_plugin(message, _sender, source) {
     if (!ownsDocument(source)) return { ok: false };
     // The complete plugins list without this install's Core: the app takes its proof back.
@@ -4278,6 +4294,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'model_catalog',
     'plugin_refresh',
     'core_plugin',
+    'load_failure',
     'usage_observation',
     'events',
     'bind',
