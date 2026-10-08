@@ -213,6 +213,10 @@
 }
 
 :root {
+  /* One scale for a turn's activity: every row's title, its secondary detail, and its height. */
+  --activity-size: calc(13px * var(--text-scale, 1));
+  --activity-meta: calc(11.5px * var(--text-scale, 1));
+  --activity-row: calc(26px * var(--text-scale, 1));
   --page: #f4f4f5;
   --card: #fff;
   --ink: #0c0c0e;
@@ -2547,8 +2551,8 @@ input[readonly] {
 /* Page activity shares the tool row's rhythm: same height, icon column, face and weight, so a
    mixed run of calls and page steps reads as one aligned list. */
 .meta.is-progress.thinking-line {
-  min-height: 27px;
-  font-size: calc(12.5px * var(--text-scale, 1));
+  min-height: var(--activity-row);
+  font-size: var(--activity-size);
   font-weight: 450;
   letter-spacing: 0;
 }
@@ -2851,9 +2855,10 @@ input[readonly] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  min-height: var(--activity-row);
+  padding: 0;
   border-radius: var(--r-md);
-  font-size: calc(12.5px * var(--text-scale, 1));
+  font-size: var(--activity-size);
   cursor: pointer;
   list-style: none;
 }
@@ -2891,7 +2896,7 @@ input[readonly] {
   flex: 1 1 auto;
   min-width: 0;
   font-style: normal;
-  font-size: calc(11.5px * var(--text-scale, 1));
+  font-size: var(--activity-meta);
   color: var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2907,7 +2912,7 @@ input[readonly] {
   margin-left: auto;
   flex: 0 0 auto;
   font-family: var(--mono);
-  font-size: calc(11px * var(--text-scale, 1));
+  font-size: var(--activity-meta);
   color: var(--soft);
 }
 
@@ -3569,18 +3574,16 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .sidebar-sessions h2 .btn .ico { --ico: 14px; }
 .sess-top { gap: 5px; }
 .sess-top .session-status { order: -1; }
-.tool-group { color: var(--faint); margin: 6px 0; }
-.tool-group > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: calc(13px * var(--text-scale, 1)); min-height: 26px; width: fit-content; max-width: 100%; }
+.tool-group { color: var(--faint); margin: 4px 0; }
+.tool-group > summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: var(--activity-size); min-height: var(--activity-row); width: fit-content; max-width: 100%; }
 .tool-group > summary::-webkit-details-marker, .agent-communication > summary::-webkit-details-marker { display: none; }
 .activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .activity-symbol { display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; }
 .activity-chevron { width: 12px; height: 12px; flex-shrink: 0; opacity: .65; }
 .tool-group[open] > summary .activity-chevron { transform: rotate(90deg); }
 .tool-group > summary:hover { color: var(--ink); }
-.tool-group.has-activity-phase > summary { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
-.tool-group.has-activity-phase[open] > .tool-group-body { margin-left: 14px; padding-left: 12px; border-left: 1px solid var(--line); }
 .routine-activity { color: var(--faint); }
-.routine-activity > summary { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; padding: 3px 7px; border-radius: 7px; list-style: none; cursor: pointer; }
+.routine-activity > summary { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-height: var(--activity-row); padding: 0 7px; border-radius: 7px; font-size: var(--activity-size); list-style: none; cursor: pointer; }
 .routine-activity > summary::-webkit-details-marker { display: none; }
 .routine-activity > summary:hover { background: var(--hover); color: var(--ink); }
 .routine-symbol { color: var(--accent); font-size: 16px; }
@@ -3589,7 +3592,41 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .routine-activity:not([open]) > .routine-activity-body { display: none; }
 .tool-group-body { padding: 4px 0 0 0; }
 .tool-group-body .ev { margin: 0; }
-.tool-group-body .tool > summary, .tool-group-body .agent-communication > summary { min-height: 24px; }
+/* Formulas (math.ts), drawn by KaTeX in the text's own colour. A wide block scrolls on its own
+   rather than widening the conversation; one KaTeX could not draw shows its source as code would. */
+.msg .math-display .katex-display { margin: 0; }
+.msg .math-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
+.msg .math-inline.is-source, .msg .math-display.is-source { font-family: var(--mono); font-size: .92em; color: var(--soft); white-space: pre-wrap; }
+/* Rounds (timeline-rounds.ts). What the model says between steps is prose, as it is in ChatGPT: the
+   answer's own face and colour, close to the round it opens. Each round's activity folds under
+   ChatGPT's recap of it, a check once done; the open round names what it is doing. An expanded
+   round hangs its rows from a hairline, so a long turn reads as rounds rather than one list. */
+/* The same space above and below a round's sentence, so it sits evenly between the rounds around it. */
+.ev.is-interim { padding: 4px 0; }
+.ev.is-interim .said { padding: 0; }
+.ev.is-interim + .ev.is-interim { padding-top: 0; }
+/* The answer after a turn's last round keeps the same rhythm as its sentences. */
+:is(.tool-group, .round-recap, .ev-tool_call, .ev-page_tool, .ev-agent_message) + .ev-assistant_message:not(.is-interim) { padding-top: 4px; }
+:is(.tool-group, .round-recap, .ev-tool_call, .ev-page_tool, .ev-agent_message) + .ev-assistant_message:not(.is-interim) > .ev-body > .said { padding-top: 0; }
+.tool-group + .tool-group, .tool-group + .round-recap, .round-recap + .tool-group { margin-top: 0; }
+.tool-group.has-recap > summary { color: var(--soft); }
+.tool-group.has-recap > summary .activity-symbol .ico { color: var(--faint); }
+.tool-group.is-live > summary { color: var(--soft); }
+.tool-group > summary:hover, .tool-group.has-recap > summary:hover { color: var(--ink); }
+/* How many actions the round holds, in its pill. */
+.activity-count { flex: none; height: 17px; padding: 0 6px; border-radius: 6px; background: var(--hover); color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); line-height: 17px; font-variant-numeric: tabular-nums; }
+.activity-count:empty { display: none; }
+.tool-group[open] > .tool-group-body { margin: 2px 0 6px 7px; padding: 2px 0 0 13px; border-left: 1px solid var(--line); animation: round-open 160ms ease-out; }
+.round-recap { padding: 1px 0; }
+.round-recap .thinking-ico { color: var(--faint); }
+.is-entering { animation: round-enter 220ms ease-out both; }
+.activity-title.is-entering { animation: round-title 260ms ease-out both; }
+@keyframes round-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes round-title { from { opacity: 0; } to { opacity: 1; } }
+@keyframes round-open { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .is-entering, .activity-title.is-entering, .tool-group[open] > .tool-group-body { animation: none; }
+}
 .agent-avatar { --hue: #7d6198; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 6px; font-size: calc(9px * var(--text-scale, 1)); line-height: 1; background: var(--hue); color: #fff; }
 .agent-avatar[data-color='1'] { --hue: #ac793a; }
 .agent-avatar[data-color='2'] { --hue: #527c96; }
@@ -3818,7 +3855,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .delivery-choices button[aria-checked='false'] .ico { visibility: hidden; }
 .send-button.is-stop > .send-icon { display: none; }
 .send-button.is-stop::after { content: ''; width: 12px; height: 12px; border-radius: 2px; background: currentColor; }
-.agent-communication > summary { display: flex; gap: 8px; align-items: center; min-height: 24px; cursor: pointer; color: var(--soft); font-size: calc(14px * var(--text-scale, 1)); }
+.agent-communication > summary { display: flex; gap: 8px; align-items: center; min-height: var(--activity-row); cursor: pointer; color: var(--soft); font-size: var(--activity-size); }
 .agent-communication > .msg { margin: 12px 0 0 24px; }
 .agent-chat-open { margin: 10px 0 2px 24px; padding: 5px 0; gap: 7px; border-radius: 4px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); font-weight: 500; }
 .agent-chat-open:hover:not(:disabled) { background: transparent; color: var(--ink); }
@@ -4416,10 +4453,17 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 }
 
 /* Round participation opens the existing worker inspector. */
-.activity-workers { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: auto; padding: 2px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--faint); font: inherit; cursor: pointer; }
-.activity-workers:hover { color: var(--accent); background: var(--sunk); }
-.activity-workers:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A round's sub-agents: one pill like the action count beside it, the team icon and how many.
+   It is the way to them, so it answers the pointer. */
+.activity-workers { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 17px; padding: 0 6px; border: 0; border-radius: 6px; background: var(--hover); color: var(--faint);
+  font: inherit; font-size: calc(11px * var(--text-scale, 1)); line-height: 17px; font-variant-numeric: tabular-nums; cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
+/* The outline robot, at the size where its face stays open, in the pill's own tone. */
+.activity-workers .ico { --ico: 14px; --glyph: 14px; }
+.activity-workers:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, var(--hover)); }
+.activity-workers:focus-visible { outline: 2px solid var(--accent-edge); outline-offset: 1px; }
+/* An open round lists its workers' calls itself. */
 .tool-group[open] > summary > .activity-workers { display: none; }
+@media (prefers-reduced-motion: reduce) { .activity-workers { transition: none; } }
 
 /*
  * Ready: the closing step. A badge that turns green when every check passes, the checks as a

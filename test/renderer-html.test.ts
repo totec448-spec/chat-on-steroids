@@ -407,3 +407,56 @@ describe('a capture that could not be carried whole', () => {
     expect(rendered.querySelector('p')!.getAttribute('dir')).toBe('auto');
   });
 });
+
+describe('formulas', () => {
+  // The shapes ChatGPT wrote on 2026-10-08: \( \) inline, \[ \] in its own block, escaped prose around it.
+  const answer = String.raw`**Fórmula de Bhaskara\:**
+
+\[
+x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}
+\]
+
+A identidade de Euler é \(e^{i\pi}+1=0\)\.
+
+\[
+A=\begin{pmatrix}
+a & b\\
+c & d
+\end{pmatrix}
+\]`;
+
+  it('draws inline and block LaTeX as formulas, not as their source', () => {
+    const rendered = renderedMarkdown(answer);
+    const blocks = rendered.querySelectorAll('.math-display .katex-display');
+    expect(blocks).toHaveLength(2);
+    expect(rendered.querySelector('.math-inline .katex')).not.toBeNull();
+    // What is drawn, not the source KaTeX keeps for screen readers.
+    const shown = [...rendered.querySelectorAll('.katex-html')].map(node => node.textContent).join(' ');
+    expect(shown).toContain('±');
+    expect(shown).not.toContain(String.raw`\frac`);
+    expect(rendered.querySelector('.math-inline')!.parentElement!.textContent).not.toContain(String.raw`\(`);
+    // A block formula is its own block, not a paragraph holding one.
+    expect(rendered.querySelector('p > .math-display')).toBeNull();
+    // The prose around it keeps its Markdown.
+    expect(rendered.querySelector('strong')!.textContent).toBe('Fórmula de Bhaskara:');
+  });
+
+  it('leaves prices, code and LaTeX it cannot draw as written', () => {
+    const rendered = renderedMarkdown('Custa $5 e $10.\n\n`' + String.raw`\(x\)` + '` fica no código.\n\n' + String.raw`\(\frac{1}{\)`);
+    expect(rendered.querySelector('.katex')).toBeNull();
+    expect(rendered.textContent).toContain('$5 e $10');
+    expect(rendered.querySelector('code')!.textContent).toBe(String.raw`\(x\)`);
+    expect(rendered.querySelector('.math-inline.is-source')!.textContent).toBe(String.raw`\(\frac{1}{\)`);
+  });
+
+  it('keeps a formula from adding links, classes or styles of its own', () => {
+    const rendered = renderedMarkdown(String.raw`\(\href{javascript:alert(1)}{x} \htmlClass{evil}{y} \htmlStyle{color:red}{z}\)`);
+    expect(rendered.querySelector('.katex')).not.toBeNull();
+    expect(rendered.querySelector('a, .evil, [style*="color:red"]')).toBeNull();
+  });
+
+  it('shows the name of a person or place ChatGPT links, instead of dropping it', () => {
+    const rendered = renderedMarkdown('No \uE200entity\uE202["place","Antigo Egito"]\uE201, \uE200entity\uE202["people","René \\"Descartes\\"","filósofo"]\uE201 estudou.');
+    expect(JSON.stringify(rendered.textContent!.trim())).toBe(JSON.stringify('No Antigo Egito, René "Descartes" estudou.'));
+  });
+});

@@ -229,7 +229,8 @@ describe('visible Chat refresh', () => {
             nextCursor: null
           });
         },
-        getSession: (id: string, options?: any) => {
+        turnTraces: () => ok({}),
+      getSession: (id: string, options?: any) => {
           detailCalls.push({ id, options });
           detailRound += 1;
           return detailRound === 1
@@ -310,6 +311,7 @@ describe('visible Chat refresh', () => {
             : ok({ sessions: all.slice(60), activeId: all[0]!.id, pressure: [], total: 65, nextCursor: null });
         },
         getSession: (id: string) => ok({ summary: all.find((entry) => entry.id === id), events: [], total: 0, nextFrom: 0 }),
+        turnTraces: () => ok({}),
         getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
         onSessionChanged: () => () => undefined,
         onSwarmChanged: () => () => undefined
@@ -369,6 +371,7 @@ describe('scoped session change refresh', () => {
         const sessions = state.listed ? [state.a, state.b] : [state.b];
         return ok({ sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] });
       },
+      turnTraces: () => ok({}),
       getSession: (id: string, options?: any) => {
         state.detailCalls.push({ id, options });
         const seq = 100 + state.detailCalls.length - 1;

@@ -66,7 +66,8 @@ import {
   upsertMessageEvent,
   upsertNativeImageEvent,
   writeAsset,
-  writeOverflowText
+  writeOverflowText,
+  writeTurnTrace
 } from './store.js';
 import {
   awaitRequestCorrelation,
@@ -1724,6 +1725,7 @@ export interface ChatObservation {
     | 'assistant_message'
     | 'native_image'
     | 'page_tool'
+    | 'turn_trace'
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
@@ -1766,6 +1768,8 @@ export interface ChatObservation {
   previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota';
   previewDataUrl?: string;
   turnId?: string;
+  /** A `turn_trace` observation's round outline (shared/turn-trace.ts). */
+  trace?: import('../../shared/turn-trace.js').TurnTrace;
   final?: boolean;
   state?: 'streaming' | 'final';
   /** Internal React conversation id used only to cross-check the URL conversation id. */
@@ -2304,6 +2308,11 @@ async function recordChatObservationsNow(
         // Native media is transcript content only. It does not renew activity, close a turn,
         // create a Goal candidate, or masquerade as a locally executed tool call.
         stored += await recordNativeImage(sessionId, item, base);
+        continue;
+      }
+      case 'turn_trace': {
+        // Presentation beside the log: no event, no activity, no work or completion evidence.
+        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace)) notifyChanged(sessionId);
         continue;
       }
       case 'page_tool': {

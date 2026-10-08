@@ -275,7 +275,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         backgroundProcessListener = listener;
         return () => undefined;
       },
-      livePreview: () => ok(null), listPausedHelpers: () => ok(pausedHelpers),
+      turnTraces: () => ok({}), listPausedHelpers: () => ok(pausedHelpers),
       retryHelper: (id: string, sourceSessionId: string) => {
         live.controlCalls.push({ id: sourceSessionId, action: `retry:${id}` });
         pausedHelpers = pausedHelpers.filter(row => row.id !== id);
@@ -2502,7 +2502,8 @@ it('keeps an unfolded tool row as the same open node while the chat keeps append
   expect(detached.some(node => node === group || node === before || (node as Element).contains?.(before))).toBe(false);
   expect(timeline.querySelector('details.tool-group')).toBe(group);
   expect(group.open).toBe(false);
-  expect(group.querySelector('summary')!.textContent).toBe('Read README.md');
+  expect(group.querySelector('.activity-title')!.textContent).toBe('Read README.md');
+  expect(group.querySelector('.activity-count')!.textContent).toBe('4');
   expect(group.querySelector('summary')!.title).toContain('4 actions');
 });
 
@@ -2543,7 +2544,7 @@ it('colors removed lines separately from added lines without changing other tool
   expect(rows[1]!.querySelector('.edit-card .metric-removed')?.textContent).toBe('−7');
 });
 
-it('keeps mixed tool and agent activity in one latest-action disclosure between authored messages', async () => {
+it('opens a round with the ChatGPT caption and keeps its mixed tool and agent activity in one latest-action disclosure', async () => {
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'extension', kind: 'progress', message: text('Checking the implementation') },
     toolCall(2, 'first'),
@@ -2553,7 +2554,10 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   const timeline = w.document.getElementById('timeline')!;
   const group = timeline.querySelector<HTMLDetailsElement>('.tool-group')!;
   expect(group.open).toBe(false);
-  expect(group.querySelector('.activity-title')!.textContent).toBe('Checking the implementation');
+  // The caption is what ChatGPT said before the step: it stands as the round's opening line.
+  expect(timeline.children[0]!.className).toContain('ev-progress');
+  expect(timeline.children[0]!.textContent).toContain('Checking the implementation');
+  expect(group.querySelector('.activity-title')!.textContent).toBe(group.querySelector('.ev-tool_call:last-of-type .tool > summary b')!.textContent);
   expect(group.querySelector('.agent-communication summary')!.textContent).toContain('Message from worker-2');
   expect(group.querySelector('.agent-avatar')).not.toBeNull();
   expect(group.querySelectorAll('.ev')).toHaveLength(3);
@@ -2579,7 +2583,6 @@ it('never titles a tool group with the app\'s own recovery note', async () => {
   const title = group.querySelector('.activity-title')!.textContent;
   expect(title).not.toContain('Reloaded chat');
   expect(title).toBe(group.querySelector('.ev-tool_call:last-of-type .tool > summary b')?.textContent ?? title);
-  expect(group.classList.contains('has-activity-phase')).toBe(false);
   // The note itself stays in the transcript, in front of the group.
   expect(timeline.children[0]!.textContent).toContain('Reloaded chat to recover an interrupted response.');
 });
@@ -4569,7 +4572,7 @@ it('ends the running turn with a row saying what it is doing now', async () => {
   expect(shown()?.[0]).toBe('Thinking');
 });
 
-it('says what a new chat\'s first turn is writing before ChatGPT publishes it (#942)', async () => {
+it('shows a new chat\'s first sentences in the timeline and keeps the live row for what happens now (#942)', async () => {
   const asked = Date.now() - 12_000;
   const { w, append } = await boot([
     { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
@@ -4578,23 +4581,35 @@ it('says what a new chat\'s first turn is writing before ChatGPT publishes it (#
   const now = () => w.document.querySelector<HTMLElement>('#timeline .turn-now')!;
   const shown = () => now().hidden ? null : now().querySelector('.turn-now-text')!.textContent;
   const asks: string[][] = [];
-  (w as any).api.livePreview = (ids: string[]) => {
+  // ChatGPT shows the sentence long before it publishes a message for it; the turn's outline holds it.
+  (w as any).api.turnTraces = (_id: string, ids: string[]) => {
     asks.push(ids);
-    return Promise.resolve({ ok: true, data: 'First command printed one; now running the second.' });
+    return Promise.resolve({ ok: true, data: { 'held-turn': [{ kind: 'say', text: 'First command printed one; now running the second.', done: true },
+      ...(status ? [{ kind: 'now', text: status }] : [])] } });
   };
+  let status = '';
   await append([]); await append([]);
-  expect(asks.at(-1)).toEqual(['chat-b', 'chat-a']);
-  expect(shown()).toBe('First command printed one; now running the second.');
+  expect(asks.at(-1)).toEqual(['held-turn']);
+  const sentence = w.document.querySelector<HTMLElement>('#timeline .ev.is-interim')!;
+  expect(sentence.textContent).toContain('First command printed one; now running the second.');
+  // The sentence is the turn's own words, before the row that says what it does right now.
+  expect(sentence.compareDocumentPosition(now()) & w.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(shown()).toBe('Thinking');
+  // ChatGPT's own phrase for what the turn is doing takes Thinking's place, with Thinking's sign.
+  status = 'Comparando três estruturas de projeto';
+  await append([]); await append([]);
+  expect(shown()).toBe('Comparando três estruturas de projeto');
   expect(now().classList.contains('is-thinking')).toBe(true);
-  // A call of this app that runs right now is what the turn is doing.
+  // A call of this app running meanwhile keeps ChatGPT's words and lends them its icon.
+  (w as any).api.runningTools = () => Promise.resolve({ ok: true, data: [{ title: 'Running echo one', kind: 'run', since: Date.now() }] });
+  await append([]); await append([]);
+  expect(shown()).toBe('Comparando três estruturas de projeto');
+  expect(now().classList.contains('is-thinking')).toBe(false);
+  status = '';
   (w as any).api.runningTools = () => Promise.resolve({ ok: true, data: [{ title: 'Running echo two', kind: 'run', since: Date.now() }] });
   await append([]); await append([]);
   expect(shown()).toBe('Running echo two');
-  // Once the page clears it, the row is back to its ordinary state.
-  (w as any).api.runningTools = () => Promise.resolve({ ok: true, data: [] });
-  (w as any).api.livePreview = () => Promise.resolve({ ok: true, data: null });
-  await append([]); await append([]);
-  expect(shown()).toBe('Thinking');
+  expect(w.document.querySelectorAll('#timeline .ev.is-interim')).toHaveLength(1);
 });
 
 it('shows a just-started turn working right after your message, never in the header first', async () => {
@@ -4726,6 +4741,7 @@ it('opens round participants in the existing dock without moving the prime reade
   expect(w.document.getElementById('inlineAgents')).toBeNull();
   expect(w.document.querySelectorAll('#chatBody .agent-panel')).toHaveLength(0);
   const indicators = [...w.document.querySelectorAll<HTMLButtonElement>('#timeline .activity-workers')];
+  // One pill per round, whatever the count: the team icon and how many workers it involved.
   expect(indicators.map(button => button.textContent)).toEqual(['2', '1']);
   expect(indicators[0]!.getAttribute('aria-label')).toBe('2 sub-agents in this round');
   // One worker reads as one, not "1 sub-agents" (seen on the 2.1.27 canary).
