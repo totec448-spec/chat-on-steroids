@@ -31,6 +31,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const {
   AgentError,
+  archiveWorkerAssignments,
   PRIME_ID,
   acknowledgeOffers,
   acknowledgeOffersForConversation,
@@ -106,7 +107,7 @@ const {
 const { startMcpServer } = await import('../src/main/mcp/server.js');
 const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
-const { findSessionByConversation, initSessionStore, readRecentEvents, requestTurnOwnershipCutoff, resetSessionStoreForTests } = await import(
+const { createSession, getSession, findSessionByConversation, initSessionStore, readRecentEvents, requestTurnOwnershipCutoff, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
 const { recordChatObservations, resetRecorderForTests } = await import('../src/main/session/recorder.js');
@@ -1484,27 +1485,46 @@ describe('a worker that is sleeping', () => {
     const staged = stageMessages(prime, [{ to: 'worker-1', text: 'inspect task B' }]);
     staged.commit();
     const current = () => statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1');
-    expect(current()).toMatchObject({ state: 'waking', label: 'worker-1', task: 'inspect task B', result: null });
+    expect(current()).toMatchObject({ state: 'waking', label: 'Worker 1', task: 'inspect task B', result: null });
     expect(offerMessages(PRIME_ID).some((message) => message.text.includes('task A completed'))).toBe(true);
     const saved = snapshotSwarm();
     resetAgentsForTests();
     restoreSwarm(saved);
-    expect(current()).toMatchObject({ state: 'waking', label: 'worker-1', task: 'inspect task B', result: null });
+    expect(current()).toMatchObject({ state: 'waking', label: 'Worker 1', task: 'inspect task B', result: null });
     if (delivery === 'browser') {
       const revival = pendingWorkerRevivals()[0]!;
       expect(noteWorkerRevived('worker-1', 'c-worker-1', revival.messageIds)).toBe(true);
     }
     expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
-    expect(current()).toMatchObject({ state: 'active', label: 'worker-1', task: 'inspect task B', result: null });
+    expect(current()).toMatchObject({ state: 'active', label: 'Worker 1', task: 'inspect task B', result: null });
     finishAgent(worker.caller, 'task B completed');
     expect(current()).toMatchObject({ state: 'sleeping', result: 'task B completed' });
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(swarmState().retainedWorkers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'worker-1', conversationId: 'c-worker-1', label: 'Worker 1', task: 'inspect task B' })
+    ]));
+  });
+
+  it('durably renames a sleeping worker only when the prime supplies a new name', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'new task', label: 'Review' }])).toThrow(/sleeping worker/);
+    finishAgent(worker.caller, 'done');
+    expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'new task', label: ' ' }])).toThrow(/label/);
+    stageMessages(prime, [{ to: 'worker-1', text: 'new task', label: ' Review ' }]).commit();
+    const saved = snapshotSwarm();
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(statusForCaller(prime).state.agents.find(agent => agent.id === 'worker-1')).toMatchObject({
+      state: 'waking', label: 'Review', task: 'new task', result: null
+    });
   });
 
   it('restores prior assignment metadata when a new assignment is rejected before acceptance', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');
     finishAgent(worker.caller, 'task A completed');
-    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'inspect task B' }]);
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'inspect task B', label: 'Review' }]);
     staged.rollback();
     expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
       state: 'sleeping', label: 'Worker 1', task: 'task 1', result: 'task A completed', pending: 0
@@ -1531,7 +1551,7 @@ describe('a worker that is sleeping', () => {
     const staged = stageQueuedWorkerRevivals(['worker-1']);
     expect(staged.waking).toEqual(['worker-1']);
     expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
-      state: 'waking', label: 'worker-1', task: 'queued task B', result: null
+      state: 'waking', label: 'Worker 1', task: 'queued task B', result: null
     });
     staged.rollback();
     expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
@@ -1540,7 +1560,7 @@ describe('a worker that is sleeping', () => {
     stageQueuedWorkerRevivals(['worker-1']).commit();
     failWorkerRevival('worker-1', 'fixture pre-send failure');
     expect(statusForCaller(prime).state.agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
-      state: 'sleeping', label: 'worker-1', task: 'queued task B', result: null, pending: 1
+      state: 'sleeping', label: 'Worker 1', task: 'queued task B', result: null, pending: 1
     });
   });
 
@@ -3951,6 +3971,18 @@ describe('through the MCP endpoint', () => {
     expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.revivable).toBe(false);
   });
 
+  it('carries a wake label through the MCP schema, in a message batch only', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'done');
+    const message = { to: 'worker-1', text: 'review the new task', label: 'Review' };
+    // The single to+text form has no label (it keeps the agents schema within its budget).
+    expect(await asChat(PRIME_CHAT, 'message', message)).toMatch(/input validation|unrecognized key/i);
+    const result = await asChat(PRIME_CHAT, 'message', { messages: [message] });
+    expect(result).toContain('Waking worker-1');
+    expect(statusForCaller(prime).state.agents.find(agent => agent.id === 'worker-1')?.label).toBe('Review');
+  });
+
   it('cannot be spoofed by naming an agent in the arguments', async () => {
     startSwarm(1);
     bindConversation('worker-1', 'c-worker-1');
@@ -4751,4 +4783,34 @@ describe('one ChatGPT account on several computers', () => {
       expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat On Steroids Core (Windows). ');
     } finally { await saveConfig(previous); }
   });
+});
+
+it('archives accepted renamed assignments before broker expiry and restores saved legacy presentation before pruning', async () => {
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-worker-archive');
+  const session = await createSession({ conversationId: 'c-worker-archive', origin: {
+    kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'task 1'
+  } });
+  finishAgent(worker.caller, 'done');
+  const rejected = stageMessages(prime, [{ to: 'worker-1', text: 'Rejected task', label: 'Rejected' }]);
+  rejected.rollback();
+  // The archive follows the durable write in the background; it never holds up acceptance.
+  await persistCriticalSwarmNow();
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'));
+  const staged = stageMessages(prime, [{ to: 'worker-1', text: 'New task', label: 'Review' }]);
+  await persistCriticalSwarmNow(); staged.commit();
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }));
+  noteAgentAlive('c-worker-archive', 'call'); finishAgent(worker.caller, 'done'); releaseQuiescentRun();
+  const saved = snapshotSwarm()!;
+  resetAgentsForTests();
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(saved.savedAt + 8 * 24 * 60 * 60_000);
+    // Startup projects the last accepted disk snapshot before restoring/pruning authority.
+    await archiveWorkerAssignments(saved);
+    restoreSwarm(saved);
+    expect(swarmState().retainedWorkers).toEqual([]);
+    resetSessionStoreForTests();
+    expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' });
+  } finally { vi.useRealTimers(); }
 });

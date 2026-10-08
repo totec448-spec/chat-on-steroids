@@ -33,6 +33,7 @@ import {
   appendEvent,
   autoCompactionReady,
   observeSessionModel,
+  recordWorkerAssignment,
   createSession,
   deleteSession,
   endSession,
@@ -4182,4 +4183,18 @@ it('ships the long-standing handoff brief rules as the editable default, unchang
     'FAILED / UNRESOLVED —', 'FILES —', 'VERIFICATION —', 'ENVIRONMENT —', 'NEXT —', 'DO NOT —']) {
     expect(DEFAULT_HANDOFF_PROMPT, heading).toContain(heading);
   }
+});
+
+it('persists worker presentation independently of broker retention and rejects stale or foreign projections', async () => {
+  const session = await createSession({ conversationId: 'archive-worker', title: 'Original',
+    origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Original task' } });
+  const assignment = { conversationId: 'archive-worker', agentId: 'worker-1', label: 'Review', task: 'New task', recordedAt: 20 };
+  await recordWorkerAssignment(assignment);
+  await recordWorkerAssignment({ ...assignment, label: 'Stale', recordedAt: 10 });
+  await recordWorkerAssignment({ ...assignment, agentId: 'worker-2', label: 'Foreign', recordedAt: 30 });
+  await flushSessions(); resetSessionStoreForTests();
+  const restored = await getSession(session.id);
+  expect(restored?.workerAssignment).toEqual(assignment);
+  expect(restored?.origin?.task).toBe('Original task');
+  expect(restored?.title).toBe('Original');
 });

@@ -3,9 +3,25 @@ import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
+import { workerOwnTask } from '../shared/worker-brief.js';
 import { compactNumber, el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { workerAvatar } from './agent-communication.js';
+
+/**
+ * What to call a worker: the name the prime gave it for this job ("Security review"), else
+ * "Worker 2". Its id (worker-2) is what the prime and the chat address it by; a label equal to it,
+ * which is what a worker reused for new work carries, is no name.
+ */
+export function workerName(id: string, label: string | undefined): string {
+  const given = label?.trim();
+  if (given && given !== id) return given;
+  const number = /^worker-(\d+)$/.exec(id)?.[1];
+  return number ? t('Worker {0}', [number]) : id;
+}
+
+/** How long a round's workers glow as the panel opens on them (`agent-arrive` in styles.css). */
+const ARRIVAL_MS = 1600;
 
 /** A read-only second pane. Its selection never changes the main chat's composer. */
 export function createAgentPanel(options: {
@@ -18,7 +34,9 @@ export function createAgentPanel(options: {
   render: (events: SessionEvent[], id: string, current: () => boolean, traces: Record<string, TurnTrace>) => HTMLElement[];
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
-  agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
+  agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & Partial<Pick<AgentInfo, 'label'>> & { conversationId?: string | null }) | null;
+  /** The model as the composer names it ("GPT-6 Sol · Instant"); the raw id without a catalog. */
+  modelLabel?: (model: string, reasoningEffort: string | undefined) => string;
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
@@ -33,6 +51,8 @@ export function createAgentPanel(options: {
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
   let generation = 0;
   let highlighted = new Set<string>();
+  // The round's workers glow once as the panel opens on them, not on every repaint after.
+  let arriving = false;
   function hide(): void {
     generation++; selected = null; highlighted.clear(); pane.hidden = true;
     if (!options.mount) options.host.classList.remove('has-agent-panel');
@@ -60,6 +80,15 @@ export function createAgentPanel(options: {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');
         row.dataset.workerSession = worker.id;
         row.classList.toggle('is-round-worker', highlighted.has(worker.id));
+        if (arriving && highlighted.has(worker.id)) {
+          // The glow plays once: the class leaves with it, so a later layout change (closing the
+          // sidebar, the dock showing again) has nothing to replay. Reduced motion shows it as
+          // still, for the same time.
+          row.classList.add('is-arriving');
+          const settle = (): void => { row.classList.remove('is-arriving'); };
+          row.addEventListener('animationend', settle, { once: true });
+          setTimeout(settle, ARRIVAL_MS);
+        }
         const owner = options.agent?.(worker);
         const state = owner?.state ?? (workerReportedFinish(worker) ? 'sleeping' : active ? 'working' : 'history');
         row.dataset.state = state;
@@ -72,45 +101,61 @@ export function createAgentPanel(options: {
         });
         row.dataset.health = health.health;
         const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
-        const task = owner?.task?.trim();
-        const original = worker.origin?.task || worker.title;
+        // The worker's own task: the run's shared context, the same for every worker, left out.
+        const saved = worker.workerAssignment?.agentId === identity && worker.workerAssignment.conversationId === worker.conversationId
+          ? worker.workerAssignment : null;
+        const task = workerOwnTask(owner?.task?.trim() || saved?.task || worker.origin?.task || worker.title);
+        const name = workerName(identity, owner?.label ?? saved?.label);
         // A worker still opening has no conversation yet; undefined === undefined must not read a model.
-        const model = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
-          ? [worker.selectedModel.model, worker.selectedModel.reasoningEffort].filter(Boolean).join(' · ') : '';
+        const observed = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
+          ? worker.selectedModel : null;
         const elapsedMs = Math.max(0, (active ? Date.now() : worker.endedAt ?? worker.updatedAt) - worker.startedAt);
         const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s`
           : elapsedMs < 3_600_000 ? `${Math.floor(elapsedMs / 60_000)}m` : `${Math.floor(elapsedMs / 3_600_000)}h`;
-        const avatar = workerAvatar(worker.origin?.agentId ?? '•');
+        const working = state === 'working' || state === 'active';
+        // The avatar carries the state: a dot of presence, and while working the app's traveling
+        // light around it (the connection capsule's). Its phase follows the clock, so the many
+        // repaints of a working list never restart it.
+        const portrait = el('span', 'agent-card-avatar');
+        portrait.append(workerAvatar(worker.origin?.agentId ?? '•'), el('span', 'agent-card-presence'));
+        if (working) portrait.style.setProperty('--phase', `${-(Date.now() % 2400)}ms`);
         const content = el('span', 'agent-card-content');
         const heading = el('span', 'agent-card-heading');
-        heading.append(el('span', 'agent-status-dot'), el('strong', 'agent-card-name', identity));
-        if (model) heading.append(el('span', 'agent-card-model', model));
-        const statusLabel: Record<string, string> = { working: 'Working', history: 'History', invited: 'opening', detached: 'no tab' };
+        heading.append(el('strong', 'agent-card-name', name), el('span', 'agent-card-time', elapsed));
+        const statusLabel: Record<string, string> = {
+          working: 'Working', active: 'Working', invited: 'Opening', waking: 'Waking', detached: 'No tab',
+          sleeping: 'Idle', failed: 'Failed', history: 'Finished'
+        };
         const meta = el('span', 'agent-card-meta');
-        const healthText = el('span', 'agent-card-health', () => {
-          if (health.health === 'healthy') return t('Healthy');
-          if (health.health === 'degraded') return t('Degraded');
-          return t('Unknown');
-        });
-        const actionMeta = t('{0} actions · {1}', [compactNumber(worker.toolCalls ?? 0), elapsed]);
-        meta.append(document.createTextNode(`${t(statusLabel[state] ?? state)} · `), healthText,
-          document.createTextNode(` · ${actionMeta}`));
-        const activity = worker.lastToolActivity
-          ? el('span', 'agent-card-activity', worker.lastToolActivity.title)
-          : null;
-        if (activity) activity.dataset.kind = worker.lastToolActivity!.kind;
-        content.append(
-          heading,
-          el('span', 'agent-card-task', () => task || `${t('Original assignment')}: ${original}`),
-          ...(activity ? [activity] : []),
-          meta
-        );
-        row.append(avatar, content);
-        row.title = task || original;
+        const part = (className: string, text: string | (() => string)): void => {
+          if (meta.childElementCount) meta.append(el('span', 'agent-card-sep', '·'));
+          meta.append(el('span', className, text));
+        };
+        part('agent-card-state', () => t(statusLabel[state] ?? state));
+        if (observed) part('agent-card-model', () => options.modelLabel?.(observed.model, observed.reasoningEffort)
+          ?? [observed.model, observed.reasoningEffort === 'none' ? t('Instant') : observed.reasoningEffort].filter(Boolean).join(' · '));
+        // A worker still opening has done nothing yet: no count until there is one.
+        if (worker.toolCalls) part('agent-card-actions', () => t('{0} actions', [compactNumber(worker.toolCalls ?? 0)]));
+        // Only a problem is worth a word; a healthy or unknown worker says nothing about it, and a
+        // failed one has already said it.
+        if (health.health === 'degraded' && state !== 'failed') part('agent-card-health', () => t('Degraded'));
+        const activityBoundary = Math.max(worker.lastFinishReportAt ?? 0, worker.lastTurnEndAt ?? 0);
+        const currentActivity = worker.lastToolCallAt != null && worker.lastToolCallAt > activityBoundary &&
+          worker.lastToolCallAt >= (worker.finishTurn?.startedAt ?? 0);
+        const activity = working && currentActivity && worker.lastToolActivity ? el('span', 'agent-card-activity', worker.lastToolActivity.title) : null;
+        if (activity) {
+          activity.dataset.kind = worker.lastToolActivity!.kind;
+          activity.style.setProperty('--phase', `${-(Date.now() % 1800)}ms`);
+        }
+        content.append(heading, el('span', 'agent-card-task', task), ...(activity ? [activity] : []), meta);
+        row.append(portrait, content);
+        // The id the prime and the chat use for it (worker-2) stays one hover away, and in its avatar.
+        row.title = `${identity} · ${task}`;
         row.onclick = () => void open(worker.id);
         body.append(row);
       }
     }
+    arriving = false;
   }
   async function open(id: string, refresh = false): Promise<void> {
     const worker = workers.find(row => row.id === id);
@@ -141,11 +186,13 @@ export function createAgentPanel(options: {
   return {
     hide,
     show: () => { highlighted.clear(); show(); list(); },
-    showWorkers(ids: string[]): void {
+    /** Opens the list on a round's workers; `focus` (the keyboard's way in) moves focus to the first. */
+    showWorkers(ids: string[], focus = true): void {
       highlighted = new Set(workers.filter(worker => ids.includes(worker.id)).map(worker => worker.id));
       if (!highlighted.size) return;
+      arriving = true;
       show(); list();
-      body.querySelector<HTMLButtonElement>('.is-round-worker')?.focus({ preventScroll: true });
+      if (focus) body.querySelector<HTMLButtonElement>('.is-round-worker')?.focus({ preventScroll: true });
     },
     open,
     update(id: string | null, next: SessionSummary[]): void {

@@ -52,9 +52,10 @@ it('keeps every catalog complete, nonempty and free of duplicate keys or changed
   }
 });
 
-it('keeps worker health labels translated in the Russian catalog', () => {
+it('keeps the sub-agent list labels translated in the Russian catalog', () => {
   const catalog = JSON.parse(readFileSync('src/renderer/locales/ru.json', 'utf8')) as Record<string, string>;
-  for (const key of ['Healthy', 'Degraded', 'Unknown']) {
+  // Health says only a problem now (Degraded); the states and the action count are the rest.
+  for (const key of ['Degraded', 'Opening', 'Waking', 'No tab', 'Idle', '{0} actions']) {
     expect(catalog[key]?.trim(), key).toBeTruthy();
   }
 });
