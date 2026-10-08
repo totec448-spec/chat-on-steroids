@@ -2272,6 +2272,11 @@ document, navigation epoch and conversation in the existing session-storage snap
 lifecycle event carries a non-manual departure through the close outbox; it does not create
 recovery authority. Main still requires eligible outstanding work. Failed removals and unknown
 origins remain conservative, and a later manual close supersedes a pending automatic departure.
+The same non-manual departure covers a chat leaving the exact document the extension borrowed
+for a new chat (#1180), or whose page reported ChatGPT's "could not be loaded" surface
+(`load_failure`, sent at most every 30 s while it shows): its Retry may take the tab to the home
+page without anyone deciding to close the chat (#1086). Both records (`tabReuses`) are spent on first
+use and trusted for two minutes.
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.

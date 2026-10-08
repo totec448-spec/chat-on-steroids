@@ -11856,10 +11856,12 @@
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
   let loadFailureRoute = null;
+  let loadFailureToldAt = 0;
   function recoverConversationLoad(now = Date.now()) {
     const route = CLF_DOM.conversationId();
     if (route !== loadFailureRoute) {
       loadFailureRoute = route;
+      loadFailureToldAt = 0;
       loadFailureSince = 0;
       loadFailureRetries = 0;
     }
@@ -11868,6 +11870,12 @@
       loadFailureSince = 0;
       if (CLF_DOM.turns().length) loadFailureRetries = 0;
       return false;
+    }
+    // Whoever presses Retry here, the tab may leave this chat for ChatGPT's home page. Say so first,
+    // so that departure is not taken for the user closing the chat (#1086). At most every 30 s.
+    if (route && now - loadFailureToldAt >= 30_000) {
+      loadFailureToldAt = now;
+      void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
     if (!loadFailureSince) loadFailureSince = now;
     const wait = LOAD_FAILURE_SETTLE_MS +
