@@ -100,6 +100,37 @@ it('confirms the exact selected pair without moving through other model versions
   expect(f.state.currentBucket).toBe(2);
   expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
 });
+it('selects an exact execution id and effort without traversing unrelated model versions', async () => {
+  const f = fixture();
+  const stages: string[] = [];
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium', () => true, (stage: string) => stages.push(stage))).toBe(true);
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-5-6-thinking', thinkingEffort: 'standard' });
+  expect(f.actions.mock.calls.filter(([action]) => action === 'version')).toHaveLength(0);
+  expect(stages).toContain('model-opening');
+  expect(stages).toContain('model-scanning');
+  expect(stages).toContain('model-confirming');
+  expect(stages.at(-1)).toBe('model-closing');
+});
+it('fails within its model-selection budget and does not mutate an unrelated version', async () => {
+  const f = fixture();
+  const browserDate = page.window.Date;
+  const realNow = browserDate.now.bind(browserDate);
+  let outOfBudget = false;
+  const clock = vi.spyOn(browserDate, 'now').mockImplementation(() => realNow() + (outOfBudget ? 45_000 : 0));
+  const stages: string[] = [];
+  try {
+    expect(await f.api.selectModelSettings('future-model', 'ultra', () => true, (stage: string) => {
+      stages.push(stage);
+      if (stage === 'model-scanning') outOfBudget = true;
+    })).toBe(false);
+  } finally {
+    clock.mockRestore();
+  }
+  expect(stages).toContain('model-timeout');
+  expect(f.actions.mock.calls.filter(([action]) => action === 'version')).toHaveLength(0);
+  expect(f.state.currentSelection.modelSlug).toBe('gpt-5-6-thinking');
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
 it('does not treat an exact but denied current choice as selection proof', async () => {
   const f = fixture();
   f.props.modelSwitcherDenialsBySlug = { 'gpt-5-6-thinking': true };

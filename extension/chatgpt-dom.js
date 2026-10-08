@@ -2833,7 +2833,7 @@ var CLF_DOM = (() => {
     }
     return false;
   }
-  function modelPickerAccess(stillCurrent) {
+  function modelPickerAccess(stillCurrent, remainingMs = () => Infinity) {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
@@ -2842,7 +2842,9 @@ var CLF_DOM = (() => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
     };
-    const wait = (read, timeout = 3000) => new Promise(resolve => {
+    const wait = (read, timeout = 3000, cleanup = false) => new Promise(resolve => {
+      const remaining = cleanup ? timeout : Math.min(timeout, remainingMs());
+      if (remaining <= 0) return resolve(null);
       let reading = false, dirty = false, done = false;
       const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
       const check = async () => {
@@ -2856,7 +2858,7 @@ var CLF_DOM = (() => {
       };
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-      const timer = setTimeout(() => finish(null), timeout); void check();
+      const timer = setTimeout(() => finish(null), remaining); void check();
     });
     const state = predicate => wait(async () => { const value = await readPickerState(); return value && (!predicate || predicate(value)) ? value : null; });
     // The shell trigger needs MAIN ownership proof. A cold account can hydrate
@@ -2895,7 +2897,9 @@ var CLF_DOM = (() => {
         // Escape belongs inside the picker focus trap, not to its outside trigger.
         // A dispatched key is only an attempt: native unmount/animation owns closure.
         if (!key(panel.contains(active) || dialog?.contains(active) ? active : panel, 'Escape')) return false;
-        const closed = Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
+        // Cleanup is allowed a final three seconds even after selection's
+        // deadline. Never leave a native focus trap open to fake success.
+        const closed = Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog)), 3000, true));
         // Rebind passive selection proof to the closed trigger, not the removed
         // menu node. Reading metadata never reopens or changes the picker.
         if (closed && stillCurrent()) await readPickerState();
@@ -3012,9 +3016,17 @@ var CLF_DOM = (() => {
     if (!closed) failure('picker_close_failed');
     return restored && closed && stillCurrent() && result.size ? [...result.values()] : null;
   }
-  async function selectModelSettings(model, effort, stillCurrent = () => true) {
+  async function selectModelSettings(model, effort, stillCurrent = () => true, onProgress = () => {}) {
     if (!model && !effort) return true;
-    const ui = modelPickerAccess(stillCurrent), original = await ui.open();
+    // Worker bootstrap has a 90-second host deadline, shared with composer
+    // hydration and sending. The model picker must fail within a smaller
+    // budget instead of hanging across unrelated model versions.
+    const deadline = Date.now() + 42_000;
+    const remainingMs = () => Math.max(0, deadline - Date.now());
+    const report = stage => { try { onProgress(stage); } catch {} };
+    const ui = modelPickerAccess(stillCurrent, remainingMs);
+    report('model-opening');
+    const original = await ui.open();
     if (!original) { await ui.close(); return false; }
     // Account-evaluated exact selection is already proof; visiting unrelated
     // versions can reset it or fail unnecessarily. Captions and denied choices
@@ -3022,6 +3034,7 @@ var CLF_DOM = (() => {
     const current = original.choices.find(choice => choice.bucket === original.currentBucket);
     if (current?.available && (current.id === model || current.familyId === model) &&
         (!effort || current.effort === effort)) {
+      report('model-closing');
       const closed = await ui.close();
       return closed && stillCurrent();
     }
@@ -3036,11 +3049,18 @@ var CLF_DOM = (() => {
       // can be resolved against what the account actually offers before anything is moved.
       const offered = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
+        if (!stillCurrent() || remainingMs() === 0) return false;
+        report('model-scanning');
         const state = await ui.version(version.id); if (!state) return false;
         for (const choice of state.choices) {
           const rank = choice.available ? modelRank(choice) : 0;
           if (rank) offered.push({ version: version.id, choice, rank });
         }
+        // A machine-proven exact execution slug + requested effort in the
+        // current version is decisive. Avoid traversing unrelated versions,
+        // which can stall a cold background tab for the entire host deadline.
+        if (model && effort && offered.some(entry =>
+          entry.choice.id === model && entry.choice.effort === effort && entry.choice.available)) break;
       }
       /*
        * An effort the account no longer offers resolves to the nearest one it does.
@@ -3079,14 +3099,18 @@ var CLF_DOM = (() => {
       if (!matches.length || (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) ||
           (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
       const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
+      if (remainingMs() === 0) return false;
+      report('model-switching');
       const state = await ui.version(wanted.version), choice = wanted.choice;
       // Versions can change while traversing the UI. Revalidate before moving its slider.
       if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return false;
       const after = await ui.bucket(choice.bucket);
       const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
-      selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+      report('model-confirming');
+      selected = remainingMs() > 0 && stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
     } finally {
-      if (!selected && stillCurrent() && await ui.version(original.version)) await ui.bucket(original.currentBucket);
+      if (!selected && stillCurrent() && remainingMs() > 0 && await ui.version(original.version)) await ui.bucket(original.currentBucket);
+      report(remainingMs() === 0 ? 'model-timeout' : 'model-closing');
       closed = await ui.close();
     }
     return selected && closed && stillCurrent();

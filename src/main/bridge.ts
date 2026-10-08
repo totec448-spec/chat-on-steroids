@@ -460,7 +460,12 @@ interface Command {
 }
 
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
-const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
+const COMMAND_STEPS = [
+  'revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor',
+  'composer', 'model', 'model-opening', 'model-scanning', 'model-switching',
+  'model-confirming', 'model-closing', 'model-timeout',
+  'composer-after-model', 'inserting', 'sending'
+] as const;
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
 const REVIVAL_WAIT_STEPS = new Set<string>(['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor']);
 type CommandStep = typeof COMMAND_STEPS[number];
@@ -469,7 +474,10 @@ type CommandStep = typeof COMMAND_STEPS[number];
  * the model takes seconds; this leaves room for a throttled background tab.
  */
 const RESUME_STEP_STALL_MS = 3 * 60_000;
-const RESUME_STALL_STEPS: ReadonlySet<CommandStep> = new Set(['composer', 'model', 'composer-after-model']);
+const RESUME_STALL_STEPS: ReadonlySet<CommandStep> = new Set([
+  'composer', 'model', 'model-opening', 'model-scanning', 'model-switching',
+  'model-confirming', 'model-closing', 'model-timeout', 'composer-after-model'
+]);
 
 const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
   'revival-waiting': 'its chat was still answering or its message box was not empty',
@@ -478,6 +486,12 @@ const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
   'revival-editor': 'its page never showed a usable message box',
   composer: 'waiting for ChatGPT\'s message box',
   model: 'choosing the model and reasoning',
+  'model-opening': 'opening the ChatGPT model picker',
+  'model-scanning': 'checking the requested model and effort against available versions',
+  'model-switching': 'switching to the requested model version',
+  'model-confirming': 'confirming the exact model and reasoning effort',
+  'model-closing': 'waiting for the model picker to close',
+  'model-timeout': 'model selection exceeded its bounded time budget',
   'composer-after-model': 'waiting for the message box after choosing the model',
   inserting: 'putting the task into the message box',
   sending: 'sending the task'

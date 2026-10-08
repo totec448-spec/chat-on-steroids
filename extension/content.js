@@ -11539,11 +11539,15 @@
     if (await failIfRetargeted()) return;
 
     if (boot.model || boot.reasoningEffort) step('model');
-    if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget))) {
+    let modelStage = 'model-opening';
+    if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(
+      boot.model, boot.reasoningEffort, stillOnTarget,
+      phase => { modelStage = phase; step(phase); }
+    ))) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
-      )));
+      ), 'model-selection:' + modelStage));
     }
     // ChatGPT's Chat/Work/model transition can replace the entire home composer after
     // the picker has already confirmed the requested selection. Do not treat that

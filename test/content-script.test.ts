@@ -15781,7 +15781,7 @@ describe('the fresh chat the app opened', () => {
     release({ ok: true, command: { id: 'cmd-resume-model', type: 'resume', text, agent: null,
       model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
     await settle(800); await live.hook.pullActivity(); await live.hook.flush();
-    expect(picker).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
+    expect(picker).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function), expect.any(Function));
     expect(picker).toHaveBeenCalledTimes(confirmed ? 2 : 1);
     expect(sends).toBe(confirmed ? 1 : 0);
     const selections = live.sent.filter(message => message.type === 'events').flatMap(message => message.entries)
@@ -15857,6 +15857,35 @@ describe('the fresh chat the app opened', () => {
     expect(proof).toMatchObject({ safe: mode === 'empty', conversationId: null });
     expect(await live.runtimeMessage({ type: 'clf-tab-close-check', conversationId: null,
       failedCommand: { id: 'foreign-command', client: 'foreign-client' } })).toMatchObject({ safe: false });
+  });
+  it('reports the bounded model-selection substep in the failed worker ACK without sending the task', async () => {
+    let release!: (value: any) => void;
+    const delivered = new Promise(resolve => { release = resolve; });
+    live = await harness('https://chatgpt.com/?clf=cmd-model-stage-timeout', {
+      redeem: () => delivered,
+      ack: () => ({ ok: true })
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = async (
+      _model: string, _effort: string, _current: () => boolean, stage: (phase: string) => void
+    ) => {
+      stage('model-scanning'); stage('model-timeout');
+      return false;
+    };
+    release({ ok: true, command: {
+      id: 'cmd-model-stage-timeout', type: 'worker', text: 'Private worker task',
+      agent: 'worker-1', model: 'gpt-5-6-thinking', reasoningEffort: 'high'
+    } });
+    await settle(450);
+    expect(live.sent).toContainEqual(expect.objectContaining({
+      type: 'ack', id: 'cmd-model-stage-timeout', status: 'failed',
+      detail: 'model-selection:model-timeout'
+    }));
+    expect(live.sent).toContainEqual(expect.objectContaining({
+      type: 'command_step', id: 'cmd-model-stage-timeout', step: 'model-timeout'
+    }));
+    expect(live.sent).not.toContainEqual(expect.objectContaining({
+      type: 'ack', id: 'cmd-model-stage-timeout', status: 'sent'
+    }));
   });
 
   it('keeps a failed bootstrap edit predicate in its durable ACK without authored content', async () => {
