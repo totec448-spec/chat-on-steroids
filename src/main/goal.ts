@@ -52,7 +52,7 @@ import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
-import { resolveChatModel } from '../shared/chat-models.js';
+import { DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
@@ -1847,7 +1847,7 @@ function helperModelLabel(): string { return goalHelperSelection().model ?? "Cha
 
 export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
   const settings = getConfig().goal;
-  let model: string | null = settings.helperModel ?? 'gpt-5.6-sol';
+  let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
   const models = getChatModels().models;
   if (!models.length) return { model, reasoningEffort };

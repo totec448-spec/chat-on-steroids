@@ -40,7 +40,17 @@ export function createWorkspaceDocks(host: HTMLElement) {
   ui(expandToggle, 'aria-label', () => t(expanded ? 'Restore right panel' : 'Expand right panel'));
   expandToggle.hidden = true;
   const controls = el('div', 'header-dock-controls'); controls.append(expandToggle, bottomToggle, rightToggle);
-  document.querySelector('header > .state')!.prepend(controls);
+  // The layout toggles live at the right end of the title bar. Where the system's own caption buttons
+  // share that end (Windows), the bar's right padding reserves their width (env(titlebar-area-*)); a
+  // divider then keeps the two groups apart. Electron's windowControlsOverlay reports no geometry, so
+  // the padding the CSS resolved is the source.
+  const topbar = document.querySelector<HTMLElement>('.app-topbar')!;
+  topbar.append(controls);
+  const markCaption = (): void => {
+    controls.classList.toggle('is-beside-caption', parseFloat(window.getComputedStyle(topbar).paddingRight) > 24);
+  };
+  window.addEventListener('resize', markCaption);
+  markCaption();
 
   const right = el('aside', 'work-dock work-dock-right'); right.id = 'workDockRight'; right.hidden = true;
   ui(right, 'aria-label', () => t('Right panel'));

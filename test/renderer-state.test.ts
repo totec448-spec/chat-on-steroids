@@ -3,7 +3,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
   tabs: vi.fn(() => []), selectTab: vi.fn(), closeTab: vi.fn()
 }) }));
 // Native animation/media APIs are covered by pet DOM and real Electron tests.
-vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
+vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}, { toggle: () => {}, isVisible: () => false }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
@@ -23,7 +23,7 @@ function installDialog(w: any): void {
 function rowMenuItem(row: Element, action: string): HTMLButtonElement | null {
   const doc = row.ownerDocument;
   closeRowMenus(doc);
-  (row.querySelector('.row-menu-button') as HTMLButtonElement).click();
+  (row.querySelector('[data-row-menu]') as HTMLButtonElement).click();
   return doc.querySelector<HTMLButtonElement>(`.row-menu [data-row-action="${action}"]`);
 }
 /** Closes whatever row menu is open, as Escape does. */
@@ -510,7 +510,12 @@ it('starts project groups collapsed and deliberately expands the project selecte
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
   await vi.waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
-  rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!.click();
+  // A new chat is the row's own button, beside its menu, not an item inside it.
+  expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')).toBeNull();
+  const create = group().querySelector<HTMLButtonElement>('.project-heading > .project-new')!;
+  expect(create.getAttribute('aria-label')).toBe('New chat in this project');
+  expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
+  create.click();
   expect(group().open).toBe(true);
 });
 
@@ -781,8 +786,9 @@ it('searches chats in a dialog opened beside the app name: recent chats first, t
   await vi.waitFor(() => expect(dialog.open).toBe(false));
   await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
 
-  // Opened again, the last query is still there, selected, and the open chat is marked.
-  (doc.getElementById('searchMenuItem') as HTMLButtonElement).click();
+  // Opened again (from the View menu), the last query is still there, selected, and the open chat is marked.
+  (doc.getElementById('viewMenu') as HTMLButtonElement).click();
+  (doc.querySelector('.row-menu [data-row-action="search"]') as HTMLButtonElement).click();
   expect(dialog.open).toBe(true);
   await vi.waitFor(() => expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true));
 
