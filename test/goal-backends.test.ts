@@ -186,7 +186,7 @@ describe('Goal decision backends', () => {
     });
     goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'first' });
     expect((await settled(id)).stage).toBe('ready');
-    expect(browser.request.mock.calls[0]?.[2]).toEqual({ sourceSessionId: sessionId, conversationId: null, lifetime: 'temporary-planner', model: 'gpt-5.6-sol', reasoningEffort: 'high', publish: expect.any(Function) });
+    expect(browser.request.mock.calls[0]?.[2]).toEqual({ sourceSessionId: sessionId, conversationId: null, lifetime: 'temporary-planner', model: 'gpt-6-thinking', reasoningEffort: 'high', publish: expect.any(Function) });
     expect(browser.request.mock.calls[0]?.[0]).toContain('Original reference only');
     // ChatGPT offers connected apps in the helper chat too; the helper must not run them (2026-10-02).
     expect(browser.request.mock.calls[0]?.[0]).toContain('Do not call any tools, apps or connectors');
@@ -494,7 +494,7 @@ it('publishes readable partial plan stages while final validation remains author
     return raw;
   });
   expect(await goal.draftTaskPlan('Build it', 'chatgpt', progress)).toEqual(['Build the feature', 'Verify acceptance']);
-  expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ model: 'gpt-6-thinking', reasoningEffort: 'high' });
   expect(progress).toHaveBeenCalledWith({ phase: 'generating', text: '1. Build the fea' });
   expect(progress).toHaveBeenCalledWith({ phase: 'generating', text: '1. Build the feature\n\n2. Verify acceptance' });
 
