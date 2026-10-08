@@ -2024,5 +2024,16 @@
   "Fine-tune permissions": "권한 세부 설정",
   "ChatGPT can now read your folders. Ask it anything in a new chat.": "이제 ChatGPT가 폴더를 읽을 수 있습니다. 새 채팅에서 무엇이든 물어보세요.",
   "Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.": "접근 권한이 제한되어 ChatGPT가 파일을 편집하거나 명령을 실행할 수 없습니다. 마음이 바뀌면 설정의 접근 권한 단계에서 전체 접근을 고르거나 워크스페이스에서 권한을 켜세요.",
-  "Change access": "접근 권한 변경"
+  "Change access": "접근 권한 변경",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "업데이트할 때마다 무엇이 바뀌었는지 확인하고, 긴 실행은 더 차분하게 멈추고 복구됩니다.",
+  "What's new, after every update": "업데이트마다 새로운 기능",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "업데이트할 때마다 이런 짧은 요약이 한 번 표시되며, 전체 릴리스 노트 링크도 함께 제공됩니다.",
+  "Clear stops for stuck messages": "멈춘 메시지는 명확하게 중단",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "ChatGPT가 대기열의 메시지를 가져가지 않으면 앱이 세 번 시도한 뒤 알려 주고 메시지는 대기열에 그대로 둡니다.",
+  "Steadier sub-agents": "더 안정적인 하위 에이전트",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "느린 연결에서도 새 워커 탭에 더 많은 시간이 주어지며, 워커가 자신의 보내지 않은 메시지에 막히는 일도 없어졌습니다.",
+  "Your settings stay put": "설정이 그대로 유지됨",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "앱이 읽을 수 없는 설정 파일이 있어도 모든 설정이 초기화되지 않습니다. 앱이 그대로 읽거나 사본을 보관합니다.",
+  "Recovery stays on": "복구는 계속 켜짐",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "앱이 조용한 채팅의 탭을 새 채팅에 다시 사용해도 그 채팅의 자동 복구는 유지됩니다."
 }

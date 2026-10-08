@@ -6,6 +6,14 @@ export function isAstraModel(model: string | null | undefined, effort?: Reasonin
     (/^(?:gpt-?)?6(?:\.0)?$/.test(normalized) && effort === 'pro');
 }
 export type ChatModelOption = { id: string; label: string; efforts: ReasoningEffort[]; aliases?: string[] };
+/**
+ * The ChatGPT model Goal and Loop decisions run on unless Settings chose another. ChatGPT lists GPT-6
+ * as two lanes, `gpt-6` (Instant, ChatGPT's automatic lane) and `gpt-6-thinking` (Medium, High); a decision wants the thinking
+ * lane. An account without it falls back to ChatGPT's current selection (goal.ts).
+ */
+export const DEFAULT_HELPER_CHAT_MODEL = 'gpt-6-thinking';
+/** The shipped default before GPT-6; a config still holding exactly this adopts the current one (config.ts). */
+export const SUPERSEDED_HELPER_CHAT_MODELS: readonly string[] = ['gpt-5.6-sol'];
 /** Pro silence policy follows the selected provider identity, including the older generation. */
 export function isProModel(model: string | null | undefined, effort?: ReasoningEffort): boolean {
   const normalized = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');

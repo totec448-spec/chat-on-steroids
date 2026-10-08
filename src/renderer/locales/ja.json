@@ -2024,5 +2024,16 @@
   "Fine-tune permissions": "権限を細かく設定",
   "ChatGPT can now read your folders. Ask it anything in a new chat.": "ChatGPT はフォルダーを読めるようになりました。新しいチャットで何でも聞いてください。",
   "Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.": "アクセスが制限されているため、ChatGPT はファイルの編集もコマンドの実行もできません。考えが変わったら、セットアップの「アクセス」でフルアクセスを選ぶか、ワークスペースで権限をオンにしてください。",
-  "Change access": "アクセスを変更"
+  "Change access": "アクセスを変更",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "アップデートのたびに変更点を確認でき、長時間の実行はより落ち着いて停止・復旧します。",
+  "What's new, after every update": "アップデートごとの新機能",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "アップデートのたびに、このような短い概要が一度だけ表示され、詳しいリリースノートへのリンクも付きます。",
+  "Clear stops for stuck messages": "止まったメッセージをはっきり停止",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "キュー内のメッセージを ChatGPT が受け取らない場合、アプリは 3 回試してからお知らせし、メッセージはキューに残します。",
+  "Steadier sub-agents": "より安定したサブエージェント",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "遅い接続でも新しいワーカーのタブにより長い時間が与えられ、ワーカーが自分の未送信メッセージで止まることもなくなりました。",
+  "Your settings stay put": "設定が消えない",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "アプリが読めない設定ファイルがあってもすべてがリセットされることはありません。そのまま読み込むか、コピーを残します。",
+  "Recovery stays on": "復旧は有効のまま",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "アプリが静かなチャットのタブを新しいチャットに再利用しても、そのチャットの自動復旧は有効のままです。"
 }

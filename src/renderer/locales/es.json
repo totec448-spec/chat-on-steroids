@@ -2024,5 +2024,16 @@
   "Fine-tune permissions": "Ajustar permisos",
   "ChatGPT can now read your folders. Ask it anything in a new chat.": "ChatGPT ya puede leer tus carpetas. Pregúntale lo que quieras en un chat nuevo.",
   "Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.": "El acceso está limitado, así que ChatGPT no puede editar archivos ni ejecutar comandos. Si cambias de opinión, elige Acceso completo en el paso Acceso de la configuración o activa los permisos en Espacio de trabajo.",
-  "Change access": "Cambiar acceso"
+  "Change access": "Cambiar acceso",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "Mira qué cambió tras cada actualización, y las sesiones largas se detienen y se recuperan con más calma.",
+  "What's new, after every update": "Novedades tras cada actualización",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "Tras cada actualización aparece una vez un resumen breve como este, con un enlace a las notas completas.",
+  "Clear stops for stuck messages": "Paradas claras para mensajes atascados",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "Si ChatGPT nunca recoge un mensaje en cola, la app lo intenta tres veces, te avisa y lo mantiene en la cola.",
+  "Steadier sub-agents": "Subagentes más estables",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "Las pestañas nuevas de los workers tienen más tiempo con conexiones lentas, y un worker ya no se queda atascado tras su propio mensaje sin enviar.",
+  "Your settings stay put": "Tus ajustes se mantienen",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Un archivo de ajustes que la app no puede leer ya no lo restablece todo: la app lo lee igualmente o guarda una copia.",
+  "Recovery stays on": "La recuperación sigue activa",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Cuando la app reutiliza la pestaña de un chat inactivo para un chat nuevo, ese chat conserva su recuperación automática."
 }

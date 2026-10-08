@@ -690,7 +690,7 @@ describe('shipped defaults', () => {
 describe('the goal loop settings', () => {
   it('keeps helper settings independent from the API and preserves a chosen idle tab budget', async () => {
     const config = defaultConfig();
-    expect(config.goal).toMatchObject({ helperModel: 'gpt-5.6-sol', helperReasoning: 'high', model: DEFAULT_GOAL_MODEL });
+    expect(config.goal).toMatchObject({ helperModel: 'gpt-6-thinking', helperReasoning: 'high', model: DEFAULT_GOAL_MODEL });
     await saveConfig({ ...config, ui: { ...config.ui, tabsToKeepOpen: 7 }, goal: {
       ...config.goal, model: 'provider/api-model', reasoning: 'low', helperModel: 'account-browser-model', helperReasoning: 'medium'
     } });
@@ -709,6 +709,14 @@ describe('the goal loop settings', () => {
     // both editable instructions on disk and the settings screen has something to paint.
     expect(config.goal.objectivePrompt).toContain('Your job is to prompt ChatGPT');
     expect(config.goal.objectivePrompt).toContain('Read it together with the original task');
+  });
+
+  it('moves the exact superseded helper model to GPT-6 Thinking and keeps any other choice', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, helperModel: 'gpt-5.6-sol', helperReasoning: 'medium' } });
+    // GPT-5.6 Sol is no longer in ChatGPT's catalog; the untouched shipped value adopts the current default.
+    expect((await loadConfig()).goal).toMatchObject({ helperModel: 'gpt-6-thinking', helperReasoning: 'medium' });
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, helperModel: 'gpt-5-6-thinking' } });
+    expect((await loadConfig()).goal.helperModel).toBe('gpt-5-6-thinking');
   });
 
   it('keeps the model, reasoning level and system prompt that were chosen', async () => {
@@ -733,7 +741,7 @@ describe('the goal loop settings', () => {
       loopBackend: 'chatgpt',
       includeToolCalls: false,
       impulseMinutes: 0,
-      helperModel: 'gpt-5.6-sol',
+      helperModel: 'gpt-6-thinking',
       helperReasoning: 'high',
       enabled: true,
       mode: 'loop',
@@ -880,7 +888,7 @@ describe('the goal loop settings', () => {
       loopBackend: 'chatgpt',
       includeToolCalls: false,
       impulseMinutes: 0,
-      helperModel: 'gpt-5.6-sol',
+      helperModel: 'gpt-6-thinking',
       helperReasoning: 'high',
       enabled: false,
       mode: 'goal',

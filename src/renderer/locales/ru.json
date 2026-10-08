@@ -2024,5 +2024,16 @@
   "Fine-tune permissions": "Настроить разрешения",
   "ChatGPT can now read your folders. Ask it anything in a new chat.": "Теперь ChatGPT может читать ваши папки. Задайте любой вопрос в новом чате.",
   "Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.": "Доступ ограничен: ChatGPT не может изменять файлы и выполнять команды. Если передумаете, выберите «Полный доступ» на шаге «Доступ» в настройке или включите разрешения в разделе «Рабочее пространство».",
-  "Change access": "Изменить доступ"
+  "Change access": "Изменить доступ",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "Смотрите, что изменилось после каждого обновления, а долгие запуски останавливаются и восстанавливаются спокойнее.",
+  "What's new, after every update": "Что нового после каждого обновления",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "После каждого обновления один раз показывается такая краткая сводка со ссылкой на полные заметки.",
+  "Clear stops for stuck messages": "Понятная остановка для зависших сообщений",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "Если ChatGPT так и не забирает сообщение из очереди, приложение пробует трижды, сообщает вам и оставляет его в очереди.",
+  "Steadier sub-agents": "Более стабильные субагенты",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "Новые вкладки воркеров получают больше времени при медленном соединении, а воркер больше не застревает из‑за своего неотправленного сообщения.",
+  "Your settings stay put": "Настройки сохраняются",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Файл настроек, который приложение не может прочитать, больше не сбрасывает всё: приложение всё равно читает его или сохраняет копию.",
+  "Recovery stays on": "Восстановление остаётся включённым",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Когда приложение использует вкладку тихого чата для нового чата, этот чат сохраняет автоматическое восстановление."
 }
