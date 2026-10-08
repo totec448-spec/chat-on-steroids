@@ -6,7 +6,7 @@ let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
 function setup() {
-  dom = new JSDOM('<div class="app"><header><span class="state"></span></header><main data-panel="chat"><article class="is-session"></article></main></div>', { pretendToBeVisual: true });
+  dom = new JSDOM('<div class="app"><div class="app-topbar"></div><main data-panel="chat"><article class="is-session"><header class="chat-head"><span class="state"></span></header></article></main></div>', { pretendToBeVisual: true });
   Object.assign(globalThis, { document: dom.window.document, window: dom.window });
   const host = document.querySelector<HTMLElement>('main')!;
   return { host, docks: createWorkspaceDocks(host) };
@@ -16,6 +16,9 @@ it('orders expansion, bottom and right controls; toggles panels and shows expans
   const { host } = setup();
   const controls = [...document.querySelectorAll<HTMLButtonElement>('.header-dock-controls > button')];
   expect(controls.map(button => button.id)).toEqual(['rightDockExpand', 'terminalToggle', 'rightDockToggle']);
+  // In the title bar, not in the chat header.
+  expect(document.querySelector('.app-topbar > .header-dock-controls')).not.toBeNull();
+  expect(document.querySelector('header .header-dock-controls')).toBeNull();
   const right = document.getElementById('workDockRight')!, bottom = document.getElementById('workDockBottom')!;
   expect(controls[0]!.hidden).toBe(true);
   controls[1]!.click(); expect(bottom.hidden).toBe(false);
