@@ -23,7 +23,7 @@ function installDialog(w: any): void {
 function rowMenuItem(row: Element, action: string): HTMLButtonElement | null {
   const doc = row.ownerDocument;
   closeRowMenus(doc);
-  (row.querySelector('.row-menu-button') as HTMLButtonElement).click();
+  (row.querySelector('[data-row-menu]') as HTMLButtonElement).click();
   return doc.querySelector<HTMLButtonElement>(`.row-menu [data-row-action="${action}"]`);
 }
 /** Closes whatever row menu is open, as Escape does. */
@@ -510,7 +510,12 @@ it('starts project groups collapsed and deliberately expands the project selecte
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
   await vi.waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
-  rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!.click();
+  // A new chat is the row's own button, beside its menu, not an item inside it.
+  expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')).toBeNull();
+  const create = group().querySelector<HTMLButtonElement>('.project-heading > .project-new')!;
+  expect(create.getAttribute('aria-label')).toBe('New chat in this project');
+  expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
+  create.click();
   expect(group().open).toBe(true);
 });
 
