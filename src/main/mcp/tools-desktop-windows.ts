@@ -5,6 +5,13 @@ import { createWindowsComputerApi, parseWindowsKeyChord, WINDOWS_API_METHODS, WI
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { currentCall, noteCount } from './call-context.js';
 import { getConfig } from '../config.js';
+import {
+  admitDesktopControl,
+  desktopControlGuardEnabled,
+  desktopControlOutcomeForError,
+  finishDesktopControlGuard,
+  type DesktopControlAdmission
+} from '../desktop-control-guard.js';
 import { requestCorrelation } from '../session/correlation.js';
 import { fail, type SurfaceRegistrar, type ToolContent, type ToolResult } from './kernel.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
@@ -184,9 +191,18 @@ export function registerWindowsDesktopTools(reg: SurfaceRegistrar): void {
       }
       const api = apiForCaller(method);
       const invoke = api[method] as (args: unknown) => Promise<unknown>;
+      let admission: DesktopControlAdmission | null = null;
+      if (!read && desktopControlGuardEnabled()) {
+        admission = await admitDesktopControl(method);
+        if (!admission.allowed) return fail(admission.reason);
+      }
       let value: unknown;
-      try { value = await invoke(input); }
+      try {
+        value = await invoke(input);
+        finishDesktopControlGuard(admission, 'success');
+      }
       catch (error) {
+        finishDesktopControlGuard(admission, desktopControlOutcomeForError(error));
         const failure = nativeFailure(error);
         if (failure) return failure;
         throw error;

@@ -104,6 +104,10 @@ import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
+import {
+  setDesktopControlGuardPresenter,
+} from './desktop-control-guard.js';
+import { createDesktopControlGuardPresenter } from './desktop-control-notice.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -307,6 +311,7 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   notice.show();
   return true;
 });
+setDesktopControlGuardPresenter(createDesktopControlGuardPresenter(() => quitting));
 setConnectionLossNotifier(surface => showConnectionLossNotice(surface, {
   isQuitting: () => quitting,
   isFocused: () => window?.isFocused() ?? false,

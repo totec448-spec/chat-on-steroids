@@ -2003,5 +2003,15 @@
   "Know when ChatGPT is waiting": "ChatGPT が待っているときにわかる",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "ChatGPT がツールの許可を求めると、止まったままにせずチャットがお知らせします。",
   "One connection control": "ひとつの接続コントロール",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "サイドバーの小さなカプセルが接続を表示し、切断されるとお知らせします。"
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "サイドバーの小さなカプセルが接続を表示し、切断されるとお知らせします。",
+  "Stay aware before an agent uses your mouse or keyboard.": "エージェントがマウスやキーボードを使用する前に通知します。",
+  "Warn before desktop control": "デスクトップ操作の前に警告",
+  "Wait 10 seconds before native mouse, keyboard or focus input. Start immediately or stop that caller from the notice.": "ネイティブのマウス、キーボード、またはフォーカス操作の前に10秒待機します。通知からすぐに開始するか、その呼び出し元を停止できます。",
+  "{0} is about to control your desktop.": "{0} がデスクトップを操作しようとしています。",
+  "Starting automatically in {0} seconds.": "{0}秒後に自動的に開始します。",
+  "Starting automatically in 1 second.": "1秒後に自動的に開始します。",
+  "Start now": "今すぐ開始",
+  "Desktop control stopped": "デスクトップ操作を停止しました",
+  "{0} cannot send desktop input until you allow it again.": "再び許可するまで、{0} はデスクトップ入力を送信できません。",
+  "Allow again": "再び許可"
 }

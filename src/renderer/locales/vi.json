@@ -2003,5 +2003,15 @@
   "Know when ChatGPT is waiting": "Biết khi ChatGPT đang chờ",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Khi ChatGPT yêu cầu bạn cho phép một công cụ, cuộc trò chuyện sẽ báo cho bạn thay vì đứng yên.",
   "One connection control": "Một nút điều khiển kết nối",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Một viên nang nhỏ ở thanh bên hiển thị kết nối và báo cho bạn nếu bị mất."
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Một viên nang nhỏ ở thanh bên hiển thị kết nối và báo cho bạn nếu bị mất.",
+  "Stay aware before an agent uses your mouse or keyboard.": "Luôn được thông báo trước khi tác nhân dùng chuột hoặc bàn phím.",
+  "Warn before desktop control": "Cảnh báo trước khi điều khiển máy tính",
+  "Wait 10 seconds before native mouse, keyboard or focus input. Start immediately or stop that caller from the notice.": "Chờ 10 giây trước khi nhập chuột, bàn phím hoặc thay đổi tiêu điểm ở cấp hệ thống. Bắt đầu ngay hoặc dừng bên gọi đó từ thông báo.",
+  "{0} is about to control your desktop.": "{0} sắp điều khiển máy tính của bạn.",
+  "Starting automatically in {0} seconds.": "Tự động bắt đầu sau {0} giây.",
+  "Starting automatically in 1 second.": "Tự động bắt đầu sau 1 giây.",
+  "Start now": "Bắt đầu ngay",
+  "Desktop control stopped": "Đã dừng điều khiển máy tính",
+  "{0} cannot send desktop input until you allow it again.": "{0} không thể gửi thao tác nhập trên máy tính cho đến khi bạn cho phép lại.",
+  "Allow again": "Cho phép lại"
 }

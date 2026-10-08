@@ -2003,5 +2003,15 @@
   "Know when ChatGPT is waiting": "ChatGPT beklediğinde haberin olsun",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "ChatGPT bir araca izin vermeni istediğinde sohbet olduğu yerde durmak yerine sana söyler.",
   "One connection control": "Tek bağlantı kontrolü",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Kenar çubuğundaki küçük bir kapsül bağlantıyı gösterir ve koparsa haber verir."
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Kenar çubuğundaki küçük bir kapsül bağlantıyı gösterir ve koparsa haber verir.",
+  "Stay aware before an agent uses your mouse or keyboard.": "Bir aracı fareyi veya klavyeyi kullanmadan önce haberdar olun.",
+  "Warn before desktop control": "Masaüstü kontrolünden önce uyar",
+  "Wait 10 seconds before native mouse, keyboard or focus input. Start immediately or stop that caller from the notice.": "Yerel fare, klavye veya odak girdisinden önce 10 saniye bekleyin. Bildirimden hemen başlatın veya bu çağıranı durdurun.",
+  "{0} is about to control your desktop.": "{0} masaüstünüzü kontrol etmek üzere.",
+  "Starting automatically in {0} seconds.": "{0} saniye içinde otomatik olarak başlayacak.",
+  "Starting automatically in 1 second.": "1 saniye içinde otomatik olarak başlayacak.",
+  "Start now": "Şimdi başlat",
+  "Desktop control stopped": "Masaüstü kontrolü durduruldu",
+  "{0} cannot send desktop input until you allow it again.": "Siz yeniden izin verene kadar {0} masaüstü girdisi gönderemez.",
+  "Allow again": "Yeniden izin ver"
 }

@@ -2003,5 +2003,15 @@
   "Know when ChatGPT is waiting": "知道 ChatGPT 何時在等你",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "當 ChatGPT 請你允許某個工具時，聊天會告訴你，而不是停在那裡。",
   "One connection control": "一個連線控制項",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "側邊欄中的小膠囊顯示連線狀態，並在中斷時提醒你。"
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "側邊欄中的小膠囊顯示連線狀態，並在中斷時提醒你。",
+  "Stay aware before an agent uses your mouse or keyboard.": "在代理使用滑鼠或鍵盤之前提醒你。",
+  "Warn before desktop control": "桌面控制前提醒",
+  "Wait 10 seconds before native mouse, keyboard or focus input. Start immediately or stop that caller from the notice.": "在原生滑鼠、鍵盤或焦點輸入前等待 10 秒。可從通知中立即開始，或停止該呼叫端。",
+  "{0} is about to control your desktop.": "{0} 即將控制你的桌面。",
+  "Starting automatically in {0} seconds.": "將在 {0} 秒後自動開始。",
+  "Starting automatically in 1 second.": "將在 1 秒後自動開始。",
+  "Start now": "立即開始",
+  "Desktop control stopped": "桌面控制已停止",
+  "{0} cannot send desktop input until you allow it again.": "在你再次允許之前，{0} 無法傳送桌面輸入。",
+  "Allow again": "再次允許"
 }

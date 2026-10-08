@@ -6,6 +6,17 @@ const native = vi.hoisted(() => ({
   act: vi.fn(), getWindowState: vi.fn(), call: null as any, apis: [] as any[],
   allowUnattributed: false, correlations: new Map<string, { sessionId: string }>()
 }));
+const desktopGuard = vi.hoisted(() => ({
+  enabled: false,
+  admit: vi.fn(async (_operation: string): Promise<any> => ({ allowed: true, request: { ownerKey: 'test' } })),
+  finish: vi.fn()
+}));
+vi.mock('../src/main/desktop-control-guard.js', () => ({
+  desktopControlGuardEnabled: () => desktopGuard.enabled,
+  admitDesktopControl: desktopGuard.admit,
+  finishDesktopControlGuard: desktopGuard.finish,
+  desktopControlOutcomeForError: () => 'failure'
+}));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ multiAgent: { allowUnattributedCalls: native.allowUnattributed } }) }));
 vi.mock('../src/main/session/correlation.js', () => ({
   requestCorrelation: (requestId: string) => native.correlations.get(requestId) ?? null,
@@ -39,6 +50,8 @@ const window = { app: 'fixture.exe', id: 71 };
 let principalSequence = 0;
 beforeEach(() => {
   vi.clearAllMocks(); native.apis.length = 0; native.correlations.clear(); native.allowUnattributed = false;
+  desktopGuard.enabled = false;
+  desktopGuard.admit.mockResolvedValue({ allowed: true, request: { ownerKey: 'test' } });
   native.call = { caller: { sessionId: `test-${++principalSequence}` } };
 });
 
@@ -65,6 +78,43 @@ describe('Windows Desktop public registrar', () => {
     api.caps.control = false;
     expect((await api.call('launch_app', { app: 'fixture.exe' })).isError).toBe(true);
     expect(native.apis).toHaveLength(0);
+  });
+
+  it('keeps Guard off on the legacy path, bypasses reads, and admits every Window2 input method when enabled', async () => {
+    const api = surface();
+    await api.call('launch_app', { app: 'fixture.exe' });
+    expect(desktopGuard.admit).not.toHaveBeenCalled();
+
+    desktopGuard.enabled = true;
+    await api.call('list_windows');
+    expect(desktopGuard.admit).not.toHaveBeenCalled();
+
+    const inputs: Array<[string, any]> = [
+      ['launch_app', { app: 'fixture.exe' }],
+      ['click', { window, element_index: 0 }],
+      ['press_key', { window, key: 'Control_L+s' }],
+      ['type_text', { window, text: 'hello' }],
+      ['scroll', { window, x: 1, y: 1, scrollX: 0, scrollY: 120 }],
+      ['set_value', { window, element_index: 0, value: 'hello' }],
+      ['drag', { window, from_x: 1, from_y: 1, to_x: 2, to_y: 2 }],
+      ['perform_secondary_action', { window, element_index: 0, action: 'Invoke' }],
+      ['activate_window', { window }]
+    ];
+    for (const [method, args] of inputs) await api.call(method, args);
+
+    expect(desktopGuard.admit.mock.calls.map(([method]) => method)).toEqual(inputs.map(([method]) => method));
+  });
+
+  it('runs no Windows native input when Guard refuses admission', async () => {
+    desktopGuard.enabled = true;
+    desktopGuard.admit.mockResolvedValueOnce({ allowed: false, reason: 'DESKTOP_GUARD_STOPPED: test refusal' });
+    const api = surface();
+
+    const result = await api.call('launch_app', { app: 'fixture.exe' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('DESKTOP_GUARD_STOPPED');
+    expect(native.apis[0].launch_app).not.toHaveBeenCalled();
   });
 
   it('keeps exact caller state across request registrars and never lends indexes to another caller', async () => {
