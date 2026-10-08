@@ -2024,5 +2024,16 @@
   "Fine-tune permissions": "微调权限",
   "ChatGPT can now read your folders. Ask it anything in a new chat.": "ChatGPT 现在可以读取你的文件夹。在新聊天中随意提问吧。",
   "Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.": "访问权限受限，ChatGPT 无法编辑文件或运行命令。如果你改变主意，请在设置的“访问权限”步骤中选择“完全访问”，或在“工作区”中开启权限。",
-  "Change access": "更改访问权限"
+  "Change access": "更改访问权限",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "每次更新后都能看到变化，长时间运行的停止和恢复也更平稳。",
+  "What's new, after every update": "每次更新后的新功能",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "每次更新后都会显示一次这样的简短摘要，并附有完整发布说明的链接。",
+  "Clear stops for stuck messages": "卡住的消息会明确停止",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "如果 ChatGPT 一直没有取走排队的消息，应用会尝试三次，然后告诉你，并保留这条排队消息。",
+  "Steadier sub-agents": "更稳定的子智能体",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "网络较慢时，新的工作者标签页有更多时间，工作者也不会再被自己未发送的消息卡住。",
+  "Your settings stay put": "设置不会丢失",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "应用无法读取的设置文件不再导致全部重置：应用会照常读取，或保留一份副本。",
+  "Recovery stays on": "恢复保持开启",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "当应用把一个空闲对话的标签页用于新对话时，该对话仍保留自动恢复。"
 }

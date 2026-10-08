@@ -2024,5 +2024,16 @@
   "Fine-tune permissions": "İzinlerde ince ayar",
   "ChatGPT can now read your folders. Ask it anything in a new chat.": "ChatGPT artık klasörlerinizi okuyabilir. Yeni bir sohbette istediğinizi sorun.",
   "Access is limited, so ChatGPT can't edit files or run commands. If you change your mind, choose Full access in Setup's Access step, or turn permissions on in Workspace.": "Erişim sınırlı, bu yüzden ChatGPT dosya düzenleyemez ve komut çalıştıramaz. Fikrinizi değiştirirseniz Kurulum'daki Erişim adımında Tam erişim'i seçin ya da izinleri Çalışma alanı'nda açın.",
-  "Change access": "Erişimi değiştir"
+  "Change access": "Erişimi değiştir",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "Her güncellemeden sonra nelerin değiştiğini görün; uzun çalışmalar daha sakin durur ve toparlanır.",
+  "What's new, after every update": "Her güncellemeden sonra yenilikler",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "Her güncellemeden sonra bunun gibi kısa bir özet bir kez gösterilir ve tam notlara bir bağlantı içerir.",
+  "Clear stops for stuck messages": "Takılan mesajlar için net durdurma",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "ChatGPT sıradaki bir mesajı hiç almazsa uygulama üç kez dener, sonra size bildirir ve mesajı sırada tutar.",
+  "Steadier sub-agents": "Daha kararlı alt ajanlar",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "Yeni worker sekmeleri yavaş bağlantılarda daha fazla süre alır ve bir worker artık kendi gönderilmemiş mesajının arkasında takılı kalmaz.",
+  "Your settings stay put": "Ayarlarınız yerinde kalır",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Uygulamanın okuyamadığı bir ayar dosyası artık her şeyi sıfırlamaz: uygulama onu yine de okur ya da bir kopyasını saklar.",
+  "Recovery stays on": "Kurtarma açık kalır",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Uygulama sessiz bir sohbetin sekmesini yeni bir sohbet için kullandığında, o sohbetin otomatik kurtarması açık kalır."
 }
