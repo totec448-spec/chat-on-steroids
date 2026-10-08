@@ -150,7 +150,10 @@ it('emits valid native images and rejects malformed or remote image payloads', a
 it('stops new admission on timeout while an accepted tool finishes under its own owner', async () => {
   let resolve!: (value: ToolResult) => void;
   const invoke = vi.fn(() => new Promise<ToolResult>(done => { resolve = done; }));
-  const output = await runCodeMode('text("retained"); await tools.lookup({}); await tools.lookup({});', tools, invoke, { ...limits, wallMs: 500 });
+  // Include enough wall time for a cold QuickJS worker to start under a loaded test run.
+  // The timeout must happen after the first call is admitted so this assertion covers
+  // the still-pending owner path, rather than racing worker startup.
+  const output = await runCodeMode('text("retained"); await tools.lookup({}); await tools.lookup({});', tools, invoke, { ...limits, wallMs: 5_000 });
   expect(rendered(output)).toContain('TIME_LIMIT');
   expect(output.content.slice(0, 2)).toEqual([
     { type: 'text', text: expect.stringContaining('CODE_MODE_TIME_LIMIT') },
@@ -161,7 +164,7 @@ it('stops new admission on timeout while an accepted tool finishes under its own
   resolve(result('late private value'));
   await new Promise(done => setImmediate(done));
   expect(invoke).toHaveBeenCalledTimes(1);
-});
+}, 10_000);
 
 it('keeps output-limit diagnostics ahead of a full 40000-byte preview and preserves dispatched effects', async () => {
   for (const priorCall of [false, true]) {
