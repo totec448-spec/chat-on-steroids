@@ -202,7 +202,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
-| Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
+| Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6-thinking` High (`DEFAULT_HELPER_CHAT_MODEL`); a config holding the superseded `gpt-5.6-sol` adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Ordinary new-chat model | Automatic: no persisted model or reasoning override. | Optional `ui.defaultChatModel` / `ui.defaultChatReasoning` apply only to a fresh ordinary chat before it has a conversation selection. A recorded conversation or accepted opening input wins. Worker and Goal/Loop/Plan defaults remain separate. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
@@ -2099,11 +2099,12 @@ fresh New Chat scope with no per-conversation selection. Once a conversation or 
 input records a model/effort, that exact selection takes precedence. `multiAgent.default*` and
 `goal.helper*` continue to own worker and Goal/Loop/Plan helper defaults independently.
 
-Model names and recovery policy checked against native picker metadata on **2026-09-17**:
+Model names and recovery policy checked against native picker metadata on **2026-09-17**; GPT-6 lanes observed on **2026-10-07**:
 
 | Display family / compatible short name | Execution identity / selected effort | Silence refresh |
 | --- | --- | --- |
-| GPT-5.6 Sol / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-thinking`; Instant/Medium/High | 2 minutes, then 1 minute listening after confirmed refresh |
+| GPT-6 / 6 | `gpt-6` (Instant: ChatGPT's automatic lane, which decides per answer whether to reason), `gpt-6-thinking` (Medium/High) | 2 minutes, then 1 minute listening |
+| GPT-5.6 Sol / GPT-5.6 / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-instant`, `gpt-5-6-thinking`; Instant/Medium/High | 2 minutes, then 1 minute listening after confirmed refresh |
 | GPT-5.5 / 5.5 | `gpt-5-5-instant`, `gpt-5-5-thinking`; non-Pro efforts up to High | 2 minutes, then 1 minute listening |
 | Any non-Pro family at Extra high / Max / Ultra | selected `xhigh`, `max` or `ultra` effort | 20 minutes (Thinking failed: 2), then 1 minute listening |
 | GPT-5.6 Pro / 5.6 Pro; GPT-5.5 Pro / 5.5 Pro | `gpt-5-6-pro`, `gpt-5-5-pro`, or an explicitly selected `pro` effort | 10 minutes |
@@ -2138,6 +2139,16 @@ The alternate shell uses an id-less editable textbox under `form[data-chatgpt-co
 `data-model-picker-view` for its portal. Its evaluated `powerSelections`, current selection and
 version options normalize into the same bounded picker snapshot. Mixed-version powers retain
 their execution ids rather than merging unrelated models into a synthetic Latest family.
+Within one version, lanes under one name with distinct efforts (GPT-6's `gpt-6` Instant and
+`gpt-6-thinking` Medium/High) form one family keyed by their shared slug prefix, with each lane
+as an alias, so the composer offers Instant, Medium and High together and each effort still
+selects its own lane. A colliding effort keeps the lanes apart. A name given by number alone
+reads in full (5.6 is GPT-5.6), as in the September picker.
+GPT-6's Instant position is ChatGPT's automatic lane, not a fixed model (observed 2026-10-08): the
+picker sends `gpt-6` ("chooses how long to think"), and ChatGPT's server answers with `gpt-6` or
+switches to `gpt-6-thinking` without an effort, as it judges each request. The account also lists
+a fixed `gpt-6-instant` ("immediate answers"), but no picker view offers it and `?model=` does not
+select it; the app offers exactly what the native picker offers and never substitutes a hidden slug.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
 The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
@@ -3707,9 +3718,16 @@ The bottom dock has no generic shortcut screen or second tool tab strip; Termina
 tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
 Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
 does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
-dock. The top-right control group orders right expansion (shown only while right is open),
-bottom, then right; the latter two buttons toggle their panels. There is no separate right-dock
-close button. Layout controls grant no new file, terminal or worker authority.
+dock. The layout control group sits at the right end of the title bar (`.app-topbar`) and orders
+right expansion (shown only while right is open), bottom, then right; the latter two buttons toggle
+their panels. Where the system's caption buttons share that end (Windows), the bar's resolved right
+padding marks the group `.is-beside-caption` and a divider separates the two. There is no separate
+right-dock close button. Layout controls grant no new file, terminal or worker authority.
+The chat's header (title, project, Install update) is the first row of the chat column
+(`.chat-head` in `.card.is-session`), not a row above the workspace, so the right dock runs from
+the title bar to the bottom with one unbroken edge and needs no compensation. Expanded, the dock
+covers the column, header included, and takes the sidebar's rounded corner while it rests there
+or moves to or from it.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
 Each worker is one plain row, not a boxed card: its tinted identity avatar carries the state (a
@@ -4026,8 +4044,12 @@ is missing; in every other state a click opens the popover, and a right click al
 confirmed connection pulses the dot once as the capsule closes; state changes are announced
 politely (`#connectionAnnounce`). Reduced
 motion drops the transitions; a sidebar narrower than 200px keeps the dot alone. Setup stays
-reachable from Settings and from the capsule when configuration is incomplete. The View menu has its own foreground
-stacking layer; Appearance rows align controls at a shared minimum height and Setup uses a stable
+reachable from Settings and from the capsule when configuration is incomplete. The View menu is
+one icon button (≡) in the title bar opening the row menus' menu (`row-menu.ts`, `view-menu.ts`):
+each action with its icon and this keyboard's shortcut (not the sidebar toggle, which sits beside it), a
+pets label that says what it will do (Show/Hide pets), zoom steps that keep it open with Actual size's value updating
+(a zoom's resize repositions it instead of closing it), and Show browser (the CoS browser) only while the
+built-in browser is the ChatGPT browser. Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
 authority-bearing `/status` response. One pending diagnostic page read is shared; current
