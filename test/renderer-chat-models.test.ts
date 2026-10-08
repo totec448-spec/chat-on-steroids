@@ -429,7 +429,7 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   dom = new JSDOM('<span id="composerModelLabel"></span><p id="chatModelStatus"></p>' +
     ['composerModel', 'composerReasoning', 'workerModel', 'workerReasoning', 'helperModel', 'helperReasoning'].map(id => `<select id="${id}"><option value="">Default</option></select>`).join(''));
   const observed = { state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [
-    { id: 'first', label: 'GPT-5.6 Sol', efforts: ['high'] }, { id: 'second', label: 'GPT-6', efforts: ['medium'] }
+    { id: 'first', label: 'GPT-5.6 Sol', efforts: ['high'] }, { id: 'gpt-6-thinking', label: 'GPT-6', efforts: ['medium'] }
   ] };
   Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: observed }) } });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -447,17 +447,18 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   expect(dom.window.document.getElementById('workerModelVerification')!.title)
     .toBe("This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.");
   expect(dom.window.document.getElementById('helperModelVerification')!.hasAttribute('hidden')).toBe(true);
-  expect(select('helperModel').value).toBe('first');
+  // The built-in helper default is ChatGPT's GPT-6 thinking lane.
+  expect(select('helperModel').value).toBe('gpt-6-thinking');
   // Selects without the badge still say so in the option itself.
   applyChatModels({ multiAgent: { defaultModel: 'unseen', defaultReasoning: 'high' }, goal: { helperModel: 'first', helperReasoning: 'ultra' } } as Config);
   await Promise.resolve();
   expect(select('helperReasoning').value).toBe('ultra');
   expect(select('helperReasoning').selectedOptions[0]!.textContent).toBe('ultra · not verified');
-  expect([...select('composerModel').options].map(row => row.value)).toEqual(['first', 'second']);
+  expect([...select('composerModel').options].map(row => row.value)).toEqual(['first', 'gpt-6-thinking']);
   select('composerModel').value = 'first'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
   expect([...select('composerReasoning').options].map(row => row.value)).toEqual(['high']);
   select('composerReasoning').value = 'high';
-  select('composerModel').value = 'second'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
+  select('composerModel').value = 'gpt-6-thinking'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
   expect(select('composerReasoning').value).toBe('medium');
   expect([...select('composerReasoning').options].map(row => row.value)).toEqual(['medium']);
 });

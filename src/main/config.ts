@@ -1,3 +1,4 @@
+import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -146,7 +147,7 @@ const DEFAULT_GOAL: GoalSettings = {
   loopBackend: 'chatgpt',
   impulseMinutes: 0,
   includeToolCalls: false,
-  helperModel: 'gpt-5.6-sol',
+  helperModel: DEFAULT_HELPER_CHAT_MODEL,
   helperReasoning: 'high',
   enabled: false,
   // The mode a fresh install runs the moment somebody flips the switch. Goal, because it is
@@ -432,7 +433,7 @@ const configSchema = z.object({
       enabled: z.boolean().optional().default(DEFAULT_GOAL.enabled),
       backend: z.enum(['api', 'chatgpt', 'templates']).optional().default('chatgpt'),
       loopBackend: z.enum(['api', 'chatgpt']).optional().default('chatgpt'),
-      helperModel: z.string().trim().min(1).max(80).optional().default('gpt-5.6-sol').catch('gpt-5.6-sol'),
+      helperModel: z.string().trim().min(1).max(80).optional().default(DEFAULT_HELPER_CHAT_MODEL).catch(DEFAULT_HELPER_CHAT_MODEL),
       helperReasoning: z.enum(REASONING_EFFORTS).optional().default('high').catch('high'),
       // Repaired rather than rejected for the same reason `reasoning` below is: a config
       // written by a version that knows one more mode than this one must not send every root
@@ -499,7 +500,7 @@ const configSchema = z.object({
         .catch(DEFAULT_GOAL.loopPrompt)
     })
     .optional()
-    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: 'gpt-5.6-sol', helperReasoning: 'high' }),
+    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: DEFAULT_HELPER_CHAT_MODEL, helperReasoning: 'high' }),
   mcp: z
     .object({
       // Repaired rather than rejected, like the Goal prompts above: this is free text a person
@@ -604,6 +605,9 @@ function adoptCurrentGoalPrompt(config: Config): Config {
   if (SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS.includes(goal.loopPrompt)) {
     goal.loopPrompt = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
   }
+  // The same fence for the helper model: only the exact shipped value moves. GPT-5.6 Sol is no longer
+  // in ChatGPT's catalog, so a config still holding it fell back to ChatGPT's selection on every decision.
+  if (goal.helperModel && SUPERSEDED_HELPER_CHAT_MODELS.includes(goal.helperModel)) goal.helperModel = DEFAULT_HELPER_CHAT_MODEL;
   return { ...config, goal };
 }
 
