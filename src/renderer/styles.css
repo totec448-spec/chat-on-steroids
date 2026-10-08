@@ -4391,6 +4391,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .activity-workers .ico { --ico: 14px; --glyph: 14px; }
 .activity-workers:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, var(--hover)); }
 .activity-workers:focus-visible { outline: 2px solid var(--accent-edge); outline-offset: 1px; }
+/* An open round lists its workers' calls itself. */
+.tool-group[open] > summary > .activity-workers { display: none; }
 @media (prefers-reduced-motion: reduce) { .activity-workers { transition: none; } }
 
 /*

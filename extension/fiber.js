@@ -1921,7 +1921,7 @@
     return { events, notifications: [] };
   }
   /** A reply that is nothing but content references to other messages. */
-  const ONLY_CONTENT_REFERENCES = /^(?:\s*::chatgpt-content-reference\{[^}\n]*\}\s*)+$/;
+  const ONLY_CONTENT_REFERENCES = /^\s*(?:::chatgpt-content-reference\{[^}\n]*\}\s*)+$/;
   /**
    * The Markdown a shell item says. ChatGPT's newer renderer (DIL, GPT-6 on 2026-10-08) leaves
    * only `::chatgpt-content-reference{…}` in `content` and keeps the reply itself as
