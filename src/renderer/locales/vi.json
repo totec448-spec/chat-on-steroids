@@ -2003,5 +2003,16 @@
   "Know when ChatGPT is waiting": "Biết khi ChatGPT đang chờ",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Khi ChatGPT yêu cầu bạn cho phép một công cụ, cuộc trò chuyện sẽ báo cho bạn thay vì đứng yên.",
   "One connection control": "Một nút điều khiển kết nối",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Một viên nang nhỏ ở thanh bên hiển thị kết nối và báo cho bạn nếu bị mất."
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Một viên nang nhỏ ở thanh bên hiển thị kết nối và báo cho bạn nếu bị mất.",
+  "See what changed after each update, and long runs that stop and recover more calmly.": "Xem những gì đã thay đổi sau mỗi lần cập nhật, và các phiên chạy dài dừng lại và khôi phục êm hơn.",
+  "What's new, after every update": "Có gì mới sau mỗi lần cập nhật",
+  "A short summary like this one shows once after each update, with a link to the full notes.": "Sau mỗi lần cập nhật, một bản tóm tắt ngắn như thế này hiện một lần, kèm liên kết tới ghi chú đầy đủ.",
+  "Clear stops for stuck messages": "Dừng rõ ràng với tin nhắn bị kẹt",
+  "If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.": "Nếu ChatGPT không bao giờ nhận một tin nhắn trong hàng đợi, ứng dụng thử ba lần, rồi báo cho bạn và giữ tin nhắn trong hàng đợi.",
+  "Steadier sub-agents": "Tác tử phụ ổn định hơn",
+  "New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.": "Các tab worker mới có thêm thời gian khi kết nối chậm, và worker không còn bị kẹt sau tin nhắn chưa gửi của chính nó.",
+  "Your settings stay put": "Cài đặt của bạn được giữ nguyên",
+  "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Tệp cài đặt mà ứng dụng không đọc được không còn đặt lại mọi thứ: ứng dụng vẫn đọc nó hoặc giữ một bản sao.",
+  "Recovery stays on": "Khôi phục vẫn bật",
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Khi ứng dụng dùng lại tab của một cuộc trò chuyện yên tĩnh cho cuộc trò chuyện mới, cuộc trò chuyện đó vẫn giữ khôi phục tự động."
 }

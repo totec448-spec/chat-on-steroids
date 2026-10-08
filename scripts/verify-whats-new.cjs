@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
     });
     const state = {config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,
       status:{state:'disconnected',surfaces:[]},bridge:{running:false,paired:false,present:false},
-      update:{current:params.get('version')||'2.1.29',latest:null,stage:'idle'}};
+      update:{current:params.get('version')||'2.1.30',latest:null,stage:'idle'}};
     const ok=data=>Promise.resolve({ok:true,data});
     window.seenCalls=0; window.openedLinks=[];
     window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),listProjects:()=>ok([]),
@@ -69,18 +69,21 @@ app.whenReady().then(async () => {
     const inkInsets=element=>sharedInkInsets(win,js,element);
 
     for (const theme of ['dark','light']) {
-      await open(`theme=${theme}&seen=2.1.28&version=2.1.29`);
+      await open(`theme=${theme}&seen=2.1.29&version=2.1.30`);
       await until(`document.getElementById('whatsNewDialog').open`);
-      await pause(1100);
+      // Measure only once every entry animation has finished: a row still sliding up reads as an
+      // icon sitting low in its badge.
+      await until(`document.getAnimations().every(animation=>animation.playState==='finished')`);
+      await pause(100);
       const view=await js(`(()=>{const d=document.getElementById('whatsNewDialog'),r=d.getBoundingClientRect(),list=document.getElementById('whatsNewList');
         return {left:r.left,right:innerWidth-r.right,top:r.top,bottom:innerHeight-r.bottom,items:list.children.length,
           title:document.getElementById('whatsNewTitle').textContent,version:document.getElementById('whatsNewVersion').textContent,
           lead:document.getElementById('whatsNewLead').textContent,focus:document.activeElement.id,ring:document.activeElement.matches(':focus-visible'),
           sideways:list.scrollWidth>list.clientWidth,fits:list.scrollHeight<=list.clientHeight,clipped:[...list.querySelectorAll('b,span')].some(e=>e.scrollWidth>e.clientWidth+1)}})()`);
-      assert.equal(view.items,6,'Six highlights for 2.1.29');
+      assert.equal(view.items,5,'Five highlights for 2.1.30');
       assert.equal(view.title,"What's new");
-      assert.equal(view.version,'Version 2.1.29');
-      assert.match(view.lead,/^Pin your chats/);
+      assert.equal(view.version,'Version 2.1.30');
+      assert.match(view.lead,/^See what changed after each update/);
       assert.equal(view.focus,'whatsNewDone','"Got it" has the focus');
       assert.equal(view.ring,false,'It opens without a focus ring; the keyboard brings one');
       assert.ok(Math.abs(view.left-view.right)<=1 && Math.abs(view.top-view.bottom)<=1,'The dialog is centred: '+JSON.stringify(view));
@@ -88,7 +91,7 @@ app.whenReady().then(async () => {
       assert.ok(view.fits,'All highlights fit an ordinary window without scrolling: '+JSON.stringify(view));
       assert.equal(await js('window.seenCalls'),1,'The version is recorded once it has been shown');
       // Every glyph sits in the middle of its badge, and the sparkle in its mark.
-      for (const element of ["document.querySelector('.whats-new-tile')","document.querySelector('.whats-new-seal')",...Array.from({length:6},(_, i)=>`document.querySelectorAll('.whats-new-icon')[${i}]`)]) {
+      for (const element of ["document.querySelector('.whats-new-tile')","document.querySelector('.whats-new-seal')",...Array.from({length:view.items},(_, i)=>`document.querySelectorAll('.whats-new-icon')[${i}]`)]) {
         // A rounded square's corners show the card through: square it off while measuring; the glyph stays put.
         // The seal sits over the tile's corner; it is measured on its own, so hide it for the tile.
         const tile=element.includes('whats-new-tile');
@@ -108,14 +111,14 @@ app.whenReady().then(async () => {
       await shot(`whats-new-${theme}.png`);
       // The release notes open externally, for this exact version.
       await js(`document.getElementById('whatsNewNotes').click()`);
-      assert.deepEqual(await js('window.openedLinks'),['https://github.com/totec448-spec/chat-on-steroids/releases/tag/v2.1.29']);
+      assert.deepEqual(await js('window.openedLinks'),['https://github.com/totec448-spec/chat-on-steroids/releases/tag/v2.1.30']);
       // "Got it" closes it, with its motion.
       await js(`document.getElementById('whatsNewDone').click()`);
       await until(`!document.getElementById('whatsNewDialog').open`);
     }
 
     // German, the longest of the catalogs here: translated, nothing cut, the actions in view.
-    await open('lang=de&seen=2.1.28&version=2.1.29');
+    await open('lang=de&seen=2.1.29&version=2.1.30');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     const de=await js(`(()=>{const list=document.getElementById('whatsNewList'),a=document.querySelector('.whats-new-actions').getBoundingClientRect();
@@ -127,7 +130,7 @@ app.whenReady().then(async () => {
     await shot('whats-new-de.png');
 
     // Escape dismisses it the same way.
-    await open('seen=2.1.28&version=2.1.29');
+    await open('seen=2.1.29&version=2.1.30');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
@@ -135,7 +138,7 @@ app.whenReady().then(async () => {
 
     // A short window: the list scrolls inside the dialog and both actions stay in view.
     win.setContentSize(720,460);
-    await open('seen=2.1.28&version=2.1.29');
+    await open('seen=2.1.29&version=2.1.30');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     const short=await js(`(()=>{const d=document.getElementById('whatsNewDialog').getBoundingClientRect(),a=document.querySelector('.whats-new-actions').getBoundingClientRect(),l=document.getElementById('whatsNewList');
@@ -145,11 +148,11 @@ app.whenReady().then(async () => {
     win.setContentSize(1180,760);
 
     // Nothing on the same version, and nothing (but a record) on a version without highlights.
-    await open('seen=2.1.29&version=2.1.29');
+    await open('seen=2.1.30&version=2.1.30');
     await pause(1200);
     assert.equal(await js(`document.getElementById('whatsNewDialog').open`),false,'Same version: no dialog');
     assert.equal(await js('window.seenCalls'),0,'Same version: nothing recorded');
-    await open('seen=2.1.29&version=9.9.9');
+    await open('seen=2.1.30&version=9.9.9');
     await pause(1200);
     assert.equal(await js(`document.getElementById('whatsNewDialog').open`),false,'No highlights: no dialog');
     assert.equal(await js('window.seenCalls'),1,'No highlights: the version is still recorded');
