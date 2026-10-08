@@ -2512,6 +2512,8 @@
       // gpt-6-thinking, both "GPT-6"; observed 2026-10-07). They are one family, as the September
       // picker had them, so the effort control offers Instant, Medium and High together. Lanes join
       // only under one name in this version and with distinct efforts: a mixed group never merges.
+      // GPT-6's Instant lane is ChatGPT's automatic `gpt-6`, which its server may answer with the
+      // thinking lane; the fixed `gpt-6-instant` exists but no native view offers it (2026-10-08).
       for (const name of new Set(choices.map(c => c.label))) {
         const lanes = choices.filter(c => c.label === name);
         if (lanes.length < 2 || new Set(lanes.map(c => c.effort)).size !== lanes.length) continue;

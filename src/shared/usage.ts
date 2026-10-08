@@ -32,7 +32,8 @@ export type UsageMessageFamily = 'gpt-5.6' | 'gpt-6';
 /**
  * Explicit recorded version identities only; unknown suffixes remain unclassified. ChatGPT records its
  * Instant and Thinking lanes as `gpt-6` and `gpt-6-thinking` (`gpt-5-6-instant`, `gpt-5-6-thinking`
- * for 5.6), observed 2026-10-07; each lane counts toward its generation.
+ * for 5.6), observed 2026-10-07; each lane counts toward its generation. GPT-6's Instant (`gpt-6`) is
+ * ChatGPT's automatic lane and may be answered by `gpt-6-thinking`; both count as GPT-6.
  */
 export function usageMessageFamily(model: string | undefined): UsageMessageFamily | null {
   const id = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');

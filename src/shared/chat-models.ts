@@ -8,7 +8,7 @@ export function isAstraModel(model: string | null | undefined, effort?: Reasonin
 export type ChatModelOption = { id: string; label: string; efforts: ReasoningEffort[]; aliases?: string[] };
 /**
  * The ChatGPT model Goal and Loop decisions run on unless Settings chose another. ChatGPT lists GPT-6
- * as two lanes, `gpt-6` (Instant) and `gpt-6-thinking` (Medium, High); a decision wants the thinking
+ * as two lanes, `gpt-6` (Instant, ChatGPT's automatic lane) and `gpt-6-thinking` (Medium, High); a decision wants the thinking
  * lane. An account without it falls back to ChatGPT's current selection (goal.ts).
  */
 export const DEFAULT_HELPER_CHAT_MODEL = 'gpt-6-thinking';
