@@ -1,3 +1,5 @@
+@import "katex/dist/katex.min.css";
+
 /* ---------------------------------------------------------------------------
    A quiet tonal design with a soft blue wash behind the dark sidebar.
 
@@ -2643,7 +2645,7 @@ input[readonly] {
 .said.is-user.has-reaction-slot.has-input-receipt { margin-bottom: 26px; }
 /* Delivery stays at the right edge; a reaction shares the footer to its left. */
 .has-reaction-slot.has-input-receipt > .message-reaction { inset-inline-end: 30px; }
-.user-message-text, .pending-message-text { max-width: 100%; padding: 16px 20px; border-radius: 20px; background: var(--hover); }
+.user-message-text, .pending-message-text { max-width: 100%; padding: 12px 17px; border-radius: 20px; background: var(--hover); line-height: 1.55; }
 
 .said b {
   display: none;
@@ -2665,8 +2667,15 @@ input[readonly] {
 
 .msg.rich {
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.65;
 }
+
+/* A typeset equation is inserted after sanitizing untrusted source HTML. Let long
+   equations scroll inside the answer, while short ones stay centered like ChatGPT. */
+.msg.rich .chat-math { overflow-wrap: normal; white-space: nowrap; }
+.msg.rich .chat-math-display { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; margin: 1em 0; padding: 3px 0 6px; text-align: center; }
+.msg.rich .chat-math-display .katex-display { margin: 0; }
+.msg.rich .chat-math .katex { font-size: 1.08em; }
 
 /* Plain messages keep independent bidi paragraphs, including mixed-language pastes.
    Direction stays on text surfaces; the app shell and action rows do not mirror. */
@@ -2694,8 +2703,21 @@ input[readonly] {
 .msg.rich h4,
 .msg.rich h5,
 .msg.rich h6 {
-  margin: 0.55em 0;
+  margin: 0.75em 0;
 }
+
+.msg.rich :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.25em 0 0.5em;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+.msg.rich h1 { font-size: 1.5em; }
+.msg.rich h2 { font-size: 1.3em; }
+.msg.rich h3 { font-size: 1.14em; }
+.msg.rich :is(h4, h5, h6) { font-size: 1em; }
+.msg.rich li { padding-inline-start: 0.15em; margin: 0.3em 0; }
+.msg.rich li > p { margin: 0.35em 0; }
 
 .msg.rich ul,
 .msg.rich ol {

@@ -27,6 +27,50 @@ afterAll(() => {
 });
 
 describe('captured ChatGPT rendered HTML', () => {
+  it('typesets inline and display TeX while preserving surrounding Markdown', () => {
+    const inline = renderedMarkdown(String.raw`The energy is \(E = mc^2\), or $E = mc^2$.`);
+    expect(inline.querySelectorAll('.chat-math .katex')).toHaveLength(2);
+    expect(inline.querySelectorAll('.chat-math math')).toHaveLength(2);
+    expect(inline.querySelector('p')?.textContent).toContain('The energy is');
+
+    const display = renderedMarkdown(String.raw`Before.
+
+\[
+\frac{a}{b} = c
+\]
+
+And:
+
+$$
+x^2 + y^2 = z^2
+$$
+`);
+    expect(display.querySelectorAll('.chat-math-display .katex-display')).toHaveLength(2);
+    expect(display.textContent).toContain('Before.');
+    expect(display.textContent).toContain('And:');
+  });
+
+  it('keeps code, incomplete TeX and ordinary dollar amounts literal', () => {
+    const source = [
+      'Cost $50 and $60.', '',
+      'Inline code: ' + '`' + String.raw`\(x+y\)` + '`', '',
+      '```tex', String.raw`\(x+y\)`, '$$x^2$$', '```', '',
+      String.raw`Broken: \(\frac{\)`
+    ].join('\n');
+    const rendered = renderedMarkdown(source);
+    expect(rendered.querySelectorAll('.katex')).toHaveLength(0);
+    expect(rendered.textContent).toContain('$50 and $60');
+    expect(rendered.querySelector('code')?.textContent).toBe(String.raw`\(x+y\)`);
+    expect(rendered.textContent).toContain(String.raw`\(\frac{\)`);
+  });
+
+  it('does not trust captured HTML to provide KaTeX markup or executable content', () => {
+    const captured = renderedMessage(whole('<span class="katex" onclick="alert(1)">forged</span><math><mi>x</mi></math><script>alert(1)</script>'), 'fallback');
+    expect(captured.querySelector('.katex')).toBeNull();
+    expect(captured.querySelector('math, script')).toBeNull();
+    expect(captured.textContent).toContain('forged');
+  });
+
   it('renders ChatGPT\'s writing block as a titled quote instead of its raw directive', () => {
     const rendered = renderedMarkdown(':::writing{variant="standard" id="58321" title="Clear <rewrite>"}\nWe want the app to be **faster**.\n:::\n\nAfter the block.');
     const quote = rendered.querySelector('blockquote')!;

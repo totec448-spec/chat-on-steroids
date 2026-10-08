@@ -29,6 +29,7 @@ import { communicationTitle, foldAgentCommunication, participatingWorkers, worke
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
+import { markdownMath } from './markdown-math.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors } from '../shared/markdown-export.js';
@@ -2082,8 +2083,9 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const pills = text.includes('chatgpt-content-reference{') ? citationPills(text, capture) : new Map<number, CitationPill>();
   const byIndex = new Map((references ?? []).map(reference => [reference.index, reference]));
   let directives = 0;
+  const math = markdownMath();
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
-  const parser = new Marked({ gfm: true, extensions: [WRITING_BLOCK, {
+  const parser = new Marked({ gfm: true, extensions: [WRITING_BLOCK, ...math.extensions, {
     name: 'inlineReference', level: 'inline',
     start: value => { const at = value.search(/:{1,2}chatgpt-content-reference\{/); return at < 0 ? undefined : at; },
     tokenizer(value) { const match = value.match(INLINE_REFERENCE); return match ? { type: 'inlineReference', raw: match[0], probe: directives++ } : undefined; },
@@ -2119,6 +2121,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   }] });
   const html = parser.parse(text, { async: false });
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+  math.typeset(box);
   if (pills.size) {
     for (const anchor of box.querySelectorAll('a[href]')) {
       const probe = anchor.textContent?.match(PILL_PLACEHOLDER)?.[1];

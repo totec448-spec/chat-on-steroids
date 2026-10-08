@@ -1668,6 +1668,11 @@ removes only the leading provider reaction envelope from assistant presentation;
 canonical source bytes and literal examples remain intact. A reserved user-bubble
 footer and in-place badge updates keep streaming reactions from shifting messages
 or reloading attachment previews. Old history gains badges when natively reobserved.
+Assistant replies render canonical Markdown with safe inline/display TeX typesetting
+(`\\(...\\)`, `\\[...\\]`, `$...$`, `$$...$$`) through KaTeX after HTML sanitization.
+The sanitizer never admits math classes, MathML or executable markup from captured HTML.
+Fenced/inline code and unfinished or invalid equations remain readable as source text.
+Authored and queued user prompts keep their literal text inside the right-aligned bubbles.
 
 Continuous recording serves the local transcript, exact identity and continuation infrastructure.
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
