@@ -1,6 +1,6 @@
 import { ui, uiText, t } from './i18n.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
-import { chatModelDisplayLabel, resolveChatModel } from '../shared/chat-models.js';
+import { chatModelDisplayLabel, DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
@@ -54,6 +54,15 @@ const composerEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'm
 const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
 function observedModel(value: string) {
   return resolveChatModel(catalog.models, value);
+}
+
+/**
+ * A model and effort as the composer shows them ("GPT-6 Sol · High", "… · Instant"), for any
+ * observed choice; a model this account's catalog does not list keeps its id.
+ */
+export function chatModelName(model: string, reasoningEffort: string | undefined): string {
+  const label = observedModel(model)?.label ?? model;
+  return reasoningEffort ? chatModelDisplayLabel(label, reasoningEffort as ReasoningEffort, effortLabel(reasoningEffort)) : label;
 }
 
 function paintComposerContext(): void {
@@ -482,7 +491,7 @@ export function applyChatModels(config: Config, previous?: Config): void {
   ordinaryDefaults = { model: config.ui?.defaultChatModel ?? '', reasoningEffort: config.ui?.defaultChatReasoning ?? '' };
   paintPair('defaultChatModel', 'defaultChatReasoning', chosen('defaultChatModel', ordinaryDefaults.model, previous?.ui?.defaultChatModel), chosen('defaultChatReasoning', ordinaryDefaults.reasoningEffort, previous?.ui?.defaultChatReasoning), true);
   paintPair('workerModel', 'workerReasoning', chosen('workerModel', config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel), chosen('workerReasoning', config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning));
-  paintPair('helperModel', 'helperReasoning', chosen('helperModel', config.goal.helperModel ?? 'gpt-5.6-sol', previous?.goal.helperModel ?? 'gpt-5.6-sol'), chosen('helperReasoning', config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning ?? 'high'));
+  paintPair('helperModel', 'helperReasoning', chosen('helperModel', config.goal.helperModel ?? DEFAULT_HELPER_CHAT_MODEL, previous?.goal.helperModel ?? DEFAULT_HELPER_CHAT_MODEL), chosen('helperReasoning', config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning ?? 'high'));
   paintComposerContext();
   if (catalogSubscribed && catalog.state !== 'unknown') return;
   const requested = ++generation;

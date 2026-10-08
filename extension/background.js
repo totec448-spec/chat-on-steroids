@@ -182,6 +182,11 @@ let delivery = { at: 0, ok: null, events: 0, total: 0, conversationId: null, sta
 let closeOutbox = [];
 /** Successful managed removals awaiting onRemoved; exact document receipts survive MV3 sleep. */
 let tabRemovals = {};
+/**
+ * Idle chats whose tab this worker borrowed for a new chat, by tab: the exact document and the
+ * chat it held. That chat leaving the document is this extension's doing, not the user's (#1086).
+ */
+let tabReuses = {};
 let closing = false;
 /**
  * Command acknowledgements accepted from a content script but not yet accepted by the app.
@@ -258,6 +263,20 @@ const COMMAND_TAB_PROTECTION_MS = 30 * 60_000;
  * and claim the other computer's calls until the app answers again. Null until the app says.
  */
 let connectorNames = null;
+/**
+ * This install's Core app as a page last listed it: `{ appId, name }`, name being the exact Core
+ * connector name at that moment. A fresh tab whose own plugin list has not arrived yet uses it for
+ * the Core mention, so a worker's first message does not go out without one (and, in a workspace
+ * shared with another computer, to that computer's plain Core).
+ */
+let ownCoreApp = null;
+
+function cleanOwnCoreApp(value) {
+  return value && typeof value === 'object' && typeof value.appId === 'string' &&
+    /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(value.appId) && typeof value.name === 'string' &&
+    /^Chat On Steroids Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u.test(value.name)
+    ? { appId: value.appId, name: value.name } : null;
+}
 
 /** The app's names, or null for anything that is not three plain "Chat On Steroids …" strings. */
 function cleanConnectorNames(value) {
@@ -271,6 +290,13 @@ function cleanConnectorNames(value) {
     names[surface] = name;
   }
   return names;
+}
+
+async function rememberOwnCoreApp(value) {
+  const next = cleanOwnCoreApp(value);
+  if (JSON.stringify(next) === JSON.stringify(ownCoreApp)) return;
+  ownCoreApp = next;
+  try { await chrome.storage.local.set({ ownCoreApp: next }); } catch { /* Kept in memory for this worker. */ }
 }
 
 async function rememberConnectorNames(value) {
@@ -294,9 +320,10 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp']);
   port = typeof stored.port === 'number' ? stored.port : null;
   connectorNames = cleanConnectorNames(stored.connectorNames);
+  ownCoreApp = cleanOwnCoreApp(stored.ownCoreApp);
   // Tells this browser apart from another one paired with the same app, so a new chat is opened
   // and sent in one browser only. Random, local, and never tied to the profile or the user.
   browserId = typeof stored.browserId === 'string' && /^[a-z0-9]{16,64}$/.test(stored.browserId) ? stored.browserId : '';
@@ -327,6 +354,7 @@ async function loadOnce() {
     'terminalDocuments',
     'closeOutbox',
     'tabRemovals',
+    'tabReuses',
     'commandAckOutbox',
     'recoveryMonitoring',
     'discardProtectedTabs',
@@ -351,6 +379,10 @@ async function loadOnce() {
     typeof row.documentId === 'string' && row.documentId === tabDocuments[key] &&
     Number.isSafeInteger(row.navigationEpoch) && row.navigationEpoch === tabEpochs[key] &&
     cleanConversationId(row.conversationId) === tabConversations[key]).slice(-1000));
+  tabReuses = Object.fromEntries(Object.entries(
+    live.tabReuses && typeof live.tabReuses === 'object' && !Array.isArray(live.tabReuses) ? live.tabReuses : {}
+  ).filter(([key, row]) => row && /^\d+$/.test(key) && typeof row.documentId === 'string' &&
+    cleanConversationId(row.conversationId) && Number.isFinite(row.at)).slice(-200));
   // Browser-close durability: a send already accepted by ChatGPT is irreversible. Its final ACK
   // therefore has to survive storage.session being cleared on browser restart. Prefer the local
   // copy, while still accepting the old session copy as an upgrade migration path.
@@ -393,6 +425,7 @@ function persistLive() {
         terminalDocuments,
         closeOutbox: closeOutbox.slice(-200),
         tabRemovals,
+        tabReuses,
         commandAckOutbox: commandAckOutbox.slice(-200),
         recoveryMonitoring,
         discardProtectedTabs,
@@ -2070,6 +2103,8 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
           const current = await chrome.tabs.get(candidate.id).catch(() => null);
           if (proof?.safe !== true || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
               !current || current.pinned || current.pendingUrl || current.url !== candidate.url) continue;
+          const borrowed = conversationForTab(candidate);
+          if (borrowed) tabReuses[String(candidate.id)] = { documentId: source.documentId, conversationId: borrowed, at: Date.now() };
           await elect(input.id, { ...source, url: current.url, stage: 'preparing' });
           const leased = await chrome.tabs.get(candidate.id).catch(() => null);
           if (!ownsDocument(source) || !leased || leased.pinned || leased.pendingUrl || leased.url !== current.url || !token || disconnected) break;
@@ -3168,6 +3203,21 @@ async function drainCloses() {
  * `expected` protects an old page's delayed close from deleting a mapping that the same
  * tab has already replaced with a new conversation.
  */
+/** A borrowed page leaves its chat within seconds; an older record belongs to a borrow that was abandoned. */
+const TAB_REUSE_MS = 2 * 60_000;
+/**
+ * Whether this chat leaving this exact document was the borrow recorded in `tabReuses`. Spent on
+ * first use: once the chat has left, any later departure of it is the user's again.
+ */
+function spendTabReuse(tab, conversationId, documentId) {
+  const key = String(tab), row = tabReuses[key];
+  if (!row || !documentId || row.documentId !== documentId || row.conversationId !== cleanConversationId(conversationId)) return false;
+  delete tabReuses[key];
+  void persistLive().catch(() => undefined);
+  if (!(Date.now() - row.at < TAB_REUSE_MS)) return false;
+  return true;
+}
+
 async function releaseTab(tab, expected = null, expectedDocument = null, expectedEpoch = null, byExtension = false) {
   await load();
   if (typeof tab !== 'number') return { ok: true, closed: false };
@@ -3476,11 +3526,32 @@ const HANDLERS = {
     const result = await call('/models', { method: 'POST', body });
     return result;
   },
+  /**
+   * This page shows ChatGPT's "could not be loaded" surface for its chat. Its Retry (pressed by the
+   * page's own recovery or by the user) can take the tab to ChatGPT's home page; that chat leaving
+   * this document is then not the user deciding to close it (#1086, 2026-10-06). Recorded like a
+   * borrowed tab, so the departure reaches the app as non-manual and recovery is not paused.
+   */
+  async load_failure(message, _sender, source) {
+    await load();
+    const conversationId = cleanConversationId(message.conversationId);
+    const key = String(source.tab);
+    if (!conversationId || !ownsDocument(source) || tabConversations[key] !== conversationId) return { ok: false };
+    tabReuses[key] = { documentId: source.documentId, conversationId, at: Date.now() };
+    tabReuses = Object.fromEntries(Object.entries(tabReuses).slice(-200));
+    void persistLive().catch(() => undefined);
+    return { ok: true };
+  },
   async core_plugin(message, _sender, source) {
     if (!ownsDocument(source)) return { ok: false };
     // The complete plugins list without this install's Core: the app takes its proof back.
-    if (message.missing === true) return call('/core-plugin', { method: 'POST', body: JSON.stringify({ missing: true }) });
+    if (message.missing === true) {
+      await rememberOwnCoreApp(null);
+      return call('/core-plugin', { method: 'POST', body: JSON.stringify({ missing: true }) });
+    }
     if (typeof message.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(message.appId)) return { ok: false };
+    // The page reports only the app listed under this install's own Core name.
+    if (connectorNames?.core) await rememberOwnCoreApp({ appId: message.appId, name: connectorNames.core });
     return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
   },
   async usage_observation(message, _sender, source) {
@@ -3632,6 +3703,7 @@ const HANDLERS = {
       paired: token !== null,
       disconnected,
       connectorNames,
+      ownCoreApp,
       pending: journal.length,
       pendingCommandAcks: commandAckOutbox.length,
       compatible: found ? found.compatible !== false : null,
@@ -3965,7 +4037,8 @@ const HANDLERS = {
   async closed(message, _sender, source) {
     // releaseTab drains the queue and posts /closed itself, and only when this was the
     // last live tab on the conversation.
-    return releaseTab(source.tab, message.conversationId, source.documentId, source.navigationEpoch);
+    return releaseTab(source.tab, message.conversationId, source.documentId, source.navigationEpoch,
+      spendTabReuse(source.tab, message.conversationId, source.documentId));
   },
   async compact(message, _sender, source) {
     await load();
@@ -4324,6 +4397,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'model_catalog',
     'plugin_refresh',
     'core_plugin',
+    'load_failure',
     'usage_observation',
     'events',
     'bind',
@@ -4531,7 +4605,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
     // dying document immediately, but preserve the conversation until the replacement page
     // binds and proves whether it is the same chat or a different one.
     if (fullNavigation && !leftChatGpt && !departed) return { ok: true, closed: false };
-    return releaseTab(id, departed, departedDocument);
+    return releaseTab(id, departed, departedDocument, null, spendTabReuse(id, departed, departedDocument));
   }).catch(() => undefined);
 });
 

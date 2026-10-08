@@ -754,11 +754,14 @@ describe('Core app mention on app-owned sends (#861)', () => {
     redrawingEditor();
     let clicked = false;
     button.addEventListener('click', () => { clicked = true; });
-    const result = api.send({ mention });
+    const reasons: string[] = [];
+    const result = api.send({ mention, explain: why => reasons.push(why) });
     box.prepend(document.createTextNode('typed by the user '));
     await vi.advanceTimersByTimeAsync(10);
     expect(await result).toBe(false);
     expect(clicked).toBe(false);
+    // Its own reason, apart from an edit before the mention step (#1086).
+    expect(reasons).toEqual(['mention-changed']);
   });
   it('adds the mention only after the caller authorized the unchanged prompt', async () => {
     // Measured 2026-10-01: added at readiness, the token made the app's draft lease refuse
@@ -977,6 +980,37 @@ describe('native image readiness', () => {
     expect(api.hasComposerAttachments()).toBe(true);
     expect(await draft.clear()).toBe(true);
     expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
+  });
+  it.each(['Quitar', 'Remove', '削除'])('accepts the current two-button file tile before authorizing Send (%s)', async removeLabel => {
+    const input = upload(); input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    input.addEventListener('change', () => {
+      const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+      host.innerHTML = `<span><span><span>notes.zip</span><button type="button" aria-label="notes.zip"></button></span><button type="button" aria-label="${removeLabel} notes.zip"></button></span>`;
+      document.querySelector('form')!.append(host);
+    });
+    const file = new dom.window.File(['exact bytes'], 'notes.zip', { type: 'application/zip' });
+    const uploaded = api.uploadImages([], () => true, draft, [file]);
+    let ready = false; void uploaded.then(value => { ready = value; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ready).toBe(true);
+    expect(await uploaded).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(true);
+    expect(draft.current()).toBe(true);
+    const authorize = vi.fn(async () => true);
+    button.addEventListener('click', () => user('Exact app prompt'));
+    expect(await api.send({ beforeSend: authorize })).toBe(true);
+    expect(authorize).toHaveBeenCalledTimes(1);
+    draft.dispose();
+  });
+  it.each(['extra action', 'wrong filename', 'outside attachments'])('refuses an ambiguous current file tile (%s)', change => {
+    const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+    host.innerHTML = '<span><span><span>notes.zip</span><button type="button" aria-label="notes.zip"></button></span><button type="button" aria-label="Quitar notes.zip"></button></span>';
+    if (change === 'extra action') host.firstElementChild!.append(document.createElement('button'));
+    if (change === 'wrong filename') host.querySelector('span span span')!.textContent = 'other.zip';
+    if (change === 'outside attachments') host.removeAttribute('data-composer-attachments');
+    document.querySelector('form')!.append(host);
+    expect(api.hasComposerAttachments()).toBe(false);
   });
   it.each([false, true])('uses the current composer upload kind with dynamic ids (files=%s)', async files => {
     const input = upload(); input.id = '_r_photo_';

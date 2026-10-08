@@ -199,5 +199,7 @@ app.whenReady().then(async () => {
     const result = { actualPty: true, projectCwd: true, projectlessHomeCwd: true, singleRightTabRow: true, rightTabClosesPty: true, rightPanelHidePreservesPty: true, persistentEnvironmentAndCd: true, keyboardInput: true, hiddenPanelContinuity: true, bottomPanelClose: true, bottomMenuVisible: true, rightMenuClickable: true, rightAndBottomIndependent: true, lastBottomTabClosesPanel: true, multipleTabs: true, ctrlC: true, exitCode: 7, closeRetiresShell: true, geometry };
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   } finally { win.destroy(); win = null; await server.close(); await backend.flushDurable(); }
-  app.exit(0);
+  // Let Electron run before-quit so the IPC owner disposes any remaining PTYs before the
+  // native ConPTY backend unloads. app.exit() skips those handlers and can crash Windows CI.
+  app.quit();
 }).catch(error => { console.error(error); app.exit(1); });

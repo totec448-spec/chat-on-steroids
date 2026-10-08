@@ -55,10 +55,10 @@ it('restores a temporarily hidden active pet through the View toggle', async () 
   expect(openLibrary).not.toHaveBeenCalled();
 });
 
-it('keeps Pets in the sidebar and Desktop Pets in the View menu', () => {
+it('keeps Pets in the sidebar and the View menu (desktop pets) in the title bar', () => {
   const page = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'));
   expect(page.window.document.querySelector('#sidebarPets .ico.ph-paw-print')).not.toBeNull();
-  expect(page.window.document.querySelector('#viewMenu #viewPets')).not.toBeNull();
+  expect(page.window.document.querySelector('.app-topbar > #viewMenu[aria-haspopup="menu"]')).not.toBeNull();
   page.window.close();
 });
 

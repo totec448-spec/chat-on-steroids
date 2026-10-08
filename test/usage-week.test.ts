@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { usageMessageFamily, usageWeekStart } from '../src/shared/usage.js';
+import { DEFAULT_USAGE_FORMULA, usageMessageFamily, usageModel, usageRate, usageWeekStart } from '../src/shared/usage.js';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -24,13 +24,20 @@ it.each([
 });
 
 it('groups explicit generation identities and rejects unknown versions and ambiguous effort labels', () => {
-  for (const model of ['5.6', 'gpt-5.6', 'gpt-5-6', 'gpt-5-6-thinking', 'gpt-5-6-pro', 'GPT-5.6 Pro', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'Sol']) {
+  for (const model of ['5.6', 'gpt-5.6', 'gpt-5-6', 'gpt-5-6-instant', 'gpt-5-6-thinking', 'gpt-5-6-pro', 'GPT-5.6 Pro', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'Sol']) {
     expect(usageMessageFamily(model), model).toBe('gpt-5.6');
   }
-  for (const model of ['6', 'gpt-6', 'gpt-6-pro', 'GPT-6 Pro', 'gpt-6-astra', 'GPT6.0 Pro', 'Astra']) {
+  // ChatGPT's GPT-6 lanes as recorded (2026-10-07): Instant is `gpt-6`, Thinking is `gpt-6-thinking`.
+  for (const model of ['6', 'gpt-6', 'gpt-6-instant', 'gpt-6-thinking', 'gpt-6-pro', 'GPT-6 Pro', 'gpt-6-astra', 'GPT6.0 Pro', 'Astra']) {
     expect(usageMessageFamily(model), model).toBe('gpt-6');
   }
-  for (const model of [undefined, '', 'pro', 'high', 'gpt-5.5', 'gpt-5.60', 'gpt-6.1', 'gpt-6-pro-unknown', 'gpt-5-6-thinking-unknown', 'my-gpt-6-pro']) {
+  for (const model of [undefined, '', 'pro', 'high', 'gpt-5.5', 'gpt-5.60', 'gpt-6.1', 'gpt-6-pro-unknown', 'gpt-5-6-thinking-unknown', 'gpt-6-thinking-mini', 'my-gpt-6-pro']) {
     expect(usageMessageFamily(model), model).toBeNull();
   }
+});
+
+it('prices both 5.6 lanes as Sol and leaves GPT-6 unpriced until an official rate is established', () => {
+  for (const model of ['gpt-5-6-instant', 'gpt-5-6-thinking']) expect(usageRate(usageModel(model), DEFAULT_USAGE_FORMULA), model).toBe(0.4);
+  // ChatGPT's GPT-6 lanes have no verified API identity (docs/usage-model-attribution.md); no rate is invented.
+  for (const model of ['gpt-6', 'gpt-6-thinking']) expect(usageRate(usageModel(model), DEFAULT_USAGE_FORMULA), model).toBeUndefined();
 });

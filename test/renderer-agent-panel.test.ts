@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createAgentPanel } from '../src/renderer/agent-panel.js';
 import type { SessionSummary } from '../src/shared/session.js';
+import { workerBrief } from '../src/shared/worker-brief.js';
 
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
@@ -181,10 +182,75 @@ it('shows the worker task and only a model observed for its current conversation
     selectedModel: { conversationId: 'chat-b', model: 'gpt-5.6-sol', reasoningEffort: 'high', observedAt: Date.now() } } as SessionSummary]);
   toggle.click();
   const card = host.querySelector<HTMLElement>('.agent-panel-row')!;
-  expect(card.querySelector('.agent-card-name')!.textContent).toBe('worker-4');
-  expect(card.querySelector('.agent-card-task')!.textContent).toBe('Original assignment: Audit and verify the build');
+  // No name from the prime: "Worker 4", and its id one hover away.
+  expect(card.querySelector('.agent-card-name')!.textContent).toBe('Worker 4');
+  expect(card.title).toBe('worker-4 · Audit and verify the build');
+  expect(card.querySelector('.agent-card-task')!.textContent).toBe('Audit and verify the build');
   expect(card.querySelector('.agent-card-model')!.textContent).toContain('gpt-5.6-sol');
   expect(card.dataset.state).toBe('working');
+});
+
+it('names the model as the composer does, says only what matters, and glows the round once', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  const now = Date.now();
+  const modelLabel = vi.fn((model: string, effort: string | undefined) => `${model === 'gpt-6-sol' ? 'GPT-6 Sol' : model} · ${effort === 'none' ? 'Instant' : effort}`);
+  const panel = createAgentPanel({ host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(),
+    working: worker => worker.id === 'busy', modelLabel,
+    // The prime named the first; the second carries its id as its label, as a reused worker does.
+    agent: worker => worker.id === 'busy' ? { state: 'active', label: 'Tests', task: workerBrief('Repo: cos. Run the checks.', 'Run the tests'), conversationId: 'chat-busy' }
+      : { state: 'sleeping', label: 'worker-2', task: workerBrief('Repo: cos. Run the checks.', 'Review the layout'), conversationId: 'chat-done' } });
+  const worker = (id: string, agentId: string, extra: Partial<SessionSummary>) => ({ id, title: agentId, conversationId: `chat-${id === 'busy' ? 'busy' : 'done'}`,
+    startedAt: now - 120_000, updatedAt: now, toolCalls: 16, lastToolCallAt: now, lastToolActivity: { kind: 'run', title: 'Ran npm test' },
+    origin: { kind: 'worker', fromSessionId: 'prime', agentId, task: 'Original' }, ...extra }) as SessionSummary;
+  panel.update('prime', [
+    worker('busy', 'worker-1', { selectedModel: { conversationId: 'chat-busy', model: 'gpt-6-sol', reasoningEffort: 'none', observedAt: now } }),
+    worker('done', 'worker-2', { endedAt: now })
+  ]);
+  panel.showWorkers(['busy', 'done']);
+  const card = (id: string) => host.querySelector<HTMLElement>(`[data-worker-session="${id}"]`)!;
+  // Named for its job when the prime named it, else "Worker 2"; each with its own task, the run's
+  // shared context left out.
+  expect([card('busy'), card('done')].map(row => row.querySelector('.agent-card-name')!.textContent)).toEqual(['Tests', 'Worker 2']);
+  expect([card('busy'), card('done')].map(row => row.querySelector('.agent-card-task')!.textContent)).toEqual(['Run the tests', 'Review the layout']);
+  // A thinking-free model is Instant, by its catalog name; never "none".
+  expect(card('busy').querySelector('.agent-card-model')!.textContent).toBe('GPT-6 Sol · Instant');
+  expect(modelLabel).toHaveBeenCalledWith('gpt-6-sol', 'none');
+  // Working: its current action and state; a finished worker shows neither its last action nor its health.
+  expect(card('busy').querySelector('.agent-card-activity')!.textContent).toBe('Ran npm test');
+  expect(card('busy').querySelector('.agent-card-state')!.textContent).toBe('Working');
+  expect(card('done').querySelector('.agent-card-activity')).toBeNull();
+  expect(card('done').querySelector('.agent-card-state')!.textContent).toBe('Idle');
+  expect(host.querySelector('.agent-card-health')).toBeNull();
+  expect(card('done').querySelector('.agent-card-meta')!.textContent).toBe('Idle·16 actions');
+  expect(card('busy').querySelector('.agent-card-time')!.textContent).toBe('2m');
+  // The round's workers glow as the panel opens on them, and not again on the repaints after.
+  expect(host.querySelectorAll('.is-arriving')).toHaveLength(2);
+  panel.update('prime', [
+    worker('busy', 'worker-1', { updatedAt: now + 1 }),
+    worker('done', 'worker-2', { endedAt: now })
+  ]);
+  expect(host.querySelectorAll('.is-arriving')).toHaveLength(0);
+  expect(host.querySelectorAll('.is-round-worker')).toHaveLength(2);
+});
+
+it('lets the round glow go once it has played, so no later layout change can replay it', () => {
+  vi.useFakeTimers();
+  try {
+    dom = new JSDOM('<main></main><button></button>');
+    Object.assign(globalThis, { document: dom.window.document });
+    const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+    const panel = createAgentPanel({ host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: () => false });
+    panel.update('prime', [{ id: 'w', title: 'worker-1', conversationId: 'c', startedAt: Date.now(), updatedAt: Date.now(),
+      origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-1', task: 'Review' } } as SessionSummary]);
+    panel.showWorkers(['w'], false);
+    expect(host.querySelectorAll('.is-arriving')).toHaveLength(1);
+    // Nothing repaints the list (closing the sidebar only moves it): the class still leaves.
+    vi.advanceTimersByTime(1600);
+    expect(host.querySelectorAll('.is-arriving')).toHaveLength(0);
+    expect(host.querySelectorAll('.is-round-worker')).toHaveLength(1);
+  } finally { vi.useRealTimers(); }
 });
 
 it('shows latest recorded worker activity and action count without loading worker history', () => {
@@ -322,4 +388,35 @@ it('shows bounded worker health in the overview without changing lifecycle owner
   expect(card.dataset.health).toBe('degraded');
   expect(card.querySelector('.agent-card-health')?.textContent).toBe('Degraded');
   expect(card.querySelector<HTMLElement>('.agent-card-health')?.getAttribute('title')).toBeNull();
+});
+
+it('keeps archived names and assignments after broker eviction, fenced by exact identity', () => {
+  dom = new JSDOM('<main></main>'); Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!;
+  const panel = createAgentPanel({ host, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: () => false });
+  const worker = { id: 'local', title: 'worker-2', conversationId: 'chat', startedAt: 1, updatedAt: 2,
+    origin: { kind: 'worker', fromSessionId: 'prime', agentId: 'worker-2', task: 'Original task' },
+    workerAssignment: { conversationId: 'chat', agentId: 'worker-2', label: 'Divisao', task: '144/12', recordedAt: 2 }
+  } as SessionSummary;
+  panel.update('prime', [worker]); panel.show();
+  expect(host.querySelector('.agent-card-name')?.textContent).toBe('Divisao');
+  expect(host.querySelector('.agent-card-task')?.textContent).toBe('144/12');
+  panel.update('prime', [{ ...worker, conversationId: 'different-chat' }]);
+  expect(host.querySelector('.agent-card-name')?.textContent).toBe('Worker 2');
+  expect(host.querySelector('.agent-card-task')?.textContent).toBe('Original task');
+});
+
+it('hides prior finish and prior-turn activity when a worker starts its next assignment', () => {
+  dom = new JSDOM('<main></main>'); Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!;
+  const panel = createAgentPanel({ host, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: () => true });
+  const worker = { id: 'local', title: 'worker-1', startedAt: 1, updatedAt: 20,
+    lastToolCallAt: 10, lastFinishReportAt: 10, lastToolActivity: { kind: 'agent', title: 'Reported the finished task' }
+  } as SessionSummary;
+  panel.update('prime', [worker]); panel.show();
+  expect(host.querySelector('.agent-card-activity')).toBeNull();
+  panel.update('prime', [{ ...worker, lastFinishReportAt: null, lastTurnEndAt: 15 }]);
+  expect(host.querySelector('.agent-card-activity')).toBeNull();
+  panel.update('prime', [{ ...worker, lastToolCallAt: 21, lastToolActivity: { kind: 'run', title: 'Ran 4+4' } }]);
+  expect(host.querySelector('.agent-card-activity')?.textContent).toBe('Ran 4+4');
 });

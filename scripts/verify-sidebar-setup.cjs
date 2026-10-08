@@ -107,10 +107,11 @@ app.whenReady().then(async () => {
     // before checking the idle baseline; hover/focus are separately intended to reveal the control.
     win.webContents.sendInputEvent({type:'mouseMove',x:1090,y:890});
     await js('document.activeElement?.blur(); new Promise(r=>requestAnimationFrame(r))');
-    // One quiet "⋯" on the project row; its menu replaces the color dot, pencil and trash.
+    // Two quiet buttons on the project row: the new chat, then one "⋯" whose menu holds color and removal.
     assert.equal(await js(`document.querySelector('.project-group').dataset.projectColor`),undefined);
     assert.equal(await js(`getComputedStyle(document.querySelector('.project-menu')).opacity`),'0');
-    assert.equal(await js(`document.querySelector('.project-heading').querySelectorAll('button').length`),1);
+    assert.equal(await js(`getComputedStyle(document.querySelector('.project-new')).opacity`),'0');
+    assert.deepEqual(await js(`[...document.querySelector('.project-heading').querySelectorAll('button')].map(b=>b.classList.contains('project-new')?'new':b.classList.contains('project-menu')?'menu':b.className)`),['new','menu']);
     const press=keyCode=>{for (const type of ['keyDown','char','keyUp']) if (type!=='char'||keyCode==='Enter') win.webContents.sendInputEvent({type,keyCode:type==='char'?'\r':keyCode});};
     await js(`document.querySelector('.project-menu').click()`);
     assert.equal(await js(`document.querySelector('.project-menu').getAttribute('aria-expanded')`),'true');

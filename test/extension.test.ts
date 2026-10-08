@@ -1134,6 +1134,27 @@ describe('ChatGPT\'s plugin list as proof', () => {
   });
 });
 
+describe('this install\'s Core app for fresh tabs (#1086)', () => {
+  it('remembers the Core app a page lists under this install\'s name, and forgets it when it goes missing', async () => {
+    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names });
+    const worker = loadWorker({
+      local, session: new FakeStorageArea(),
+      fetch: async input => new URL(input).pathname === '/hello'
+        ? response(200, { app: 'chat-on-steroids', paired: true }) : response(200, { ok: true })
+    });
+    await worker.registerTab(1);
+    expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toBeNull();
+    expect((await worker.send({ type: 'core_plugin', appId: 'asdk_app_win2222' }, 1)).ok).toBe(true);
+    const remembered = { appId: 'asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' };
+    expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toEqual(remembered);
+    expect((await local.get(['ownCoreApp'])).ownCoreApp).toEqual(remembered);
+    // The page's complete plugin list without this install's Core takes the sighting back.
+    expect((await worker.send({ type: 'core_plugin', missing: true }, 1)).ok).toBe(true);
+    expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toBeNull();
+  });
+});
+
 describe('automatic Continue shares scheduled reload custody', () => {
   it.each(['accepted', 'draft', 'navigated', 'rejected'] as const)('never reloads immediately after Stop (%s)', async outcome => {
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';

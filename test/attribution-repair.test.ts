@@ -132,9 +132,11 @@ it('caps cached request identities across buckets rather than allowing 50,000 pe
   }));
   await flushSessions(); resetSessionStoreForTests();
   await repairDeterministicAttribution();
-  const read = vi.spyOn(fs, 'readFile');
+  // Journal reads use the bounded file-handle scanner, so observe the actual open instead of
+  // depending on the older whole-file `readFile` implementation.
+  const open = vi.spyOn(fs, 'open');
   await repairDeterministicAttribution(new Set(['unrelated-new-request']));
-  const reread = read.mock.calls.filter(([file]) => buckets.some(bucket => String(file) === path.join(dir, 'sessions', bucket.id, 'events.jsonl')));
+  const reread = open.mock.calls.filter(([file]) => buckets.some(bucket => String(file) === path.join(dir, 'sessions', bucket.id, 'events.jsonl')));
   // At least one bucket was evicted to maintain the aggregate bound and is reconstructed.
   expect(reread.length).toBeGreaterThan(0);
 });

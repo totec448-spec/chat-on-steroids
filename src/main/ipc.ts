@@ -61,7 +61,7 @@ import {
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
-import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
+import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -104,7 +104,7 @@ import {
   unpair
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
-import { extensionDownloadUrl } from './version.js';
+import { APP_VERSION, extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
   clearImageStorage,
@@ -523,7 +523,8 @@ async function buildState(): Promise<AppState> {
     bridge: await bridgeStatus(),
     cosBrowserSignedIn: cosBrowserSignedIn(),
     update: updateStatus(),
-    desktopAccess: getMacOSDesktopAccess()
+    desktopAccess: getMacOSDesktopAccess(),
+    settingsRecovered: settingsRecovered()
   };
 }
 
@@ -752,6 +753,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The renderer owns the choice; the main process keeps it for the browser extension.
     const language = z.enum(UI_LANGUAGES).parse(payload);
     if (getConfig().ui.language !== language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
+  });
+  handle('ui:whatsNewSeen', async () => {
+    // Only this version can be recorded; the renderer cannot write another one (#1172).
+    if (getConfig().ui.lastSeenVersion !== APP_VERSION) await updateConfig(config => ({ ...config, ui: { ...config.ui, lastSeenVersion: APP_VERSION } }));
   });
   handle('ui:stopNoticeTexts', async payload => {
     // The renderer's catalogs translate the stopped-chat notices (#855); bounded and allowlisted.

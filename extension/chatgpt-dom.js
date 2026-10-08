@@ -1829,7 +1829,8 @@ var CLF_DOM = (() => {
   const REVIVAL_RESIDUE = new RegExp('\\(ChatOnSteroids:youarestill[A-Za-z0-9_-]{1,40}inthesamerun,' +
     'andthisistheprimeagenttalkingtoyouagaininthechatyoualreadyknow\\.' +
     'Pickupfromwhatyoudidherebeforeratherthanstartingover\\.' +
-    'Reportwithagentsaction=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
+    // With a connector suffix the sentence names this computer's Core: "the agents tool of … (Windows): ".
+    'Reportwith(?:agents|theagentstoolof[^:]{1,160}:)action=messageto="prime"asyougoandaction=finishwhenthispieceisdone\\.\\)$');
 
   /**
    * Empties an editor that holds only an earlier worker wake (#882).
@@ -2528,8 +2529,10 @@ var CLF_DOM = (() => {
           mentioning = false;
           for (const pending of mentionTimers) clearTimeout(pending);
           mentionTimers = [];
-          // Only the prompt as it was approved may be sent, with or without the token.
-          if (promptWithoutMentions(box) !== mentionPlain) return finish(false, 'draft-changed');
+          // Only the prompt as it was approved may be sent, with or without the token. Named apart
+          // from a user's edit: four worker wakes failed this way at once in #1086, all reported
+          // as draft-changed, so the log could not say which step refused them.
+          if (promptWithoutMentions(box) !== mentionPlain) return finish(false, 'mention-changed');
           mentionedDraft = draftText();
           const resume = resumeClick;
           resumeClick = null;
@@ -2567,7 +2570,7 @@ var CLF_DOM = (() => {
               priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
               mentionPlain = promptWithoutMentions(box);
               const added = addAppMention(box, mention);
-              if (added === false) return finish(false, 'draft-changed');
+              if (added === false) return finish(false, 'mention-not-restored');
               if (added) {
                 mentionAdded = true;
                 mentioning = true;
@@ -2621,6 +2624,22 @@ var CLF_DOM = (() => {
 
   /** Native attachment identity from the composer's exact tile/remove control. */
   function composerFileName(button) {
+    // Current shell: a filename-labelled open button and a translated remove button share a
+    // span tile, without role/group/default-action. Count only that exact remove control;
+    // treating both buttons as attachments prevents the upload receipt from reaching Send.
+    const attachmentHost = button.closest('[data-composer-attachments]');
+    const tileParent = button.parentElement;
+    if (attachmentHost && tileParent && tileParent !== attachmentHost) {
+      const actions = [...tileParent.querySelectorAll('button')];
+      if (actions.length === 2 && actions[1] === button) {
+        const open = actions[0], name = open.getAttribute('aria-label');
+        const removal = button.getAttribute('aria-label') || '';
+        const labelled = [...tileParent.querySelectorAll('span')].some(node =>
+          !node.children.length && node.textContent === name);
+        if (name && removal !== name && removal.endsWith(` ${name}`) && labelled &&
+            open.closest('[data-composer-attachments]') === attachmentHost) return name;
+      }
+    }
     const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
     if (tile && tile !== button) {
       const name = tile.getAttribute('aria-label');

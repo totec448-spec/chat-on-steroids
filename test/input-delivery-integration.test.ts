@@ -1689,8 +1689,11 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await claim('tunnel_desk00001')).body.ok).toBe(true);
     resetPluginRefreshForTests();
   });
-  it('defaults automatic plugin refresh off and revokes an already offered claim without removing the backend', async () => {
+  it('offers nothing while automatic plugin refresh is off and revokes an already offered claim without removing the backend', async () => {
     const plugin = await import('../src/main/plugin-refresh.js');
+    // Fresh installs start with it on (config.test.ts); this is the switch turned off.
+    const configure = (enabled: boolean) => saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: enabled } });
+    await configure(false);
     plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
     await writeDurableNow('plugin-refresh', []);
     const tools = [{ name: 'read', description: 'Current declaration', inputSchema: { type: 'object', properties: {} } }];
@@ -1699,7 +1702,6 @@ describe('IPC input delivery and Goal control integration', () => {
     expect(saved).toBeDefined();
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
     expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toEqual([]);
-    const configure = (enabled: boolean) => saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: enabled } });
     await configure(true);
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests[0].id).toBe(saved.id);
     expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toHaveLength(1);
@@ -2790,12 +2792,12 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     } finally { clock.mockRestore(); }
   });
 
-  it('retains the same frozen ticket across restore and the shared 2/5/10/15 pickup schedule', async () => {
+  it('retains the same frozen ticket across restore and stops after the shared 2/5/10 pickup schedule', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const bridge = await import('../src/main/bridge.js');
     try {
       const { row, conversationId } = await silent('gpt-5.6-sol', ms => { now += ms; });
-      for (const minutes of [2, 5, 10, 15]) {
+      for (const minutes of [2, 5, 10]) {
         input.resetInputForTests();
         now += minutes * 60_000;
         expect(await input.pendingQueuedPickups()).toEqual(expect.arrayContaining([expect.objectContaining({ conversationId })]));
@@ -2807,6 +2809,13 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
         expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued', text: row.text });
         expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
       }
+      expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ pickupRecovery: { attempts: 3, stoppedAt: now } });
+      input.resetInputForTests();
+      expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ pickupRecovery: { attempts: 3, stoppedAt: now } });
+      now += 15 * 60_000;
+      await bridge.sweepStaleSwarm(now);
+      expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((item: any) => item.conversationId === conversationId)).toBe(false);
+      expect((await input.listInputs()).find(item => item.id === row.id)?.text).toBe(row.text);
       expect((await input.claimBrowserInput(row.id, 'restored-doc', conversationId, true))?.text).toBe(row.text);
       expect(await input.authorizeBrowserInput(row.id, 'restored-doc', conversationId)).toBe(true);
     } finally { clock.mockRestore(); }

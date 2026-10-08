@@ -39,6 +39,7 @@
 
 .ph.ph-activity::before { content: '\e000'; }
 .ph.ph-arrow-clockwise::before { content: '\e036'; }
+.ph.ph-arrow-counter-clockwise::before { content: '\e038'; }
 .ph.ph-arrow-down::before { content: '\e03e'; }
 .ph.ph-arrow-left::before { content: '\e058'; }
 .ph.ph-arrow-right::before { content: '\e06c'; }
@@ -73,6 +74,7 @@
 .ph.ph-link-break::before { content: '\e2e4'; }
 .ph.ph-browser::before { content: '\e0f4'; }
 .ph.ph-brain::before { content: '\e74e'; }
+.ph.ph-list::before { content: '\e2f0'; }
 .ph.ph-list-checks::before { content: '\eadc'; }
 .ph.ph-lock-key::before { content: '\e2fe'; }
 .ph.ph-magnifying-glass::before { content: '\e30c'; }
@@ -82,6 +84,7 @@
 .ph.ph-palette::before { content: '\e6c8'; }
 .ph.ph-paw-print::before { content: '\e648'; }
 .ph.ph-pencil-simple::before { content: '\e3b4'; }
+.ph.ph-plug::before { content: '\e946'; }
 .ph.ph-push-pin-simple::before { content: '\e65c'; }
 .ph.ph-play::before { content: '\e3d0'; }
 .ph.ph-plus::before { content: '\e3d4'; }
@@ -91,6 +94,7 @@
 .ph.ph-robot::before { content: '\e762'; }
 .ph.ph-sidebar-simple::before { content: '\ec24'; }
 .ph.ph-sliders-horizontal::before { content: '\e434'; }
+.ph.ph-sparkle::before { content: '\e6a2'; }
 .ph.ph-star::before { content: '\e46a'; }
 .ph.ph-sign-in::before { content: '\e428'; }
 .ph.ph-sign-out::before { content: '\e42a'; }

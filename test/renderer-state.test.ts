@@ -3,7 +3,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
   tabs: vi.fn(() => []), selectTab: vi.fn(), closeTab: vi.fn()
 }) }));
 // Native animation/media APIs are covered by pet DOM and real Electron tests.
-vi.mock('../src/renderer/pet.js', () => ({ initPet: () => () => {} }));
+vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}, { toggle: () => {}, isVisible: () => false }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
@@ -23,7 +23,7 @@ function installDialog(w: any): void {
 function rowMenuItem(row: Element, action: string): HTMLButtonElement | null {
   const doc = row.ownerDocument;
   closeRowMenus(doc);
-  (row.querySelector('.row-menu-button') as HTMLButtonElement).click();
+  (row.querySelector('[data-row-menu]') as HTMLButtonElement).click();
   return doc.querySelector<HTMLButtonElement>(`.row-menu [data-row-action="${action}"]`);
 }
 /** Closes whatever row menu is open, as Escape does. */
@@ -510,7 +510,12 @@ it('starts project groups collapsed and deliberately expands the project selecte
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
   await vi.waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
-  rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!.click();
+  // A new chat is the row's own button, beside its menu, not an item inside it.
+  expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')).toBeNull();
+  const create = group().querySelector<HTMLButtonElement>('.project-heading > .project-new')!;
+  expect(create.getAttribute('aria-label')).toBe('New chat in this project');
+  expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
+  create.click();
   expect(group().open).toBe(true);
 });
 
@@ -781,8 +786,9 @@ it('searches chats in a dialog opened beside the app name: recent chats first, t
   await vi.waitFor(() => expect(dialog.open).toBe(false));
   await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
 
-  // Opened again, the last query is still there, selected, and the open chat is marked.
-  (doc.getElementById('searchMenuItem') as HTMLButtonElement).click();
+  // Opened again (from the View menu), the last query is still there, selected, and the open chat is marked.
+  (doc.getElementById('viewMenu') as HTMLButtonElement).click();
+  (doc.querySelector('.row-menu [data-row-action="search"]') as HTMLButtonElement).click();
   expect(dialog.open).toBe(true);
   await vi.waitFor(() => expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true));
 
@@ -1647,9 +1653,60 @@ it('ends Setup on Ready, which names what is still open and leads back to it', a
   expect(doc.getElementById('readyStart')!.hidden).toBe(true);
   const pending = [...doc.querySelectorAll<HTMLButtonElement>('#readyChecks .ready-go')];
   expect(pending.length).toBeGreaterThan(0);
-  expect(pending.map(button => button.textContent)).toContain('Step 4API key stored');
+  expect(pending.map(button => button.textContent)).toContain('Step 5API key stored');
   pending.find(button => button.textContent!.includes('API key'))!.click();
   expect(doc.querySelector('[data-step="key"]')!.classList.contains('is-open')).toBe(true);
+});
+
+it('asks what ChatGPT can do in Setup, and read-only keeps it open with the reason', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const access = doc.querySelector<HTMLElement>('[data-step="access"]')!;
+  const choice = (level: string) => doc.querySelector<HTMLButtonElement>(`[data-access="${level}"]`)!;
+
+  // The fixture shares a folder with every permission on: the step is done, on Full access.
+  expect(access.classList.contains('is-done')).toBe(true);
+  expect(choice('full').getAttribute('aria-checked')).toBe('true');
+  expect(doc.getElementById('accessNote')!.hidden).toBe(true);
+
+  // Read-only, as an older install or a recovered settings file leaves it: the step is done (setup
+  // can still end on all set), but it says why, and Ready says what is limited and how to change it.
+  const readOnly = structuredClone(mounted.state);
+  readOnly.config.readOnly = true;
+  readOnly.settingsRecovered = true;
+  mounted.push(readOnly);
+  expect(access.classList.contains('is-done')).toBe(true);
+  expect(choice('read').getAttribute('aria-checked')).toBe('true');
+  expect(doc.getElementById('accessRecovered')!.hidden).toBe(false);
+  expect(doc.getElementById('accessNote')!.classList.contains('is-warn')).toBe(true);
+  expect(doc.getElementById('readyLimited')!.hidden).toBe(false);
+  expect(doc.querySelector('#readyChecks .ready-check.is-passed.is-limited')!.textContent).toBe('ChatGPT can only read files');
+  doc.getElementById('readyChangeAccess')!.click();
+  expect(access.classList.contains('is-open')).toBe(true);
+
+  // Files and terminal turns read-only off and Desktop off in one save.
+  choice('files').click();
+  await settle();
+  const saved = mounted.calls.at(-1);
+  expect(saved.readOnly).toBe(false);
+  for (const cap of ['create', 'edit', 'move', 'deleteFile', 'command']) expect(saved.capabilities[cap], cap).toBe(true);
+  for (const cap of ['screen', 'control', 'clipboardRead', 'clipboardWrite']) expect(saved.capabilities[cap], cap).toBe(false);
+
+  // An unpublished Desktop card leads to the same step, not to Settings.
+  const noDesktop = structuredClone(mounted.state);
+  noDesktop.status.surfaces = [{ id: 'desktop', connectorName: 'Chat On Steroids Desktop', state: 'off', available: false, optional: true,
+    detail: 'Turn on a Desktop permission.', cardSummary: 'Browser and desktop apps.', tools: [], lastRequestAt: null, lastToolCallAt: null }];
+  mounted.push(noDesktop);
+  [...doc.querySelectorAll<HTMLButtonElement>('#connectorCards .btn')].find(button => button.textContent === 'Change access')!.click();
+  expect(access.classList.contains('is-open')).toBe(true);
+
+  // A mix from Workspace without commands is custom, and named as what keeps ChatGPT from working.
+  const custom = structuredClone(mounted.state);
+  custom.config.capabilities.command = false;
+  mounted.push(custom);
+  for (const level of ['full', 'files', 'read']) expect(choice(level).getAttribute('aria-checked')).toBe('false');
+  expect(doc.getElementById('readyLimited')!.hidden).toBe(false);
+  expect(doc.getElementById('accessNote')!.textContent).toMatch(/^These permissions keep ChatGPT from editing files or running commands/);
 });
 
 it('requires external installation before choosing the built-in browser and signing in', async () => {
@@ -2029,7 +2086,7 @@ it('keeps folder access discoverable after setup and navigates without granting 
   // A finished setup leads with its proof: every check passed, and the way into a chat.
   expect(doc.getElementById('readyTitle')!.textContent).toBe('You’re all set!');
   expect(doc.getElementById('readyStart')!.hidden).toBe(false);
-  expect(doc.querySelectorAll('#readyChecks .ready-check.is-passed')).toHaveLength(6);
+  expect(doc.querySelectorAll('#readyChecks .ready-check.is-passed')).toHaveLength(7);
   expect(mounted.window.getComputedStyle(doc.getElementById('readyChecks')!).display).not.toBe('none');
   doc.querySelector<HTMLButtonElement>('[data-rail-step="folder"]')!.click();
   const manage = doc.getElementById('wizManageFolders')!;

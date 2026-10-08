@@ -71,6 +71,8 @@ app.whenReady().then(async () => {
   win.setContentSize(920, 320);
   win.webContents.setZoomFactor(1);
   const previews = [
+    { file: 'preview-pickup', kind: 'pickup', next: 'queue', deadline: 300_000, now: 0 },
+    { file: 'preview-pickup-stopped', kind: 'pickup-stopped', next: 'queue', attempts: 3, deadline: 300_000, now: 0 },
     { file: 'preview-unattributed', kind: 'unattributed', deadline: 15_000, now: 0 },
     { file: 'preview-unattributed-multiple', kind: 'unattributed', deadline: 60_000, now: 0 },
     { file: 'preview-unattributed-five-minute', kind: 'unattributed-wait', deadline: 300_000, now: 60_000 },

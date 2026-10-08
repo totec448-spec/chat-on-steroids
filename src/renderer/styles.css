@@ -417,7 +417,6 @@ code {
   background: var(--page);
   transition: grid-template-columns 220ms cubic-bezier(.16, 1, .3, 1);
 }
-.app > header { grid-column: 2; grid-row: 2; }
 .app > .notices { grid-column: 2; grid-row: 3; min-width: 0; }
 .app[data-screen='settings'] #pluginRefreshReminder { display: none; }
 .app > main { grid-column: 2; grid-row: 4; min-width: 0; }
@@ -430,14 +429,13 @@ code {
 :root[data-theme='dark'] .app[data-screen='chat'] .card.is-session { background: transparent; }
 .app-topbar { position: relative; z-index: 130; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 6px; height: env(titlebar-area-height, 28px); padding: 0 10px; padding-left: max(10px, calc(env(titlebar-area-x, 0px) + 4px)); padding-right: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))); background: var(--page); -webkit-app-region: drag; }
 
-.app-topbar > .btn, .view-menu { -webkit-app-region: no-drag; height: 100%; }
-.app-topbar > .btn { padding: 0 5px; }
+.app-topbar > .btn { -webkit-app-region: no-drag; height: 100%; padding: 0 5px; }
 .app-topbar > .btn .ico { --ico: 14px; }
-.view-menu { position: relative; font-size: calc(12px * var(--text-scale, 1)); }
-.view-menu > summary { display: flex; align-items: center; height: 100%; list-style: none; cursor: pointer; padding: 0 9px; border-radius: 6px; }
-.view-menu > summary:hover, .view-menu[open] > summary { background: var(--hover); }
-.view-menu-items { position: absolute; top: calc(100% + 5px); left: 0; z-index: 100; width: 260px; padding: 6px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003; }
-.view-menu-items .btn { display: flex; width: 100%; gap: 10px; padding: 9px 10px; border-radius: 5px; }
+/* The View menu's button stays lit while its menu is open, like a row's ⋮. Its three lines draw
+   narrower and shorter than the sidebar toggle's frame beside it: a larger glyph gives them the
+   same width, so the pair reads as one set. */
+#viewMenu[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
+#viewMenu .ico { --glyph: 18.5px; }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
   position: fixed; z-index: 200; display: grid; gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
@@ -469,8 +467,11 @@ code {
 .row-menu-swatch[data-color='rose'] { background: #bd5d72; border-color: #0002; }
 .row-menu-swatch[data-color='teal'] { background: #388f91; border-color: #0002; }
 @media (prefers-reduced-motion: reduce) { .row-menu, .row-menu-leaving, .row-menu-item { animation: none; transition: none; } }
-.view-menu-items kbd { margin-left: auto; color: var(--soft); font: inherit; }
-.view-menu-items hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
+/* The View menu's items carry their shortcut at the end, and Actual size its live zoom. */
+.row-menu-label:has(+ .row-menu-hint) { flex: 0 1 auto; }
+.row-menu-hint { flex: none; margin-inline-end: auto; color: var(--faint); font-variant-numeric: tabular-nums; }
+.row-menu-shortcut { flex: none; margin-inline-start: 16px; color: var(--faint); font: inherit; font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.row-menu-item:is(:hover, :focus-visible) > .row-menu-shortcut { color: var(--soft); }
 .app.is-sidebar-collapsed { grid-template-columns: minmax(0, 0px) minmax(0, 1fr); }
 .app.is-resizing-sidebar { transition: none; }
 .app.is-sidebar-collapsed .sidebar { clip-path: inset(0 100% 0 0); opacity: 0; transform: translateX(-14px); visibility: hidden; pointer-events: none; transition: clip-path 180ms ease-in, opacity 150ms ease-in, transform 180ms ease-in, visibility 0s 180ms; }
@@ -541,6 +542,79 @@ code {
 @keyframes search-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .search-dialog[open], .search-dialog.is-closing, .search-dialog[open]::backdrop, .search-dialog.is-closing::backdrop { animation: none; }
+}
+/*
+ * What's New (#1172), in the language of the browser sign-in card (cos-browser-sign-in.css): a card
+ * whose hairline catches light along its top edge over two soft shadows, rising in on a spring; the
+ * app's own tile sealed with an accent sparkle; highlights that arrive one after another; and the
+ * card's quiet centred actions.
+ */
+.whats-new-dialog { width: min(540px, calc(100vw - 40px)); max-height: min(740px, calc(100dvh - 40px)); margin: auto; padding: 0; overflow: hidden;
+  --whats-new-surface: var(--card); color: var(--ink); background: var(--whats-new-surface); border: 0; border-radius: 22px; text-align: center;
+  box-shadow: 0 0 0 1px var(--edge), inset 0 1px 0 color-mix(in srgb, var(--ink) 7%, transparent), 0 2px 6px #0003, 0 28px 70px -18px #000b; }
+/* Raised like the sign-in card in dark; in light the card tone is the lighter one, as the search window uses. */
+:root[data-theme='dark'] .whats-new-dialog { --whats-new-surface: var(--popover); }
+.whats-new-dialog[open] { display: flex; flex-direction: column; animation: whats-new-rise .6s cubic-bezier(.16, 1, .3, 1) .04s both; }
+.whats-new-dialog::backdrop { background: color-mix(in srgb, var(--page) 58%, transparent); }
+.whats-new-dialog[open]::backdrop { animation: search-backdrop-in .42s cubic-bezier(.2, .7, .2, 1) both; }
+.whats-new-dialog.is-closing { animation: whats-new-leave .22s cubic-bezier(.4, 0, 1, 1) both; }
+.whats-new-dialog.is-closing::backdrop { animation: search-backdrop-out .26s ease-in both; }
+
+/* Not the app's toolbar header: no border, gap or minimum height of its own. */
+.whats-new-head { display: flex; flex-direction: column; align-items: center; gap: 0; flex: none; min-height: 0; padding: 28px 30px 4px; border: 0; }
+.whats-new-hero { position: relative; margin-bottom: 22px; }
+.whats-new-tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--ink); color: var(--page);
+  box-shadow: 0 0 0 1px var(--line), 0 6px 16px -8px #000a; animation: whats-new-pop .5s cubic-bezier(.34, 1.4, .64, 1) .16s both; }
+.whats-new-tile .ico { --ico: 30px; stroke-width: 1.6; }
+/* The mark's drawing carries its ink a pixel left of its box (the folder tab) and half a pixel low (the speech tail); centred in the tile. */
+.whats-new-tile .ico { translate: 1px -0.5px; }
+.whats-new-seal { position: absolute; right: -7px; bottom: -7px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--whats-new-surface); box-shadow: 0 0 0 3px var(--whats-new-surface);
+  animation: whats-new-pop .45s cubic-bezier(.34, 1.4, .64, 1) .42s both; }
+.whats-new-seal .ico { --ico: 14px; --glyph: 14px; animation: whats-new-twinkle .7s cubic-bezier(.34, 1.4, .64, 1) .5s both; }
+.whats-new-version { margin-bottom: 6px; color: var(--accent); font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; line-height: calc(16px * var(--text-scale, 1)); }
+.whats-new-head h2 { margin: 0; font-size: calc(19px * var(--text-scale, 1)); font-weight: 600; line-height: calc(26px * var(--text-scale, 1)); letter-spacing: -0.016em; }
+.whats-new-lead { max-width: 380px; margin: 8px 0 0; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); line-height: calc(20px * var(--text-scale, 1)); text-wrap: balance; }
+
+/* The scrollbar's room is kept, so rows never shift sideways on a window too short for them all. */
+.whats-new-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; margin: 18px 0 0; padding: 0 18px 4px; list-style: none; text-align: start; }
+.whats-new-item { display: grid; grid-template-columns: 38px 1fr; align-items: start; gap: 13px; padding: 8px 8px; border-radius: 14px;
+  animation: whats-new-arrive .45s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(.22s + var(--i, 0) * 45ms); }
+.whats-new-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; background: var(--hover); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 6px 16px -10px #0008; }
+/* An even glyph in an even box in an even badge: every glyph lands on whole pixels. */
+.whats-new-icon .ico { --ico: 18px; --glyph: 18px; }
+/* Optical correction, measured by verify-whats-new: Phosphor draws the pin's ink a pixel low in its box. */
+.whats-new-icon .ph-push-pin-simple { translate: 0 -1px; }
+/* The lock's shackle lifts its ink above centre; half a pixel brings the body back. */
+.whats-new-icon .ph-lock-key { translate: 0 0.5px; }
+/* Whole-pixel line heights keep every row, and so every badge, on a whole pixel: glyphs stay crisp and centred. */
+.whats-new-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 1px; }
+.whats-new-words b { font-size: calc(13.5px * var(--text-scale, 1)); font-weight: 600; line-height: calc(18px * var(--text-scale, 1)); letter-spacing: -0.006em; }
+.whats-new-words span { color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); line-height: calc(18px * var(--text-scale, 1)); overflow-wrap: anywhere; }
+
+.whats-new-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex: none; padding: 12px 24px 18px; }
+.whats-new-link, .whats-new-done { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; font: inherit;
+  font-size: calc(12.5px * var(--text-scale, 1)); line-height: calc(18px * var(--text-scale, 1)); cursor: pointer; transition: background-color .14s, color .14s, transform .16s cubic-bezier(.16, 1, .3, 1); }
+.whats-new-link { padding: 8px 12px; border-radius: 10px; background: none; color: var(--faint); font-weight: 500; }
+.whats-new-link .ico { --ico: 14px; }
+.whats-new-link:hover { background: var(--hover); color: var(--ink); }
+/* The one strong action, in the hero tile's ink. */
+.whats-new-done { min-width: 108px; padding: 9px 18px; border-radius: 11px; background: var(--ink); color: var(--page); font-weight: 600;
+  box-shadow: 0 6px 16px -10px #000a; }
+.whats-new-done:hover { transform: translateY(-1px); }
+.whats-new-done:active { transform: translateY(0) scale(.98); }
+.whats-new-link:focus-visible, .whats-new-done:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@keyframes whats-new-rise { from { opacity: 0; transform: translateY(18px) scale(.96); } }
+@keyframes whats-new-leave { to { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes whats-new-pop { from { opacity: 0; transform: scale(.6); } }
+@keyframes whats-new-twinkle { from { opacity: 0; transform: rotate(-60deg) scale(.4); } }
+@keyframes whats-new-arrive { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) {
+  .whats-new-dialog[open], .whats-new-dialog.is-closing, .whats-new-dialog[open]::backdrop, .whats-new-dialog.is-closing::backdrop,
+  .whats-new-tile, .whats-new-seal, .whats-new-seal .ico, .whats-new-item { animation: none; }
+  .whats-new-done { transition: none; }
 }
 /* A fixed row: the clear button keeps its place while hidden, so typing never moves the line below. */
 .search-dialog-field { display: flex; align-items: center; gap: 10px; flex: none; box-sizing: border-box; height: 54px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); }
@@ -1859,6 +1933,21 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .browser-option:hover { background: var(--hover); }
 .browser-option[aria-checked="true"] { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); }
 .browser-option[aria-checked="true"]::after { box-shadow: inset 0 0 0 4px var(--accent); }
+/*
+ * Setup's access choice: the browser step's radio cards, three side by side, and the step's words
+ * centred over them. The fine control under them is as wide as the cards and reads left to right.
+ */
+.wizard > .step.is-open[data-step="access"] > .step-body { display: grid; justify-items: center; text-align: center; }
+.wizard > .step.is-open[data-step="access"] > .step-body > .step-lead { margin-inline: auto; }
+.wizard > .step.is-open[data-step="access"] > .step-body > .step-nav { justify-self: stretch; text-align: initial; }
+.access-choice { width: 100%; max-width: 820px; grid-template-columns: repeat(3, minmax(0, 1fr)); text-align: left; }
+.access-choice .browser-option > .ico { font-size: calc(26px * var(--text-scale, 1)); color: var(--soft); margin-bottom: 2px; }
+.access-choice .browser-option[aria-checked="true"] > .ico { color: var(--accent); }
+#accessNote { margin-top: 14px; max-width: 820px; }
+#accessRecovered { margin-top: 10px; max-width: 64ch; }
+.access-fine { width: 100%; max-width: 820px; margin-top: 18px; text-align: left; }
+.access-fine > #accessFineSlot { margin-top: 12px; }
+@container (max-width: 640px) { .access-choice { grid-template-columns: minmax(0, 1fr); } }
 .browser-action { display: grid; gap: 12px; margin-top: 24px; }
 .browser-action > .btn { justify-content: center; }
 .browser-action > .status-pill { background: none; box-shadow: none; padding: 0; color: var(--soft); font-weight: 500; }
@@ -2242,7 +2331,7 @@ input[readonly] {
    whole content — which is why the timeline painted over the header. Every child gets an
    explicit track; nothing here may rely on implicit rows. */
 [data-panel='chat'] .card.is-session {
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   background: var(--page); border: 0; border-radius: 0; box-shadow: none;
 }
 /* Disclosure/history height changes must not take scrollbar width from the prose. */
@@ -2344,14 +2433,15 @@ input[readonly] {
   white-space: nowrap;
 }
 .app[data-screen='settings'] :is(#chatTitle, #chatProjectContext) { display: none; }
-.app > header .power { padding: 6px 10px; min-height: 32px; border-radius: 8px; font-size: calc(12px * var(--text-scale, 1)); font-weight: 500; }
-.app > header .live { font-size: calc(12px * var(--text-scale, 1)); font-weight: 400; }
+.chat-head .power { padding: 6px 10px; min-height: 32px; border-radius: 8px; font-size: calc(12px * var(--text-scale, 1)); font-weight: 500; }
+.chat-head .live { font-size: calc(12px * var(--text-scale, 1)); font-weight: 400; }
 .subhead:has(#chatState:empty) { display: none; }
-.card.is-session > .subhead { grid-row: 1; padding-inline: 24px; }
-.card.is-session > #chatBody { grid-row: 2; padding-top: 12px; }
-.card.is-session > .composer-dock { grid-row: 3; }
-.card.is-session > #composer { grid-row: 4; }
-.card.is-session > #chatFoot { grid-row: 5; }
+.card.is-session > .chat-head { grid-row: 1; }
+.card.is-session > .subhead { grid-row: 2; padding-inline: 24px; }
+.card.is-session > #chatBody { grid-row: 3; padding-top: 12px; }
+.card.is-session > .composer-dock { grid-row: 4; }
+.card.is-session > #composer { grid-row: 5; }
+.card.is-session > #chatFoot { grid-row: 6; }
 
 /* ------------------------------------------------------- session list */
 
@@ -3433,12 +3523,12 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .image-remove { position: absolute; top: -4px; right: -4px; border: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--page); cursor: pointer; }
 
 /* The workspace shell follows the observed Codex chat/settings hierarchy. */
-.app > header { min-height: 48px; border-bottom: 0; padding: 8px 24px; }
-.app > header > .mark, .app > header > .title { display: none; }
-.app[data-screen='settings'] > header, .app[data-screen='library'] > header { display: none; }
+.chat-head { min-height: 48px; border-bottom: 0; padding: 8px 24px; }
+.chat-head > .mark, .chat-head > .title { display: none; }
 .app[data-screen='settings'] .sidebar-bottom { margin-top: auto; }
 .app[data-screen='settings'] #backToChat { justify-content: flex-start; align-self: start; width: auto; min-height: 36px; padding: 8px 10px; border: 0; border-radius: 8px; margin-bottom: 16px; animation: sidebar-content-in 170ms cubic-bezier(.16, 1, .3, 1); }
 .app[data-screen='settings'] .is-session > h2,
+.app[data-screen='settings'] .is-session > .chat-head,
 .app[data-screen='settings'] .is-session > .subhead,
 .app[data-screen='settings'] #chatFoot { display: none; }
 /* Agents & automation is a view of the chat card, not a panel of its own. The card is positioned
@@ -3454,7 +3544,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 #chatFoot { border: 0; padding: 0 24px 8px; text-align: center; font-size: calc(10px * var(--text-scale, 1)); }
 @media (max-width: 850px) {
   .app { --sidebar-default: 205px; }
-  .app > header .live em { display: none; }
+  .chat-head .live em { display: none; }
   .composer { width: calc(100% - 32px); padding: 14px 12px 10px; }
   #chatBody { padding: 20px 22px; }
 }
@@ -3500,12 +3590,12 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .tool-group-body { padding: 4px 0 0 0; }
 .tool-group-body .ev { margin: 0; }
 .tool-group-body .tool > summary, .tool-group-body .agent-communication > summary { min-height: 24px; }
-.agent-avatar { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 6px; font-size: calc(9px * var(--text-scale, 1)); line-height: 1; background: #7d6198; color: #fff; }
-.agent-avatar[data-color='1'] { background: #ac793a; }
-.agent-avatar[data-color='2'] { background: #527c96; }
-.agent-avatar[data-color='3'] { background: #608a72; }
-.agent-avatar[data-color='4'] { background: #a46486; }
-.agent-avatar[data-color='5'] { background: #827f4d; }
+.agent-avatar { --hue: #7d6198; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 6px; font-size: calc(9px * var(--text-scale, 1)); line-height: 1; background: var(--hue); color: #fff; }
+.agent-avatar[data-color='1'] { --hue: #ac793a; }
+.agent-avatar[data-color='2'] { --hue: #527c96; }
+.agent-avatar[data-color='3'] { --hue: #608a72; }
+.agent-avatar[data-color='4'] { --hue: #a46486; }
+.agent-avatar[data-color='5'] { --hue: #827f4d; }
 
 /* Composer popovers mirror the small, contextual controls in the native reference. */
 .composer-menu { position: relative; flex-shrink: 0; }
@@ -3759,9 +3849,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .row-menu-button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--faint); }
 .row-menu-button:hover, .row-menu-button[aria-expanded='true'] { color: var(--ink); background: var(--hover); }
 .row-menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.project-menu { opacity: 0; transition: opacity 120ms ease; }
-@media (prefers-reduced-motion: reduce) { .project-menu { transition: none; } }
-.project-heading:hover .project-menu, .project-heading:focus-within .project-menu, .project-menu[aria-expanded='true'] { opacity: 1; }
+/* The new chat button and the menu appear together, on hover or focus and while the menu is open. */
+:is(.project-new, .project-menu) { opacity: 0; transition: opacity 120ms ease; }
+@media (prefers-reduced-motion: reduce) { :is(.project-new, .project-menu) { transition: none; } }
+.project-heading:is(:hover, :focus-within, :has(.project-menu[aria-expanded='true'])) :is(.project-new, .project-menu) { opacity: 1; }
+/* Its center 27px from the menu's, where a chat row's sub-agent arrow sits beside its "⋯" on hover. */
+.project-heading > .project-new { width: 24px; margin-inline-end: -7px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
@@ -3784,22 +3877,64 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-header .agent-back { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border-radius: 7px; color: var(--soft); }
 .agent-panel-header .agent-back:hover { background: var(--hover); color: var(--ink); }
 .agent-back .ico { --ico: 16px; --glyph: 16px; }
-.agent-panel-body { min-height: 0; overflow-y: auto; padding: 24px; }
-.agent-panel-body h3 { color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); font-weight: 450; margin: 12px 0 18px; }
-.agent-panel-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
-.agent-panel-row:hover, .agent-panel-row:focus-visible { background: var(--hover); border-color: var(--edge); outline: none; }
-.agent-panel-row:focus-visible { box-shadow: inset 2px 0 var(--accent); }
-.agent-panel-row .agent-avatar { width: 28px; height: 28px; flex-basis: 28px; font-size: calc(12px * var(--text-scale, 1)); }
-.agent-card-content { display: grid; gap: 4px; flex: 1; min-width: 0; }
-.agent-card-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-card-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); }
-.agent-card-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: calc(10px * var(--text-scale, 1)) var(--mono); }
-.agent-card-task { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
-.agent-card-activity { overflow: hidden; color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.agent-card-meta { color: var(--faint); font: calc(10px * var(--text-scale, 1)) var(--mono); }
-.agent-status-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.agent-panel-row[data-state='working'] .agent-status-dot, .agent-panel-row[data-state='active'] .agent-status-dot { background: var(--green); }
-.agent-panel-row[data-state='failed'] .agent-status-dot { background: var(--red); }
+.agent-panel-body { min-height: 0; overflow-y: auto; padding: 14px 12px 24px; }
+/*
+ * Sub-agents: a roster, not a stack of boxes. Each worker is one quiet row (the sidebar's hover and
+ * radius) whose avatar carries the state; working, the connection capsule's light travels around it
+ * and the current action carries the turn's sheen. Name and time, the task, then one line of facts.
+ */
+.agent-panel-body h3 { display: flex; align-items: baseline; gap: 6px; margin: 18px 12px 6px; color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; letter-spacing: .01em; font-variant-numeric: tabular-nums; }
+.agent-panel-body h3:first-child { margin-top: 4px; }
+.agent-panel-body h3 + .meta { margin: 0 12px 8px; color: var(--faint); font-size: calc(13px * var(--text-scale, 1)); }
+.agent-panel-row { position: relative; display: flex; align-items: flex-start; gap: 12px; width: 100%; margin: 1px 0; padding: 10px 12px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer;
+  transition: background-color 120ms ease; }
+.agent-panel-row:hover { background: var(--hover); }
+.agent-panel-row:focus-visible { outline: 2px solid var(--accent-edge); outline-offset: -2px; background: var(--hover); }
+/* The round's workers, when the panel opens on them: one glow, in the app's own selection tone,\n   that settles into the plain row. */
+.agent-panel-row.is-arriving { --arrive: color-mix(in srgb, var(--ink) 7%, var(--hover)); animation: agent-arrive 1600ms cubic-bezier(.22, 1, .36, 1); }
+@keyframes agent-arrive { 0%, 30% { background-color: var(--arrive); } 100% { background-color: transparent; } }
+.agent-card-avatar { position: relative; flex: none; display: grid; margin-top: 1px; }
+.agent-panel-row .agent-avatar { width: 32px; height: 32px; flex-basis: 32px; border-radius: 9px; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600;
+  background: color-mix(in srgb, var(--hue) 24%, var(--card)); color: color-mix(in srgb, var(--hue) 46%, var(--ink)); }
+.agent-card-presence { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--faint); box-shadow: 0 0 0 2px var(--page); transition: background-color 200ms ease; }
+.agent-panel-row:hover .agent-card-presence { box-shadow: 0 0 0 2px var(--hover); }
+.agent-panel-row:is([data-state='working'], [data-state='active']) .agent-card-presence { background: var(--green); }
+.agent-panel-row:is([data-state='invited'], [data-state='waking']) .agent-card-presence { background: var(--accent); }
+.agent-panel-row[data-state='failed'] .agent-card-presence { background: var(--red); }
+.agent-panel-row:is([data-state='sleeping'], [data-state='history']) .agent-card-presence { background: color-mix(in srgb, var(--faint) 70%, var(--page)); }
+/* Working: the light that travels the connection capsule's border, around the avatar. */
+.agent-panel-row:is([data-state='working'], [data-state='active']) .agent-card-avatar::before {
+  content: ''; position: absolute; inset: -3px; border-radius: 12px; padding: 1.5px; pointer-events: none;
+  background: conic-gradient(from var(--capsule-arc), transparent 0deg, transparent 180deg, color-mix(in srgb, var(--green) 30%, transparent) 260deg, var(--green) 350deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: capsule-arc 2.4s linear infinite; animation-delay: var(--phase, 0ms); }
+.agent-card-content { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.agent-card-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.agent-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.01em; }
+.agent-card-time { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.agent-card-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft);
+  font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; }
+/* The current action, while working: one line in the turn's sheen. */
+.agent-card-activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4;
+  color: transparent; background: linear-gradient(100deg, var(--soft) 36%, var(--ink) 50%, var(--soft) 64%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: turn-sheen 1.8s ease-in-out infinite; animation-delay: var(--phase, 0ms); }
+.agent-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; margin-top: 2px; color: var(--faint);
+  font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.agent-card-state { color: var(--soft); font-weight: 500; }
+.agent-panel-row:is([data-state='working'], [data-state='active']) .agent-card-state { color: var(--green); }
+.agent-panel-row[data-state='failed'] .agent-card-state, .agent-card-health { color: var(--red); }
+.agent-card-sep { color: var(--line); }
+@media (prefers-reduced-motion: reduce) {
+  .agent-panel-row, .agent-card-presence { transition: none; }
+  .agent-panel-row.is-arriving { animation: none; background: var(--arrive); }
+  .agent-panel-row .agent-card-avatar::before { animation: none; }
+  .agent-card-activity { animation: none; color: var(--soft); background: none; }
+}
 .agent-panel-body .ev { display: block; margin: 24px 0; }
 .agent-panel-body :is(.ev-tool_call, .ev-page_tool, .ev-agent_message) { margin: 0; }
 .agent-panel-body .ev-body { min-width: 0; }
@@ -4249,6 +4384,11 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .work-dock-quick span { flex: 1; color: var(--ink); }
 .work-dock-quick kbd { color: var(--faint); font: inherit; font-size: calc(10px * var(--text-scale, 1)); }
 .header-dock-controls { display: flex; align-items: center; gap: 4px; }
+/* In the title bar: at its right end, clickable inside the drag region. Beside the system's caption
+   buttons, a short divider and a gap set the app's toggles apart from minimize, maximize and close. */
+.app-topbar > .header-dock-controls { margin-left: auto; height: 100%; -webkit-app-region: no-drag; }
+.app-topbar > .header-dock-controls.is-beside-caption { padding-right: 12px; margin-right: 4px; position: relative; }
+.app-topbar > .header-dock-controls.is-beside-caption::after { content: ''; position: absolute; right: 0; top: 50%; width: 1px; height: 16px; transform: translateY(-50%); background: var(--line); }
 .header-dock-controls > .btn { display: grid; place-items: center; width: 28px; height: 28px; padding: 5px; border-radius: 7px; color: var(--soft); }
 /* The shared 17px glyph in a 15px box sat at x.5 and blurred, worst on rotated glyphs. The dock
    controls draw upright glyphs at 18px in an 18px box on whole pixels; the filled half-squares
@@ -4263,8 +4403,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .app[data-screen='settings'] [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr); }
 .app[data-screen='settings'] .work-panel-resize { display: none; }
 [data-panel='chat'].is-work-dock-expanded { grid-template-columns: 0 minmax(0, 1fr); }
+/* Expanded, the panel's edge is the workspace's: it curves with the sidebar's rounded corner. It keeps the
+   curve while it expands or restores (.is-moving without .is-sliding), since it starts or ends at that corner,
+   and lets it go once it rests at the right. */
+[data-panel='chat'].is-work-dock-expanded > .work-dock-right, .work-dock-right.is-moving:not(.is-sliding) { border-top-left-radius: 18px; }
+.work-dock-right { transition: border-top-left-radius 160ms ease; }
+@media (prefers-reduced-motion: reduce) { .work-dock-right { transition: none; } }
 .is-work-dock-expanded:not(.is-dock-handover) > .is-session, .is-work-dock-expanded .work-panel-resize { display: none; }
-.app[data-screen='settings'] .header-dock-controls { display: none; }
+.app:is([data-screen='settings'], [data-screen='library']) .header-dock-controls { display: none; }
 @media (max-width: 850px) {
   [data-panel='chat'].has-work-dock { grid-template-columns: 0 minmax(0, 1fr); }
   .has-work-dock > .is-session { display: none; }
@@ -4275,7 +4421,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .activity-workers:hover { color: var(--accent); background: var(--sunk); }
 .activity-workers:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tool-group[open] > summary > .activity-workers { display: none; }
-.agent-panel-row.is-round-worker { background: var(--accent-wash); box-shadow: inset 3px 0 var(--accent); }
 
 /*
  * Ready: the closing step. A badge that turns green when every check passes, the checks as a
@@ -4310,6 +4455,16 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 }
 .step-ready .step-actions { margin-top: 18px; }.setup-rail li.setup-rail-ready.is-done .setup-rail-mark { background: var(--green); border-color: var(--green); color: var(--page); }
 @container (max-width: 560px) { .ready-checks { grid-template-columns: minmax(0, 1fr); } }
+/* Limited access: done, but marked, and said once under the checks with the way to change it. */
+.ready-check.is-limited .ico { color: var(--soft); }
+.ready-limited {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px;
+  border-radius: 10px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line);
+}
+.ready-limited[hidden] { display: none; }
+.ready-limited > .ico { color: var(--ink); font-size: calc(18px * var(--text-scale, 1)); }
+.ready-limited > p { margin: 0; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; line-height: 1.5; }
+@container (max-width: 560px) { .ready-limited { grid-template-columns: auto minmax(0, 1fr); } .ready-limited > .btn { grid-column: 2; justify-self: start; } }
 @media (prefers-reduced-motion: reduce) { .step-ready.is-all-set.is-open .ready-badge { animation: none; } }
 
 /*

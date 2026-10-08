@@ -719,7 +719,8 @@ describe('surface boundaries', () => {
     );
     expect(targetRun).toMatchObject({ type: 'string', minLength: 1, maxLength: 36 });
     const worker = agentsTool.inputSchema.properties.workers.items;
-    expect(worker.properties.label.description).toBe('Short name shown to the user, e.g. "Security".');
+    // The prime is asked to name every worker: the Sub-agents list shows that name, or a generic "Worker 2".
+    expect(worker.properties.label.description).toBe('Name its job in 1-3 words, e.g. "Tests"; shown to the user.');
     expect(worker.properties.task.description).toBe(
       'This worker\'s job: objective, relevant files, constraints and expected handoff.'
     );
@@ -734,6 +735,10 @@ describe('surface boundaries', () => {
       'utf8'
     );
     expect(targetRunOverhead).toBe(148);
+    // A sleeping worker woken for new work can be renamed for it (the Sub-agents list shows the name).
+    const revivalLabel = agentsTool.inputSchema.properties.messages.items.properties.label;
+    expect(revivalLabel.description).toBe('New job name when waking.');
+    expect(Buffer.byteLength(`,"label":${JSON.stringify(revivalLabel)}`, 'utf8')).toBe(97);
   });
 
   it('removes the agents tool entirely once multi-agent is switched off', async () => {
@@ -948,8 +953,9 @@ describe('surface boundaries', () => {
           : tool.name === 'apply_patch'
             ? 5_000
             : tool.name === 'agents'
-              // Main's 3,400-byte guardrail plus the measured 148-byte target_run_id property.
-              ? 3_548
+              // Main's 3,400-byte guardrail plus the measured 148-byte target_run_id property and
+              // the measured 97-byte revival label (messages[].label).
+              ? 3_645
               : tool.name === 'exec_command'
                 // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
                 // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a

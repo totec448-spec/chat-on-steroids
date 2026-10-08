@@ -46,6 +46,7 @@ import {
 } from './session/recorder.js';
 import {
   agentConversation,
+  archiveWorkerAssignments,
   bindConversation,
   onRetiredWorkersPersist,
   onRetiredWorkersPersistNow,
@@ -492,6 +493,9 @@ void app.whenReady().then(async () => {
   restoreRetiredWorkers(retiredWorkers);
   const savedSwarm = await readDurable<SwarmSnapshot>(SWARM_STATE);
   if (windowActivation.isDisabled()) return;
+  // From the saved snapshot itself, so families the restore prunes as expired keep their names in
+  // history; in the background, since startup does not wait on presentation.
+  void archiveWorkerAssignments(savedSwarm);
   restoreSwarm(savedSwarm);
   if (!getConfig().multiAgent.enabled) {
     // A feature toggle is a pause, not Clear swarm. Canonicalize any active incarnation left by
