@@ -1,4 +1,10 @@
 {
+  "Chat is in the linked ChatGPT Project · checked {0}": "Bu sohbet bağlı ChatGPT Projesinde · {0} kontrol edildi",
+  "Chat is in another ChatGPT Project · checked {0}": "Bu sohbet başka bir ChatGPT Projesinde · {0} kontrol edildi",
+  "Chat is not in a ChatGPT Project · checked {0}": "Bu sohbet hiçbir ChatGPT Projesinde değil · {0} kontrol edildi",
+  "Check chat in linked ChatGPT Project": "Bağlı ChatGPT Projesinde sohbeti kontrol et",
+  "Check only this current chat; do not move it between local projects": "Yalnızca bu geçerli sohbeti kontrol et; yerel projeler arasında taşıma",
+  "Verified matches: {0}": "Doğrulanan eşleşmeler: {0}",
   "Clear search": "Aramayı temizle",
   "Jump to latest": "En yeniye git",
   "No chats match": "Eşleşen sohbet yok",

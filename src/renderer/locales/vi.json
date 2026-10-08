@@ -1,4 +1,10 @@
 {
+  "Chat is in the linked ChatGPT Project · checked {0}": "Cuộc trò chuyện thuộc Dự án ChatGPT đã liên kết · kiểm tra {0}",
+  "Chat is in another ChatGPT Project · checked {0}": "Cuộc trò chuyện thuộc một Dự án ChatGPT khác · kiểm tra {0}",
+  "Chat is not in a ChatGPT Project · checked {0}": "Cuộc trò chuyện không thuộc Dự án ChatGPT nào · kiểm tra {0}",
+  "Check chat in linked ChatGPT Project": "Kiểm tra cuộc trò chuyện trong Dự án ChatGPT đã liên kết",
+  "Check only this current chat; do not move it between local projects": "Chỉ kiểm tra cuộc trò chuyện hiện tại; không chuyển giữa các dự án cục bộ",
+  "Verified matches: {0}": "Số cuộc trò chuyện khớp đã xác minh: {0}",
   "Clear search": "Xóa tìm kiếm",
   "Jump to latest": "Chuyển đến mới nhất",
   "No chats match": "Không có cuộc trò chuyện nào khớp",

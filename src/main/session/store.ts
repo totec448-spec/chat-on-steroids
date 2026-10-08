@@ -189,6 +189,8 @@ interface OpenSession {
   summary: SessionSummary;
   /** Process-lifetime generation of the current ChatGPT frontend attachment. */
   attachmentGeneration: number;
+  /** Process-local order of explicit observations; never infer causality from wall-clock time. */
+  projectObservationAttempt: number;
   nextSeq: number;
   /** Highest durable journal/message seq already reflected by `summary`. */
   historySeq: number;
@@ -448,6 +450,71 @@ export async function withSessionMutationFence<T>(
 }
 
 /**
+ * Begin one user-requested, read-only observation of an exact CoS-known current frontend.
+ * Every new request supersedes older in-flight results, even with equal/decreasing clocks.
+ */
+export async function beginChatGptProjectObservation(
+  sessionId: string, projectId: string
+): Promise<{ conversationId: string; attachmentGeneration: number; observationAttempt: number }> {
+  const entry = await ensureOpen(sessionId);
+  return enqueueSessionOperation(entry, 'begin ChatGPT Project observation', async () => {
+    const session = entry.summary;
+    if (!session.projectId) throw new Error('The selected chat is not assigned to this local project');
+    if (session.projectId !== projectId) throw new Error('The selected chat already belongs to another local project');
+    if (!session.conversationId) throw new Error('The selected session has no current ChatGPT conversation');
+    const exact = await findSessionByConversation(session.conversationId, { requireUnique: true });
+    if (!exact || exact.id !== session.id) throw new Error('The selected ChatGPT conversation does not have unique current session ownership');
+    return {
+      conversationId: session.conversationId,
+      attachmentGeneration: entry.attachmentGeneration,
+      observationAttempt: ++entry.projectObservationAttempt
+    };
+  });
+}
+
+/**
+ * Stores only an exact, user-initiated browser observation. The source's process-lifetime
+ * attachment generation must still match; a stale A -> B -> A result cannot be written to A.
+ * This read-only projection never changes session ownership, project assignment or updatedAt.
+ */
+export async function recordChatGptProjectObservation(
+  sessionId: string,
+  projectId: string,
+  conversationId: string,
+  attachmentGeneration: number,
+  observationAttempt: number,
+  linkId: string,
+  status: 'linked' | 'other-project' | 'not-project',
+  observedAt: number
+): Promise<NonNullable<SessionSummary['chatGptProjectObservation']> | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(linkId) ||
+      !['linked', 'other-project', 'not-project'].includes(status)) {
+    throw new Error('Invalid ChatGPT Project observation');
+  }
+  if (!Number.isFinite(observedAt) || observedAt < 0) throw new Error('Invalid ChatGPT Project observation time');
+  const entry = await ensureOpen(sessionId);
+  return enqueueSessionOperation(entry, 'ChatGPT Project observation', async () => {
+    if (entry.summary.projectId !== projectId || entry.summary.conversationId !== conversationId ||
+        entry.attachmentGeneration !== attachmentGeneration ||
+        entry.projectObservationAttempt !== observationAttempt) {
+      // For Link/Refresh the catalog may already have committed safely while a later
+      // rebind superseded the optional row status. Do not turn success into a false
+      // failure; callers of a standalone check explicitly reject this null verdict.
+      return null;
+    }
+    const exact = await findSessionByConversation(conversationId, { requireUnique: true });
+    if (!exact || exact.id !== sessionId) return null;
+    const observation = { conversationId, linkId, status, observedAt };
+    const staged: SessionSummary = { ...entry.summary, chatGptProjectObservation: observation };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishCachedSummary(staged, false);
+    entry.metaDirty = false;
+    return observation;
+  });
+}
+
+/**
  * The summary is rewritten on a short delay rather than on every event. A long agent
  * session appends thousands of events; rewriting the summary for each one would turn
  * an append-only log into a write-amplified one for no benefit.
@@ -532,6 +599,7 @@ export async function createSession(options: {
   const entry: OpenSession = {
     summary,
     attachmentGeneration: 1,
+    projectObservationAttempt: 0,
     nextSeq: 1,
     historySeq: 0,
     tail: [],
@@ -986,6 +1054,7 @@ async function ensureOpen(id: string): Promise<OpenSession> {
     const entry: OpenSession = {
       summary: snapshot.summary,
       attachmentGeneration: 1,
+      projectObservationAttempt: 0,
       nextSeq: snapshot.historySeq + 1,
       historySeq: snapshot.historySeq,
       tail: [],
@@ -2428,6 +2497,15 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         !/^[a-zA-Z0-9 ._-]{1,80}$/.test(selected.model) || !Number.isFinite(selected.observedAt))) {
       delete publicSummary.selectedModel;
     }
+    const observedProject = publicSummary.chatGptProjectObservation;
+    if (observedProject !== undefined && (!observedProject || typeof observedProject !== 'object' ||
+        observedProject.conversationId !== publicSummary.conversationId ||
+        typeof observedProject.linkId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(observedProject.linkId) ||
+        !['linked', 'other-project', 'not-project'].includes(observedProject.status) ||
+        !Number.isFinite(observedProject.observedAt) || observedProject.observedAt < 0)) {
+      delete publicSummary.chatGptProjectObservation;
+    }
     const lastToolActivity = publicSummary.lastToolActivity;
     if (lastToolActivity !== undefined && lastToolActivity !== null && (
       typeof lastToolActivity !== 'object' ||
@@ -3365,6 +3443,7 @@ export async function rebindSession(
     const staged: SessionSummary = {
       ...entry.summary,
       conversationId: toConversationId,
+      chatGptProjectObservation: undefined,
       retiredChatAt: fromConversationId ? { ...entry.summary.retiredChatAt, [fromConversationId]: Date.now() } : entry.summary.retiredChatAt,
       chatIds: entry.summary.chatIds.includes(toConversationId)
         ? [...entry.summary.chatIds]

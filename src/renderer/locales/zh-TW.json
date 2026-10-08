@@ -1,4 +1,10 @@
 {
+  "Chat is in the linked ChatGPT Project · checked {0}": "此聊天屬於已連結的 ChatGPT 專案 · {0}檢查",
+  "Chat is in another ChatGPT Project · checked {0}": "此聊天屬於另一個 ChatGPT 專案 · {0}檢查",
+  "Chat is not in a ChatGPT Project · checked {0}": "此聊天不屬於任何 ChatGPT 專案 · {0}檢查",
+  "Check chat in linked ChatGPT Project": "檢查聊天是否屬於已連結的 ChatGPT 專案",
+  "Check only this current chat; do not move it between local projects": "僅檢查目前聊天，不在本機專案之間移動",
+  "Verified matches: {0}": "已確認符合的聊天數：{0}",
   "Clear search": "清除搜尋",
   "Jump to latest": "跳到最新",
   "No chats match": "沒有符合的聊天",

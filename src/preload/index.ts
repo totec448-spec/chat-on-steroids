@@ -7,7 +7,7 @@ import type { SessionControlsView } from '../main/bridge.js';
 import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { LocalProject, ProjectColor } from '../shared/projects.js';
+import type { ChatGptMembershipCheck, LocalProject, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
@@ -249,6 +249,7 @@ const api = {
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   linkChatGptProject: (id: string, sessionId: string) => call<LocalProject>('projects:linkChatGpt', { id, sessionId }),
   verifyChatGptProject: (id: string, sessionId: string) => call<LocalProject>('projects:verifyChatGpt', { id, sessionId }),
+  checkChatGptProjectMembership: (id: string, sessionId: string) => call<ChatGptMembershipCheck>('projects:checkChatGptMembership', { id, sessionId }),
   unlinkChatGptProject: (id: string) => call<LocalProject>('projects:unlinkChatGpt', { id }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),

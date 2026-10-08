@@ -77,7 +77,7 @@ import { listSessions } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor, unlinkChatGptProject } from './projects.js';
-import { syncChatGptProjectLink } from './project-sync.js';
+import { checkChatGptProjectMembership, syncChatGptProjectLink } from './project-sync.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -890,6 +890,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const project = await syncChatGptProjectLink(id, sessionId, 'verify');
     push('session:changed');
     return project;
+  });
+  handle('projects:checkChatGptMembership', async payload => {
+    const { id, sessionId } = z.object({ id: z.string().uuid(), sessionId: z.string().min(1).max(80) }).strict().parse(payload);
+    const membership = await checkChatGptProjectMembership(id, sessionId);
+    push('session:changed');
+    return membership;
   });
   handle('projects:unlinkChatGpt', async payload => {
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);

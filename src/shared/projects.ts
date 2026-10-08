@@ -5,8 +5,16 @@ export interface ChatGptProjectLink {
   provider: 'chatgpt';
   /** Provider routing identity only. Display names and slugs are deliberately excluded. */
   projectId: string;
+  /** Fresh opaque incarnation per Link; an unlink/relink never reuses this identity. */
+  linkId?: string;
   linkedAt: number;
   lastObservedAt: number;
+}
+
+/** Read-only matching result; remote routing identity is deliberately absent from the IPC reply. */
+export interface ChatGptMembershipCheck {
+  status: 'linked' | 'other-project' | 'not-project';
+  observedAt: number;
 }
 
 /** Stable ChatGPT Project routing identity used by native /g/<id>/... routes. */

@@ -1,4 +1,10 @@
 {
+  "Chat is in the linked ChatGPT Project · checked {0}": "Чат находится в связанном проекте ChatGPT · проверено {0}",
+  "Chat is in another ChatGPT Project · checked {0}": "Чат находится в другом проекте ChatGPT · проверено {0}",
+  "Chat is not in a ChatGPT Project · checked {0}": "Чат не относится к проекту ChatGPT · проверено {0}",
+  "Check chat in linked ChatGPT Project": "Проверить чат в связанном проекте ChatGPT",
+  "Check only this current chat; do not move it between local projects": "Проверить только текущий чат, не перемещая его между локальными проектами",
+  "Verified matches: {0}": "Подтверждённых совпадений: {0}",
   "Clear search": "Очистить поиск",
   "Jump to latest": "К последнему",
   "No chats match": "Подходящих чатов нет",

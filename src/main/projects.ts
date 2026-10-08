@@ -11,6 +11,9 @@ import { normalizeChatGptProjectId, PROJECT_COLORS, type LocalProject, type Proj
 const remoteProjectSchema = z.object({
   provider: z.literal('chatgpt'),
   projectId: z.string().refine(value => normalizeChatGptProjectId(value) === value, 'Invalid ChatGPT Project id'),
+  // Older pre-landing local catalogs may lack an incarnation. They stay readable but
+  // membership checks remain unavailable until a user explicitly Refreshes the link.
+  linkId: z.string().uuid().optional(),
   linkedAt: z.number().finite().nonnegative(),
   lastObservedAt: z.number().finite().nonnegative()
 }).strict().refine(value => value.lastObservedAt >= value.linkedAt, 'Project observation predates its link');
@@ -102,10 +105,10 @@ export function linkChatGptProject(projectId: string, remoteProjectId: string, o
     if (project.remote && (project.remote.provider !== 'chatgpt' || project.remote.projectId !== observed.projectId)) {
       throw new Error('Local project is already linked to another ChatGPT Project');
     }
-    if (project.remote && observed.observedAt <= project.remote.lastObservedAt) return project;
+    if (project.remote?.linkId && observed.observedAt <= project.remote.lastObservedAt) return project;
     const remote = project.remote
-      ? { ...project.remote, lastObservedAt: observed.observedAt }
-      : { provider: 'chatgpt' as const, projectId: observed.projectId, linkedAt: observed.observedAt, lastObservedAt: observed.observedAt };
+      ? { ...project.remote, linkId: project.remote.linkId ?? randomUUID(), lastObservedAt: Math.max(observed.observedAt, project.remote.lastObservedAt) }
+      : { provider: 'chatgpt' as const, projectId: observed.projectId, linkId: randomUUID(), linkedAt: observed.observedAt, lastObservedAt: observed.observedAt };
     const updated = { ...project, remote };
     await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
     return updated;
@@ -128,8 +131,11 @@ export function verifyChatGptProjectLink(projectId: string, remoteProjectId: str
     if (project.remote.provider !== 'chatgpt' || project.remote.projectId !== observed.projectId) {
       throw new Error('Observed ChatGPT Project does not match the linked Project');
     }
-    if (observed.observedAt <= project.remote.lastObservedAt) return project;
-    const updated = { ...project, remote: { ...project.remote, lastObservedAt: observed.observedAt } };
+    if (project.remote.linkId && observed.observedAt <= project.remote.lastObservedAt) return project;
+    const updated = { ...project, remote: {
+      ...project.remote, linkId: project.remote.linkId ?? randomUUID(),
+      lastObservedAt: Math.max(observed.observedAt, project.remote.lastObservedAt)
+    } };
     await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
     return updated;
   });

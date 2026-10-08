@@ -1,4 +1,10 @@
 {
+  "Chat is in the linked ChatGPT Project · checked {0}": "Chat gehört zum verknüpften ChatGPT-Projekt · geprüft {0}",
+  "Chat is in another ChatGPT Project · checked {0}": "Chat gehört zu einem anderen ChatGPT-Projekt · geprüft {0}",
+  "Chat is not in a ChatGPT Project · checked {0}": "Chat gehört zu keinem ChatGPT-Projekt · geprüft {0}",
+  "Check chat in linked ChatGPT Project": "Chat im verknüpften ChatGPT-Projekt prüfen",
+  "Check only this current chat; do not move it between local projects": "Nur diesen aktuellen Chat prüfen; nicht zwischen lokalen Projekten verschieben",
+  "Verified matches: {0}": "Bestätigte Übereinstimmungen: {0}",
   "Clear search": "Suche leeren",
   "Jump to latest": "Zum Neuesten springen",
   "No chats match": "Keine passenden Chats",
