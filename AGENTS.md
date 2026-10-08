@@ -3385,6 +3385,16 @@ scheduled refresh rereads the selected transcript only when it is named, all tra
 invalidated, or its refreshed summary's `updatedAt`/`events` differ from those its last live-tail
 read was requested against; manual/visible refreshes still reread. Losing the selected row from the catalog clears its transcript.
 
+Setup's Access step (after Folder) offers Full access, Files and terminal, and Read only, and
+under them, folded, the Workspace permission surface itself: `placePermissions` moves that one
+DOM surface into Setup while Setup is shown, so there is never a second permission control or
+store. Any choice completes the step; read-only or a mix without create/edit/command still ends
+on all set, but Ready marks the access row and says how to change it. A recovered (unreadable)
+settings file reports `settingsRecovered` until read-only is switched off. The unavailable
+Desktop card links to the same step. Fresh installs start with automatic plugin refresh on;
+older and recovered configs keep it off. `scripts/verify-setup-access.cjs` checks the shared
+surface, the saves and Ready in the production renderer.
+
 First-run Setup keeps the six-step flow, with reviewed screenshots in `renderer/setup-images/`
 and translated numbered highlights in `renderer/setup-guide.ts`. Sensitive identifiers must
 be removed from asset pixels before inclusion; an HTML overlay is never a privacy boundary.

@@ -1689,8 +1689,11 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await claim('tunnel_desk00001')).body.ok).toBe(true);
     resetPluginRefreshForTests();
   });
-  it('defaults automatic plugin refresh off and revokes an already offered claim without removing the backend', async () => {
+  it('offers nothing while automatic plugin refresh is off and revokes an already offered claim without removing the backend', async () => {
     const plugin = await import('../src/main/plugin-refresh.js');
+    // Fresh installs start with it on (config.test.ts); this is the switch turned off.
+    const configure = (enabled: boolean) => saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: enabled } });
+    await configure(false);
     plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
     await writeDurableNow('plugin-refresh', []);
     const tools = [{ name: 'read', description: 'Current declaration', inputSchema: { type: 'object', properties: {} } }];
@@ -1699,7 +1702,6 @@ describe('IPC input delivery and Goal control integration', () => {
     expect(saved).toBeDefined();
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
     expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toEqual([]);
-    const configure = (enabled: boolean) => saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: enabled } });
     await configure(true);
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests[0].id).toBe(saved.id);
     expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toHaveLength(1);
