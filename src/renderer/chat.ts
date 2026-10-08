@@ -166,11 +166,10 @@ function rowMenuButton(owner: string): HTMLElement | null {
 const savingProjectColor = new Set<string>();
 const removingProject = new Set<string>();
 
-/** A project's menu: a new chat in it, its color (a submenu), and taking it off the sidebar. */
+/** A project's menu: its color (a submenu) and taking it off the sidebar. A new chat has its own button on the row. */
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
   return [
-    { action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id }, run: () => selectNewChat(id) },
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
       submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
@@ -920,7 +919,7 @@ function paintSessions(): void {
   // page on the next repaint, and so did the color button after a pick.
   const focused = document.activeElement;
   const focusedControl = focused instanceof HTMLElement && projectList.contains(focused)
-    ? ['.project-heading', '.project-menu', '.project-show-more'].find(selector => focused.matches(selector))
+    ? ['.project-heading', '.project-new', '.project-menu', '.project-show-more'].find(selector => focused.matches(selector))
     : undefined;
   const focusedProject = focusedControl ? (focused as HTMLElement).closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
   const children = new Map<string, SessionSummary[]>();
@@ -1015,7 +1014,13 @@ function paintSessions(): void {
       });
       more.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleRowMenu(menu()); });
       heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
-      heading.append(more);
+      // The project's primary action, beside its menu rather than inside it: one click, as in ChatGPT.
+      const create = el('button', 'btn row-menu-button project-new') as HTMLButtonElement;
+      create.type = 'button'; create.dataset.newProject = id; create.append(icon('i-pencil'));
+      ui(create, 'title', () => t('New chat in this project'));
+      ui(create, 'aria-label', () => t('New chat in this project'));
+      create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); });
+      heading.append(create, more);
     }
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
