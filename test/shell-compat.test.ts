@@ -1376,6 +1376,34 @@ it('maps native lane labels over transport effort values (Pro/Extra High lanes)'
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
   expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
 });
+it('joins one model\'s Instant and thinking lanes into one family, and selects each lane by its effort', async () => {
+  const f = fixture();
+  // ChatGPT's GPT-6 as observed (2026-10-07): two slugs under one name, with distinct efforts.
+  (f.selections[0] as any[]).splice(0, 2,
+    { model: 'gpt-6', modelLabel: 'GPT-6', reasoningEffort: 'none', sliderLabel: 'Instant', labels: { effort: 'Instant' }, powerSettingIndex: 0 },
+    { model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'medium', powerSettingIndex: 1 },
+    { model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'high', powerSettingIndex: 2 });
+  f.props.selectedLabelCandidate = f.selections[0]![1];
+  const models = await f.api.inspectModelSettings();
+  expect(models.find((m: any) => m.id === 'gpt-6')).toEqual({ id: 'gpt-6', label: 'GPT-6', efforts: ['none', 'medium', 'high'], aliases: ['gpt-6', 'gpt-6-thinking'] });
+  // Each effort still selects its own lane, by the family or by the lane's exact id.
+  expect(await f.api.selectModelSettings('gpt-6', 'none')).toBe(true);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6', reasoningEffort: 'none' });
+  expect(await f.api.selectModelSettings('gpt-6', 'high')).toBe(true);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-thinking', reasoningEffort: 'high' });
+  expect(await f.api.selectModelSettings('gpt-6-thinking', 'medium')).toBe(true);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-thinking', reasoningEffort: 'medium' });
+  // Different names never merge.
+  expect(models.map((m: any) => m.id)).toEqual(['gpt-6', 'future-thinking', 'future-pro']);
+});
+it('names a model the shell lists by number alone in full, as the September picker did', async () => {
+  const f = fixture();
+  // The shell labels older models "5.6"; the list reads GPT-6, GPT-5.6, GPT-5.5 alike.
+  for (const lane of f.selections[0]!) lane.modelLabel = '5.6';
+  const models = await f.api.inspectModelSettings();
+  expect(models.find((m: any) => m.id === 'gpt-5-6-thinking')?.label).toBe('GPT-5.6');
+  expect(models.find((m: any) => m.id === 'future-thinking')?.label).toBe('未来モデル');
+});
 it('identifies a Pro shell lane from its execution id when the effort label is localized', async () => {
   const f = fixture();
   Object.assign(f.selections[0]![0]!, {

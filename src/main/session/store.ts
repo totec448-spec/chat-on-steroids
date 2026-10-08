@@ -1640,7 +1640,7 @@ export interface ReadOptions {
  *
  * A malformed line is skipped and counted rather than throwing: the whole point of
  * an append-only log is that a half-written final line costs one event, not the
- * session. Reading the file in one go is fine at the sizes the caps allow.
+ * session. Scan bounded blocks: a transcript-only read must not allocate the entire tool journal.
  */
 export async function readEvents(sessionId: string, options: ReadOptions = {}): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
@@ -1669,40 +1669,39 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
       return chronological(projectTimeline(page, timeline?.timelineTurns, timeline?.requestTurns, active.messages.values()));
     }
   }
-  let raw: string;
-  try {
-    raw = await fs.readFile(path.join(sessionDir(sessionId), 'events.jsonl'), 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') raw = '';
-    else throw err;
-  }
-  const messages = active?.messages ?? (await readCanonicalMessages(sessionId));
-  const canonicalKeys = new Set(messages.keys());
-  const out: SessionEvent[] = [];
+  const journal: SessionEvent[] = [];
   let damaged = 0;
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
+  const oversized = await scanJournalLines(sessionId, line => {
+    if (!line.trim()) return;
     let parsed: SessionEvent;
     try {
       parsed = JSON.parse(line) as SessionEvent;
     } catch {
       damaged++;
-      continue;
+      return;
     }
     if (typeof parsed?.seq !== 'number' || typeof parsed?.kind !== 'string') {
       damaged++;
-      continue;
+      return;
     }
-    if (parsed.seq < from) continue;
-    if (options.kinds && !options.kinds.includes(parsed.kind)) continue;
-    if (options.agent && parsed.agent !== options.agent) continue;
+    if (parsed.seq < from) return;
+    if (options.kinds && !options.kinds.includes(parsed.kind)) return;
+    if (options.agent && parsed.agent !== options.agent) return;
+    journal.push(parsed);
+  });
+  damaged += oversized;
+  // Read the canonical overlay after the asynchronous scan, just as after the old whole-file
+  // read. A message revised while the journal is read must still replace its legacy snapshots.
+  const messages = active?.messages ?? (await readCanonicalMessages(sessionId));
+  const canonicalKeys = new Set(messages.keys());
+  const out = journal.filter(parsed => {
     // Once a message has a canonical record, a pre-1.8 append-only snapshot with the same
     // ChatGPT identity is legacy journal history, not another transcript item.
     if (messageKey(parsed) && canonicalKeys.has(messageKey(parsed)!)) {
-      continue;
+      return false;
     }
-    out.push(parsed);
-  }
+    return true;
+  });
   for (const message of messages.values()) {
     if (message.seq < from) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
@@ -1720,6 +1719,44 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
     return chronological(projectTimeline(page, timeline?.timelineTurns, timeline?.requestTurns, messages.values()));
   }
   return chronological(projectTimeline(out, timeline?.timelineTurns, timeline?.requestTurns, messages.values())).slice(0, limit);
+}
+
+/** A bounded line scan, including torn/oversized legacy lines and UTF-8 split across blocks. */
+async function scanJournalLines(sessionId: string, accept: (line: string) => void): Promise<number> {
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try { handle = await fs.open(path.join(sessionDir(sessionId), 'events.jsonl'), 'r'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
+  const block = Buffer.alloc(256 * 1024);
+  const empty = Buffer.alloc(0);
+  let carry = empty, skipping = false, damaged = 0, position = 0;
+  try {
+    const { size } = await handle.stat();
+    // A live recorder may append during the scan. Read the captured journal extent once,
+    // rather than chasing a moving EOF or borrowing a later generation's events.
+    while (position < size) {
+      const { bytesRead } = await handle.read(block, 0, Math.min(block.length, size - position), position);
+      if (!bytesRead) break;
+      position += bytesRead;
+      const bytes = block.subarray(0, bytesRead);
+      let start = 0;
+      while (start < bytes.length) {
+        const newline = bytes.indexOf(0x0a, start);
+        const part = bytes.subarray(start, newline < 0 ? bytes.length : newline);
+        if (!skipping) {
+          if (carry.length + part.length > MAX_LINE_BYTES) { skipping = true; carry = empty; }
+          else if (newline >= 0) accept((carry.length ? Buffer.concat([carry, part]) : part).toString('utf8'));
+          else carry = carry.length ? Buffer.concat([carry, part]) : Buffer.from(part);
+        }
+        if (newline < 0) break;
+        if (skipping) { damaged++; skipping = false; }
+        carry = empty;
+        start = newline + 1;
+      }
+    }
+    if (skipping) damaged++;
+    else if (carry.length) accept(carry.toString('utf8'));
+    return damaged;
+  } finally { await handle.close(); }
 }
 
 /**

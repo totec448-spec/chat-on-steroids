@@ -16,7 +16,7 @@ import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
 import { logInfo, logWarn } from '../logger.js';
 import { noteChatOrigin } from './recorder.js';
-import { isAstraModel, isProModel } from '../../shared/chat-models.js';
+import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
@@ -1910,7 +1910,7 @@ export async function requestBrowserDecision(text: string, signal: AbortSignal, 
       }
       const entry = entrySchema.parse({ id, sessionId: null, text, mode: 'after-turn', dueAt: Date.now(),
         // null means ChatGPT's current selection; only an omitted value gets the historical default.
-        model: options.model === undefined ? 'gpt-5.6-sol' : options.model,
+        model: options.model === undefined ? DEFAULT_HELPER_CHAT_MODEL : options.model,
         reasoningEffort: options.reasoningEffort === undefined ? 'high' : options.reasoningEffort,
         decisionSourceSessionId: options.sourceSessionId, lifetime: options.lifetime, purpose: 'decision', state: 'queued', owner: null,
         createdAt: Date.now(), conversationId: options.conversationId ?? null });

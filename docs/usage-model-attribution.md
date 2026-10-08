@@ -47,6 +47,20 @@ the disclosure and verifies calculations still update. Known feature quotas use
 human labels (Deep research, File uploads, Pasted text files, Image generation),
 and missing model balance text no longer assumes a position for the quota rows.
 
+## ChatGPT GPT-6 lanes, 7 October 2026
+
+The account catalog lists GPT-6 as two lanes, and messages record them as such:
+`gpt-6` (the picker's Instant, effort `none`) and `gpt-6-thinking` (Medium, High).
+`gpt-6` is ChatGPT's automatic lane: a message sent with it can be answered by
+`gpt-6-thinking`, so the answer's model, not the selection, says which lane ran
+(observed 2026-10-08). GPT-5.6 and
+GPT-5.5 appear the same way (`gpt-5-6-instant` / `gpt-5-6-thinking`). Both lanes
+count toward their generation in the weekly message split. `gpt-5-6-instant`
+joins the existing `gpt-5-6` and `gpt-5-6-thinking` aliases of `gpt-5.6-sol`.
+No official API identity or rate has been established for ChatGPT's `gpt-6`
+lanes, so they stay unpriced (a manual rate can be entered) rather than being
+equated with `gpt-6-sol` or Astra.
+
 ## Official rate verification, 5 September 2026
 
 The following official pages were searched and opened directly. These are Standard
