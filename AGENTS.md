@@ -3740,9 +3740,16 @@ The bottom dock has no generic shortcut screen or second tool tab strip; Termina
 tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
 Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
 does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
-dock. The top-right control group orders right expansion (shown only while right is open),
-bottom, then right; the latter two buttons toggle their panels. There is no separate right-dock
-close button. Layout controls grant no new file, terminal or worker authority.
+dock. The layout control group sits at the right end of the title bar (`.app-topbar`) and orders
+right expansion (shown only while right is open), bottom, then right; the latter two buttons toggle
+their panels. Where the system's caption buttons share that end (Windows), the bar's resolved right
+padding marks the group `.is-beside-caption` and a divider separates the two. There is no separate
+right-dock close button. Layout controls grant no new file, terminal or worker authority.
+The chat's header (title, project, Install update) is the first row of the chat column
+(`.chat-head` in `.card.is-session`), not a row above the workspace, so the right dock runs from
+the title bar to the bottom with one unbroken edge and needs no compensation. Expanded, the dock
+covers the column, header included, and takes the sidebar's rounded corner while it rests there
+or moves to or from it.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
 Each worker row also projects its recorded tool-call count and the newest bounded tool activity
