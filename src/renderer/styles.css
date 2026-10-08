@@ -3594,8 +3594,8 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .tool-group-body .ev { margin: 0; }
 /* Formulas (math.ts), drawn by KaTeX in the text's own colour. A wide block scrolls on its own
    rather than widening the conversation; one KaTeX could not draw shows its source as code would. */
-.msg .math-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
 .msg .math-display .katex-display { margin: 0; }
+.msg .math-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
 .msg .math-inline.is-source, .msg .math-display.is-source { font-family: var(--mono); font-size: .92em; color: var(--soft); white-space: pre-wrap; }
 /* Rounds (timeline-rounds.ts). What the model says between steps is prose, as it is in ChatGPT: the
    answer's own face and colour, close to the round it opens. Each round's activity folds under

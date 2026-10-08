@@ -661,6 +661,7 @@ describe('the window as a whole', () => {
     const horizontal = [...css.matchAll(/([^{}]+)\{[^{}]*overflow-x:\s*(?:auto|scroll)[^{}]*\}/g)];
     expect(horizontal.map(match => match[1]!.trim())).toEqual([
       '.msg.rich .markdown-table',
+      '.msg .math-display',
       '.file-panel-toolbar-actions',
       '.review-panel .file-changes-header-content',
       '.file-preview-markdown pre',
