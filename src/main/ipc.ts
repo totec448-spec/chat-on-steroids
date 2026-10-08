@@ -61,7 +61,7 @@ import {
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
-import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema } from './config.js';
+import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -522,7 +522,8 @@ async function buildState(): Promise<AppState> {
     bridge: await bridgeStatus(),
     cosBrowserSignedIn: cosBrowserSignedIn(),
     update: updateStatus(),
-    desktopAccess: getMacOSDesktopAccess()
+    desktopAccess: getMacOSDesktopAccess(),
+    settingsRecovered: settingsRecovered()
   };
 }
 
