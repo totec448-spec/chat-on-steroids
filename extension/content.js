@@ -13074,8 +13074,12 @@
       }
       if (message.type === 'clf-model-catalog-state') {
         const reason = modelCatalogBusy ? 'inspection_busy' : catalogPageBlocker();
-        sendResponse({ ready: !modelCatalogBusy && (!reason || (reason === 'composer_missing' && catalogHelper())), reason });
-        return false;
+        const ready = !modelCatalogBusy && (!reason || (reason === 'composer_missing' && catalogHelper()));
+        // A borrowed chat must also have a picker the reader accepts; an owned helper is a fresh home page.
+        if (!ready || catalogHelper()) { sendResponse({ ready, reason }); return false; }
+        void CLF_DOM.modelPickerReadable().catch(() => false)
+          .then(readable => sendResponse(readable ? { ready: true, reason: null } : { ready: false, reason: 'picker_unreadable' }));
+        return true;
       }
       if (message.type === 'clf-input-reuse-state') {
         sendResponse({ safe: inputReuseSafe(), navigationEpoch: epoch });

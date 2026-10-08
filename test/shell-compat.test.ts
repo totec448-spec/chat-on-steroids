@@ -1476,3 +1476,16 @@ it('records a native shell conversation and UUID tool origin through the real is
   expect(JSON.stringify(events())).not.toContain('NEVER_COPY_TOOL_ARGS');
   win.__CLF_CONTENT_RECORDER__.stop();
 });
+it('reports a chat on a model the account no longer lists as unreadable for discovery', async () => {
+  // VM 2026-10-08: a chat still on GPT-5.6 Sol after GPT-6 has no selected version and no effort
+  // lanes. Discovery elected that tab and timed out with picker_unavailable after 15 seconds.
+  const f = fixture();
+  expect(await f.api.modelPickerReadable()).toBe(true);
+  f.versions.forEach(version => { version.selected = false; });
+  f.props.powerSelections = []; f.props.selectedLabelCandidate = { model: 'gpt-5-6', modelLabel: 'GPT-5.6 Sol', reasoningEffort: 'medium' };
+  expect(await f.api.modelPickerReadable()).toBe(false);
+  // The Chat/Work toggle swaps the picker before inspection, so it defers to that transition.
+  const toggle = f.doc.createElement('button'); toggle.setAttribute('role', 'radio'); toggle.setAttribute('data-tpp-toggle-value', 'work');
+  f.doc.body.append(toggle);
+  expect(await f.api.modelPickerReadable()).toBe(true);
+});

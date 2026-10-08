@@ -637,6 +637,7 @@
   "Waiting for the ChatGPT composer to finish loading.": "正在等待 ChatGPT 輸入框載入完成。",
   "The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.": "ChatGPT 輸入框被隱藏。請關閉原生設定或對話框以使用此分頁。",
   "The native model picker is already being inspected.": "正在檢查原生模型選擇器。",
+  "The open chats show no readable model picker. Refresh opens a separate discovery page.": "開啟的聊天中沒有可讀取的模型選擇器。重新整理會開啟一個獨立的偵測頁面。",
   "The browser companion has not answered the page readiness check.": "瀏覽器擴充功能尚未回應頁面就緒檢查。",
   "The discovery page changed or closed. Retry to start a new inspection.": "偵測頁面已變更或關閉。請重試以開始新的檢查。",
   "Opening one separate discovery page. Existing chats are left untouched.": "正在開啟一個獨立的模型偵測頁面。不會干擾現有聊天。",

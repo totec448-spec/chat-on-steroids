@@ -2348,7 +2348,7 @@ function inspectRequestedModels(request) {
     if (!current()) return;
     // Bounded machine reasons, never page text. Progress cannot publish model choices.
     const known = ['generating', 'input_busy', 'draft', 'attachments', 'composer_missing', 'composer_hidden',
-      'inspection_busy', 'page_unreachable', 'page_changed', 'opening', 'inspecting', 'inspection_failed', 'result_unconfirmed'];
+      'inspection_busy', 'page_unreachable', 'page_changed', 'opening', 'inspecting', 'inspection_failed', 'result_unconfirmed', 'picker_unreadable'];
     try { await call('/models', { method: 'POST', body: JSON.stringify({ nonce: wanted.nonce, waiting: known.includes(reason) ? reason : 'inspection_failed' }) }); }
     catch { /* The original app deadline still owns a broken transport. */ }
   };
@@ -2377,7 +2377,8 @@ function inspectRequestedModels(request) {
     if (wanted && !current()) return;
     if (!wanted && !tab) return;
     if (!tab) {
-      const blocked = ['generating', 'input_busy', 'draft', 'attachments', 'composer_hidden'];
+      // A chat on a model the account no longer lists cannot be read; Refresh opens a fresh page instead.
+      const blocked = ['generating', 'input_busy', 'draft', 'attachments', 'composer_hidden', 'picker_unreadable'];
       const proof = owner?.nonce === wanted.nonce ? proofs[tabs.findIndex(candidate => candidate.id === owner.tab)] : proofs[0];
       await waiting(proof?.reason || 'page_unreachable');
       // Only an explicit Refresh may bypass positively identified busy user pages.
