@@ -1124,6 +1124,12 @@ plain names. ChatGPT records a connector's calls under the exact name typed (cal
   `TobisComputer`), never a prefix, so one computer never records or attributes the other's calls.
 - `usage.js` reports every Core-like app from the page's system hints; the content script mentions
   the one with this install's exact name, and none when it is missing or ambiguous.
+- A fresh tab can send before its own system hints arrive. The extension remembers the app id a page
+  reported for this install's exact Core name (`ownCoreApp` in local storage, handed out with
+  `status`) and forgets it when a page's complete plugin list lacks the Core; until the page lists
+  its own apps, that sighting supplies the mention. Without it a worker's first message went out with
+  no mention, and in a shared workspace ChatGPT routed its calls to the other computer's plain Core
+  (seen live, 2026-10-07). Only the page's own list counts as the `core_plugin` report.
 - Plugin refresh treats any "Chat On Steroids Plugins (…)" as the Plugins kind for its action limits.
 - Worker protocol text (the brief and wake-up messages) names this install's exact Core when a
   suffix is set, and the "no run" refusal names the Core that answered: a worker told only "the

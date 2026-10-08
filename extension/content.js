@@ -925,6 +925,8 @@
   // Every Core-like app the page lists, by name: this install picks its own (with this
   // computer's suffix, if any) when it inserts the mention, whenever the app's names arrived.
   let coreCandidates = [];
+  // This install's Core as another tab of this browser last saw it listed (background `status`).
+  let knownOwnCore = null;
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-core-mention') return;
     const valid = (path) => typeof path === 'string' && /^app:\/\/asdk_app_[A-Za-z0-9_-]{1,160}$/.test(path) ? path : null;
@@ -945,7 +947,8 @@
   let corePluginList = false;
   let ownNamesKnown = false;
   function reportCorePlugin() {
-    const core = currentCoreMention();
+    // What this page itself lists is the evidence; a remembered sighting is not a new report.
+    const core = pageCoreMention();
     const report = core ? core.path : corePluginList && ownNamesKnown && !coreCandidates.some(entry => entry.name === CLF_DOM.connectorNames()[0]) ? 'missing' : null;
     if (!report || report === reportedCorePlugin) return;
     reportedCorePlugin = report;
@@ -953,10 +956,20 @@
     void ask(message).catch(() => { reportedCorePlugin = null; });
   }
   /** This install's Core app as the page lists it, or null when it is missing or ambiguous. */
-  function currentCoreMention() {
+  /** This install's Core app as this page itself lists it, or null when missing or ambiguous. */
+  function pageCoreMention() {
     const own = CLF_DOM.connectorNames()[0];
     const match = coreCandidates.find(entry => entry.name === own);
     return match?.path ? { path: match.path, name: match.name } : null;
+  }
+  function currentCoreMention() {
+    const own = CLF_DOM.connectorNames()[0];
+    const match = coreCandidates.find(entry => entry.name === own);
+    if (match) return pageCoreMention();
+    // A fresh tab can send before its own plugin list arrives; then this browser's last sighting of
+    // this install's Core stands in. Never once this page's complete list says the Core is missing.
+    if (corePluginList || !knownOwnCore || knownOwnCore.name !== own) return null;
+    return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
   /**
    * Whether the user's own prompts carry the Core mention (the app's ui.mentionCore, on unless off).
@@ -10887,6 +10900,9 @@
 
   async function checkStatus() {
     const reply = await ask({ type: 'status' });
+    const known = reply?.ownCoreApp;
+    knownOwnCore = known && typeof known.appId === 'string' && /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(known.appId) &&
+      typeof known.name === 'string' ? { path: `app://${known.appId}`, name: known.name } : null;
     if (reply?.connectorNames && CLF_DOM.setConnectorNames(reply.connectorNames)) { ownNamesKnown = true; reportCorePlugin(); }
     if (reply) {
       status = {
