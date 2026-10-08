@@ -17,6 +17,8 @@ app.whenReady().then(async () => {
   const built = await require('esbuild').build({ entryPoints: [path.join(root, 'src/renderer/chat.ts')],
     bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'chat',
     outfile: path.join(root, '.local/history-fixture.js'),
+    // KaTeX's stylesheet names its fonts; this fixture draws no formulas, so they stay out.
+    loader: { '.woff2': 'empty', '.woff': 'empty', '.ttf': 'empty' },
     plugins: [{ name: 'fixture-url-assets', setup(build) {
       build.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: 'fixture-url' }));
       build.onLoad({ filter: /.*/, namespace: 'fixture-url' }, () => ({ contents: 'export default "";', loader: 'js' }));
