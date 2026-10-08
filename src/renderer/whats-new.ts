@@ -14,6 +14,16 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.30': {
+    lead: () => t('See what changed after each update, and long runs that stop and recover more calmly.'),
+    highlights: [
+      { icon: 'i-sparkle', title: () => t("What's new, after every update"), text: () => t('A short summary like this one shows once after each update, with a link to the full notes.') },
+      { icon: 'i-retry', title: () => t('Clear stops for stuck messages'), text: () => t('If ChatGPT never picks up a queued message, the app tries three times, then tells you and keeps it queued.') },
+      { icon: 'i-agents', title: () => t('Steadier sub-agents'), text: () => t('New worker tabs get more time on slow connections, and a worker no longer gets stuck behind its own unsent message.') },
+      { icon: 'i-gear', title: () => t('Your settings stay put'), text: () => t("A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.") },
+      { icon: 'i-loop', title: () => t('Recovery stays on'), text: () => t("When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.") }
+    ]
+  },
   '2.1.29': {
     lead: () => t('Pin your chats, search from anywhere, and know when ChatGPT is waiting for you.'),
     highlights: [
@@ -55,13 +65,14 @@ export function paintWhatsNew(version: string): boolean {
 /**
  * Centred in a window of odd width or height, the dialog starts half a pixel off the pixel grid
  * and every icon in it blurs and drifts by that half pixel. Its own size is whole pixels, so
- * shifting it back by the remainder keeps it centred within half a pixel and crisp.
+ * whole-pixel margins keep it centred within half a pixel and crisp. Margins, not a transform:
+ * a fractional transform rasterises the glyphs off the grid all the same.
  */
 function snapToPixels(dialog: HTMLDialogElement): void {
   if (!dialog.open) return;
   const x = (window.innerWidth - dialog.offsetWidth) / 2;
   const y = (window.innerHeight - dialog.offsetHeight) / 2;
-  dialog.style.translate = `${Math.floor(x) - x}px ${Math.floor(y) - y}px`;
+  dialog.style.margin = x < 0 || y < 0 ? '' : `${Math.floor(y)}px ${Math.ceil(x)}px ${Math.ceil(y)}px ${Math.floor(x)}px`;
 }
 
 let wired = false;
