@@ -40,6 +40,7 @@ import type {
   StoredText,
   ToolEditReview
 } from '../../shared/session.js';
+import type { WorkerAssignmentSummary } from '../../shared/session.js';
 import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
@@ -2430,6 +2431,12 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
       lastToolActivity.title.length > 200 ||
       !/^(?:edit|create|delete|move|read|search|browse|run|process|screen|input|clipboard|session|agent|other)$/.test(lastToolActivity.kind)
     )) delete publicSummary.lastToolActivity;
+    const assignment = publicSummary.workerAssignment;
+    if (assignment !== undefined && (!assignment || typeof assignment.conversationId !== 'string' ||
+        typeof assignment.agentId !== 'string' || typeof assignment.label !== 'string' || assignment.label.length > 60 ||
+        typeof assignment.task !== 'string' || assignment.task.length > 8200 || !Number.isFinite(assignment.recordedAt))) {
+      delete publicSummary.workerAssignment;
+    }
     const finish = publicSummary.finishTurn;
     if (finish !== undefined && finish !== null && (!finish || typeof finish !== 'object' ||
         typeof finish.turnId !== 'string' || !Number.isFinite(finish.startedAt) ||
@@ -3344,6 +3351,28 @@ export async function setSessionOrigin(id: string, origin: SessionOrigin, title:
     const named = entry.summary.titleSource === 'manual';
     const staged = { ...entry.summary, origin, ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
       ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/** Archive accepted broker presentation in the exact recorded worker session, never create one. */
+export async function recordWorkerAssignment(assignment: WorkerAssignmentSummary): Promise<void> {
+  if (!assignment.conversationId || !assignment.agentId || assignment.label.length > 60 ||
+      assignment.task.length > 8200 || !Number.isFinite(assignment.recordedAt)) return;
+  const summary = await findSessionByConversation(assignment.conversationId, { requireUnique: true });
+  if (!summary) return;
+  const entry = await ensureOpen(summary.id);
+  await enqueueSessionOperation(entry, 'worker assignment projection', async () => {
+    const current = entry.summary;
+    if (current.conversationId !== assignment.conversationId || current.origin?.kind !== 'worker' ||
+        current.origin.agentId !== assignment.agentId) return;
+    const previous = current.workerAssignment;
+    if (previous && (previous.recordedAt > assignment.recordedAt ||
+        (previous.conversationId === assignment.conversationId && previous.label === assignment.label &&
+         previous.task === assignment.task))) return;
+    const staged = { ...current, workerAssignment: { ...assignment } };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);

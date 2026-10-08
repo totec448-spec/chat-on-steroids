@@ -1125,6 +1125,12 @@ plain names. ChatGPT records a connector's calls under the exact name typed (cal
   `TobisComputer`), never a prefix, so one computer never records or attributes the other's calls.
 - `usage.js` reports every Core-like app from the page's system hints; the content script mentions
   the one with this install's exact name, and none when it is missing or ambiguous.
+- A fresh tab can send before its own system hints arrive. The extension remembers the app id a page
+  reported for this install's exact Core name (`ownCoreApp` in local storage, handed out with
+  `status`) and forgets it when a page's complete plugin list lacks the Core; until the page lists
+  its own apps, that sighting supplies the mention. Without it a worker's first message went out with
+  no mention, and in a shared workspace ChatGPT routed its calls to the other computer's plain Core
+  (seen live, 2026-10-07). Only the page's own list counts as the `core_plugin` report.
 - Plugin refresh treats any "Chat On Steroids Plugins (…)" as the Plugins kind for its action limits.
 - Worker protocol text (the brief and wake-up messages) names this install's exact Core when a
   suffix is set, and the "no run" refusal names the Core that answered: a worker told only "the
@@ -2274,6 +2280,11 @@ document, navigation epoch and conversation in the existing session-storage snap
 lifecycle event carries a non-manual departure through the close outbox; it does not create
 recovery authority. Main still requires eligible outstanding work. Failed removals and unknown
 origins remain conservative, and a later manual close supersedes a pending automatic departure.
+The same non-manual departure covers a chat leaving the exact document the extension borrowed
+for a new chat (#1180), or whose page reported ChatGPT's "could not be loaded" surface
+(`load_failure`, sent at most every 30 s while it shows): its Retry may take the tab to the home
+page without anyone deciding to close the chat (#1086). Both records (`tabReuses`) are spent on first
+use and trusted for two minutes.
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
@@ -3044,11 +3055,26 @@ undelivered messages, page absence, manual departure, Stop and current recovery 
 Only a live broker slot grants or refuses worker recovery; parked prime history cannot veto
 a later ordinary turn. Tests: `bridge.test.ts`, including cancellation during the storage read.
 
-Revival reserves the new assignment with its current inbox task preview, a neutral worker-id
-label and no completion result. The previous spawn label/result must not describe new work.
+Revival reserves the new assignment with its current inbox task preview and no completion
+result. An omitted message label preserves the worker name. The prime can explicitly supply
+`messages[].label` (1–60 characters, ideally 1–3 words) when messaging a sleeping worker with a
+new job; the single to+text form has none, which keeps the agents schema inside its measured
+byte budget (`mcp.test.ts`) without trimming existing guidance. Labels cannot rename active workers or primes; conflicting
+names in one batch are rejected before mutation. The app does not infer task identity from prose.
 Rejected acceptance restores that prior metadata; accepted work keeps its new metadata even
 if browser wake fails. Historical reports remain in the prime inbox and recorded history.
 A worker proving it never stopped clears its obsolete result while retaining the same task.
+The local UI swarm projection also includes dormant workers in `retainedWorkers`, so parking
+a family preserves its displayed name and task. The panel matches the exact worker conversation;
+caller/model status remains scoped separately.
+After a critical broker snapshot is written, its bounded name/task presentation is projected into
+the exact worker session's `workerAssignment`, in the background: neither the acceptance barrier
+nor startup waits on it, and unchanged workers skip the store. Startup projects the saved snapshot
+itself, so families its restore prunes as expired keep their names. The session archive supplies historical labels/tasks after broker eviction;
+it never grants slots, routing or revival authority, and a failed broker write projects nothing.
+Legacy plain-text briefs with multiple `Your task:` boundaries remain intact rather than guessing
+which authored section to discard. The panel shows tool activity only when its recorded timestamp
+is newer than the last finish report and turn end, and belongs at or after the current turn start.
 
 After a worker reaches its own 400k estimated-context ceiling, its next stop becomes terminal
 and it is no longer reusable. Do not interrupt its current useful work merely for that ceiling.
@@ -3386,6 +3412,16 @@ cleanup, sends `allTranscripts`. A payload-less push refreshes only catalog/cont
 scheduled refresh rereads the selected transcript only when it is named, all transcripts are
 invalidated, or its refreshed summary's `updatedAt`/`events` differ from those its last live-tail
 read was requested against; manual/visible refreshes still reread. Losing the selected row from the catalog clears its transcript.
+
+Setup's Access step (after Folder) offers Full access, Files and terminal, and Read only, and
+under them, folded, the Workspace permission surface itself: `placePermissions` moves that one
+DOM surface into Setup while Setup is shown, so there is never a second permission control or
+store. Any choice completes the step; read-only or a mix without create/edit/command still ends
+on all set, but Ready marks the access row and says how to change it. A recovered (unreadable)
+settings file reports `settingsRecovered` until read-only is switched off. The unavailable
+Desktop card links to the same step. Fresh installs start with automatic plugin refresh on;
+older and recovered configs keep it off. `scripts/verify-setup-access.cjs` checks the shared
+surface, the saves and Ready in the production renderer.
 
 First-run Setup keeps the six-step flow, with reviewed screenshots in `renderer/setup-images/`
 and translated numbered highlights in `renderer/setup-guide.ts`. Sensitive identifiers must
@@ -3752,7 +3788,17 @@ covers the column, header included, and takes the sidebar's rounded corner while
 or moves to or from it.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
-Each worker row also projects its recorded tool-call count and the newest bounded tool activity
+Each worker is one plain row, not a boxed card: its tinted identity avatar carries the state (a
+presence dot; while working, the connection capsule's traveling light around it), then name and
+elapsed time, the task, and one line of facts: state, the model as the composer names it (no
+thinking reads Instant, never "none"), the action count once there is one, and Degraded only when
+it is (a failed worker already says so). The name is the label the prime gave the worker (the
+agents tool asks for 1-3 words), else "Worker 2"; the id stays in the avatar and the row's
+tooltip, since the prime and the chat address workers by it. The task is the worker's own: the
+run's shared context, which opens every brief alike (`src/shared/worker-brief.ts`), is left out
+there and in a worker chat's title. The
+newest tool activity shows, in the turn's sheen, only while the worker works. Each worker row
+also projects its recorded tool-call count and the newest bounded tool activity
 from the session summary. The store owns that compact latest-activity projection and preserves
 event-time order when late attribution repairs append older calls, so the overview never loads
 every worker transcript just to paint one line. These fields are read-only telemetry; lifecycle,
@@ -3760,7 +3806,8 @@ scheduling, messaging and execution authority remain with the existing broker/to
 Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Each collapsed activity round that used workers shows one Phosphor Sub-agents icon and the
 number of distinct workers. Its keyboard-reachable button labels that count accessibly and
-opens the existing Sub-agents dock with those exact workers highlighted; it does not expand
+opens the existing Sub-agents dock with those exact workers highlighted (one glow as the dock
+opens, which settles into the plain row; focus moves to the first only from the keyboard); it does not expand
 the round, load worker transcripts or move the timeline reader. Inspection releases the existing
 follow-output/send hold; Jump to latest resumes following. Membership and selection generations
 fence activation, and parent changes clear highlights. Participation derives from recorded

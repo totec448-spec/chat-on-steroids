@@ -289,13 +289,13 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     fetch, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console
   });
   vm.runInContext(activeTabsSource, context);
-  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
+  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, loadFailure: HANDLERS.load_failure, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
   const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
@@ -467,6 +467,33 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
       await h.closed({ conversationId: secondId }, { ...sender, url: tab.url }, back);
       expect(closes().at(-1)).toEqual({ conversationId: secondId, manual: true });
     }
+  });
+
+  it.each([true, false])('does not take a chat leaving ChatGPT\'s "could not be loaded" page for the user closing it (reported: %s)', async reported => {
+    // #1086: Retry on ChatGPT's load-failure surface (pressed by the page's own recovery or by the
+    // user) took the tab to the home page, and the app paused the chat's recovery as if closed.
+    const h = await worker([]);
+    const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
+    h.tabs.push(tab);
+    const sender = { tab, documentId: 'failed-document', frameId: 0, url: tab.url };
+    const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    await h.noteTabConversation(source, secondId);
+    if (reported) expect(await h.loadFailure({ conversationId: secondId }, sender, source)).toEqual({ ok: true });
+    await h.closed({ conversationId: secondId }, sender, source);
+    const closes = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/closed')
+      .map(([, init]) => JSON.parse(String(init!.body)));
+    expect(closes).toEqual([{ conversationId: secondId, manual: !reported }]);
+  });
+
+  it('accepts a load-failure report only for the chat its own document shows', async () => {
+    const h = await worker([]);
+    const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
+    h.tabs.push(tab);
+    const sender = { tab, documentId: 'failed-document', frameId: 0, url: tab.url };
+    const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    await h.noteTabConversation(source, secondId);
+    expect(await h.loadFailure({ conversationId: firstId }, sender, source)).toEqual({ ok: false });
+    expect(await h.loadFailure({ conversationId: 'not-a-chat' }, sender, source)).toEqual({ ok: false });
   });
 
   it.each(['returned', 'absent', 'foreign', 'original-present'] as const)('resumes a pending exact-chat input only in an already returned tab (%s)', async state => {
