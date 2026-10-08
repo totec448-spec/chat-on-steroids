@@ -30,6 +30,10 @@ After an update, the app now shows a short summary of what changed. A message Ch
   - **Failed sends:** when the Core mention right before Send fails, the log now says so, instead of reporting a changed draft.
   - **Projects:** when opening a chat inside a ChatGPT Project fails, the log says at which step.
 
+### ⚠️ Known issue
+
+- **Compact & Resume may not start on ChatGPT's newest page layout.** ChatGPT is rolling out a new page layout. On it, the app reads the handoff before ChatGPT has finished writing it, sees that it's far too short, and safely stops instead of moving your work: you stay in your chat and nothing is lost. Version 2.1.29 is affected the same way. A fix follows in the next version.
+
 ### 💛 Thank you
 
 To **@Haz4rdovisk** for the idea of the What's New screen and for the new View menu, to **@mch1902879100-cmyk** for the bounded pickup recovery, and to **@xuan2261** for the Project entry diagnostics. And to **@tude91979059-byte**, whose long-run reports and logs found the reused-tab and wake-message problems fixed here.
