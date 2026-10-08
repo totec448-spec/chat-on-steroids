@@ -263,6 +263,20 @@ const COMMAND_TAB_PROTECTION_MS = 30 * 60_000;
  * and claim the other computer's calls until the app answers again. Null until the app says.
  */
 let connectorNames = null;
+/**
+ * This install's Core app as a page last listed it: `{ appId, name }`, name being the exact Core
+ * connector name at that moment. A fresh tab whose own plugin list has not arrived yet uses it for
+ * the Core mention, so a worker's first message does not go out without one (and, in a workspace
+ * shared with another computer, to that computer's plain Core).
+ */
+let ownCoreApp = null;
+
+function cleanOwnCoreApp(value) {
+  return value && typeof value === 'object' && typeof value.appId === 'string' &&
+    /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(value.appId) && typeof value.name === 'string' &&
+    /^Chat On Steroids Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u.test(value.name)
+    ? { appId: value.appId, name: value.name } : null;
+}
 
 /** The app's names, or null for anything that is not three plain "Chat On Steroids …" strings. */
 function cleanConnectorNames(value) {
@@ -276,6 +290,13 @@ function cleanConnectorNames(value) {
     names[surface] = name;
   }
   return names;
+}
+
+async function rememberOwnCoreApp(value) {
+  const next = cleanOwnCoreApp(value);
+  if (JSON.stringify(next) === JSON.stringify(ownCoreApp)) return;
+  ownCoreApp = next;
+  try { await chrome.storage.local.set({ ownCoreApp: next }); } catch { /* Kept in memory for this worker. */ }
 }
 
 async function rememberConnectorNames(value) {
@@ -299,9 +320,10 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp']);
   port = typeof stored.port === 'number' ? stored.port : null;
   connectorNames = cleanConnectorNames(stored.connectorNames);
+  ownCoreApp = cleanOwnCoreApp(stored.ownCoreApp);
   // Tells this browser apart from another one paired with the same app, so a new chat is opened
   // and sent in one browser only. Random, local, and never tied to the profile or the user.
   browserId = typeof stored.browserId === 'string' && /^[a-z0-9]{16,64}$/.test(stored.browserId) ? stored.browserId : '';
@@ -3404,8 +3426,13 @@ const HANDLERS = {
   async core_plugin(message, _sender, source) {
     if (!ownsDocument(source)) return { ok: false };
     // The complete plugins list without this install's Core: the app takes its proof back.
-    if (message.missing === true) return call('/core-plugin', { method: 'POST', body: JSON.stringify({ missing: true }) });
+    if (message.missing === true) {
+      await rememberOwnCoreApp(null);
+      return call('/core-plugin', { method: 'POST', body: JSON.stringify({ missing: true }) });
+    }
     if (typeof message.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(message.appId)) return { ok: false };
+    // The page reports only the app listed under this install's own Core name.
+    if (connectorNames?.core) await rememberOwnCoreApp({ appId: message.appId, name: connectorNames.core });
     return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
   },
   async usage_observation(message, _sender, source) {
@@ -3557,6 +3584,7 @@ const HANDLERS = {
       paired: token !== null,
       disconnected,
       connectorNames,
+      ownCoreApp,
       pending: journal.length,
       pendingCommandAcks: commandAckOutbox.length,
       compatible: found ? found.compatible !== false : null,

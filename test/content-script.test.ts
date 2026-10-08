@@ -1777,6 +1777,38 @@ describe('desktop input delivery and helper ownership', () => {
     expect(mentions).toEqual([expected]);
   });
 
+  it.each([
+    ['the remembered Core before the page lists its apps', 'Chat On Steroids Core (Windows)', null,
+      { path: 'app://asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' }],
+    ['nothing when the remembered Core has another name', 'Chat On Steroids Core', null, null],
+    ['nothing once the page\'s complete list lacks this Core', 'Chat On Steroids Core (Windows)',
+      { type: 'cos-core-mention', path: null, name: null, candidates: [], pluginList: true }, null]
+  ] as const)('mentions %s in a fresh tab (#1086)', async (_case, rememberedName, pageList, expected) => {
+    // A worker's fresh tab can send before its own plugin list arrives. Its first message then went
+    // out without the Core mention, and in a workspace shared with another computer ChatGPT sent
+    // the worker's calls to that computer's plain Core. Another tab's sighting stands in.
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
+        core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' },
+        ownCoreApp: { appId: 'asdk_app_win2222', name: rememberedName } }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed() } })
+    });
+    await settle();
+    if (pageList) live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com', data: pageList }));
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'remembered-core-receipt', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(mentions).toEqual([expected]);
+  });
+
   it('keeps the plain names for a status reply that carries foreign or malformed names', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
