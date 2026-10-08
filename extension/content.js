@@ -386,6 +386,10 @@
   const errorFirstSeen = new WeakMap();
   /** The last label sent for each identified ChatGPT-native tool row of this generation. */
   const pageToolsReported = new Map();
+  /** The last round outline sent for each local turn, newest last (`turnTraceOf`). */
+  const tracesReported = new Map();
+  /** When this document first showed each call of a turn it ran live, by ChatGPT's call id. */
+  const traceCallsSeen = new Map();
   /** Last metadata ownership emitted for each exact provider-message/generated-asset tuple. */
   const nativeImagesReported = new Map();
   /** Disposable pixel-capture state. Durable receipt/storage remains in the browser journal/app. */
@@ -1405,6 +1409,17 @@
           entry.agent === queued.agent &&
           entry.event?.kind === 'assistant_message' &&
           entry.event?.messageId === messageId
+      );
+      if (prior >= 0) removeQueueEntry(prior);
+    }
+    // A turn's outline is whole each time; only the newest unsent one matters.
+    if (queued.event.kind === 'turn_trace' && typeof queued.event.turnId === 'string') {
+      const prior = queue.findIndex(
+        (entry) =>
+          !queueGapKeys.has(entry) &&
+          entry.conversationId === queued.conversationId &&
+          entry.event?.kind === 'turn_trace' &&
+          entry.event?.turnId === queued.event.turnId
       );
       if (prior >= 0) removeQueueEntry(prior);
     }
@@ -2448,7 +2463,6 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
-    syncLivePreview(livePreviewSent.conversationId, null);
     streamGone = null;
     resumedOrder = 0;
     generating = false;
@@ -3432,7 +3446,7 @@
   // 11: adds exact typed thought-notification ids and ephemeral DOM stamps for selective
   //     presentation suppression. Caption text and per-call adjacency remain non-authority.
   // 12: adds exact provider-message/sediment generated-image descriptors and DOM pixel stamps.
-  const FIBER_VERSION = 21;
+  const FIBER_VERSION = 22;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -3772,10 +3786,9 @@
       codeIds.add(messageId);
       codeModeCalls.push({ messageId, tool: 'functions.exec', requestId: cap(entry.requestId, 100), answered: entry.answered === true });
     }
-    // Presentation only (#942): a caption line for a running turn, never a recorded message.
-    const preview = !endMessageId && typeof raw.preview === 'string' ? cap(raw.preview.trim(), 300) : null;
+    const trace = turnTraceOf(raw.trace);
     if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
-        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !preview) {
+        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !trace) {
       return null;
     }
     return {
@@ -3792,8 +3805,44 @@
       activities: keptActivities,
       thoughtNotifications: keptThoughtNotifications,
       images: keptImages,
-      preview
+      trace
     };
+  }
+
+  /**
+   * The provider's outline of one turn's rounds (fiber.js `shellTurnTrace`), revalidated: what
+   * the model said between steps, this app's calls in order, and each round's recap. It crosses
+   * to the app as presentation for the timeline and is never a message, a call or work evidence.
+   */
+  function turnTraceOf(value) {
+    if (!Array.isArray(value) || value.length === 0) return null;
+    const out = [];
+    let room = 128 * 1024;
+    for (const item of value.slice(0, 400)) {
+      const kind = item && item.kind;
+      if (kind === 'say' || kind === 'recap' || kind === 'now') {
+        const text = typeof item.text === 'string' ? item.text.slice(0, kind === 'say' ? 8000 : 300) : '';
+        if (!text.trim() || text.length > room) continue;
+        room -= text.length;
+        const id = kind === 'say' ? cap(item.id, 200) : null;
+        out.push(kind === 'say' ? { kind, ...(id ? { id } : {}), text, done: item.done === true } : { kind, text });
+      } else if (kind === 'answer') {
+        const id = cap(item.id, 200);
+        if (id) out.push({ kind, id });
+      } else if (kind === 'call' || kind === 'exec') {
+        const id = cap(item.id, 200);
+        if (!id) continue;
+        const tool = kind === 'call' ? cap(item.tool, 100) : null;
+        out.push({ kind, id, ...(tool ? { tool } : {}), done: item.done === true });
+        if (kind === 'call') {
+          // When this document first showed the call, kept per call: the app aligns it with the
+          // recorded call that started then. Only a turn this page runs live is stamped below.
+          const seen = traceCallsSeen.get(id);
+          if (seen) out[out.length - 1].at = seen;
+        }
+      }
+    }
+    return out.length ? out : null;
   }
 
   const nativeImageKey = image => `${image.messageId}\u0000${image.assetId}`;
@@ -4224,28 +4273,6 @@
     return fiberRepairing ? await fiberRepairing : null;
   }
 
-  /** The caption last sent for the running turn (#942), so an unchanged scan sends nothing. */
-  let livePreviewSent = { conversationId: null, text: null };
-  /**
-   * Tells the app the newest sentence ChatGPT shows for a running turn whose message it has not
-   * published yet. ChatGPT keeps a new chat's first-turn narration out of its page model until it
-   * fetches history again, so without this the app showed only the calls until the final answer.
-   * The app holds it in memory as a caption; the sentence is recorded the ordinary way, with its
-   * own message id, once ChatGPT publishes it.
-   */
-  function syncLivePreview(forConversation, text) {
-    const id = typeof forConversation === 'string' && /^[0-9a-f-]{8,64}$/i.test(forConversation) ? forConversation : null;
-    const next = id && typeof text === 'string' && text ? text : null;
-    const previous = livePreviewSent;
-    if (previous.conversationId === id && previous.text === next) return;
-    livePreviewSent = { conversationId: id, text: next };
-    // A route change must not leave the old chat's caption behind.
-    if (previous.text && previous.conversationId && previous.conversationId !== id) {
-      void ask({ type: 'live_preview', conversationId: previous.conversationId, text: null });
-    }
-    if (id && (next || previous.conversationId === id)) void ask({ type: 'live_preview', conversationId: id, text: next });
-  }
-
   async function refreshFiber(settled = null, presentationOnly = false) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
     // navigation to a fresh composer has the exact same pathname until ChatGPT assigns the
@@ -4448,11 +4475,6 @@
     }
     const activeTurnIndex =
       ownedPageTurn && activeLocalTurnId ? answer.turns.indexOf(ownedPageTurn) : -1;
-    // #942: a caption for the generation this document owns right now, never for a settled scan.
-    if (!presentationOnly && !settled) {
-      syncLivePreview(askedConversation || concreteConversation(CLF_DOM.conversationId()),
-        activeTurnIndex >= 0 && generating ? ownedPageTurn.preview : null);
-    }
     if (askedConversation) {
       // Ownership evidence is no longer gated on `activeTurnIndex`.
       //
@@ -4820,6 +4842,26 @@
           expediteActivityPull();
         }
       }
+      // The provider's outline of this turn's rounds, for the timeline only. It needs a local turn
+      // to be filed under, so an unowned historical section sends none; an unchanged outline sends
+      // nothing, and a settled turn read after a reload refreshes the outline its recaps came late to.
+      if (localOwner && turn.trace) {
+        if (index === activeTurnIndex && generating) {
+          const now = Date.now();
+          for (const item of turn.trace) {
+            if (item.kind !== 'call' || item.at) continue;
+            item.at = now;
+            traceCallsSeen.set(item.id, now);
+          }
+          while (traceCallsSeen.size > 2000) traceCallsSeen.delete(traceCallsSeen.keys().next().value);
+        }
+        const signature = JSON.stringify(turn.trace);
+        if (tracesReported.get(localOwner) !== signature) {
+          tracesReported.delete(localOwner);
+          tracesReported.set(localOwner, signature);
+          emit({ kind: 'turn_trace', turnId: localOwner, trace: turn.trace });
+        }
+      }
     }
     // ChatGPT's own message model is stronger completion evidence than the renderer's Stop
     // button. If the final assistant message says `end_turn:true`, close the exact local
@@ -4851,6 +4893,7 @@
     if (callsReported.size > 4000) callsReported.clear();
     if (messagesReported.size > 4000) messagesReported.clear();
     if (pageToolsReported.size > 4000) pageToolsReported.clear();
+    while (tracesReported.size > 64) tracesReported.delete(tracesReported.keys().next().value);
     if (nativeImagesReported.size > 2000) {
       for (const key of nativeImagesReported.keys()) {
         nativeImagesReported.delete(key);

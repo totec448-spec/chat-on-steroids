@@ -1085,33 +1085,35 @@ describe('active agent tab discard projection', () => {
   });
 });
 
-describe('the running turn\'s caption (#942)', () => {
-  it('holds the newest unpublished sentence in memory and drops it when cleared or the page closes', async () => {
-    const { livePreview } = await import('../src/main/live-preview.js');
+describe('a turn\'s round outline (#942)', () => {
+  it('stores the newest outline of a turn beside its log, never as an event', async () => {
+    const { readTurnTraces, readEvents } = await import('../src/main/session/store.js');
     await pair();
-    const conversationId = 'f0f00942-1111-4111-8111-111111111111', other = 'f0f00942-1111-4111-8111-222222222222';
-    const send = (body: unknown) => request('POST', '/live-preview', { body });
-    expect((await send({ conversationId, text: 'First command printed one.' })).status).toBe(200);
-    expect(livePreview([other, conversationId])).toBe('First command printed one.');
-    expect(livePreview([other])).toBeNull();
-    expect((await send({ conversationId, text: null })).status).toBe(200);
-    expect(livePreview([conversationId])).toBeNull();
-    // Bounded and exact: one caption line, nothing else accepted.
-    for (const bad of [{ conversationId, text: 'x'.repeat(301) }, { conversationId, text: '' }, { conversationId },
-      { conversationId, text: 'ok', extra: true }, { conversationId: 'not a chat', text: 'ok' }]) {
-      expect((await send(bad)).status, JSON.stringify(bad).slice(0, 60)).toBe(400);
-    }
-    expect(livePreview([conversationId])).toBeNull();
-    await send({ conversationId, text: 'Second command printed two.' });
-    await request('POST', '/closed', { body: { conversationId, manual: true } });
-    expect(livePreview([conversationId])).toBeNull();
-  });
-
-  it('forgets a caption nobody refreshed for ten minutes', async () => {
-    const { livePreview, setLivePreview } = await import('../src/main/live-preview.js');
-    setLivePreview('f0f00942-1111-4111-8111-333333333333', 'Still going', 1_000);
-    expect(livePreview(['f0f00942-1111-4111-8111-333333333333'], 1_000 + 10 * 60_000)).toBe('Still going');
-    expect(livePreview(['f0f00942-1111-4111-8111-333333333333'], 1_001 + 10 * 60_000)).toBeNull();
+    const conversationId = 'f0f00942-1111-4111-8111-111111111111';
+    const post = (events: unknown[]) => request('POST', '/events', { body: { conversationId, events } });
+    const opened = await post([{ kind: 'user_message', time: Date.now(), text: 'Run three commands', messageId: 'q-942' }]);
+    const sessionId = opened.body.sessionId as string;
+    const before = (await readEvents(sessionId, { from: 0, limit: 1000 })).length;
+    const outline = [
+      { kind: 'say', text: 'First command printed one.', done: true },
+      { kind: 'call', id: 'call-1', tool: 'exec_command', done: true, at: 1_791_000_000_000 },
+      { kind: 'recap', text: 'Ran the first command' }
+    ];
+    expect((await post([{ kind: 'turn_trace', time: Date.now(), turnId: 'g-942-0-1', trace: outline }])).status).toBe(200);
+    await vi.waitFor(async () => expect((await readTurnTraces(sessionId, ['g-942-0-1']))['g-942-0-1']).toEqual(outline));
+    // The newest outline replaces the turn's; anything the page cannot vouch for is dropped.
+    await post([{ kind: 'turn_trace', time: Date.now(), turnId: 'g-942-0-1',
+      trace: [...outline, { kind: 'say', text: 'Second.', done: false }, { kind: 'mystery', text: 'x' }, { kind: 'call', tool: 'read' }] }]);
+    await vi.waitFor(async () => expect((await readTurnTraces(sessionId, ['g-942-0-1']))['g-942-0-1']).toEqual(
+      [...outline, { kind: 'say', text: 'Second.', done: false }]));
+    // A page reloaded since the turn ran reads the same calls without when they first showed; that is kept.
+    await post([{ kind: 'turn_trace', time: Date.now(), turnId: 'g-942-0-1',
+      trace: [outline[0], { kind: 'call', id: 'call-1', tool: 'exec_command', done: true }, outline[2]] }]);
+    await vi.waitFor(async () => expect((await readTurnTraces(sessionId, ['g-942-0-1']))['g-942-0-1']).toEqual(outline));
+    // An outline without a turn to file it under is not stored anywhere.
+    await post([{ kind: 'turn_trace', time: Date.now(), trace: outline }]);
+    expect((await readEvents(sessionId, { from: 0, limit: 1000 })).length).toBe(before);
+    expect(JSON.stringify(await readEvents(sessionId, { from: 0, limit: 1000 }))).not.toContain('First command printed one.');
   });
 });
 

@@ -15,6 +15,7 @@ import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
+import { turnTrace } from '../shared/turn-trace.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
 import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
@@ -135,7 +136,6 @@ import {
   requestTurnOwnershipCutoff
 } from './session/store.js';
 import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
-import { setLivePreview } from './live-preview.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -1293,6 +1293,8 @@ const OBSERVATION_KINDS = new Set([
   'assistant_message',
   'native_image',
   'page_tool',
+  // A turn's round outline: presentation stored beside the log (shared/turn-trace.ts).
+  'turn_trace',
   'turn_start',
   'turn_end',
   'chat_error',
@@ -1516,6 +1518,11 @@ function parseObservations(input: unknown): ChatObservation[] {
       }
     }
     if (typeof item['turnId'] === 'string') observation.turnId = item['turnId'].slice(0, 100);
+    if (kind === 'turn_trace') {
+      const trace = turnTrace(item['trace']);
+      if (!trace || !observation.turnId) continue;
+      observation.trace = trace;
+    }
     if (typeof item['renderedHtml'] === 'string') observation.renderedHtml = item['renderedHtml'].slice(0, 120_000);
     if (item['state'] === 'streaming' || item['state'] === 'final') observation.state = item['state'];
     if (typeof item['fiberConversationId'] === 'string') {
@@ -1654,8 +1661,6 @@ function conversationId(value: unknown): string | null {
 }
 
 const MAX_ACTIVITY_CALL_ID_CHARS = 200;
-/** One caption line (#942); the page sends at most this much. */
-const MAX_LIVE_PREVIEW_CHARS = 300;
 const MAX_ACTIVITY_DETAIL_TEXT_CHARS = 8_000;
 const BINARY_OMISSION = (chars: number): string => `<binary payload omitted: ${chars} characters>`;
 
@@ -2803,8 +2808,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (id) {
-      // A closed page shows no running sentence any more.
-      setLivePreview(id, null);
       // Preserve the page's last exact turn verdict before closeConversation removes its live
       // recorder entry. Agent ownership outlives a tab; an open turn is the narrower fact that
       // authorises reopening it.
@@ -2852,25 +2855,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   // One disclosure expansion reads only the exact record already hydrated for this current
   // conversation by /activity. Missing/stale/foreign identities deliberately share one answer.
-  if (route === '/live-preview' && req.method === 'POST') {
-    let body: unknown;
-    try {
-      body = await readBody(req);
-    } catch (err) {
-      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
-      return json(res, 400, { error: 'bad_request' }, origin);
-    }
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'bad_request' }, origin);
-    const fields = body as Record<string, unknown>;
-    if (Object.keys(fields).some(key => !['conversationId', 'text'].includes(key))) return json(res, 400, { error: 'bad_request' }, origin);
-    const id = conversationId(fields.conversationId);
-    const text = fields.text === null ? null
-      : typeof fields.text === 'string' && fields.text.length > 0 && fields.text.length <= MAX_LIVE_PREVIEW_CHARS ? fields.text : undefined;
-    if (!id || text === undefined) return json(res, 400, { error: 'bad_request' }, origin);
-    setLivePreview(id, text);
-    return json(res, 200, { ok: true }, origin);
-  }
-
   if (route === '/activity/detail' && req.method === 'POST') {
     let body: unknown;
     try {

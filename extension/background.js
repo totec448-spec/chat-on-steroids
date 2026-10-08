@@ -3837,16 +3837,6 @@ const HANDLERS = {
     }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
-  /** The running turn's newest unpublished sentence (#942), as a live caption in the app. */
-  async live_preview(message, _sender, source) {
-    await load();
-    const conversationId = cleanConversationId(message.conversationId);
-    const text = message.text === null ? null
-      : typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 300 ? message.text : undefined;
-    if (!conversationId || text === undefined) return { ok: false, status: 400, error: 'bad_live_preview' };
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    return call('/live-preview', { method: 'POST', body: JSON.stringify({ conversationId, text }) });
-  },
   /** Reads one already-recorded call only for the exact currently bound page document. */
   async activity_detail(message, _sender, source) {
     await load();
@@ -4255,7 +4245,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'bind',
     'activity',
     'activity_detail',
-    'live_preview',
     'correlate',
     'closed',
     'compact',

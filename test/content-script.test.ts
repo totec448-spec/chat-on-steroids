@@ -22009,7 +22009,7 @@ describe('ordinary Continue native recovery', () => {
     win.__CLF_CONTENT_RECORDER__.stop();
     win.CLF_TEST_HOOK = (api: Hook) => { live!.hook = api; };
     win.eval(contentSource.replace('const RECORDER_VERSION = 22;', 'const RECORDER_VERSION = 13;')
-      .replace('const FIBER_VERSION = 21;', 'const FIBER_VERSION = 12;'));
+      .replace('const FIBER_VERSION = 22;', 'const FIBER_VERSION = 12;'));
     await settle();
     userTurn(live.document, 'source', 'Complete the task');
     const section = assistantTurn(live.document, 'native-answer', []);
