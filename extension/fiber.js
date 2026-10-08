@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 21;
+  const VERSION = 22;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Retire it across versions too: picker/plugin replies use their own v1
@@ -99,8 +99,11 @@
   /** Aggregate authored text/HTML copied through MAIN -> isolated world in one scan. */
   const MAX_RESPONSE_TEXT = MAX_TURNS * 512 * 1024;
   const MAX_TURN_TEXT = 512 * 1024;
-  /** One live caption line; the full text is recorded once ChatGPT publishes its message. */
-  const MAX_PREVIEW_TEXT = 300;
+  /** A turn outline (`shellTurnTrace`): items, one sentence block, one recap, and all of its text. */
+  const MAX_TRACE_ITEMS = 400;
+  const MAX_TRACE_SAY = 8000;
+  const MAX_TRACE_RECAP = 300;
+  const MAX_TRACE_TEXT = 128 * 1024;
 
   function budgetedText(value, budget, perValueLimit) {
     if (typeof value !== 'string' || !value || !budget || budget.remaining <= 0) return '';
@@ -1917,18 +1920,81 @@
     rendered.sort((a, b) => a.order - b.order);
     return { events, notifications: [] };
   }
-  /** The newest public preamble of a running shell turn whose source message ChatGPT has not
-   * published (#942: a new chat's first turn keeps them out of every mapping until history is
-   * fetched again). Presentation only: no identity, never recorded, gone once the turn ends or
-   * its source message becomes readable and is recorded the ordinary way. */
-  function shellLivePreview(shell, metadata) {
-    if (shell.endMessageId) return null;
-    const preambles = shell.entry.turn.items.flatMap(item => item?.type === 'chatgpt-reasoning-group' &&
-      Array.isArray(item.items) && item.reasoningRecap?.type !== 'hide_all' ? item.items : []).filter(item => item?.type === 'reasoning' &&
-        item.isTransient !== true && item.presentation === 'preamble' && typeof item.content === 'string');
-    const newest = preambles.at(-1);
-    if (!newest || metadata.some(source => source.preamble === newest.content)) return null;
-    return budgetedText(visibleText(newest.content), { remaining: MAX_PREVIEW_TEXT }, MAX_PREVIEW_TEXT) || null;
+  /** A reply that is nothing but content references to other messages. */
+  const ONLY_CONTENT_REFERENCES = /^\s*(?:::chatgpt-content-reference\{[^}\n]*\}\s*)+$/;
+  /**
+   * The Markdown a shell item says. ChatGPT's newer renderer (DIL, GPT-6 on 2026-10-08) leaves
+   * only `::chatgpt-content-reference{…}` in `content` and keeps the reply itself as
+   * `fallbackMarkdown` on the one `dil` reference that names this same message: the text the page
+   * shows when its widget cannot render, so the text the model wrote. Anything else keeps its
+   * content as it is.
+   */
+  function shellItemText(item) {
+    const content = typeof item?.content === 'string' ? item.content : '';
+    if (!ONLY_CONTENT_REFERENCES.test(content)) return content;
+    const id = str(item.messageId);
+    const own = (Array.isArray(item.contentReferences) ? item.contentReferences : []).filter(reference =>
+      reference?.type === 'dil' && id && reference.source_message_id === id &&
+      typeof reference.model_dil_v2?.fallbackMarkdown === 'string' && reference.model_dil_v2.fallbackMarkdown.trim());
+    return own.length === 1 ? own[0].model_dil_v2.fallbackMarkdown.slice(0, MAX_RENDERED_TEXT) : content;
+  }
+  /**
+   * The provider's own outline of a shell turn's work, in its order: what the model said between
+   * steps, each call of this app's connectors, and the recap ChatGPT closes each round with.
+   *
+   * ChatGPT draws a turn's work as reasoning groups. Inside one, a round is the model's sentences
+   * (`assistant-message` items under GPT-6, id-less `reasoning` preambles under GPT-5.x), its calls,
+   * and a public `thought` that recaps them ("Created the test files"). In a new chat's first turn
+   * none of the sentences or recaps reach any message mapping (#942), so the outline is the only
+   * place they exist while the turn runs. It is presentation: it names no message the recorder
+   * does not already know, and the app places its recorded calls in rounds by tool and order
+   * (renderer/timeline-rounds.ts), never by an id. Hidden groups and transient reasoning stay out.
+   */
+  function shellTurnTrace(shell) {
+    const out = [], budget = { remaining: MAX_TRACE_TEXT };
+    for (const item of shell.entry.turn.items) {
+      // The turn's answer stands outside its rounds; naming it keeps it from reading as one more sentence.
+      if (item?.type === 'assistant-message' && item.phase === 'final_answer' && str(item.messageId)) {
+        out.push({ kind: 'answer', id: str(item.messageId) });
+        continue;
+      }
+      if (item?.type !== 'chatgpt-reasoning-group' || !Array.isArray(item.items) || item.reasoningRecap?.type === 'hide_all') continue;
+      for (const step of item.items) {
+        if (out.length >= MAX_TRACE_ITEMS) return out;
+        if (step?.type === 'assistant-message') {
+          const text = shellItemText(step).trim();
+          if (!text || ONLY_CONTENT_REFERENCES.test(text)) continue;
+          const id = str(step.messageId), said = budgetedText(text, budget, MAX_TRACE_SAY);
+          if (said) out.push({ kind: 'say', ...(id ? { id } : {}), text: said, done: step.completed === true });
+        } else if (step?.type === 'reasoning' && step.isTransient !== true && typeof step.content === 'string' && step.content.trim()) {
+          if (step.presentation === 'preamble') {
+            const said = budgetedText(step.content.trim(), budget, MAX_TRACE_SAY);
+            if (said) out.push({ kind: 'say', text: said, done: step.completed !== false });
+          } else if (step.presentation === 'thought') {
+            const recap = budgetedText(visibleText(step.content), budget, MAX_TRACE_RECAP);
+            if (recap) out.push({ kind: 'recap', text: recap });
+          }
+        } else if (step?.type === 'mcp-tool-call' && OUR_APPS.some(app =>
+            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) {
+          const id = str(step.callId), tool = toolName(step.invocation?.tool);
+          if (id && tool) out.push({ kind: 'call', id, tool, done: step.completed === true });
+        } else if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
+          // ChatGPT's own code mode: one item for any number of this app's calls it makes.
+          const id = str(step.callId);
+          if (id) out.push({ kind: 'exec', id, done: step.completed === true });
+        }
+      }
+    }
+    // What ChatGPT says the turn is doing right now ("Comparing three layouts…"): the open thought of
+    // the newest group, which becomes that round's recap once it closes. Only while the turn runs.
+    if (shell.entry.turn.status !== 'complete') {
+      const groups = shell.entry.turn.items.filter(item => item?.type === 'chatgpt-reasoning-group' && item.reasoningRecap?.type !== 'hide_all');
+      const active = groups.at(-1)?.activeReasoning;
+      const now = active && active.completed !== true && active.isTransient !== true && active.presentation === 'thought' &&
+        typeof active.content === 'string' ? budgetedText(visibleText(active.content), budget, MAX_TRACE_RECAP) : '';
+      if (now) out.push({ kind: 'now', text: now });
+    }
+    return out;
   }
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
@@ -1948,7 +2014,7 @@
         const user = item.type === 'user-message', id = str(item.messageId) || (user ? str(item.serverMessageId) : null);
         if (!id) continue;
         if (!remember(id) || (user && item.serverMessageId && item.messageId && item.serverMessageId !== item.messageId)) return null;
-        const role = user ? 'user' : 'assistant', text = user ? item.message : item.content;
+        const role = user ? 'user' : 'assistant', text = user ? item.message : shellItemText(item);
         const final = !user && item.phase === 'final_answer';
         if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
@@ -2120,7 +2186,7 @@
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
         const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
-        const preview = shell ? shellLivePreview(shell, metadata) : null;
+        const trace = shell ? shellTurnTrace(shell) : [];
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
         // identity for handoff capture; streaming and cancelled items stay weak.
@@ -2132,7 +2198,7 @@
           codeModeCalls.length === 0 && calls.length === 0 &&
           requests.length === 0 &&
           renderedMessages.length === 0 &&
-          activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId && !preview
+          activities.length === 0 && nativeActivities.notifications.length === 0 && generatedImages.length === 0 && !endMessageId && trace.length === 0
         ) continue;
         const index = out.length;
         entry = {
@@ -2149,7 +2215,7 @@
           activities,
           thoughtNotifications: nativeActivities.notifications,
           images: generatedImages,
-          ...(preview ? { preview } : {})
+          ...(trace.length ? { trace } : {})
         };
         // The isolated-world renderer needs to know which visible section this exact Fiber
         // turn descriptor came from. Remember the desired ephemeral scan index now and apply
