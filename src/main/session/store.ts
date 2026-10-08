@@ -45,6 +45,7 @@ import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, 
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
+import { turnTrace, type TurnTrace } from '../../shared/turn-trace.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
@@ -3088,6 +3089,81 @@ export async function updateSessionPlan(
   });
 }
 
+/**
+ * Round outlines (shared/turn-trace.ts): one small file per local turn under `traces/`, beside
+ * the log rather than in it, since an outline is presentation and never evidence. Each write
+ * replaces the turn's whole outline; the newest reads are kept in memory.
+ */
+const TRACE_TURN_ID = /^[A-Za-z0-9_-]{1,100}$/;
+const MAX_TRACE_FILE_BYTES = 512 * 1024;
+const traceCache = new Map<string, { json: string; trace: TurnTrace } | null>();
+function traceCacheKey(id: string, turnId: string): string { return `${id}\u0000${turnId}`; }
+function rememberTrace(key: string, value: { json: string; trace: TurnTrace } | null): void {
+  traceCache.delete(key);
+  traceCache.set(key, value);
+  while (traceCache.size > 512) traceCache.delete(traceCache.keys().next().value!);
+}
+async function readTraceFile(id: string, turnId: string): Promise<{ json: string; trace: TurnTrace } | null> {
+  const key = traceCacheKey(id, turnId);
+  if (traceCache.has(key)) return traceCache.get(key)!;
+  let value: { json: string; trace: TurnTrace } | null = null;
+  try {
+    const json = await fs.readFile(path.join(sessionDir(id), 'traces', `${turnId}.json`), 'utf8');
+    const trace = json.length <= MAX_TRACE_FILE_BYTES ? turnTrace(JSON.parse(json)) : null;
+    value = trace ? { json, trace } : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+  }
+  rememberTrace(key, value);
+  return value;
+}
+
+/** Replaces one turn's outline. False when it is unchanged, invalid, or the session is gone. */
+export async function writeTurnTrace(id: string, turnId: string, input: unknown): Promise<boolean> {
+  assertSessionId(id);
+  const incoming = TRACE_TURN_ID.test(turnId) ? turnTrace(input) : null;
+  if (!incoming) return false;
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'trace', async () => {
+    // When a call first showed is known only to the page that ran the turn live; a page reloaded
+    // since reads the same calls without it. The earliest time recorded for a call id is kept.
+    const seen = new Map((await readTraceFile(id, turnId))?.trace.flatMap(item => item.kind === 'call' && item.at ? [[item.id, item.at] as const] : []) ?? []);
+    const trace = incoming.map(item => {
+      if (item.kind !== 'call' || !seen.has(item.id)) return item;
+      const at = Math.min(seen.get(item.id)!, item.at ?? Infinity);
+      return { ...item, at };
+    });
+    const json = JSON.stringify(trace);
+    if (Buffer.byteLength(json) > MAX_TRACE_FILE_BYTES) return false;
+    if ((await readTraceFile(id, turnId))?.json === json) return false;
+    const folder = path.join(sessionDir(id), 'traces');
+    const target = path.join(folder, `${turnId}.json`);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(temporary, json, 'utf8');
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+    }
+    rememberTrace(traceCacheKey(id, turnId), { json, trace });
+    return true;
+  });
+}
+
+/** The outlines recorded for these turns; turns without one are absent. */
+export async function readTurnTraces(id: string, turnIds: Iterable<string>): Promise<Record<string, TurnTrace>> {
+  assertSessionId(id);
+  await open.get(id)?.queue;
+  const out: Record<string, TurnTrace> = {};
+  for (const turnId of new Set(turnIds)) {
+    if (!TRACE_TURN_ID.test(turnId)) continue;
+    const found = await readTraceFile(id, turnId);
+    if (found) out[turnId] = found.trace;
+  }
+  return out;
+}
+
 export async function endSession(id: string, dismissBrowserRecovery = false, expectedConversationId?: string): Promise<void> {
   const entry = dismissBrowserRecovery ? await ensureOpen(id) : open.get(id);
   if (!entry) return;
@@ -3947,6 +4023,7 @@ export async function deleteSession(id: string): Promise<void> {
     open.delete(id);
   }
   await fs.rm(sessionDir(id), { recursive: true, force: true });
+  for (const key of [...traceCache.keys()]) if (key.startsWith(`${id}\u0000`)) traceCache.delete(key);
   invalidateAssetUsage(id);
   publishAttachmentRemoval(id);
 }
@@ -3957,6 +4034,7 @@ export function resetSessionStoreForTests(): void {
   open.clear();
   opening.clear();
   reconciling.clear();
+  traceCache.clear();
   sessionAssetUsage.clear();
   globalAssetUsage = null;
   assetMutationEpoch = 0;
@@ -3972,6 +4050,7 @@ export function resetSessionStoreForTests(): void {
 export function unsetSessionRootForTests(): void {
   root = '';
   sessionAssetUsage.clear();
+  traceCache.clear();
   globalAssetUsage = null;
   assetMutationEpoch = 0;
   assetWrittenEpoch.clear();

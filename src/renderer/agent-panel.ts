@@ -1,3 +1,4 @@
+import type { TurnTrace } from '../shared/turn-trace.js';
 import { ui, t } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
@@ -13,8 +14,8 @@ export function createAgentPanel(options: {
   toggle?: HTMLButtonElement;
   onShow?: () => void;
   onEscape?: () => void;
-  load: (id: string) => Promise<{ events: SessionEvent[] } | null>;
-  render: (events: SessionEvent[], id: string, current: () => boolean) => HTMLElement[];
+  load: (id: string) => Promise<{ events: SessionEvent[]; traces?: Record<string, TurnTrace> } | null>;
+  render: (events: SessionEvent[], id: string, current: () => boolean, traces: Record<string, TurnTrace>) => HTMLElement[];
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & { conversationId?: string | null }) | null;
@@ -127,7 +128,7 @@ export function createAgentPanel(options: {
     openMain.onclick = () => { if (current()) { hide(); options.openMain(id); } };
     const position = body.scrollTop;
     const follow = !preserve || position + body.clientHeight >= body.scrollHeight - 40;
-    body.replaceChildren(openMain, ...options.render(detail.events, id, current));
+    body.replaceChildren(openMain, ...options.render(detail.events, id, current, detail.traces ?? {}));
     body.scrollTop = follow ? body.scrollHeight : position;
   }
   back.onclick = list;

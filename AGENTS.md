@@ -262,6 +262,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
+| Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
 | Native upload originals | `input-attachments.ts` / `input-attachments/` | Immutable bytes, opaque ids; outbox owns membership and retention. |
@@ -1520,6 +1521,7 @@ userData/sessions/<local-id>/
   meta.json             recoverable projection plus durable ownership/project facts
   meta.backup.json      last validated metadata checkpoint
   plan.json             current agent-maintained plan
+  traces/<turnId>.json  each turn's round outline as ChatGPT showed it (presentation only)
   assets/               bounded binary and overflow material
   handoffs/             exact captured briefs and provenance
 ```
@@ -2140,7 +2142,7 @@ version options normalize into the same bounded picker snapshot. Mixed-version p
 their execution ids rather than merging unrelated models into a synthetic Latest family.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
-The matched recorder/MAIN helper version is 21. Shell exchanges are read only under the native
+The matched recorder/MAIN helper version is 22. Shell exchanges are read only under the native
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
@@ -3435,11 +3437,31 @@ paged transcript. Main owns durable mutation acknowledgements; renderer optimism
 receipt. Native edit context menus respect the focused editable control and selection.
 The timeline retains each exact tool row. It folds five or more consecutive successful agent
 status checks or waits on the same process inside the existing activity disclosure, preserving
-each row on expansion; a failed call breaks the fold. An immediately preceding recorded progress
-line may title that disclosure as the observed activity phase. Tool diff counts and shell/result
+each row on expansion; a failed call breaks the fold. Tool diff counts and shell/result
 headers are projections of recorded data, not new execution or completion evidence.
-A working turn's timeline ends with one live row: the call this app is running for the chat,
-else a step ChatGPT's page names in the progressive, else Thinking. `sessions:runningTools`
+A turn's work reads in rounds, as ChatGPT draws it (`renderer/timeline-rounds.ts`, pure). A round
+is what the model said before a step, the step's activity (this app's calls, ChatGPT's own steps,
+agent messages) and the recap ChatGPT closes it with. The sentences stand as prose in the interim
+style; the activity folds under one disclosure titled with the recap and a check once the round is
+done, else with its latest action; a lone action without a recap stays its own row. The rounds come
+from the turn's outline when one was recorded (`shared/turn-trace.ts`): its sentences, recaps and
+answer id in ChatGPT's order. Recorded calls are aligned with the outline's calls as the longest
+order-preserving match on tool name, preferring calls that started within 90 s of when the page
+first showed them; ChatGPT can show calls that never reached this app (a 22-minute turn on
+2026-10-07 showed 106 and recorded 92), so unmatched outline calls stay unmatched. A recorded call
+the outline does not show joins ChatGPT's code-mode `exec` between its aligned neighbours, the
+newest round once the outline has moved on, else its predecessor's round. Other rows follow the row
+recorded before them; a recorded interim message the outline shows is used in its place, and a
+native step whose label equals an outlined recap is not repeated (late recaps were recorded after the
+answer). Without an outline, each interim message or ChatGPT caption opens a round and a native step
+ending a finished round titles it, by position. Disclosures are keyed by turn and round, reuse the
+node their rows already sit in when paging moves a round's start, and rounds drawn after a chat's
+first paint enter with a short fade (none under reduced motion).
+A working turn's timeline ends with one live row: ChatGPT's own words for what the turn is doing
+(the outline's `now`, in the page's language), wearing the icon and clock of a call this app runs
+meanwhile; else that running call by its own caption; else a step ChatGPT's page names in the
+progressive; else Thinking. ChatGPT shows only a generic Thinking during a turn's first stretch of
+reasoning too (observed 2026-10-08); its words appear once a round is under way. `sessions:runningTools`
 answers it from `mcp/call-context.ts` `runningToolActivity`, whose caption the kernel builds
 from the call's arguments when it starts. It shares one ownership rule, `exactOwner`, with
 `runningToolProgress`: a call counts for a chat by its placed conversation or, while it still
@@ -3448,17 +3470,32 @@ runs, by the page's exact proof of its request id (`requestCorrelation`, install
 a second while the chat works. The row is presentation only: it records nothing and is not
 completion evidence. Page step labels are recognised by English wording; in other languages
 the row says Thinking.
-Between the running call and the page step, the row shows the running turn's newest
-unpublished sentence (#942). In a new chat's first turn ChatGPT draws the model's preambles from
-id-less view items and keeps their messages out of every mapping until history is fetched again.
-fiber.js reports the newest such preamble as the turn descriptor's optional `preview` (at most
-300 characters, only while the turn has no end message and only when no readable source message
-matches it). content.js forwards it as `live_preview` for the generation it owns and clears it
-at `finishGeneration`. background.js relays it to `POST /live-preview`, and `/closed` also clears
-it. `src/main/live-preview.ts` holds it in memory, dropping it after ten minutes without a
-refresh. `sessions:livePreview` (preload `livePreview`) returns it beside `sessions:runningTools`.
-It is a caption only: it is never recorded and never becomes a message id, so the sentence is
-recorded once, in its place, when ChatGPT publishes it.
+The live row never shows the model's prose; its sentences belong to the timeline (#942). In a new
+chat's first turn ChatGPT keeps them, and each round's recap, out of every message mapping until
+history is fetched again, so fiber.js reads the turn's outline from the shell's `entry.turn.items`
+(`shellTurnTrace`): `say` (GPT-5.x id-less `reasoning` preambles, or GPT-6 `assistant-message`
+items inside a reasoning group with their own id), `call` (this app's connectors, with ChatGPT's
+call id and tool), `exec` (ChatGPT's code mode), `recap` (a public `thought`), the top-level
+`answer` id, and, only while the turn runs, `now`: the newest group's open `activeReasoning`
+thought, which ChatGPT shows as the turn's status line and later closes into that round's recap.
+Hidden groups and transient reasoning stay out. Bounds: 400 items, 8,000 characters a
+sentence, 300 a recap, 128 KiB in all. content.js revalidates it (`turnTraceOf`), stamps each call
+with when this document first showed it (`at`, only for the generation it runs live), and sends
+`turn_trace` for an owned local turn whenever it changes, coalescing unsent ones; a settled turn
+read after a reload sends its outline too, which is how recaps that arrived late find their rounds.
+The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
+`sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
+beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
+(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. A DIL reply whose
+`content` is only `::chatgpt-content-reference{…}` naming itself is read as the `fallbackMarkdown`
+of that one `dil` reference (`shellItemText`), so its recorded text is the reply rather than the
+directive. In that Markdown the timeline shows an `entity` widget as its name in bold and drops
+widgets it cannot draw (`image_group`). Formulas render with KaTeX (`renderer/math.ts`): `\( … \)`
+inline and `\[ … \]` or `$$ … $$` as a block, the shapes ChatGPT writes; a lone `$` stays text. The
+Markdown pass leaves only a placeholder, the message is sanitised as usual, and each placeholder
+then becomes KaTeX's rendering of the original source with `trust` off, so a formula cannot add
+links, classes or styles. Source KaTeX cannot parse, or longer than 8,000 characters, shows as
+written; a wide block formula scrolls on its own.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button

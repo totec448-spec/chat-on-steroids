@@ -69,11 +69,10 @@ import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, r
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
 import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
-import { livePreview } from './live-preview.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
-import { listSessions } from './session/store.js';
+import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from './projects.js';
@@ -1326,12 +1325,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }).parse(payload);
     return stopExecProcess(sessionId, processId, incarnation);
   });
-  // The newest sentence a working chat shows before ChatGPT publishes it (#942).
   // The window armed its Keychain notice; the first Keychain read may start.
   handle('keychain:noticeReady', async () => keychainNoticeReady());
-  handle('sessions:livePreview', async (payload) => {
-    const { conversationIds } = z.object({ conversationIds: z.array(z.string().min(1).max(200)).max(16) }).parse(payload);
-    return livePreview(conversationIds);
+  // The round outlines (shared/turn-trace.ts) of the turns a timeline shows.
+  handle('sessions:traces', async (payload) => {
+    const { id, turnIds } = z.object({
+      id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+      turnIds: z.array(z.string().min(1).max(100)).max(64)
+    }).parse(payload);
+    return readTurnTraces(id, turnIds);
   });
   handle('sessions:retryHelper', async (payload) => {
     const { id, sourceSessionId } = z.object({ id: z.string().uuid(), sourceSessionId: z.string().min(8).max(64) }).parse(payload);
