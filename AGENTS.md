@@ -202,7 +202,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
-| Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
+| Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6-thinking` High (`DEFAULT_HELPER_CHAT_MODEL`); a config holding the superseded `gpt-5.6-sol` adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Ordinary new-chat model | Automatic: no persisted model or reasoning override. | Optional `ui.defaultChatModel` / `ui.defaultChatReasoning` apply only to a fresh ordinary chat before it has a conversation selection. A recorded conversation or accepted opening input wins. Worker and Goal/Loop/Plan defaults remain separate. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
@@ -2101,11 +2101,12 @@ fresh New Chat scope with no per-conversation selection. Once a conversation or 
 input records a model/effort, that exact selection takes precedence. `multiAgent.default*` and
 `goal.helper*` continue to own worker and Goal/Loop/Plan helper defaults independently.
 
-Model names and recovery policy checked against native picker metadata on **2026-09-17**:
+Model names and recovery policy checked against native picker metadata on **2026-09-17**; GPT-6 lanes observed on **2026-10-07**:
 
 | Display family / compatible short name | Execution identity / selected effort | Silence refresh |
 | --- | --- | --- |
-| GPT-5.6 Sol / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-thinking`; Instant/Medium/High | 2 minutes, then 1 minute listening after confirmed refresh |
+| GPT-6 / 6 | `gpt-6` (Instant: ChatGPT's automatic lane, which decides per answer whether to reason), `gpt-6-thinking` (Medium/High) | 2 minutes, then 1 minute listening |
+| GPT-5.6 Sol / GPT-5.6 / 5.6 Sol / Sol | `gpt-5-6`, `gpt-5-6-instant`, `gpt-5-6-thinking`; Instant/Medium/High | 2 minutes, then 1 minute listening after confirmed refresh |
 | GPT-5.5 / 5.5 | `gpt-5-5-instant`, `gpt-5-5-thinking`; non-Pro efforts up to High | 2 minutes, then 1 minute listening |
 | Any non-Pro family at Extra high / Max / Ultra | selected `xhigh`, `max` or `ultra` effort | 20 minutes (Thinking failed: 2), then 1 minute listening |
 | GPT-5.6 Pro / 5.6 Pro; GPT-5.5 Pro / 5.5 Pro | `gpt-5-6-pro`, `gpt-5-5-pro`, or an explicitly selected `pro` effort | 10 minutes |
@@ -2140,6 +2141,16 @@ The alternate shell uses an id-less editable textbox under `form[data-chatgpt-co
 `data-model-picker-view` for its portal. Its evaluated `powerSelections`, current selection and
 version options normalize into the same bounded picker snapshot. Mixed-version powers retain
 their execution ids rather than merging unrelated models into a synthetic Latest family.
+Within one version, lanes under one name with distinct efforts (GPT-6's `gpt-6` Instant and
+`gpt-6-thinking` Medium/High) form one family keyed by their shared slug prefix, with each lane
+as an alias, so the composer offers Instant, Medium and High together and each effort still
+selects its own lane. A colliding effort keeps the lanes apart. A name given by number alone
+reads in full (5.6 is GPT-5.6), as in the September picker.
+GPT-6's Instant position is ChatGPT's automatic lane, not a fixed model (observed 2026-10-08): the
+picker sends `gpt-6` ("chooses how long to think"), and ChatGPT's server answers with `gpt-6` or
+switches to `gpt-6-thinking` without an effort, as it judges each request. The account also lists
+a fixed `gpt-6-instant` ("immediate answers"), but no picker view offers it and `?model=` does not
+select it; the app offers exactly what the native picker offers and never substitutes a hidden slug.
 Ambiguous triggers and unrecognized state remain unknown. MAIN helper replacement removes the
 previous listener across protocol versions, because the picker/plugin reply protocols are shared.
 The matched recorder/MAIN helper version is 22. Shell exchanges are read only under the native

@@ -352,6 +352,13 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   };
 }
 
+it('ignores a pointer release when the timeline owns no pointer press', async () => {
+  const { w } = await boot([]);
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  w.dispatchEvent(new w.MouseEvent('pointerup'));
+  expect(error).not.toHaveBeenCalled();
+});
+
 it('makes parent and worker session selectors keyboard-focusable and activates them with Enter/Space', async () => {
   const parent: SessionSummary = { ...summary([]), id: 'parent-session', title: 'Parent', conversationId: 'parent-chat', chatIds: ['parent-chat'] };
   const worker: SessionSummary = { ...summary([]), id: 'worker-session', title: 'Worker', conversationId: 'worker-chat', chatIds: ['worker-chat'],
@@ -1519,7 +1526,7 @@ it.each([false, true])('removes a project group in one click, keeps its chats an
   const api = (w as any).api;
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   (w.document.querySelector('.worker-toggle') as HTMLButtonElement).click();
-  projectMenu(w, project.id); (w.document.querySelector(`.row-menu [data-new-project="${project.id}"]`) as HTMLButtonElement).click();
+  (w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement).click();
   input.value = 'Keep my draft';
   input.dispatchEvent(new w.Event('input', { bubbles: true }));
   if (selectedSkill) {
@@ -1579,21 +1586,23 @@ it('keeps the project visible when its removal fails, and lets the removal be tr
   expect((w as any).api.removeProject).toHaveBeenCalledTimes(2);
 });
 
-it('offers a project\'s actions in one menu: a new chat, its color as a submenu, and removal', async () => {
+it('offers a new chat beside a project\'s menu, and its color as a submenu and removal inside it', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
   const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
-  // No loose buttons on the row: one "⋯", and a right click opens the same menu.
-  expect(group.querySelector('.project-heading')!.querySelectorAll('button').length).toBe(1);
+  // Two buttons on the row: the primary new chat, then one "⋯"; a right click opens the same menu.
+  expect([...group.querySelector('.project-heading')!.querySelectorAll('button')].map(b => b.className)).toEqual(['btn row-menu-button project-new', 'btn row-menu-button project-menu']);
   const button = projectMenu(w, project.id);
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'color', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['color', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
-  expect(w.document.activeElement).toBe(menuItem(w, 'new-chat'));
-  // Keyboard: Down moves, Right opens the color submenu on the current choice, Left comes back.
+  expect(w.document.activeElement).toBe(menuItem(w, 'color'));
+  // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'remove'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   expect(w.document.querySelectorAll('.row-menu').length).toBe(2);
@@ -1612,8 +1621,10 @@ it('offers a project\'s actions in one menu: a new chat, its color as a submenu,
   expect(menuItem(w, 'color')).not.toBeNull();
   w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
   expect(w.document.querySelector('.row-menu')).toBeNull();
-  // New chat in this project.
-  projectMenu(w, project.id); menuItem(w, 'new-chat').click(); await settle();
+  // New chat in this project: the row's own button, no longer a menu item.
+  expect(projectMenu(w, project.id) && menuItem(w, 'new-chat')).toBeNull();
+  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
+  (w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement).click(); await settle();
   expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
 });
 
@@ -1793,7 +1804,7 @@ it('groups project chats and restores each project composer with its selected id
   expect([...groups].map(group => group.open)).toEqual([false, false]);
   expect(groups[0]!.querySelector('[data-id]')?.getAttribute('data-id')).toBe(summary([]).id);
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
-  const choose = (id: string) => { projectMenu(w, id); (w.document.querySelector(`.row-menu [data-new-project="${id}"]`) as HTMLButtonElement).click(); };
+  const choose = (id: string) => { (w.document.querySelector(`.project-heading > [data-new-project="${id}"]`) as HTMLButtonElement).click(); };
   choose(projects[0]!.id); expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[0]!.id}"]`)!.open).toBe(true); input.value = 'Alpha draft';
   choose(projects[1]!.id); expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[1]!.id}"]`)!.open).toBe(true); expect(input.value).toBe(''); input.value = 'Beta draft';
   (w.document.getElementById('newChat') as HTMLButtonElement).click();

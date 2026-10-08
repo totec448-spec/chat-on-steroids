@@ -2624,6 +2624,22 @@ var CLF_DOM = (() => {
 
   /** Native attachment identity from the composer's exact tile/remove control. */
   function composerFileName(button) {
+    // Current shell: a filename-labelled open button and a translated remove button share a
+    // span tile, without role/group/default-action. Count only that exact remove control;
+    // treating both buttons as attachments prevents the upload receipt from reaching Send.
+    const attachmentHost = button.closest('[data-composer-attachments]');
+    const tileParent = button.parentElement;
+    if (attachmentHost && tileParent && tileParent !== attachmentHost) {
+      const actions = [...tileParent.querySelectorAll('button')];
+      if (actions.length === 2 && actions[1] === button) {
+        const open = actions[0], name = open.getAttribute('aria-label');
+        const removal = button.getAttribute('aria-label') || '';
+        const labelled = [...tileParent.querySelectorAll('span')].some(node =>
+          !node.children.length && node.textContent === name);
+        if (name && removal !== name && removal.endsWith(` ${name}`) && labelled &&
+            open.closest('[data-composer-attachments]') === attachmentHost) return name;
+      }
+    }
     const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
     if (tile && tile !== button) {
       const name = tile.getAttribute('aria-label');
