@@ -656,9 +656,11 @@ describe('the window as a whole', () => {
   });
 
   it('never scrolls sideways', () => {
-    // Wide authored content and compact dock controls may scroll locally; the app must not.
+    // Wide authored content (including typeset equations) and compact dock controls
+    // may scroll locally; the app window must not.
     const horizontal = [...css.matchAll(/([^{}]+)\{[^{}]*overflow-x:\s*(?:auto|scroll)[^{}]*\}/g)];
     expect(horizontal.map(match => match[1]!.trim())).toEqual([
+      '.msg.rich .chat-math-display',
       '.msg.rich .markdown-table',
       '.file-panel-toolbar-actions',
       '.review-panel .file-changes-header-content',
@@ -671,6 +673,8 @@ describe('the window as a whole', () => {
       '.usage-table-stack'
     ]);
     expect(css).not.toMatch(/overflow:\s*(auto|scroll)\s+/);
+    // A display equation owns its own bounded viewport rather than widening the chat.
+    expect(rule('.msg.rich .chat-math-display')).toContain('max-width: 100%');
     // The one scrolling surface in the app is vertical only.
     expect(rule('.scroll')).toContain('overflow: hidden auto');
   });
