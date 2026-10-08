@@ -26,7 +26,7 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
-import { formatMainText, mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
+import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
@@ -106,9 +106,8 @@ import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
 import {
   setDesktopControlGuardPresenter,
-  type DesktopControlGuardDecision,
-  type DesktopControlGuardRequest
 } from './desktop-control-guard.js';
+import { createDesktopControlGuardPresenter } from './desktop-control-notice.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -312,87 +311,7 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   notice.show();
   return true;
 });
-let desktopGuardNoticeSequence = 0;
-const desktopGuardNoticeOptions = (): { timeoutType?: 'never' } =>
-  process.platform === 'win32' ? { timeoutType: 'never' } : {};
-const desktopGuardBody = (request: DesktopControlGuardRequest, remainingSeconds: number): string =>
-  formatMainText('{0} is about to control your desktop.', [request.label]) + '\n' +
-  (remainingSeconds === 1
-    ? mainText('Starting automatically in 1 second.')
-    : formatMainText('Starting automatically in {0} seconds.', [remainingSeconds]));
-setDesktopControlGuardPresenter({
-  prompt(request) {
-    if (quitting || !Notification.isSupported()) {
-      return Promise.reject(new Error('Desktop notifications are unavailable.'));
-    }
-    return new Promise<DesktopControlGuardDecision>((resolve, reject) => {
-      try {
-        let done = false;
-        let remaining = Math.max(1, Math.ceil(request.countdownMs / 1000));
-        const notice = new Notification({
-          id: 'cos-desktop-control-' + (++desktopGuardNoticeSequence),
-          title: mainText('Desktop control'),
-          body: desktopGuardBody(request, remaining),
-          silent: true,
-          actions: [
-            { type: 'button', text: mainText('Start now') },
-            { type: 'button', text: mainText('Stop') }
-          ],
-          ...desktopGuardNoticeOptions()
-        });
-        let tick: ReturnType<typeof setInterval> | null = null;
-        let automatic: ReturnType<typeof setTimeout> | null = null;
-        const settle = (decision: DesktopControlGuardDecision): void => {
-          if (done) return;
-          done = true;
-          if (tick) clearInterval(tick);
-          if (automatic) clearTimeout(automatic);
-          try { notice.close(); } catch { /* Result ownership is already decided. */ }
-          resolve(decision);
-        };
-        notice.on('action', details => settle(details.actionIndex === 1 ? 'stop' : 'allow'));
-        notice.on('click', showWindow);
-        notice.show();
-        tick = setInterval(() => {
-          remaining -= 1;
-          if (remaining <= 0 || done) return;
-          try {
-            notice.body = desktopGuardBody(request, remaining);
-            notice.show();
-          } catch (error) {
-            if (tick) clearInterval(tick);
-            if (automatic) clearTimeout(automatic);
-            done = true;
-            reject(error);
-          }
-        }, 1000);
-        tick.unref?.();
-        automatic = setTimeout(() => settle('allow'), request.countdownMs);
-        automatic.unref?.();
-      } catch (error) {
-        reject(error);
-      }
-    });
-  },
-  blocked(request, allowAgain) {
-    if (quitting || !Notification.isSupported()) return;
-    const notice = new Notification({
-      id: 'cos-desktop-control-blocked-' + (++desktopGuardNoticeSequence),
-      title: mainText('Desktop control stopped'),
-      body: formatMainText('{0} cannot send desktop input until you allow it again.', [request.label]),
-      silent: true,
-      actions: [{ type: 'button', text: mainText('Allow again') }],
-      ...desktopGuardNoticeOptions()
-    });
-    notice.on('action', details => {
-      if (details.actionIndex !== 0) return;
-      allowAgain();
-      try { notice.close(); } catch { /* The owner is already allowed again. */ }
-    });
-    notice.on('click', showWindow);
-    notice.show();
-  }
-});
+setDesktopControlGuardPresenter(createDesktopControlGuardPresenter(() => quitting));
 setConnectionLossNotifier(surface => showConnectionLossNotice(surface, {
   isQuitting: () => quitting,
   isFocused: () => window?.isFocused() ?? false,
