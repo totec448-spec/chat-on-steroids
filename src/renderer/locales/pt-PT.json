@@ -2003,5 +2003,15 @@
   "Know when ChatGPT is waiting": "Saiba quando o ChatGPT está à espera",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Quando o ChatGPT lhe pede para permitir uma ferramenta, o chat avisa-o em vez de ficar parado.",
   "One connection control": "Um único controlo de ligação",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Uma pequena cápsula na barra lateral mostra a ligação e avisa-o se esta cair."
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Uma pequena cápsula na barra lateral mostra a ligação e avisa-o se esta cair.",
+  "Stay aware before an agent uses your mouse or keyboard.": "Mantenha-se informado antes de um agente utilizar o rato ou o teclado.",
+  "Warn before desktop control": "Avisar antes do controlo do ambiente de trabalho",
+  "Wait 10 seconds before native mouse, keyboard or focus input. Start immediately or stop that caller from the notice.": "Aguardar 10 segundos antes de entrada nativa de rato, teclado ou foco. Iniciar imediatamente ou parar esse autor a partir da notificação.",
+  "{0} is about to control your desktop.": "{0} está prestes a controlar o seu ambiente de trabalho.",
+  "Starting automatically in {0} seconds.": "Início automático dentro de {0} segundos.",
+  "Starting automatically in 1 second.": "Início automático dentro de 1 segundo.",
+  "Start now": "Iniciar agora",
+  "Desktop control stopped": "Controlo do ambiente de trabalho parado",
+  "{0} cannot send desktop input until you allow it again.": "{0} não pode enviar entradas para o ambiente de trabalho até voltar a permitir.",
+  "Allow again": "Permitir novamente"
 }

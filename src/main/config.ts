@@ -345,6 +345,7 @@ const configSchema = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
+    desktopControlGuard: z.boolean().optional().default(false),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.
@@ -550,7 +551,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     readOnly: false,
     commandAllowlist: { ...DEFAULT_COMMAND_ALLOWLIST, rules: [] },
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false, autoSelectSkills: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, desktopControlGuard: false, theme: 'dark', autoRefreshPlugins: false, autoSelectSkills: false, backgroundChats: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

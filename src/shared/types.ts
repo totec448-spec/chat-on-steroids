@@ -174,6 +174,8 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Warn before native mouse/keyboard/focus input. Off unless the user turns it on. */
+  desktopControlGuard?: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */

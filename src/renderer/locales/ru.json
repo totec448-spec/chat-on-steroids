@@ -2003,5 +2003,15 @@
   "Know when ChatGPT is waiting": "Знайте, когда ChatGPT ждёт",
   "When ChatGPT asks you to allow a tool, the chat tells you instead of standing still.": "Когда ChatGPT просит разрешить инструмент, чат сообщает об этом, а не просто стоит.",
   "One connection control": "Один элемент подключения",
-  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Небольшая капсула в боковой панели показывает подключение и сообщает, если оно прервётся."
+  "A small capsule in the sidebar shows the connection and tells you if it drops.": "Небольшая капсула в боковой панели показывает подключение и сообщает, если оно прервётся.",
+  "Stay aware before an agent uses your mouse or keyboard.": "Получайте предупреждение перед тем, как агент начнёт использовать мышь или клавиатуру.",
+  "Warn before desktop control": "Предупреждать перед управлением рабочим столом",
+  "Wait 10 seconds before native mouse, keyboard or focus input. Start immediately or stop that caller from the notice.": "Подождать 10 секунд перед нативным вводом мышью, клавиатурой или сменой фокуса. Можно начать сразу или остановить этого вызывающего из уведомления.",
+  "{0} is about to control your desktop.": "{0} собирается управлять вашим рабочим столом.",
+  "Starting automatically in {0} seconds.": "Автоматический запуск через {0} сек.",
+  "Starting automatically in 1 second.": "Автоматический запуск через 1 сек.",
+  "Start now": "Начать сейчас",
+  "Desktop control stopped": "Управление рабочим столом остановлено",
+  "{0} cannot send desktop input until you allow it again.": "{0} не может отправлять ввод на рабочий стол, пока вы снова не разрешите это.",
+  "Allow again": "Разрешить снова"
 }

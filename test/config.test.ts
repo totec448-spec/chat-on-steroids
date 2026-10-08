@@ -561,6 +561,7 @@ describe('shipped defaults', () => {
     (platform) => {
       const config = defaultConfig(platform);
       expect(config.readOnly).toBe(false);
+      expect(config.ui.desktopControlGuard).toBe(false);
       for (const [capability, enabled] of Object.entries(config.capabilities) as Array<[Capability, boolean]>) {
         expect(enabled, `${platform}:${capability}`).toBe(expectedFreshCapability(capability, platform));
       }

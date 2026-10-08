@@ -4,6 +4,7 @@ import { setStopNoticeTranslations } from './stuck-notice.js';
 import { setMainTextTranslations } from './main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
+import { clearDesktopControlGuardBlocks } from './desktop-control-guard.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
@@ -221,6 +222,7 @@ const settingsPatch = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
+    desktopControlGuard: z.boolean().optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -390,6 +392,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.ui.privacyScreenshots,
         base.ui.privacyScreenshots,
         wanted.ui.privacyScreenshots
+      ),
+      desktopControlGuard: pick(
+        current.ui.desktopControlGuard ?? false,
+        base.ui.desktopControlGuard ?? false,
+        wanted.ui.desktopControlGuard ?? false
       ),
       theme: pick(current.ui.theme, base.ui.theme, wanted.ui.theme)
     },
@@ -715,6 +722,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The listener reads this switch on every request, so a flip needs no restart; it is logged.
     if (before.controlApi.allowActions !== next.controlApi.allowActions) {
       logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
+    }
+    if (before.ui.desktopControlGuard === true && next.ui.desktopControlGuard !== true) {
+      clearDesktopControlGuardBlocks();
     }
     if (authorityPersistError) throw authorityPersistError;
     if (loginStartupError) throw loginStartupError;

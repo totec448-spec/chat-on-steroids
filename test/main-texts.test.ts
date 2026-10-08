@@ -80,6 +80,15 @@ it('shows the published translation, keeps English for anything unknown, and rep
   expect(texts.mainText('Open')).toBe('Abrir');
 });
 
+it('formats translated main-process text without changing the allowlisted source contract', async () => {
+  const texts = await import('../src/main/main-texts.js');
+  texts.setMainTextTranslations({
+    '{0} is about to control your desktop.': '{0} übernimmt gleich Ihren Desktop.'
+  });
+  expect(texts.formatMainText('{0} is about to control your desktop.', ['Worker 2']))
+    .toBe('Worker 2 übernimmt gleich Ihren Desktop.');
+});
+
 it('starts a launch to the tray in the last language, before any window has published', async () => {
   // A background launch builds the tray without a window, so the renderer never publishes; the
   // main process keeps the last set it received and takes it back at startup.

@@ -4134,6 +4134,18 @@ focus chords support authorized navigation, like clicking or setting that same n
 it is not a general browser automation fallback. Capture/privacy settings and platform permission
 failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
 
+Desktop control admission is a separate optional user gate, not a second native queue. When
+`ui.desktopControlGuard` is off (the default), Windows and macOS input take the existing path with
+no added await. When it is on, validated mouse/keyboard/focus input must be admitted before
+`computer/index.ts` enters its shared `exclusive()` operation; reads, waits and clipboard-only
+work bypass this gate. A failed/unavailable/timed-out preflight is fail-closed and dispatches no
+native input. Stop is owned by the exact proven caller (worker, session/chat, or permitted request
+scope) until the user allows it again. The built-in notice is only the first presenter for this
+contract: it may delay/refuse an otherwise permitted operation but can never widen capabilities.
+Post-operation reporting is best effort and must never turn an input that may have completed into
+a failed/retryable result. Native atomicity, capture/ref authority and postconditions remain owned
+by `computer/index.ts`; future lease/FIFO or visual ownership UI must not duplicate that owner.
+
 ## 19. Debugging, tests and working here
 
 Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one
