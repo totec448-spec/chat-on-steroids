@@ -1428,6 +1428,36 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.response)).toEqual([]);
   });
 
+  it('waits for a GPT-6 helper answer instead of taking its bare content reference', async () => {
+    // Windows, 2026-10-09 (final 2.1.31 check): three Goal helper decisions in a row were read at turn
+    // end while ChatGPT's page model still held only `::chatgpt-content-reference{…}`, and each failed
+    // as "the structured decision was not JSON". The answer's own text arrives a scan later.
+    const canonical = '{"action":"continue","reply":"temporary result"}';
+    const pointer = '::chatgpt-content-reference{index="0" source_message_id="temp-message"}';
+    live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.response ? { ok: true } : { input: claimed({ purpose: 'decision', lifetime: 'temporary-planner' }) } })
+    });
+    const toggle = live.document.createElement('button'); toggle.setAttribute('aria-label', '一時チャット'); toggle.innerHTML = '<svg><use href="/sprite.svg#chat-temp-checked"></use></svg>'; Object.defineProperty(toggle, 'getClientRects', { value: () => [{}] }); live.document.body.append(toggle);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'temp-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      const section = assistantTurn(live!.document, 'temp-final', []);
+      prose(live!.document, section, 'temp-message', canonical);
+      const turn = (live!.window as any).CLF_DOM.turns().find((item: any) => item.id === 'temp-final');
+      live!.hook.noteGoalTurn(turn, 'completed', 'temp-final');
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    const section = live.document.querySelector('[data-turn-id="temp-final"]') as HTMLElement;
+    const userSection = live.document.querySelector('[data-turn-id="temp-user"]') as HTMLElement;
+    const userProof = { conversationId: null, messages: [{ role: 'user', messageId: 'm-temp-user', rawMessageId: 'm-temp-user', rawText: text }] };
+    const final = (rawText: string) => ({ turnId: 'temp-final', conversationId: null, endMessageId: 'temp-message',
+      messages: [{ role: 'assistant', messageId: 'temp-message', rawMessageId: 'temp-message', rawText }] });
+    await bindFiberTurns([{ section: userSection, turn: userProof }, { section, turn: final(pointer) }]);
+    expect(live.sent.filter(message => message.response)).toEqual([]);
+    await bindFiberTurns([{ section: userSection, turn: userProof }, { section, turn: final(canonical) }]);
+    expect(live.sent.filter(message => message.response)).toEqual([expect.objectContaining({ response: canonical })]);
+  });
+
   it.each([null, 'WEB:f0f00010-1111-4111-8111-111111111111'])('completes a temporary planner with provider identity %s without journaling', async providerId => {
     const canonical = '{"action":"continue","reply":"temporary result"}';
     live = await harness(`https://chatgpt.com/?temporary-chat=true&cos-input=${inputId}`, {
