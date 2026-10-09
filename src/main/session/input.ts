@@ -1750,7 +1750,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
 export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
-  return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && !row.conversationId && row.decisionSourceSessionId)
+  return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
     .map(row => ({ id: row.id, sourceSessionId: row.decisionSourceSessionId! }));
 }
 
@@ -1904,8 +1904,11 @@ export async function requestBrowserDecision(text: string, signal: AbortSignal, 
       // chat nobody can name, so a second one could duplicate it. A confirmed Temporary Chat send
       // keeps no conversation id and is not ambiguous; refusing its retry stopped every Goal whose
       // helper answer was lost (2026-10-02) with "could not confirm" about a confirmed prompt.
+      // A helper the app itself cancelled (a newer turn superseded it, Goal or Loop was switched off,
+      // the request timed out) never blocks the next one: at worst its old Temporary Chat answers a
+      // planning prompt nobody reads (user decision 2026-10-09). Only a person's cancellation pauses.
       if (options.sourceSessionId && !options.conversationId && current.some(row => row.decisionSourceSessionId === options.sourceSessionId &&
-          row.state === 'cancelled' && !row.conversationId && row.deliveredAt === undefined)) {
+          row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.deliveredAt === undefined)) {
         throw new Error('goal_browser_send_unconfirmed');
       }
       const entry = entrySchema.parse({ id, sessionId: null, text, mode: 'after-turn', dueAt: Date.now(),
