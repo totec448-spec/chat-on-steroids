@@ -12071,7 +12071,7 @@ describe('evidence from the page context', () => {
           blocking: true,
           recoverable: false,
           retryAt: observedAt + 24_000,
-          text: expect.stringContaining('Retry-After')
+          text: expect.stringContaining('retry wait')
         })
       })
     ]);

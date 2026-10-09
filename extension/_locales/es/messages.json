@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "El endpoint de continuación personalizado no es válido. Revisa su URL en Ajustes; usa HTTPS o un endpoint HTTP local."
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT ha limitado temporalmente el acceso al historial de este chat. Chat On Steroids pausa la recuperación automática hasta que termine la espera."
+  },
   "content_goal_error_rate_limited": {
     "message": "El proveedor de continuación está limitando la frecuencia de las solicitudes. Espera al reintento indicado o elige otro modelo de continuación."
   },

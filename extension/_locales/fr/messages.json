@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "Le point de terminaison de continuation personnalisé est invalide. Vérifiez son URL dans les paramètres ; utilisez HTTPS ou un point de terminaison HTTP local."
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT a temporairement limité l’accès à l’historique de cette conversation. Chat On Steroids suspend la récupération automatique jusqu’à la fin de l’attente."
+  },
   "content_goal_error_rate_limited": {
     "message": "Le fournisseur de continuation limite le débit des requêtes. Attendez la nouvelle tentative affichée ou choisissez un autre modèle de continuation."
   },

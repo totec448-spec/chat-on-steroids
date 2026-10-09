@@ -9770,7 +9770,9 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
-      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'provider-limit', deadline: retryAt }]);
+      // The now-eligible silence handout is still the authoritative notice;
+      // the provider deadline extends it rather than concealing it.
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'silence', deadline: retryAt }]);
 
       await vi.advanceTimersByTimeAsync(60_000);
       const repair = await maintenance();
@@ -9793,11 +9795,19 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
       const handout = await maintenance();
       expect(handout).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+      const session = (await findSessionByConversation(PRIME))!;
+      // An already-handed recovery owns the notice. Adding a provider delay
+      // must fence the claim, not hide that existing action behind a new row.
+      const before = (await sessionControlsFor(session.id)).recovery ?? [];
+      expect(before).toEqual([{ kind: 'silence', deadline: expect.any(Number) }]);
 
       const retryAt = Date.now() + 31_000;
       await events(PRIME, [{
         kind: 'chat_error', time: Date.now(), turnId: 'history-limit-race', recoverable: false, blocking: true,
         retryAt, text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }]);
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{
+        kind: 'silence', deadline: Math.max(before[0]!.deadline, retryAt)
       }]);
       expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(false);
 

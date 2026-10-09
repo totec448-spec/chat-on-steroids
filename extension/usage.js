@@ -11,7 +11,7 @@
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 4;
+  const OBSERVER_VERSION = 5;
   const prior = window.__cosUsageObserver;
   // An extension update re-executes this file in pages that stay open, and the same protocol
   // version used to keep the *old* code running until the tab was reloaded — measured
@@ -47,7 +47,11 @@
   const readers = new Set();
   const ORIGIN_LISTEN_MS = 15 * 60_000;
   const MAX_HISTORY_RETRY_MS = 24 * 60 * 60_000;
-  const HISTORY_PATH = /^\/backend-api\/conversations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
+  // A 429 may not expose Retry-After at all (including due to response-header
+  // filtering). Back off conservatively instead of entering a reload storm.
+  const HEADERLESS_HISTORY_BACKOFF_MS = 60_000;
+  // ChatGPT has used both the singular and plural history detail routes.
+  const HISTORY_PATH = /^\/backend-api\/conversations?\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
   function publishOrigin(conversationId, requestIds, observedAt) {
     if (!active) return;
     const fresh = requestIds.filter(id => !origins.has(`${conversationId}:${id}`));
@@ -106,7 +110,7 @@
   }
   /**
    * Provider history throttling happens before the conversation DOM exists.
-   * Project only the exact conversation id plus Retry-After deadline: no body,
+   * Project only the exact conversation id plus bounded retry deadline: no body,
    * request headers, credentials or transcript bytes cross worlds.
    */
   function inspectHistoryLimit(response, observedAt, method) {
@@ -116,8 +120,10 @@
     if (url.origin !== location.origin) return;
     const match = HISTORY_PATH.exec(url.pathname);
     if (!match || response.status !== 429) return;
-    const retryAt = retryAfterAt(response, observedAt);
-    if (!retryAt) return;
+    // Never assume a live Retry-After header exists: a fixed, bounded local
+    // cooldown covers real 429s without a usable header. It is not presented
+    // as a provider-declared retry deadline.
+    const retryAt = retryAfterAt(response, observedAt) ?? observedAt + HEADERLESS_HISTORY_BACKOFF_MS;
     const projected = { type: 'cos-history-rate-limit', conversationId: match[1], retryAt, observedAt };
     if (!latestHistoryLimit || projected.retryAt > latestHistoryLimit.retryAt ||
         projected.conversationId !== latestHistoryLimit.conversationId) latestHistoryLimit = projected;

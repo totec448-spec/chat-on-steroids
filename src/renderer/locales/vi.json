@@ -2071,7 +2071,7 @@
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Dịch văn bản chính xác và tự nhiên, giữ nhất quán ý nghĩa, giọng điệu, định dạng và thuật ngữ.",
   "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Biến một mục tiêu thành kế hoạch rõ ràng, thực tế: phạm vi, cột mốc, nhiệm vụ, rủi ro và bước đầu tiên có thể bắt đầu ngay hôm nay.",
   "ChatGPT history temporarily rate-limited": "Lịch sử ChatGPT tạm thời bị giới hạn tần suất",
-  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "Khôi phục tự động được tạm dừng cho đến khi khoảng Retry-After của ChatGPT kết thúc. Tải lại sớm hơn có thể kéo dài giới hạn.",
-  "Retry allowed in {0}": "Có thể thử lại sau {0}",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Khôi phục tự động tạm dừng trong thời gian chờ do giới hạn truy cập lịch sử. Tải lại quá sớm có thể kéo dài giới hạn.",
+  "Retry check in {0}": "Kiểm tra lại sau {0}",
   "Retry window ended": "Đã hết thời gian chờ thử lại"
 }

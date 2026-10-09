@@ -7069,6 +7069,19 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   const session = await getSession(sessionId);
   if (session?.conversationId !== conversationId || session.browserRecoveryDismissedAt !== undefined || isChatBlocked(conversationId) || stopRequestedFor(conversationId) ||
       continuationForSession(sessionId) || supersededSourceConversations().includes(conversationId)) return [];
+  const result: import('../shared/recovery.js').RecoveryCountdown[] = [];
+  const pendingRepair = repairsInFlight.get(conversationId);
+  if (pendingRepair?.sessionId === sessionId && pendingRepair.state !== 'done' && workerRecoveryAllowed(conversationId) && departureAllowsRepair(session)) {
+    // The action already holding the browser handout takes precedence over future watches.
+    if (pendingRepair.reason === 'assistant-error' && await assistantRepairCurrent(conversationId, pendingRepair))
+      return [{ kind: 'assistant-error', deadline: pendingRepair.notBefore }];
+    if (pendingRepair.reason === 'unattributed' && await attributionRepairAllowed(pendingRepair, session))
+      return [{ kind: 'unattributed', deadline: pendingRepair.notBefore }];
+    if (pendingRepair.reason === 'silence' && await silenceRepairCurrent(conversationId, pendingRepair))
+      return [{ kind: 'silence', deadline: pendingRepair.notBefore }];
+    if (pendingRepair.reason === 'no-tab' || pendingRepair.reason === 'stalled')
+      return [{ kind: 'tab-recovery', deadline: pendingRepair.notBefore }];
+  }
   const recovery = rows.find(row => row.sessionId === sessionId && row.recovery &&
     (row.state === 'queued' || row.state === 'browser') && row.silenceBoundary);
   if (recovery?.silenceBoundary && recoveryInputAllowed(sessionId, conversationId)) {
@@ -7093,21 +7106,10 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
         attempts: pendingGoal.pickupAttempts ?? BROWSER_PICKUP_MAX_ATTEMPTS, next: goalModeFor(conversationId) }];
     }
   }
+  // Preserve pre-existing recovery/pickup precedence. A 429 only replaces
+  // future, not-yet-handed recovery notices; its deadline still fences calls.
   const providerLimit = providerHistoryBackoff(conversationId);
   if (providerLimit) return [{ kind: 'provider-limit', deadline: providerLimit }];
-  const result: import('../shared/recovery.js').RecoveryCountdown[] = [];
-  const pendingRepair = repairsInFlight.get(conversationId);
-  if (pendingRepair?.sessionId === sessionId && pendingRepair.state !== 'done' && workerRecoveryAllowed(conversationId) && departureAllowsRepair(session)) {
-    // The action already holding the browser handout takes precedence over future watches.
-    if (pendingRepair.reason === 'assistant-error' && await assistantRepairCurrent(conversationId, pendingRepair))
-      return [{ kind: 'assistant-error', deadline: pendingRepair.notBefore }];
-    if (pendingRepair.reason === 'unattributed' && await attributionRepairAllowed(pendingRepair, session))
-      return [{ kind: 'unattributed', deadline: pendingRepair.notBefore }];
-    if (pendingRepair.reason === 'silence' && await silenceRepairCurrent(conversationId, pendingRepair))
-      return [{ kind: 'silence', deadline: pendingRepair.notBefore }];
-    if (pendingRepair.reason === 'no-tab' || pendingRepair.reason === 'stalled')
-      return [{ kind: 'tab-recovery', deadline: pendingRepair.notBefore }];
-  }
   if (recovery?.silenceBoundary && recoveryInputAllowed(sessionId, conversationId)) {
     const wait = recovery.silenceBoundary.listenUntil ?? 0;
     const pickup = pickupWatch.get(conversationId);
@@ -7275,11 +7277,8 @@ function noteProviderHistoryBackoff(conversationId: string, observations: readon
   }
   if (!until) return;
   providerHistoryBackoffUntil.set(conversationId, until);
-  if (providerHistoryBackoffUntil.size > 500) {
-    for (const id of [...providerHistoryBackoffUntil.keys()].slice(0, 100)) {
-      if (id !== conversationId) providerHistoryBackoffUntil.delete(id);
-    }
-  }
+  // Expired entries are purged above. Never evict a live rate-limit fence,
+  // even if more than 500 distinct conversations were throttled.
   const repair = repairsInFlight.get(conversationId);
   if (repair && repair.state !== 'done') {
     repair.notBefore = Math.max(repair.notBefore, until);

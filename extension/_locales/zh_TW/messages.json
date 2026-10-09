@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "自訂續接端點無效。請在設定中檢查其 URL；請使用 HTTPS 或本機 HTTP 端點。"
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT 暫時限制了對此對話歷史的存取。Chat On Steroids 將暫停自動復原，直到等待期結束。"
+  },
   "content_goal_error_rate_limited": {
     "message": "續接供應商正在限制請求頻率。請等待顯示的重試時間，或選擇其他續接模型。"
   },
