@@ -9,6 +9,34 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.32] — Messages that reach the running answer, and a Stop that sticks
+
+A message you send while ChatGPT is working now reaches the model: it goes into the running answer as a real ChatGPT message, even while a command runs. When ChatGPT asks you to pick an option, the timeline shows the question and its choices. Stop ends a turn for good, and a few long-run problems from 2.1.31 are fixed.
+
+### ✨ Highlights
+
+- **Messages reach the running answer.** While ChatGPT works, **Send directly** puts your message into the running answer as a real ChatGPT message, where it shows on the website too. It works even while a command is running, and the command keeps its result. Before, "Inject now" tucked the message into the next tool result, and on GPT-5.6 and GPT-6 the model ignored it there. **Inject now** stays for Pro answers and for images.
+- **ChatGPT's choices in the timeline.** When ChatGPT asks you to pick an option on its page, the timeline shows the question and the choices as a read-only card. You answer in ChatGPT.
+- **A Stop that sticks.** Stop ends the turn even when a tool result arriving after it reopens the turn. A second Stop is answered, and the timeline says when the turn stopped.
+- **A clearer Usage page.** Token counts are whole numbers, a cost that is partly without a price shows as a lower bound ("≥ $4.10"), and the activity chart opens on the newest weeks.
+- **Skills in your language.** The recommended skills describe themselves in the language of the app, and search finds them by those words.
+
+### 🛠 Fixed
+
+- **"Thinking" that never ended:** a turn now ends on ChatGPT's final answer even when that answer was already on the page before the app saw the turn begin.
+- **Old chats stay quiet:** opening an old chat for a moment no longer reopens its tab later or starts an automatic Compact & Resume for it. Both could happen to a chat whose turn had been left open days earlier.
+- **Messages sent during a turn** stay where you sent them in the timeline.
+- **Plugins keep working** after one of their tools reports an error.
+- **The "connector tools changed" banner** goes away once the automatic plugin refresh has updated ChatGPT, instead of asking for a refresh that already happened.
+
+### ⚠️ Known issue
+
+- **Right after an update or restart,** the next tool call from a chat that was already open sometimes takes about two minutes to arrive, while ChatGPT shows "Still waiting for the current operation to complete". It then goes through by itself. New chats aren't affected. We measured it on Mac and Windows and on two versions of OpenAI's tunnel client; the delay is in how ChatGPT routes calls to the restarted connection ([#1220](https://github.com/totec448-spec/chat-on-steroids/issues/1220)).
+
+### 💛 Thank you
+
+To **@Haz4rdovisk** for the Stop and turn-ending fixes and for the careful restart-delay measurements, to **@m1d0e1** for showing ChatGPT's choice prompts in the timeline, and to **@Akilaydin** for keeping plugins alive after tool errors.
+
 ## [2.1.31] — Ready for GPT-6, with a timeline that reads like ChatGPT
 
 ChatGPT's GPT-6 rollout changed how its page works, and this release catches up. You can pick GPT-6 in the app, and Goal, Loop and Compact & Resume work on it again. The timeline now shows a turn in rounds the way ChatGPT does, the Sub-agents list says what each worker is doing, and Setup asks up front what ChatGPT may do on your computer.

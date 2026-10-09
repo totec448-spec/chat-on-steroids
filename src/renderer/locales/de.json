@@ -2069,5 +2069,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "Schreibe, prüfe oder optimiere SQL-Abfragen korrekt und sicher, mit Parametern, klaren Joins und einer Kontrolle der Ergebnisse.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Fasse lange Dokumente, Threads oder Transkripte genau zusammen: Kernpunkte, Entscheidungen, offene Fragen und Aufgaben.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Übersetze Text genau und natürlich und halte Bedeutung, Ton, Formatierung und Terminologie einheitlich.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Mach aus einem Ziel einen klaren, realistischen Plan: Umfang, Meilensteine, Aufgaben, Risiken und ein erster Schritt, der heute beginnen kann."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Mach aus einem Ziel einen klaren, realistischen Plan: Umfang, Meilensteine, Aufgaben, Risiken und ein erster Schritt, der heute beginnen kann.",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "Nachrichten, die die laufende Antwort erreichen, ChatGPTs Auswahlfragen im Verlauf und ein Stopp, der hält.",
+  "Messages reach the running answer": "Nachrichten erreichen die laufende Antwort",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "Direkt senden fügt deine Nachricht als echte ChatGPT-Nachricht in die laufende Antwort ein, auch während ein Befehl läuft, und der Befehl behält sein Ergebnis.",
+  "ChatGPT's choices in the timeline": "ChatGPTs Auswahl im Verlauf",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "Wenn ChatGPT dich eine Option wählen lässt, zeigt der Verlauf die Frage und ihre Antworten.",
+  "A Stop that sticks": "Ein Stopp, der hält",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "Stopp beendet den Durchlauf auch dann, wenn ein spätes Tool-Ergebnis ihn wieder öffnet, und der Verlauf zeigt, wann er gestoppt wurde.",
+  "A clearer Usage page": "Eine klarere Nutzungsseite",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Ganze Token-Zahlen, eine Untergrenze für Kosten ohne Preis und die neuesten Wochen der Aktivität zuerst.",
+  "Skills in your language": "Skills in deiner Sprache",
+  "The recommended skills describe themselves in the language of the app.": "Die empfohlenen Skills beschreiben sich in der Sprache der App."
 }
