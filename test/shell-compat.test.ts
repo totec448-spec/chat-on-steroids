@@ -1358,6 +1358,43 @@ it.each([false, true])('commits a shell resume and records its response before i
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 10000);
 
+it('ends a turn it claimed without a Send on the final ChatGPT gave inside the settle window (#1226)', async () => {
+  // 2026-10-09, macOS: no Send receipt, so the turn opened only after Stop had stayed for the
+  // settle window. ChatGPT had already finished: the shell's own exchange held the final before
+  // the answer's slot mounted. That final was filed as history and the turn stayed open until
+  // the ten-minute watchdog.
+  const f = fixture();
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  const r = await recorder(f);
+  let offset = 0;
+  const clock = f.win.Date.now.bind(f.win.Date);
+  vi.spyOn(f.win.Date, 'now').mockImplementation(() => clock() + offset);
+  try {
+    const next = addExchange(f, 1, 'Run one command');
+    const exchange = [...f.doc.querySelectorAll('[data-turn-key]')].at(-1)!;
+    const answer = exchange.querySelector('[data-content-search-unit-key$=":assistant"]')!;
+    const start = exchange.querySelector('[data-chatgpt-agent-turn-start]')!;
+    answer.remove(); start.remove();
+    f.doc.querySelector('button[type="submit"]')!.insertAdjacentHTML('afterend', '<button type="button" data-testid="stop-button" aria-label="Stop streaming"></button>');
+    await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+
+    // ChatGPT finishes inside the window. Stop lingers and the answer's slot has not mounted.
+    next.entry.turn.status = 'complete';
+    Object.assign(next.entry.turn.items[1]!, { completed: true, content: 'Finished' });
+    await r.hook.refreshFiber();
+    offset += r.hook.TURN_SETTLE_MS;
+    r.hook.observe(); await r.hook.flush();
+    const starts = r.events().filter((event: any) => event.kind === 'turn_start');
+    expect(starts).toHaveLength(1);
+
+    answer.querySelector('[data-markdown-text-style]')!.textContent = 'Finished';
+    exchange.querySelector('[data-content-search-turn-key]')!.append(start, answer);
+    await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+    expect(r.events().filter((event: any) => event.kind === 'turn_end')).toEqual([
+      expect.objectContaining({ turnId: starts[0].turnId, outcome: 'completed' })]);
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__.stop(); }
+}, 10000);
+
 it('leaves classic messages readable when quoted markup contains shell-looking attributes', () => {
   const f = fixture(); f.doc.body.innerHTML = '<section data-testid="conversation-turn-1" data-turn="assistant"><div data-message-id="actual" data-message-author-role="assistant"><div class="markdown">real answer<div id="app-shell-sidebar"></div><div data-turn-key="quoted"></div></div></div></section>';
   expect(f.api.turns()).toHaveLength(1); expect(f.api.messages()[0].text).toContain('real answer');

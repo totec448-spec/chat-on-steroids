@@ -506,6 +506,8 @@
    * it is a generation. See claimUnrecordedGeneration.
    */
   let unrecordedGeneratingSince = 0;
+  /** The native finals Fiber had reported when that generation was first seen (#1226). */
+  let finalsBeforeUnrecorded = null;
   /**
    * This document has adopted an identified chat whose durable state the app has not answered
    * for yet: neither "is one of my turns still open?" nor "which user messages do I already
@@ -1666,9 +1668,32 @@
     }
     if (!unrecordedGeneratingSince) {
       unrecordedGeneratingSince = Date.now();
+      finalsBeforeUnrecorded = new Set(knownFinals);
       return null;
     }
     return Date.now() - unrecordedGeneratingSince >= (settled ? SETTLED_REGENERATION_MS : TURN_SETTLE_MS) ? newest : null;
+  }
+
+  /**
+   * The finals that are history for a turn claimUnrecordedGeneration() opened for `questionId`,
+   * or null when the question is not on the page and every known final stays history.
+   *
+   * A claimed turn has no Send baseline, and ChatGPT can finish inside the settle window: Fiber
+   * then carries the turn's own final before its section mounts. Settling that final too left
+   * the turn open until the ten-minute watchdog (#1226). History is what Fiber had reported
+   * before the generation was first seen, plus every final drawn above the claimed question —
+   * a reloaded page can receive its first Fiber reply only after the window began.
+   */
+  function claimedHistoryFinals(questionId) {
+    const observed = CLF_DOM.turns();
+    const at = observed.findIndex(turn => turn.role === 'user' && CLF_DOM.messagesIn(turn).some(message => message.id === questionId));
+    if (at < 0) return null;
+    const history = new Set(finalsBeforeUnrecorded ?? []);
+    for (const turn of observed.slice(0, at)) {
+      const final = fiberTurnFor(turn)?.endMessageId;
+      if (final) history.add(final);
+    }
+    return history;
   }
 
   function adoptOpenTurn(open, questionId = null) {
@@ -2827,8 +2852,9 @@
       // state the resume exists to keep, since recorder.ts empties `progress`, `pageTools`
       // and the pending sightings on every turn_start.
       emit({ kind: 'turn_start', turnId });
-      // Without a witnessed Send, every final already on the page is history.
-      const finalsAtSend = submission?.baseline?.finals;
+      // A witnessed Send's baseline is exact. A claimed turn keeps its own final (#1226);
+      // any other turn without a baseline files every final already on the page as history.
+      const finalsAtSend = submission ? submission.baseline?.finals : claimedHistoryFinals(newUserMessage);
       for (const known of knownFinals) if (!finalsAtSend || finalsAtSend.has(known)) settledFinals.add(known);
 
       // The compaction binding is made here and only here: the first generation to open
