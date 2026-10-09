@@ -466,6 +466,22 @@ it('hands a message for the running turn to the browser while one of its calls i
     expect(row).toMatchObject({ transportIntent: 'browser', directTurn: { id: turnId } });
     const status = await post('/status', { openConversations: [conversationId] });
     expect(status.body.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ id: row.id, directTurn: { id: turnId, startedAt: expect.any(Number) } })]));
+    // The page's claim must succeed during the call too: VM 141, 2026-10-09, the claim was refused
+    // until the call returned, so the message waited ~35 s and reached the turn only between calls.
+    expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: row.id, directTurn: { id: turnId } });
+  });
+});
+
+it('still holds an ordinary queued message for a chat while one of its calls is running', async () => {
+  const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Queued message during a call', conversationId });
+  await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+    caller: { requestId: randomUUID(), transportKey: null, conversationId } }, async () => {
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    expect(row.directTurn).toBeUndefined();
+    expect((await post('/input/claim', { id: row.id, owner: 'idle-page', conversationId, requiresAuthorization: true })).body.input).toBeNull();
   });
 });
 

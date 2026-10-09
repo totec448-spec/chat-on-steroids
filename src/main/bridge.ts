@@ -2585,7 +2585,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 200, { ok: deferred }, origin);
     }
     if (body.authorize === true) return json(res, 200, { ok: await authorizeBrowserInput(body.id, body.owner, target) }, origin);
-    if (target && runningToolCalls(target) > 0) return json(res, 200, { input: null }, origin);
+    // A message for the running turn may go in while a call runs, exactly as /status offers it;
+    // claimBrowserInput still requires that same turn. Everything else waits for the call.
+    if (target && runningToolCalls(target) > 0 &&
+        !(await pendingBrowserInputs()).some(row => row.id === body.id && row.conversationId === target && row.directTurn))
+      return json(res, 200, { input: null }, origin);
     if (staleCompanion(req)) return json(res, 200, { input: null }, origin);
     if (!target && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
