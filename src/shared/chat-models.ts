@@ -7,13 +7,14 @@ export function isAstraModel(model: string | null | undefined, effort?: Reasonin
 }
 export type ChatModelOption = { id: string; label: string; efforts: ReasoningEffort[]; aliases?: string[] };
 /**
- * The ChatGPT model Goal and Loop decisions run on unless Settings chose another. ChatGPT lists GPT-6
- * as two lanes, `gpt-6` (Instant, ChatGPT's automatic lane) and `gpt-6-thinking` (Medium, High); a decision wants the thinking
- * lane. An account without it falls back to ChatGPT's current selection (goal.ts).
+ * The ChatGPT model Goal and Loop decisions run on unless Settings chose another: the GPT-6 family.
+ * With the default High effort that is its thinking lane (`gpt-6-thinking`), the lane a decision
+ * wants; the family id lets Settings show it as the one "GPT-6" the picker lists (#1217). An account
+ * without it falls back to ChatGPT's current selection (goal.ts).
  */
-export const DEFAULT_HELPER_CHAT_MODEL = 'gpt-6-thinking';
-/** The shipped default before GPT-6; a config still holding exactly this adopts the current one (config.ts). */
-export const SUPERSEDED_HELPER_CHAT_MODELS: readonly string[] = ['gpt-5.6-sol'];
+export const DEFAULT_HELPER_CHAT_MODEL = 'gpt-6';
+/** Shipped defaults before this one; a config still holding exactly one adopts the current one (config.ts). */
+export const SUPERSEDED_HELPER_CHAT_MODELS: readonly string[] = ['gpt-5.6-sol', 'gpt-6-thinking'];
 /** Pro silence policy follows the selected provider identity, including the older generation. */
 export function isProModel(model: string | null | undefined, effort?: ReasoningEffort): boolean {
   const normalized = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');

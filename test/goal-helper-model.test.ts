@@ -73,9 +73,9 @@ it('logs a fallback from the untouched default helper as info, and from a chosen
   const { getLog } = await import('../src/main/logger.js');
   const level = (model: string) => getLog().filter(entry => entry.message.includes(`helper model "${model}"`)).at(-1)?.level;
   state.models = [{ id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] }];
-  state.goal = { helperModel: 'gpt-6-thinking', helperReasoning: 'high' };
+  state.goal = { helperModel: 'gpt-6', helperReasoning: 'high' };
   expect(goalHelperSelection()).toEqual({ model: null, reasoningEffort: 'high' });
-  expect(level('gpt-6-thinking')).toBe('info');
+  expect(level('gpt-6')).toBe('info');
   state.goal = { helperModel: 'gpt-5-4-thinking', helperReasoning: 'high' };
   goalHelperSelection();
   expect(level('gpt-5-4-thinking')).toBe('warn');
