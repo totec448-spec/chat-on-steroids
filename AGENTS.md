@@ -2574,9 +2574,10 @@ tab: if the browser finds one by the time it acts (often the tab a worker wake j
 still loading or answers `clf-page-status`, it reports `repairAction=present` and never reloads it,
 which used to cut a wake off mid-send (#864). Only a silent tab is reloaded. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
-A bare open turn counts as current work for a closed tab for one hour after its start
-(`OPEN_TURN_RECOVERY_MS`); activity in the silence window counts however old the turn is. A turn
-left open by a page that went away days ago must not reopen its tab on a brief visit.
+A bare open turn counts as current work for a closed tab and for automatic compaction for one hour
+after its start (`OPEN_TURN_RECOVERY_MS`, `liveTurnIsCurrent`); activity in the silence window counts
+however old the turn is. A turn left open by a page that went away days ago must not reopen its tab
+or file a compaction on a brief visit.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
 existing session metadata and withdraws every unexecuted browser repair. It revokes synthetic
 silence inputs while retaining authored input, continuation tickets, exact request ownership
