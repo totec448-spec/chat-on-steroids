@@ -190,7 +190,7 @@
 .usage-cost-group { min-width: 0; }
 .usage-cost-group > h3 { margin: 0 0 10px; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; line-height: 1.4; }
 .usage-table-stack { overflow-x: auto; }
-.usage-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: calc(13px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.usage-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: calc(13px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
 .usage-table th, .usage-table td { text-align: right; border-bottom: 1px solid var(--line); padding: 12px 18px; }
 .usage-table th:first-child, .usage-table td:first-child { text-align: left; }
 .usage-table tr:last-child td { border-bottom: 0; }
@@ -287,6 +287,8 @@
 .heat-day, .heat-month { align-self: center; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1; white-space: nowrap; }
 .heat-month { align-self: end; padding-bottom: 2px; }
 .heat-month.is-end { text-align: right; }
+/* A narrow window scrolls the year to its newest weeks; the weekday names stay beside them. */
+.heat-day { position: sticky; left: -18px; z-index: 1; margin-left: -18px; padding-left: 18px; background: var(--card); }
 .heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 .heat-legend .heat-cell { width: 11px; height: 11px; }
 .heat-legend > span:first-child { margin-right: 4px; }
