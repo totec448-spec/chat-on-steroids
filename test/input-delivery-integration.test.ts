@@ -1468,6 +1468,21 @@ it('completes only an explicitly temporary planner over HTTP without inventing a
   expect(await answer).toBe('Transient plan answer');
   expect((await input.listInputs())[0]).toMatchObject({ conversationId: null, deliveredSessionId: null, state: 'sent' });
 });
+it('hands a sent temporary planner back for closing with the chat ChatGPT moved it to', async () => {
+  // VM 2026-10-09: after Send, ChatGPT moves a helper to /c/<id>?temporary-chat=true without the
+  // cos-input marker. A close retry that names only the input id can never find that tab again.
+  const controller = new AbortController();
+  const answer = input.requestBrowserDecision('Routed plan context', controller.signal, { lifetime: 'temporary-planner' });
+  await vi.waitFor(async () => expect(await input.pendingBrowserInputs()).toHaveLength(1));
+  const row = (await input.listInputs()).find(item => item.text === 'Routed plan context')!;
+  const conversationId = randomUUID();
+  expect((await post('/input/claim', { id: row.id, owner: 'routed-page', conversationId: null, requiresAuthorization: true })).body.input).toBeTruthy();
+  expect((await post('/input/ack', { id: row.id, owner: 'routed-page', conversationId })).body.ok).toBe(true);
+  expect((await post('/input/answer', { id: row.id, owner: 'routed-page', conversationId, response: 'Routed plan answer' })).body.ok).toBe(true);
+  expect(await answer).toBe('Routed plan answer');
+  expect((await post('/status', { openConversations: [] })).body.inputs).toContainEqual(
+    expect.objectContaining({ id: row.id, close: true, conversationId }));
+});
 afterAll(async () => {
   await stopBridge(); await flushDurable(); resetSessionStoreForTests(); resetDurableForTests();
   await removeTempDir(directory);
