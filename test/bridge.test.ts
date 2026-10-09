@@ -3107,6 +3107,31 @@ describe('automatic compaction', () => {
     });
   });
 
+  // 2026-10-09: briefly opening an old worker chat whose turn had been open since 09-25 filed an
+  // automatic compaction at 408k tokens, and its pickups reloaded the chat for 50 minutes.
+  it('does not compact a chat whose only claim to work is a turn opened long ago', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac1d';
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'turn_start', time: Date.now() - 8 * 24 * 60 * 60_000, turnId: 'turn-left-open' }, ...over()]
+        }
+      });
+      await settled();
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      const sessionId = activity.body.sessionId as string;
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(continuationForSession(sessionId)).toBeNull();
+
+      // A turn that really runs now still compacts.
+      await request('POST', '/events', { body: { conversationId, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-now' }, ...over()] } });
+      await settled();
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true }), { timeout: 3000 });
+    });
+  });
+
   it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac09';
