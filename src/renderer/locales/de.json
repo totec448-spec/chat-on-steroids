@@ -973,7 +973,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1 Mio. gecachter Input · gib einen geprüften Vergleichswert ein",
   "Unknown rate": "Unbekannter Preis",
   "{0} cached-input USD per million tokens": "{0} USD pro Million gecachter Input-Tokens",
-  "{0} + unpriced": "{0} + ohne Preis",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "{0} geschätzte Tokens; für {1} gibt es keinen Vergleichspreis. Gegenwert als gecachter Input, keine Rechnung.",
   "{0}: {1} estimated tokens": "{0}: {1} geschätzte Tokens",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Letzter Frontend-Kontext (für diese Schätzung auf {2} Tokens begrenzt) × eindeutige Tool-Aufrufe ÷ {0} × Preis des jeweiligen Modells für gecachten Input ÷ 1 Mio. × {1}.",

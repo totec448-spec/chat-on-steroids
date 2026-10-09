@@ -13,7 +13,9 @@ function saveFormula(): void {
 
 // In the app's language, like every other number on this page, not the system region's: an English
 // page read "4.082,99 $" and "8,5 Mrd." on a German Mac. Created per call so a language change applies.
-const count = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(value) };
+// Token counts are estimates with fractions; whole numbers first. Compact notation abbreviates
+// thousands in English ("307.4K") but not in German, which showed "307.373,5" tokens.
+const count = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(Math.round(value)) };
 const money = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value) };
 const featureLabels: Record<string, string> = { deep_research: "Deep research", file_upload: "File uploads", paste_text_to_file: "Pasted text files", image_gen: "Image generation" };
 function usageHint(node: HTMLElement, text: string | (() => string)): void {
@@ -120,7 +122,9 @@ function dayLabel(key: string): string {
 function paintCost(): void {
   if (!snapshot) return;
   const total = usageEstimate(snapshot.models, formula);
-  const costText = (estimate: ReturnType<typeof usageEstimate>) => estimate.unpricedTokens > 0 ? t("{0} + unpriced", [money.format(estimate.cost)]) : money.format(estimate.cost);
+  // Tokens without a rate make the priced sum a lower bound: "≥ $0.29", which fits the card on one
+  // line and reads in every language; the hint and the sentence below name the unpriced tokens.
+  const costText = (estimate: ReturnType<typeof usageEstimate>) => estimate.unpricedTokens > 0 ? `≥ ${money.format(estimate.cost)}` : money.format(estimate.cost);
   const costSummary = document.getElementById('usageTotalCost');
   if (costSummary) {
     ui(costSummary.querySelector('strong')!, 'textContent', () => costText(total));
@@ -177,6 +181,8 @@ function paintCost(): void {
   for (let level = 0; level <= 4; level++) { const swatch = el('span', 'heat-cell'); swatch.dataset.level = String(level); legend.append(swatch); }
   legend.append(el('span', '', () => t('More')));
   heat.append(grid, legend);
+  // The newest weeks are the ones worth seeing; a narrow window scrolls the year sideways.
+  setTimeout(() => { const box = heat.parentElement; if (box && box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth; }, 0);
   ui($('usageHeatmapCaption'), 'textContent', () => t("Estimated context processed per tool call · last 52 weeks"));
   ui($('usageFormula'), 'textContent', () => t("Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier, snapshot!.contextTokenCap.toLocaleString(currentLanguage())]));
   ui($('usageCost'), 'textContent', () => t("{0} estimated equivalent. {1}This is a comparison, not a bill.", [costText(total), total.unpricedTokens ? t("{0} tokens have no rate. ", [Math.round(total.unpricedTokens).toLocaleString(currentLanguage())]) : '']));

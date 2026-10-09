@@ -137,7 +137,8 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   expect(balances.textContent).not.toMatch(/deep_research|file_upload|paste_text_to_file|image_gen|below/);
   expect(field('usageDivisor')).toBe(divisor);
   expect(dom.window.document.getElementById('costModel')).toBeNull();
-  expect(cost()).toContain(usd(0.48)); expect(cost()).toContain('unpriced');
+  // Unpriced tokens make the priced sum a lower bound.
+  expect(cost()).toContain(`≥ ${usd(0.48)}`);
   change(divisor, '4');
   expect(cost()).toContain(usd(0.24));
   expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain('÷ 4');
@@ -148,7 +149,7 @@ it.each([256_000, 400_000])('shows the calculated %i context cap and edits formu
   expect(cost()).toContain(usd(0.24));
   const unknownRate = dom.window.document.querySelector('input[aria-label="another-model cached-input USD per million tokens"]') as HTMLInputElement;
   change(unknownRate, '1');
-  expect(cost()).toContain(usd(0.84)); expect(cost()).not.toContain('unpriced');
+  expect(cost()).toContain(usd(0.84)); expect(cost()).not.toContain('≥');
   change(field('usageMultiplier'), '1');
   expect(cost()).toContain(usd(0.7));
   expect(getUsage).toHaveBeenCalledTimes(1);
@@ -199,7 +200,7 @@ it('combines equivalent recorded names in the table while keeping raw rate edits
   expect(dom.window.document.querySelectorAll('#usageRates input')).toHaveLength(3);
   const rate = dom.window.document.querySelector('input[aria-label="5.6 cached-input USD per million tokens"]') as HTMLInputElement;
   rate.value = ''; rate.dispatchEvent(new dom.window.Event('input'));
-  expect(table().textContent).toContain(`${usd(0.96)} + unpriced`);
+  expect(table().textContent).toContain(`≥ ${usd(0.96)}`);
   expect(getUsage).toHaveBeenCalledTimes(1);
   expect(models[0]!.model).toBe('5.6');
 });
@@ -257,4 +258,22 @@ it('prints totals and amounts in the app language and follows a language change'
   expect(cost()).toMatch(/\$/);
   setLanguage('en');
   expect(processed()).toBe(compact('en'));
+});
+
+// German compact notation does not shorten thousands, so an estimated count showed its fraction:
+// "307.373,5" peak daily tokens (2026-10-09). Counts print as whole numbers in every language.
+it('prints estimated token counts as whole numbers where compact notation keeps the thousands', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const models = [{ model: 'gpt-5.6-sol', reasoningEffort: 'high', assumed: false, tokens: 307_373.5 }];
+  const data: UsageOverview = { contextTokenCap: 256_000, messages: { through: Date.now(), days: [] }, tokens: 307_373.5, models, days: [{ date: '2026-10-08', tokens: 307_373.5, models }], sessions: 1, limits: [] };
+  Object.assign(dom.window, { api: { getUsage: vi.fn(async () => ({ ok: true, data })), getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const { initUsage, refreshUsage } = await import('../src/renderer/usage.js');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  initUsage(); await refreshUsage();
+  const peak = () => dom.window.document.querySelector('[data-usage-metric="Peak daily tokens"] strong')!.textContent;
+  setLanguage('de');
+  expect(peak()).toBe('307.374');
+  setLanguage('en');
+  expect(peak()).toBe('307.4K');
 });
