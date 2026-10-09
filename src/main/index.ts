@@ -88,6 +88,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
+import { resumeUpdateRefresh } from './update-all.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import { loadedCosBrowser, onCosBrowserLoaded, syncCosBrowser } from './cos-browser/selection.js';
@@ -588,6 +589,7 @@ void app.whenReady().then(async () => {
     startControlApi().catch((error: Error) => logWarn(`control API did not start: ${error.message}`));
   }
   if (getConfig().ui.autoConnect) void connect();
+  void resumeUpdateRefresh().catch((error: Error) => logWarn(`update refresh did not resume: ${error.message}`));
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
   // window that is already on screen. Everything it learns arrives through the ordinary state

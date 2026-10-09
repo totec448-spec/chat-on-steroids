@@ -2072,5 +2072,9 @@
   "Checks incomplete": "Kiểm tra chưa hoàn tất",
   "Update status": "Trạng thái cập nhật",
   "App, browser extension and ChatGPT connectors.": "Ứng dụng, tiện ích trình duyệt và trình kết nối ChatGPT.",
-  "Review setup": "Kiểm tra thiết lập"
+  "Review setup": "Kiểm tra thiết lập",
+  "Update all": "Cập nhật tất cả",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "Cập nhật các thành phần được hỗ trợ và giữ nguyên cài đặt. Ứng dụng có thể khởi động lại; các bước thủ công xuất hiện trong danh sách trạng thái.",
+  "Download opened. Install the app to continue; your settings are kept.": "Đã mở trang tải xuống. Cài đặt ứng dụng để tiếp tục; cài đặt của bạn được giữ nguyên.",
+  "Updates requested. Any remaining steps are shown in Update status.": "Đã yêu cầu cập nhật. Các bước còn lại xuất hiện trong Trạng thái cập nhật."
 }

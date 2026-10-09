@@ -2331,15 +2331,35 @@ it('reports update readiness only from checked versions and current connector ev
 });
 
 it('keeps update readiness actions stable and does not start update or connection work on pushes', async () => {
-  const installUpdate = vi.fn(), connect = vi.fn(), refreshUpdate = vi.fn();
-  const { window: w, state, push } = await mountChat({}, [], { installUpdate, connect, refreshUpdate });
+  const installUpdate = vi.fn(), connect = vi.fn(), refreshUpdate = vi.fn(), updateAll = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { installUpdate, connect, refreshUpdate, updateAll });
   const button = w.document.getElementById('updateReviewSetup') as HTMLButtonElement;
   expect(button).not.toBeNull();
   button.focus(); push(structuredClone(state));
   expect(w.document.activeElement).toBe(button);
   expect(installUpdate).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(refreshUpdate).not.toHaveBeenCalled();
+  expect(updateAll).not.toHaveBeenCalled();
   button.click();
   expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
+});
+
+it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('The app may restart');
+  button.click(); button.click(); push(structuredClone(state));
+  expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
+  resolve({ ok: false, error: 'Network unavailable' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(button.textContent).toBe('Update all');
+  button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
+  resolve({ ok: true, data: 'manual' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(w.document.body.textContent).toContain('Download opened. Install the app to continue');
 });
 
 it('reports a staged update in the Activity line and the header bar', async () => {

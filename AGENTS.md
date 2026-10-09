@@ -3950,6 +3950,16 @@ successful release check with no newer app, a live paired extension at the runni
 and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
 exact current schema. Optional off connectors do not block completion; unknown and historical
 connection proof never pass. Review setup only opens Setup; displaying this card starts no work.
+`update:all` / preload `updateAll()` is explicit consent to check/stage, apply a supported app
+update via normal shutdown, and refresh published connectors once. `update-all.ts` joins
+concurrent presses and commits refresh intent before quitting; it never changes config or
+secrets. macOS/DEB retain their manual download path, and ambiguous/manual provider refreshes
+stay manual. Its receipt (`restarting/manual/checking-connectors`) is not completion evidence.
+The existing refresh rows record paired `requestedVersion/requestedFromVersion` fields. They
+allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
+the new build's schema once, but a later same-build schema change gets no borrowed authority.
+Startup resumes accepted refresh work even with auto-connect off, without another install.
+Extension replacement/reload stays with the existing build-stamp and idle-check owners.
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
@@ -4412,6 +4422,8 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
+`markInstallOnQuit(expectedVersion)` also fences a grouped update against a staged release
+changed while connection/refresh intent was being committed.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
 assembles installers, the Chromium extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`

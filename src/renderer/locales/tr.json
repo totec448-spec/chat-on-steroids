@@ -2072,5 +2072,9 @@
   "Checks incomplete": "Kontroller tamamlanmadı",
   "Update status": "Güncelleme durumu",
   "App, browser extension and ChatGPT connectors.": "Uygulama, tarayıcı uzantısı ve ChatGPT bağlayıcıları.",
-  "Review setup": "Kurulumu gözden geçir"
+  "Review setup": "Kurulumu gözden geçir",
+  "Update all": "Tümünü güncelle",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "Desteklenen bileşenleri günceller ve ayarlarınızı korur. Uygulama yeniden başlayabilir; elle yapılacak adımlar durum listesinde gösterilir.",
+  "Download opened. Install the app to continue; your settings are kept.": "İndirme açıldı. Devam etmek için uygulamayı yükleyin; ayarlarınız korunur.",
+  "Updates requested. Any remaining steps are shown in Update status.": "Güncellemeler istendi. Kalan adımlar Güncelleme durumu bölümünde gösterilir."
 }

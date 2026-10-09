@@ -681,6 +681,9 @@ export interface UpdateStatus {
   checkedAt: number | null;
 }
 
+/** Receipt for Update all; component completion still comes from each authoritative owner. */
+export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors';
+
 /** Where an installation that cannot update itself gets the new version by hand. */
 export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
 

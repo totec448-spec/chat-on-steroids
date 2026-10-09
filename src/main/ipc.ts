@@ -142,6 +142,7 @@ import { onConnectorProofChange } from './connector-proof.js';
 import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import { openInPreferredBrowser } from './browser.js';
 import { checkForUpdatesIfStale, manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
+import { updateAll } from './update-all.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -1137,6 +1138,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // artifact makes that mean anything. The quit is what applies it, at the end of the same
   // shutdown sequence every other quit runs; refusing here is how a press with nothing staged
   // avoids closing the app for no reason.
+  handle('update:all', async () => updateAll(quitToInstall, url => shell.openExternal(url)));
   handle('update:install', async () => {
     if (!markInstallOnQuit()) throw new Error('There is no downloaded update to install yet');
     logInfo('update: install requested; quitting to hand the update over');

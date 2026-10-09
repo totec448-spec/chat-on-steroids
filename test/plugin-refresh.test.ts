@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, pluginRefreshStatuses, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { PLUGIN_REFRESH_FAILURE_LIMIT, authorizedPluginRefreshPublications, hasRequestedPluginRefresh, requestPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, pluginRefreshStatuses, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { APP_VERSION } from '../src/main/version.js';
 import { buildServer } from '../src/main/mcp/tools.js';
@@ -16,6 +16,67 @@ afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); aw
 const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
+it('allows one explicit refresh round while automatic refresh stays off and fences later schema edits', async () => {
+  publish(); const automatic = (await pendingPluginRefreshes())[0]!;
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+  expect(await claimPluginRefresh({ ...automatic, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(false);
+  await requestPluginRefreshes(APP_VERSION);
+  const explicit = (await pendingPluginRefreshes(false))[0]!;
+  expect(explicit.schemaId).toBe(automatic.schemaId); expect(explicit.id).not.toBe(automatic.id);
+  publishPluginSurface('desktop', 'Desktop', '1', '', tools);
+  expect((await pendingPluginRefreshes(false)).map(row => row.surface)).toEqual(['core']);
+  expect((await authorizedPluginRefreshPublications(false)).map(row => row.surface)).toEqual(['core']);
+  expect(await claimPluginRefresh({ ...explicit, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true }, false)).toBe(true);
+  expect(await hasRequestedPluginRefresh()).toBe(false);
+  publish('1', [{ ...tools[0]!, description: 'Later settings edit' }]);
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+  expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
+  const later = (await pendingPluginRefreshes())[0]!;
+  expect(await claimPluginRefresh({ ...later, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(false);
+});
+it('carries a requested app update through restart and pins only the first schema of that build', async () => {
+  publish(); const original = (await pendingPluginRefreshes())[0]!;
+  await claimPluginRefresh({ ...original, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true });
+  await requestPluginRefreshes('99.0.0');
+  expect(await pendingPluginRefreshes(false)).toEqual([]); expect(await hasRequestedPluginRefresh()).toBe(false);
+  const saved = await readDurable('plugin-refresh') as any[];
+  // The installer replaced the build. Keep the real persisted rows, with this test process as
+  // the new app version; publication comes from the restarted app's new declarations.
+  saved[0].requestedVersion = APP_VERSION; saved[0].requestedFromVersion = '1.0.0';
+  await writeDurableNow('plugin-refresh', saved);
+  resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
+  expect(await hasRequestedPluginRefresh()).toBe(true);
+  const changed = [{ ...tools[0]!, description: 'New build declaration' }]; publish('2', changed);
+  const resumed = (await pendingPluginRefreshes(false))[0]!;
+  expect(resumed.schemaId).not.toBe(original.schemaId); expect(resumed.appId).toBe(appId);
+  expect(await claimPluginRefresh({ ...resumed, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(true);
+  await completePluginRefresh({ ...resumed, appId, tools: changed });
+  expect(await hasRequestedPluginRefresh()).toBe(false);
+  publish('2', [{ ...tools[0]!, description: 'Another settings edit' }]);
+  expect(await pendingPluginRefreshes(false)).toEqual([]); expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
+});
+it('does not rearm manual or already claimed refreshes when Update all is pressed again', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  await claim(request); await requestPluginRefreshes(APP_VERSION);
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+  expect((await readDurable('plugin-refresh') as any[])[0].id).toBe(request.id);
+  resetPluginRefreshForTests(); publish(); await writeDurableNow('plugin-refresh', []);
+  const manual = (await pendingPluginRefreshes())[0]!;
+  await requireManualPluginRefresh({ ...manual, appId, connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0]!, description: 'Old' }], error: 'Recreate in ChatGPT' });
+  await requestPluginRefreshes(APP_VERSION);
+  expect((await pluginRefreshStatuses()).core?.state).toBe('manual'); expect(await pendingPluginRefreshes(false)).toEqual([]);
+});
+it('keeps corrupt or ambiguous stored grants from authorizing explicit refresh', async () => {
+  publish(); await requestPluginRefreshes(APP_VERSION);
+  const current = await readDurable('plugin-refresh') as any[];
+  await writeDurableNow('plugin-refresh', [current[0], current[0]]);
+  expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
+  expect(await hasRequestedPluginRefresh()).toBe(false);
+  const partial = structuredClone(current); delete partial[0].requestedFromVersion;
+  await writeDurableNow('plugin-refresh', partial);
+  expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+});
 it('projects refresh evidence without creating, repairing or rearming browser work', async () => {
   publish();
   expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');

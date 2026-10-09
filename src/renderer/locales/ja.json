@@ -2072,5 +2072,9 @@
   "Checks incomplete": "確認が完了していません",
   "Update status": "更新状況",
   "App, browser extension and ChatGPT connectors.": "本体・ブラウザー拡張・ChatGPTコネクターの状態。",
-  "Review setup": "設定を確認"
+  "Review setup": "設定を確認",
+  "Update all": "まとめて更新",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "対応する項目を更新し、設定を維持します。アプリが再起動する場合があります。手動操作が必要な項目は状況一覧に表示されます。",
+  "Download opened. Install the app to continue; your settings are kept.": "ダウンロードを開きました。続けるにはアプリをインストールしてください。設定は維持されます。",
+  "Updates requested. Any remaining steps are shown in Update status.": "更新を依頼しました。残る操作は「更新状況」に表示されます。"
 }

@@ -2437,6 +2437,23 @@ window.addEventListener('drop', (event) => event.preventDefault());
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
 $('updateReviewSetup').addEventListener('click', () => showTab('setup'));
+const updateAllButton = $<HTMLButtonElement>('updateAll');
+updateAllButton.addEventListener('click', async () => {
+  if (updateAllButton.disabled) return;
+  updateAllButton.disabled = true;
+  updateAllButton.setAttribute('aria-busy', 'true');
+  ui(updateAllButton, 'textContent', () => t('Updating…'));
+  try {
+    const result = await run(api.updateAll());
+    if (result === 'manual') toast(t('Download opened. Install the app to continue; your settings are kept.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
+    else if (result === 'checking-connectors') toast(t('Updates requested. Any remaining steps are shown in Update status.'));
+  } finally {
+    updateAllButton.disabled = false;
+    updateAllButton.removeAttribute('aria-busy');
+    ui(updateAllButton, 'textContent', () => t('Update all'));
+  }
+});
 
 /**
  * Install the update that is already downloaded.

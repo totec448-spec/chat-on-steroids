@@ -11,7 +11,8 @@ import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, Plug
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
-const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional() });
+const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+$/).optional();
+const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional(), requestedVersion, requestedFromVersion: requestedVersion }).refine(row => !!row.requestedVersion === !!row.requestedFromVersion);
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
@@ -38,9 +39,13 @@ let tunnelGraceMs = PLUGIN_REFRESH_TUNNEL_GRACE_MS;
 export const PLUGIN_REFRESH_FAILURE_LIMIT = 3;
 let chain: Promise<unknown> = Promise.resolve();
 function serial<T>(work: () => Promise<T>): Promise<T> { const result = chain.then(work, work); chain = result.catch(() => undefined); return result; }
-async function rows(): Promise<Row[]> {
+async function savedRows(): Promise<Row[]> {
   const result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh') ?? []);
   if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+  return result;
+}
+async function rows(): Promise<Row[]> {
+  const result = await savedRows();
   // Legacy fail() marked discovery failures as clicks. A real claim always commits a
   // concrete appId, so null proves these rows never crossed the refresh boundary.
   let repaired = false;
@@ -140,13 +145,28 @@ export async function enrolledPluginSurfaces(): Promise<PluginSurface[]> {
   catch { return []; }
 }
 export function pluginRefreshPublications(): PluginPublication[] { return structuredClone([...publications.values()]); }
+/** Status hints grant no new work; explicit requests are exact-version and schema scoped. */
+export async function authorizedPluginRefreshPublications(automatic: boolean): Promise<PluginPublication[]> {
+  if (automatic) return pluginRefreshPublications();
+  try {
+    const current = await savedRows();
+    return pluginRefreshPublications().filter(publication => current.some(row => row.surface === publication.surface &&
+      row.requestedVersion === APP_VERSION && (row.schemaId === publication.schemaId || row.requestedFromVersion !== APP_VERSION)));
+  } catch { return []; }
+}
+export async function hasRequestedPluginRefresh(): Promise<boolean> {
+  try {
+    const current = await savedRows();
+    return current.some(row => row.requestedVersion === APP_VERSION && (row.requestedFromVersion !== APP_VERSION ||
+      (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId)));
+  } catch { return false; }
+}
 /** Reading update status must not create refresh debt, repair rows or wake a browser. */
 export function pluginRefreshStatuses(): Promise<Partial<Record<PluginSurface, PluginRefreshStatus>>> {
   return serial(async () => {
     let current: Row[] = [];
     try {
-      current = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh') ?? []);
-      if (new Set(current.map(row => row.surface)).size !== current.length) current = [];
+      current = await savedRows();
     } catch { /* Unreadable evidence is unknown, never a successful refresh. */ }
     return Object.fromEntries([...publications.values()].map(publication => {
       const row = current.find(candidate => candidate.surface === publication.surface);
@@ -178,29 +198,63 @@ export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
   });
 }
 /** App IDs are stable connector identities. The browser must prove current installation. */
-export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
-  return serial(async () => {
-    const current = await rows();
-    let changed = false;
-    for (const publication of publications.values()) {
-      const found = current.find(row => row.surface === publication.surface);
-      if (found?.schemaId === publication.schemaId) continue;
-      // A click for `found` that never confirmed its outcome leaves ChatGPT's schema unknown: it may
-      // hold that newer schema, so the older completion no longer says what ChatGPT has. Measured
-      // 2026-09-27: 11 -> 8 tools clicked, app quit before completion, back to 11 was then taken
-      // as already current while ChatGPT showed 8.
-      const unconfirmed = found?.attempted === true && found.completedSchemaId !== found.schemaId;
-      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: unconfirmed ? null : found?.completedSchemaId ?? null, attempted: false, manual: false };
-      if (found) current[current.indexOf(found)] = next; else current.push(next);
-      changed = true;
+function reconcileRows(current: Row[]): boolean {
+  let changed = false;
+  for (const publication of publications.values()) {
+    const found = current.find(row => row.surface === publication.surface);
+    if (found?.schemaId === publication.schemaId) {
+      if (found.requestedVersion === APP_VERSION && found.requestedFromVersion !== APP_VERSION) {
+        found.requestedFromVersion = APP_VERSION; changed = true;
+      }
+      continue;
     }
+    // A click for `found` that never confirmed its outcome leaves ChatGPT's schema unknown: it may
+    // hold that newer schema, so the older completion no longer says what ChatGPT has. Measured
+    // 2026-09-27: 11 -> 8 tools clicked, app quit before completion, back to 11 was then taken
+    // as already current while ChatGPT showed 8.
+    const unconfirmed = found?.attempted === true && found.completedSchemaId !== found.schemaId;
+    const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: unconfirmed ? null : found?.completedSchemaId ?? null, attempted: false, manual: false };
+    // A requested app update may introduce new schemas on restart. Adopt those once; a later
+    // settings edit in the same build must not borrow Update all's one-shot authorization.
+    if (found?.requestedVersion && (found.requestedVersion !== APP_VERSION || found.requestedFromVersion !== APP_VERSION)) {
+      next.requestedVersion = found.requestedVersion;
+      next.requestedFromVersion = found.requestedVersion === APP_VERSION ? APP_VERSION : found.requestedFromVersion;
+    }
+    if (found) current[current.indexOf(found)] = next; else current.push(next);
+    changed = true;
+  }
+  return changed;
+}
+/** An explicit round does not enable the automatic preference or retry an ambiguous click. */
+export function requestPluginRefreshes(version: string): Promise<void> {
+  return serial(async () => {
+    const target = requestedVersion.unwrap().parse(version);
+    const current = await rows();
+    reconcileRows(current);
+    for (const row of current) {
+      if (!publications.has(row.surface)) continue;
+      if (target === APP_VERSION && (row.manual || row.attempted || row.completedSchemaId === row.schemaId)) continue;
+      row.requestedVersion = target; row.requestedFromVersion = APP_VERSION;
+      if (target === APP_VERSION) {
+        row.id = randomUUID(); delete row.error; delete row.failures; delete row.parked; delete row.parkedBy;
+      }
+    }
+    await writeDurableNow('plugin-refresh', current);
+    if (target === APP_VERSION) wakeBrowserWork();
+  });
+}
+export function pendingPluginRefreshes(automatic = true): Promise<PluginRefreshRequest[]> {
+  return serial(async () => {
+    if (!automatic && !await hasRequestedPluginRefresh()) return [];
+    const current = await rows();
+    const changed = reconcileRows(current);
     if (changed) {
       await writeDurableNow('plugin-refresh', current);
       logInfo(`plugin refresh pending observed ${current.filter(row => !row.manual && row.completedSchemaId !== row.schemaId).map(row => `surface=${row.surface} schema=${row.schemaId.slice(0, 12)} dueInMs=${Math.max(0, (settling.get(row.surface)?.readyAt ?? 0) - Date.now())}`).join(' ')}`);
     }
     return current.flatMap(row => {
       const publication = publications.get(row.surface);
-      return publication && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now() && publication.schemaId === row.schemaId && !row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId
+      return publication && (automatic || row.requestedVersion === APP_VERSION) && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now() && publication.schemaId === row.schemaId && !row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId
         ? [{ ...structuredClone(publication), id: row.id, appId: row.appId }] : [];
     });
   });
@@ -226,10 +280,10 @@ function exact(current: Row[], identity: Identity): Row | undefined {
   return current.find(row => row.id === identity.id && publications.get(row.surface)?.schemaId === row.schemaId && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now());
 }
 /** Commit one attempted click before the browser acts. A crash never re-arms it. */
-export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurrent?: boolean }): Promise<boolean> {
+export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurrent?: boolean }, automatic = true): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
-    if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
+    if (!row || (!automatic && row.requestedVersion !== APP_VERSION) || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
     const publication = publications.get(row.surface)!;
     // Unique-name discovery is initial enrollment only. Stale definitions can still
     // identify the surface; the complete post-refresh declarations must match below.

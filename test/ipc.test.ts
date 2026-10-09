@@ -1319,6 +1319,18 @@ describe('every link the window offers', () => {
  * press that closed the window and installed nothing would be worse than no button at all.
  */
 describe('installing a downloaded update on request', () => {
+  it('exposes Update all and refuses its failed check without quitting or changing settings', async () => {
+    const updater = await import('../src/main/update.js');
+    const checked = vi.spyOn(updater, 'checkForUpdates').mockResolvedValue(undefined);
+    const status = vi.spyOn(updater, 'updateStatus').mockReturnValue({ current: '2.1.31', latest: null, stage: 'failed', checkedAt: null, error: 'Network unavailable' });
+    const before = structuredClone(getConfig()), quits = quitToInstallCalls;
+    try {
+      const reply = await handlers.get('update:all')!(null, undefined);
+      expect(reply).toEqual({ ok: false, error: 'Network unavailable' });
+      expect(checked).toHaveBeenCalledTimes(1);
+      expect(quitToInstallCalls).toBe(quits); expect(getConfig()).toEqual(before);
+    } finally { checked.mockRestore(); status.mockRestore(); }
+  });
   it('refuses, and does not quit, when nothing has been downloaded', async () => {
     const before = quitToInstallCalls;
     const reply = (await handlers.get('update:install')!(null, undefined)) as { ok: boolean; error: string };

@@ -2072,5 +2072,9 @@
   "Checks incomplete": "확인 미완료",
   "Update status": "업데이트 상태",
   "App, browser extension and ChatGPT connectors.": "앱, 브라우저 확장 프로그램 및 ChatGPT 커넥터.",
-  "Review setup": "설정 확인"
+  "Review setup": "설정 확인",
+  "Update all": "모두 업데이트",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "지원되는 구성 요소를 업데이트하고 설정을 유지합니다. 앱이 다시 시작될 수 있으며, 수동 단계는 상태 목록에 표시됩니다.",
+  "Download opened. Install the app to continue; your settings are kept.": "다운로드를 열었습니다. 계속하려면 앱을 설치하세요. 설정은 유지됩니다.",
+  "Updates requested. Any remaining steps are shown in Update status.": "업데이트를 요청했습니다. 남은 단계는 업데이트 상태에 표시됩니다."
 }

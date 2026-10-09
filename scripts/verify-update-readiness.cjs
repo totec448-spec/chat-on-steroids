@@ -29,7 +29,8 @@ app.whenReady().then(async () => {
       listSessions:()=>ok({sessions:[],activeId:null,pressure:[]}),listInputs:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
       getSwarm:()=>ok({running:false,agents:[],pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]}),
       onStateChanged:fn=>{listener=fn;return()=>{}},onSessionChanged:()=>()=>{},
-      installUpdate:()=>{window.mutations.push('install');return ok(true)},connect:()=>{window.mutations.push('connect');return ok(state)}
+      installUpdate:()=>{window.mutations.push('install');return ok(true)},connect:()=>{window.mutations.push('connect');return ok(state)},
+      updateAll:()=>{window.mutations.push('update-all');return new Promise(resolve=>{window.fixtureFinishUpdate=()=>resolve({ok:true,data:'checking-connectors'})})}
     },{get:(target,key)=>key in target?target[key]:String(key).startsWith('on')?()=>()=>{}:()=>ok(null)});
     window.fixturePush=next=>listener(next);`;
   const server = http.createServer((request, response) => {
@@ -65,19 +66,23 @@ app.whenReady().then(async () => {
       assert.equal(await js(`document.querySelectorAll('.update-readiness .check.is-ok').length`),3);
       const geometry = await js(`(()=>{const c=document.querySelector('.update-readiness'),a=document.getElementById('updateReviewSetup').getBoundingClientRect();
         return {clipped:[...c.querySelectorAll('strong,p,button')].some(e=>e.scrollWidth>e.clientWidth+1),sideways:c.scrollWidth>c.clientWidth,bottom:a.bottom,height:c.getBoundingClientRect().height,title:document.getElementById('updateReadinessTitle').textContent}})()`);
-      assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<430,JSON.stringify(geometry));
+      assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<600,JSON.stringify(geometry));
       if (lang==='ja') assert.equal(geometry.title,'更新状況');
       await shot('ready-'+lang+'-'+theme+'.png');
     }
-    win.setContentSize(700,850); await open('lang=ja');
-    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
-    assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false');
-    assert.equal(await js(`document.querySelector('.update-readiness').scrollWidth>document.querySelector('.update-readiness').clientWidth`),false);
-    await shot('manual-ja-narrow.png');
+    win.setContentSize(700,850);
+    for (const lang of ['en','ja']) {
+      await open('lang='+lang);
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false');
+      assert.equal(await js(`document.querySelector('.update-readiness').scrollWidth>document.querySelector('.update-readiness').clientWidth`),false);
+      await pause(600); // DOM delivery precedes offscreen compositor publication.
+      await shot('manual-'+lang+'-narrow.png');
+    }
     win.setContentSize(700,460);
     await js(`document.getElementById('updateReviewSetup').scrollIntoView({block:'nearest'})`);
     const short = await js(`(()=>{const a=document.getElementById('updateReviewSetup').getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight}})()`);
-    assert.ok(short.top>=0 && short.bottom<=short.viewport,'Short window action is reachable: '+JSON.stringify(short));
+    assert.ok(short.top>=0 && short.bottom<=short.viewport+1,'Short window action is reachable (subpixel scroll rounding): '+JSON.stringify(short));
     assert.equal(await js(`(()=>{const children=[...document.querySelector('.update-readiness').children].map(e=>e.getBoundingClientRect());return children.some((r,i)=>i>0&&r.top<children[i-1].bottom-1)})()`),false,'Short window does not compress text rows into each other');
     await pause(200);
     await shot('short-ja.png');
@@ -90,6 +95,13 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
     win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
     await until(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`);
+    win.setContentSize(1100,850); await open('lang=en');
+    await js(`document.getElementById('updateAll').click();document.getElementById('updateAll').click();window.fixtureState.update.stage='checking';window.fixturePush(window.fixtureState)`);
+    assert.deepEqual(await js('window.mutations'),['update-all'],'Explicit action only, with duplicate clicks joined');
+    assert.equal(await js(`document.getElementById('updateAll').disabled`),true);
+    await pause(400); await shot('updating-en-dark.png');
+    await js('window.fixtureFinishUpdate()');
+    await until(`!document.getElementById('updateAll').disabled`);
     assert.deepEqual(errors,[],'No production renderer errors');
     console.log('PASS: production update status, all three proofs, live transitions, stable keyboard action, no mutations, en/ja/de, both themes and narrow layout');
   } finally { win?.destroy(); await new Promise(resolve=>server.close(resolve)); app.quit(); }

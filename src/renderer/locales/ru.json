@@ -2072,5 +2072,9 @@
   "Checks incomplete": "Проверки не завершены",
   "Update status": "Состояние обновления",
   "App, browser extension and ChatGPT connectors.": "Приложение, расширение браузера и коннекторы ChatGPT.",
-  "Review setup": "Проверить настройку"
+  "Review setup": "Проверить настройку",
+  "Update all": "Обновить всё",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "Обновляет поддерживаемые компоненты и сохраняет настройки. Приложение может перезапуститься; ручные действия показаны в списке состояния.",
+  "Download opened. Install the app to continue; your settings are kept.": "Загрузка открыта. Установите приложение, чтобы продолжить; настройки сохраняются.",
+  "Updates requested. Any remaining steps are shown in Update status.": "Обновления запрошены. Оставшиеся действия показаны в разделе состояния обновлений."
 }

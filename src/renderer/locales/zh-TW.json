@@ -2072,5 +2072,9 @@
   "Checks incomplete": "檢查尚未完成",
   "Update status": "更新狀態",
   "App, browser extension and ChatGPT connectors.": "應用程式、瀏覽器擴充功能及 ChatGPT 連接器。",
-  "Review setup": "檢查設定"
+  "Review setup": "檢查設定",
+  "Update all": "全部更新",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "更新支援的元件並保留設定。應用程式可能會重新啟動；需要手動操作的步驟會顯示在狀態清單中。",
+  "Download opened. Install the app to continue; your settings are kept.": "已開啟下載。請安裝應用程式以繼續；設定將保留。",
+  "Updates requested. Any remaining steps are shown in Update status.": "已要求更新。剩餘步驟會顯示在「更新狀態」中。"
 }

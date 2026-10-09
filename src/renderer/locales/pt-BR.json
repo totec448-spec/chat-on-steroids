@@ -2072,5 +2072,9 @@
   "Checks incomplete": "Verificações incompletas",
   "Update status": "Status da atualização",
   "App, browser extension and ChatGPT connectors.": "Aplicativo, extensão do navegador e conectores do ChatGPT.",
-  "Review setup": "Revisar configuração"
+  "Review setup": "Revisar configuração",
+  "Update all": "Atualizar tudo",
+  "Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.": "Atualiza os componentes compatíveis e mantém suas configurações. O app pode reiniciar; as etapas manuais aparecem na lista de status.",
+  "Download opened. Install the app to continue; your settings are kept.": "Download aberto. Instale o app para continuar; suas configurações são mantidas.",
+  "Updates requested. Any remaining steps are shown in Update status.": "Atualizações solicitadas. As etapas restantes aparecem em Status da atualização."
 }

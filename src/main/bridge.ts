@@ -17,7 +17,7 @@ import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
-import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
+import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
@@ -2322,9 +2322,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (route === '/plugin-refresh' && req.method === 'POST') {
     const raw = await readBody(req);
     const body = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    if (body.action === 'pending') return json(res, 200, { requests: getConfig().ui.autoRefreshPlugins === true ? await pendingPluginRefreshes() : [] }, origin);
-    // Turning the setting off also revokes a request already handed to the page.
-    if (body.action === 'claim' && getConfig().ui.autoRefreshPlugins !== true) return json(res, 409, { ok: false, error: 'automatic_refresh_disabled' }, origin);
+    if (body.action === 'pending') return json(res, 200, { requests: await pendingPluginRefreshes(getConfig().ui.autoRefreshPlugins === true) }, origin);
+    // Disabling automatic refresh revokes its claims; an explicit Update all round is separate.
+    if (body.action === 'claim' && getConfig().ui.autoRefreshPlugins !== true && !await hasRequestedPluginRefresh()) return json(res, 409, { ok: false, error: 'automatic_refresh_disabled' }, origin);
     if (typeof body.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(body.id)) return json(res, 400, { error: 'invalid_request' }, origin);
     let ok = false;
     const tunnelId = typeof body.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(body.tunnelId) ? body.tunnelId : undefined;
@@ -2334,7 +2334,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     };
     if (body.action === 'fail' && typeof body.error === 'string') ok = await failPluginRefresh({ id: body.id, error: body.error.slice(0, 200) });
     else if (typeof body.appId === 'string' && /^asdk_app_[a-zA-Z0-9_-]{1,160}$/.test(body.appId)) {
-      if ((body.action === 'claim' || body.action === 'current') && typeof body.connectorName === 'string') ok = await claimPluginRefresh({ id: body.id, appId: body.appId, connectorName: body.connectorName, tools: body.tools, tunnelId, ownsTunnel, alreadyCurrent: body.action === 'current' });
+      if ((body.action === 'claim' || body.action === 'current') && typeof body.connectorName === 'string') ok = await claimPluginRefresh({ id: body.id, appId: body.appId, connectorName: body.connectorName, tools: body.tools, tunnelId, ownsTunnel, alreadyCurrent: body.action === 'current' }, getConfig().ui.autoRefreshPlugins === true);
       if (body.action === 'manual' && typeof body.connectorName === 'string' && typeof body.error === 'string') ok = await requireManualPluginRefresh({ id: body.id, appId: body.appId, connectorName: body.connectorName, tools: body.tools, tunnelId, ownsTunnel, error: body.error.slice(0, 200) });
       if (body.action === 'complete') ok = await completePluginRefresh({ id: body.id, appId: body.appId, tools: body.tools, versionId: typeof body.versionId === 'string' ? body.versionId.slice(0, 200) : undefined });
     }
@@ -2440,7 +2440,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         modelCatalogRequest: pendingChatModelRequest(),
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
-        pluginRefreshRequests: getConfig().ui.autoRefreshPlugins === true ? pluginRefreshPublications().map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })) : [],
+        pluginRefreshRequests: (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         inputs: [...pendingInputs.filter(input => (!input.conversationId || runningToolCalls(input.conversationId) === 0) &&
