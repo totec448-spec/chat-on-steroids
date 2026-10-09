@@ -157,6 +157,13 @@ export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
     return true;
   });
 }
+/** Per surface, the declaration ChatGPT confirmed after a refresh click or found already current. */
+export function confirmedPluginSchemas(): Promise<Partial<Record<PluginSurface, string>>> {
+  return serial(async () => {
+    try { return Object.fromEntries((await rows()).flatMap(row => row.completedSchemaId ? [[row.surface, row.completedSchemaId]] : [])); }
+    catch { return {}; }
+  });
+}
 /** App IDs are stable connector identities. The browser must prove current installation. */
 export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
   return serial(async () => {

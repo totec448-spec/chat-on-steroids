@@ -731,6 +731,8 @@ export interface AppState {
    * local contract only; they are not evidence that ChatGPT has refreshed its cached tools.
    */
   connectorSchemas: Partial<Record<SurfaceId, string>>;
+  /** Per surface, the declaration ChatGPT confirmed after a plugin refresh (or found already current). */
+  confirmedConnectorSchemas?: Partial<Record<SurfaceId, string>>;
   platform: PlatformInfo;
   /** Only packaged Windows builds may change the login item. */
   loginStartupAvailable?: boolean;
