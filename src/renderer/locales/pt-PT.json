@@ -244,7 +244,7 @@
   "Loop response source": "Fonte de resposta do Loop",
   "Loop keeps going until you switch it off.": "O Loop continua até o desativar.",
   "Goal, Loop and Plan model": "Modelo de Goal, Loop e Plan",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "Modelo para mensagens e planos gerados pelo ChatGPT. Selecione GPT-5.6 e Alto abaixo para o planeamento.",
+  "Model for ChatGPT-generated messages and plans.": "Modelo para mensagens e planos gerados pelo ChatGPT.",
   "Goal, Loop and Plan reasoning": "Raciocínio de Goal, Loop e Plan",
   "Used with the ChatGPT model above; independent from API reasoning.": "Utilizado com o modelo do ChatGPT acima; independente do raciocínio da API.",
   "Include tool details in handoffs": "Incluir detalhes das ferramentas nos handoffs",

@@ -424,7 +424,7 @@
   "Loop response source": "循環回覆來源",
   "Loop keeps going until you switch it off.": "循環會持續執行，直到你關閉它。",
   "Goal, Loop and Plan model": "目標、循環和計畫模型",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "用於 ChatGPT 生成的訊息和計畫。規劃時可在下方選擇 GPT-5.6 和高推理強度。",
+  "Model for ChatGPT-generated messages and plans.": "用於 ChatGPT 生成的訊息和計畫。",
   "Goal, Loop and Plan reasoning": "目標、循環和計畫推理強度",
   "Used with the ChatGPT model above; independent from API reasoning.": "用於上方的 ChatGPT 模型，與 API 推理設定相互獨立。",
   "Include tool details in handoffs": "在交接中包含工具詳細資訊",

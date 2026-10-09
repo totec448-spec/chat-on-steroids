@@ -231,7 +231,7 @@
   "Loop response source": "Nguồn phản hồi Loop",
   "Loop keeps going until you switch it off.": "Loop tiếp tục cho đến khi bạn tắt.",
   "Goal, Loop and Plan model": "Mô hình cho Goal, Loop và Plan",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "Mô hình cho tin nhắn và kế hoạch do ChatGPT tạo. Chọn GPT-5.6 và Cao bên dưới để lập kế hoạch.",
+  "Model for ChatGPT-generated messages and plans.": "Mô hình cho tin nhắn và kế hoạch do ChatGPT tạo.",
   "Goal, Loop and Plan reasoning": "Suy luận cho Goal, Loop và Plan",
   "Used with the ChatGPT model above; independent from API reasoning.": "Dùng với mô hình ChatGPT ở trên; độc lập với suy luận API.",
   "Include tool details in handoffs": "Bao gồm chi tiết công cụ trong Handoff",

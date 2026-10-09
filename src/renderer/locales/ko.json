@@ -231,7 +231,7 @@
   "Loop response source": "Loop 응답 소스",
   "Loop keeps going until you switch it off.": "Loop는 끌 때까지 계속 진행됩니다.",
   "Goal, Loop and Plan model": "Goal, Loop 및 Plan 모델",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "ChatGPT가 생성하는 메시지와 플랜에 사용할 모델입니다. 플랜 생성에는 아래에서 GPT-5.6과 High를 선택하세요.",
+  "Model for ChatGPT-generated messages and plans.": "ChatGPT가 생성하는 메시지와 플랜에 사용할 모델입니다.",
   "Goal, Loop and Plan reasoning": "Goal, Loop 및 Plan 추론",
   "Used with the ChatGPT model above; independent from API reasoning.": "위 ChatGPT 모델과 함께 사용되며 API 추론 설정과는 별개입니다.",
   "Include tool details in handoffs": "인수인계에 도구 상세 정보 포함",
