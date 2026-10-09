@@ -41,6 +41,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-home': 'house',
   'i-image': 'image',
   'i-lock': 'lock-key',
+  'i-link': 'link',
   'i-loop': 'arrows-clockwise',
   'i-monitor': 'monitor',
   'i-more': 'dots-three',
@@ -74,6 +75,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-zoom-out': 'magnifying-glass-minus',
   'i-zoom-reset': 'arrow-counter-clockwise',
   'i-trash': 'trash',
+  'i-unlink': 'link-break',
   'i-warning': 'warning',
   'i-x': 'x'
 };

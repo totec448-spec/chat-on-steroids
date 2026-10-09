@@ -5,9 +5,10 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from '../src/main/projects.js';
+import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
+import { createSession, getSession, initSessionStore, listSessionPage, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
+import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, linkChatGptProject, listProjects, projectWorkspace, removeProject, setProjectColor, unlinkChatGptProject, verifyChatGptProjectLink } from '../src/main/projects.js';
+import { checkChatGptProjectMembership, syncChatGptProjectLink } from '../src/main/project-sync.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -133,4 +134,315 @@ it('fails closed when explicit project permission is removed and follows approve
   await saveConfig({ ...defaultConfig(), roots: [] });
   await expect(getSessionProject(session.id)).rejects.toThrow();
   expect((await getSession(session.id))?.projectId).toBe(project.id);
+});
+
+it('links one stable ChatGPT Project identity without changing local workspace authority', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const session = await createSession({ title: 'Project chat', conversationId: 'project-chat-current' });
+  await assignSessionProject(session.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+  const replacement = 'g-p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+  const linked = await linkChatGptProject(local.id, remote.toUpperCase(), 1000);
+  expect(linked).toEqual({
+    ...local,
+    remote: { provider: 'chatgpt', projectId: remote, linkId: expect.any(String), linkedAt: 1000, lastObservedAt: 1000 }
+  });
+  expect(await projectWorkspace(local.id)).toMatchObject({ real: local.path, virtual: '/work/first' });
+  expect((await getSession(session.id))?.projectId).toBe(local.id);
+
+  const older = await linkChatGptProject(local.id, remote, 900);
+  expect(older.remote).toEqual(linked.remote);
+  await expect(linkChatGptProject(other.id, remote, 1100)).rejects.toThrow(/already linked/i);
+  await expect(linkChatGptProject(local.id, replacement, 1100)).rejects.toThrow(/another ChatGPT Project/i);
+  await expect(linkChatGptProject(local.id, 'g-p-not-a-project', 1100)).rejects.toThrow(/ChatGPT Project id/i);
+
+  const verified = await verifyChatGptProjectLink(local.id, remote, 1200);
+  expect(verified.remote).toEqual({ provider: 'chatgpt', projectId: remote, linkId: linked.remote!.linkId, linkedAt: 1000, lastObservedAt: 1200 });
+  await expect(verifyChatGptProjectLink(local.id, replacement, 1300)).rejects.toThrow(/does not match/i);
+
+  const unlinked = await unlinkChatGptProject(local.id);
+  expect(unlinked).toEqual(local);
+  expect(await projectWorkspace(local.id)).toMatchObject({ real: local.path, virtual: '/work/first' });
+  expect((await getSession(session.id))?.projectId).toBe(local.id);
+});
+
+it('gives an unlink/relink to the same Project a new opaque identity even at the same observation timestamp', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const remote = 'g-p-11111111222233334444555555555555';
+  const first = await linkChatGptProject(local.id, remote, 1000);
+  await unlinkChatGptProject(local.id);
+  const second = await linkChatGptProject(local.id, remote, 1000);
+  expect(first.remote?.linkId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(second.remote?.linkId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(second.remote?.linkId).not.toBe(first.remote?.linkId);
+});
+
+it('reads a pre-incarnation link without trusting its membership, then upgrades only after explicit Refresh', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Legacy link', conversationId: 'membership-legacy-link' });
+  await assignSessionProject(session.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+  await writeDurableNow('projects', [{ ...local, remote: {
+    provider: 'chatgpt', projectId: remote, linkedAt: 1000, lastObservedAt: 1000
+  } }]);
+  let called = false;
+  await expect(checkChatGptProjectMembership(local.id, session.id, async () => {
+    called = true;
+    return { ok: true, projectId: remote, observedAt: 1000 };
+  })).rejects.toThrow(/Refresh this ChatGPT Project link/i);
+  expect(called).toBe(false);
+  const updated = await syncChatGptProjectLink(local.id, session.id, 'verify', async () => ({
+    ok: true, projectId: remote, observedAt: 1000
+  }));
+  expect(updated.remote?.linkId).toMatch(/^[0-9a-f-]{36}$/);
+  expect((await getSession(session.id))?.chatGptProjectObservation).toMatchObject({
+    linkId: updated.remote?.linkId, status: 'linked'
+  });
+});
+
+it('refuses a durable catalog that maps one ChatGPT Project identity to two local projects', async () => {
+  const one = await addProject(path.join(approved, 'first'));
+  const two = await addProject(path.join(approved, 'second'));
+  const remote = {
+    provider: 'chatgpt' as const,
+    projectId: 'g-p-11111111222233334444555555555555',
+    linkedAt: 1000,
+    lastObservedAt: 1000
+  };
+  await writeDurableNow('projects', [{ ...one, remote }, { ...two, remote }]);
+  resetDurableForTests(); initDurableStore(directory);
+  await expect(listProjects()).rejects.toThrow('Project catalog is invalid');
+});
+
+it('links only from the selected exact session already owned by the local project and rechecks after browser observation', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const session = await createSession({ title: 'Exact source', conversationId: 'project-source-chat' });
+  await assignSessionProject(session.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+
+  expect(await syncChatGptProjectLink(local.id, session.id, 'link', async conversationId => ({
+    ok: true, projectId: remote, observedAt: 1000, conversationId
+  }))).toMatchObject({ remote: { projectId: remote } });
+  await expect(syncChatGptProjectLink(other.id, session.id, 'link', async () => ({
+    ok: true, projectId: remote, observedAt: 1100
+  }))).rejects.toThrow(/already belongs to another local project/i);
+
+  await expect(syncChatGptProjectLink(local.id, session.id, 'verify', async () => {
+    expect(await rebindSession(session.id, 'project-source-chat', 'project-source-replacement')).toBe(true);
+    return { ok: true, projectId: remote, observedAt: 1200 };
+  })).rejects.toThrow(/changed while ChatGPT Project was being observed/i);
+});
+
+it('rejects a stale Project observation when the same session leaves A and returns to A', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'ABA source', conversationId: 'project-aba-source' });
+  await assignSessionProject(session.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+
+  await expect(syncChatGptProjectLink(local.id, session.id, 'link', async () => {
+    expect(await rebindSession(session.id, 'project-aba-source', 'project-aba-middle')).toBe(true);
+    expect(await rebindSession(session.id, 'project-aba-middle', 'project-aba-source')).toBe(true);
+    return { ok: true, projectId: remote, observedAt: 1000 };
+  })).rejects.toThrow(/changed while ChatGPT Project was being observed/i);
+
+  expect((await getSession(session.id))?.conversationId).toBe('project-aba-source');
+  expect((await listProjects()).find(project => project.id === local.id)?.remote).toBeUndefined();
+});
+
+it('records a bounded read-only membership match for exact known chats, never moving their local folders', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const outside = await addProject(path.join(approved, 'second'));
+  const source = await createSession({ title: 'Link source', conversationId: 'membership-source' });
+  const known = await createSession({ title: 'Known local chat', conversationId: 'membership-known' });
+  const other = await createSession({ title: 'Other local folder', conversationId: 'membership-other' });
+  await assignSessionProject(source.id, local.id);
+  await assignSessionProject(known.id, local.id);
+  await assignSessionProject(other.id, outside.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+  const different = 'g-p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const initialUpdatedAt = (await getSession(known.id))!.updatedAt;
+
+  const linked = await syncChatGptProjectLink(local.id, source.id, 'link', async conversationId => ({
+    ok: true, conversationId, projectId: remote, observedAt: 1000
+  }));
+  expect((await getSession(source.id))?.chatGptProjectObservation).toEqual({
+    conversationId: 'membership-source', linkId: linked.remote?.linkId, status: 'linked', observedAt: 1000
+  });
+  expect((await getSession(known.id))?.chatGptProjectObservation).toBeUndefined();
+  await expect(checkChatGptProjectMembership(local.id, known.id, async conversationId => ({
+    ok: true, conversationId, projectId: different, observedAt: 1100
+  }))).resolves.toEqual({ status: 'other-project', observedAt: 1100 });
+  expect((await getSession(known.id))?.chatGptProjectObservation).toEqual({
+    conversationId: 'membership-known', linkId: linked.remote?.linkId, status: 'other-project', observedAt: 1100
+  });
+  expect(JSON.stringify((await listSessionPage({ limit: 50 })).sessions)).not.toContain(different);
+  await expect(checkChatGptProjectMembership(local.id, known.id, async conversationId => ({
+    ok: true, conversationId, projectId: remote, observedAt: 1200
+  }))).resolves.toEqual({ status: 'linked', observedAt: 1200 });
+  await expect(checkChatGptProjectMembership(local.id, known.id, async () => ({
+    ok: false, reason: 'project-not-detected'
+  }))).resolves.toMatchObject({ status: 'not-project' });
+  expect((await getSession(known.id))?.chatGptProjectObservation?.status).toBe('not-project');
+  expect(JSON.stringify((await getSession(known.id))?.chatGptProjectObservation)).not.toContain(different);
+  expect((await getSession(known.id))?.updatedAt).toBe(initialUpdatedAt);
+  expect((await getSession(known.id))?.projectId).toBe(local.id);
+  expect((await getSession(other.id))?.projectId).toBe(outside.id);
+  expect(await projectWorkspace(local.id)).toMatchObject({ real: local.path });
+  expect((await listProjects()).find(row => row.id === local.id)?.remote?.projectId).toBe(remote);
+  resetSessionStoreForTests();
+  expect((await getSession(known.id))?.chatGptProjectObservation).toMatchObject({
+    conversationId: 'membership-known', linkId: linked.remote?.linkId, status: 'not-project'
+  });
+  expect((await getSession(known.id))?.projectId).toBe(local.id);
+});
+
+it('keeps the newest explicitly requested membership check when clocks tie, go backward, or an older request finishes last', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const source = await createSession({ title: 'Source', conversationId: 'membership-order-source' });
+  const known = await createSession({ title: 'Known', conversationId: 'membership-order-known' });
+  await assignSessionProject(source.id, local.id);
+  await assignSessionProject(known.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+  const other = 'g-p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const linked = await syncChatGptProjectLink(local.id, source.id, 'link', async () => ({
+    ok: true, projectId: remote, observedAt: 1000
+  }));
+  let entered!: () => void, release!: () => void;
+  const observationStarted = new Promise<void>(resolve => { entered = resolve; });
+  const holdOlderResult = new Promise<void>(resolve => { release = resolve; });
+  const older = checkChatGptProjectMembership(local.id, known.id, async () => {
+    entered();
+    await holdOlderResult;
+    return { ok: true, projectId: remote, observedAt: 1000 };
+  });
+  await observationStarted;
+  await expect(checkChatGptProjectMembership(local.id, known.id, async () => ({
+    ok: true, projectId: other, observedAt: 900
+  }))).resolves.toEqual({ status: 'other-project', observedAt: 900 });
+  release();
+  await expect(older).rejects.toThrow(/changed while ChatGPT Project was being observed/i);
+  expect((await getSession(known.id))?.chatGptProjectObservation).toEqual({
+    conversationId: 'membership-order-known', linkId: linked.remote?.linkId,
+    status: 'other-project', observedAt: 900
+  });
+  await expect(checkChatGptProjectMembership(local.id, known.id, async () => ({
+    ok: true, projectId: remote, observedAt: 900
+  }))).resolves.toEqual({ status: 'linked', observedAt: 900 });
+  expect((await getSession(known.id))?.chatGptProjectObservation?.status).toBe('linked');
+  expect((await listProjects()).find(row => row.id === local.id)?.remote?.lastObservedAt).toBe(1000);
+});
+
+it('rejects wrong-owner, unavailable and A-to-B-to-A observations without stale membership', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const outside = await addProject(path.join(approved, 'second'));
+  const source = await createSession({ title: 'Exact chat', conversationId: 'membership-aba-A' });
+  await assignSessionProject(source.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+  let called = false;
+  await expect(checkChatGptProjectMembership(local.id, source.id, async () => {
+    called = true;
+    return { ok: true, projectId: remote, observedAt: 10 };
+  })).rejects.toThrow(/not linked/i);
+  expect(called).toBe(false);
+  await syncChatGptProjectLink(local.id, source.id, 'link', async () => ({
+    ok: true, projectId: remote, observedAt: 100
+  }));
+  await expect(checkChatGptProjectMembership(outside.id, source.id, async () => {
+    called = true;
+    return { ok: true, projectId: remote, observedAt: 200 };
+  })).rejects.toThrow();
+  expect(called).toBe(false);
+  await expect(checkChatGptProjectMembership(local.id, source.id, async () => {
+    expect(await rebindSession(source.id, 'membership-aba-A', 'membership-aba-B')).toBe(true);
+    expect(await rebindSession(source.id, 'membership-aba-B', 'membership-aba-A')).toBe(true);
+    return { ok: true, projectId: remote, observedAt: 300 };
+  })).rejects.toThrow(/changed/i);
+  expect((await getSession(source.id))?.chatGptProjectObservation).toBeUndefined();
+  await expect(checkChatGptProjectMembership(local.id, source.id, async () => ({
+    ok: false, reason: 'project-ambiguous'
+  }))).rejects.toThrow(/more than one/i);
+  await expect(checkChatGptProjectMembership(local.id, source.id, async () => ({
+    ok: false, reason: 'source-tab-lost'
+  }))).rejects.toThrow(/not available/i);
+  await expect(checkChatGptProjectMembership(local.id, source.id, async () => ({
+    ok: false, reason: 'project-route-changed'
+  }))).rejects.toThrow(/route changed/i);
+  expect((await getSession(source.id))?.chatGptProjectObservation).toBeUndefined();
+  await createSession({ title: 'Duplicate frontend owner', conversationId: 'membership-aba-A' });
+  await expect(checkChatGptProjectMembership(local.id, source.id, async () => ({
+    ok: true, projectId: remote, observedAt: 400
+  }))).rejects.toThrow(/unique current session ownership/i);
+  resetSessionStoreForTests();
+  expect((await getSession(source.id))?.chatGptProjectObservation).toBeUndefined();
+});
+
+it('holds the session mutation fence through Project observation publication', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Publication source', conversationId: 'project-publish-source' });
+  await assignSessionProject(session.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+  let entered!: () => void, release!: () => void;
+  const publicationEntered = new Promise<void>(resolve => { entered = resolve; });
+  const publicationRelease = new Promise<void>(resolve => { release = resolve; });
+
+  const syncing = syncChatGptProjectLink(
+    local.id,
+    session.id,
+    'link',
+    async () => ({ ok: true, projectId: remote, observedAt: 1000 }),
+    async (action, projectId, remoteProjectId, observedAt) => {
+      expect(action).toBe('link');
+      entered();
+      await publicationRelease;
+      return linkChatGptProject(projectId, remoteProjectId, observedAt);
+    }
+  );
+  await publicationEntered;
+
+  let moved = false;
+  const moving = rebindSession(session.id, 'project-publish-source', 'project-publish-replacement')
+    .then(result => { moved = result; return result; });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(moved).toBe(false);
+
+  release();
+  await expect(syncing).resolves.toMatchObject({ remote: { projectId: remote } });
+  await expect(moving).resolves.toBe(true);
+  expect((await getSession(session.id))?.conversationId).toBe('project-publish-replacement');
+});
+
+it('keeps a remote link with an ungrouped project until that exact project is restored and unlinked', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const remote = 'g-p-11111111222233334444555555555555';
+  await linkChatGptProject(local.id, remote, 1000);
+
+  await removeProject(local.id);
+  expect(await listProjects()).toContainEqual(expect.objectContaining({
+    id: local.id, ungrouped: true, remote: expect.objectContaining({ projectId: remote })
+  }));
+  await expect(linkChatGptProject(other.id, remote, 1100)).rejects.toThrow(/already linked/i);
+
+  const restored = await addProject(local.path);
+  expect(restored).toMatchObject({ id: local.id, remote: { projectId: remote } });
+  await unlinkChatGptProject(local.id);
+  await expect(linkChatGptProject(other.id, remote, 1200)).resolves.toMatchObject({
+    id: other.id, remote: { projectId: remote }
+  });
+});
+
+it('refuses a late Project observation after the local Project was removed from the sidebar', async () => {
+  const local = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Removed while observing', conversationId: 'project-removal-race' });
+  await assignSessionProject(session.id, local.id);
+  const remote = 'g-p-11111111222233334444555555555555';
+
+  await expect(syncChatGptProjectLink(local.id, session.id, 'link', async () => {
+    await removeProject(local.id);
+    return { ok: true, projectId: remote, observedAt: 1000 };
+  })).rejects.toThrow(/no longer on the sidebar/i);
+  expect((await listProjects()).find(row => row.id === local.id)?.remote).toBeUndefined();
 });

@@ -642,6 +642,19 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /**
+   * Last user-requested, read-only observation of this exact current ChatGPT conversation.
+   * It is presentation evidence only; it never assigns a local folder or authorizes tools.
+   * A successful session rebind clears it, including A -> B -> A.
+   */
+  chatGptProjectObservation?: {
+    conversationId: string;
+    /** The locally-created linked association incarnation, not a foreign routing ID. */
+    linkId: string;
+    /** Safe presentation verdict; unrelated remote Project identities are never persisted. */
+    status: 'linked' | 'other-project' | 'not-project';
+    observedAt: number;
+  };
   id: string;
   title: string;
   /**

@@ -509,6 +509,22 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
   expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
   expect(uncolored.data.color).toBeUndefined();
+  // The renderer can ask for observation, but cannot provide or forge a remote Project identity.
+  expect(await handlers.get('projects:linkChatGpt')!(null, {
+    id: first.data.id, sessionId: 'session-source', projectId: 'g-p-11111111222233334444555555555555'
+  })).toMatchObject({ ok: false });
+  // Renderer may request an exact known chat check, not forge its remote Project identity.
+  expect(await handlers.get('projects:checkChatGptMembership')!(null, {
+    id: first.data.id, sessionId: 'session-source', projectId: 'g-p-11111111222233334444555555555555'
+  })).toMatchObject({ ok: false });
+  expect(await handlers.get('projects:checkChatGptMembership')!(null, {
+    id: first.data.id, sessionId: 'session-source'
+  })).toMatchObject({ ok: false }); // Not linked; must not start a provider observation.
+  const { linkChatGptProject } = await import('../src/main/projects.js');
+  await linkChatGptProject(first.data.id, 'g-p-11111111222233334444555555555555', 1000);
+  const unlinked = await handlers.get('projects:unlinkChatGpt')!(null, { id: first.data.id }) as any;
+  expect(unlinked).toMatchObject({ ok: true, data: { id: first.data.id } });
+  expect(unlinked.data.remote).toBeUndefined();
   const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
   expect(removed).toMatchObject({ ok: true, data: { id: first.data.id, ungrouped: true } });
   expect(getConfig().roots).toHaveLength(1);

@@ -255,6 +255,9 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         return ok({ sessions: [...openings, ...sessions], activeId: summary(live.events).id, pressure: [] });
       },
       listProjects: () => ok(projects),
+      linkChatGptProject: (id: string) => ok(projects.find(row => row.id === id) ?? null),
+      verifyChatGptProject: (id: string) => ok(projects.find(row => row.id === id) ?? null),
+      unlinkChatGptProject: (id: string) => ok(projects.find(row => row.id === id) ?? null),
       // IPC snapshots cannot share the backend's mutable array with the renderer.
       listInputs: () => ok(structuredClone(live.inputs)),
       cancelInput: vi.fn((id: string) => {
@@ -1596,7 +1599,11 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['color', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['link-chatgpt-project', 'color', 'remove']);
+  const link = menuItem(w, 'link-chatgpt-project');
+  expect(link.disabled).toBe(true);
+  expect(link.textContent?.trim()).toBe('Link ChatGPT Project');
+  expect(link.querySelector('.ph-link')).not.toBeNull();
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
@@ -1626,6 +1633,120 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
   (w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement).click(); await settle();
   expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
+});
+
+it('links, verifies and unlinks the selected Project chat without changing its local Project', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  // The main-process catalog is already durably committed before IPC resolves.
+  // Keep the fixture's listProjects snapshot consistent with Link/Refresh/Unlink.
+  const catalog: LocalProject[] = [project];
+  const { w } = await boot([], true, [], catalog);
+  const api = (w as any).api;
+  const remote = { provider: 'chatgpt' as const, projectId: 'g-p-11111111222233334444555555555555',
+    linkId: '11111111-2222-4333-8444-555555555555', linkedAt: 1000, lastObservedAt: 1000 };
+  let finishLink!: (value: unknown) => void;
+  api.linkChatGptProject = vi.fn(() => new Promise(resolve => { finishLink = resolve; }));
+  api.verifyChatGptProject = vi.fn(async () => {
+    catalog[0] = { ...project, remote: { ...remote, lastObservedAt: 1100 } };
+    return { ok: true, data: catalog[0] };
+  });
+  api.unlinkChatGptProject = vi.fn(async () => {
+    catalog[0] = project;
+    return { ok: true, data: project };
+  });
+
+  projectMenu(w, project.id); menuItem(w, 'link-chatgpt-project').click();
+  expect(api.linkChatGptProject).toHaveBeenCalledWith(project.id, '2026-09-02-test0001');
+  projectMenu(w, project.id);
+  expect(menuItem(w, 'link-chatgpt-project').disabled).toBe(true);
+  expect(menuItem(w, 'remove').disabled).toBe(true);
+  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
+  catalog[0] = { ...project, remote };
+  finishLink({ ok: true, data: { ...project, remote } }); await settle();
+  const status = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"] .project-remote-status`)!;
+  expect(status.tagName).toBe('I');
+  expect(status.classList.contains('ph-check-circle')).toBe(true);
+  expect(status.title).toContain('Linked to a ChatGPT Project · checked ');
+  expect(status.title).not.toContain(remote.projectId);
+  expect(status.getAttribute('aria-label')).toBe(status.title);
+
+  projectMenu(w, project.id);
+  const refresh = menuItem(w, 'verify-chatgpt-project');
+  expect(refresh.textContent?.trim()).toBe('Refresh ChatGPT Project link');
+  expect(refresh.querySelector('.ph-arrow-clockwise')).not.toBeNull();
+  refresh.click(); await settle();
+  expect(api.verifyChatGptProject).toHaveBeenCalledWith(project.id, '2026-09-02-test0001');
+
+  projectMenu(w, project.id);
+  const unlink = menuItem(w, 'unlink-chatgpt-project');
+  expect(unlink.textContent?.trim()).toBe('Remove ChatGPT Project link');
+  expect(unlink.querySelector('.ph-link-break')).not.toBeNull();
+  unlink.click(); await settle();
+  expect(api.unlinkChatGptProject).toHaveBeenCalledWith(project.id);
+  expect(w.document.querySelector(`.project-group[data-project-id="${project.id}"] .project-remote-status`)).toBeNull();
+});
+
+it('marks only explicitly observed current chats as matched or mismatched, without changing local grouping', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1,
+    remote: { provider: 'chatgpt' as const, projectId: 'g-p-11111111222233334444555555555555',
+      linkId: '11111111-2222-4333-8444-555555555555', linkedAt: 1000, lastObservedAt: 1000 } };
+  const checked = { ...summary([]), projectId: project.id, conversationId: 'current-checked' };
+  const unknown = { ...summary([]), id: 'another-known-session', title: 'Unverified local chat',
+    conversationId: 'current-unknown', chatIds: ['current-unknown'], projectId: project.id };
+  const rows: SessionSummary[] = [checked, unknown];
+  const { w } = await boot([], true, [], [project], { sessions: rows });
+  const api = (w as any).api;
+  const entry = () => w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"] .sess[data-id="${checked.id}"]`)!;
+  const menu = () => { entry().querySelector<HTMLButtonElement>('.sess-menu')!.click(); return menuItem(w, 'check-chatgpt-membership'); };
+  expect(w.document.querySelectorAll('.project-group .sess')).toHaveLength(2);
+  expect(w.document.querySelector('.sess-project-membership')).toBeNull();
+  expect(w.document.querySelector('.project-match-count')).toBeNull();
+
+  api.checkChatGptProjectMembership = vi.fn(async (projectId: string, sessionId: string) => {
+    expect([projectId, sessionId]).toEqual([project.id, checked.id]);
+    checked.chatGptProjectObservation = { conversationId: checked.conversationId!,
+      linkId: project.remote.linkId, status: 'linked', observedAt: 1100 };
+    return { ok: true, data: { status: 'linked', observedAt: 1100 } };
+  });
+  const check = menu();
+  expect(check.textContent?.trim()).toBe('Check chat in linked ChatGPT Project');
+  expect(check.querySelector('.ph-arrow-clockwise')).not.toBeNull();
+  check.click(); await settle();
+  expect(api.checkChatGptProjectMembership).toHaveBeenCalledExactlyOnceWith(project.id, checked.id);
+  const mark = entry().querySelector<HTMLElement>('.sess-project-membership')!;
+  expect(mark.dataset.membership).toBe('linked');
+  expect(mark.title).toContain('Chat is in the linked ChatGPT Project · checked');
+  expect(mark.getAttribute('aria-label')).toBe(mark.title);
+  expect(mark.title).not.toContain(project.remote.projectId);
+  expect(w.document.querySelector('.project-match-count')?.textContent).toBe('Verified matches: 1');
+  expect(w.document.querySelector<HTMLElement>(`.sess[data-id="${unknown.id}"] .sess-project-membership`)).toBeNull();
+
+  checked.chatGptProjectObservation = { conversationId: checked.conversationId!,
+    linkId: project.remote.linkId, status: 'other-project', observedAt: 1200 };
+  api.checkChatGptProjectMembership = vi.fn(async () => ({ ok: true, data: { status: 'other-project', observedAt: 1200 } }));
+  menu().click(); await settle();
+  expect(entry().querySelector<HTMLElement>('.sess-project-membership')?.dataset.membership).toBe('other-project');
+  expect(entry().querySelector<HTMLElement>('.sess-project-membership')?.title).toContain('another ChatGPT Project');
+  expect(w.document.querySelector('.project-match-count')?.textContent).toBe('Verified matches: 0');
+  checked.chatGptProjectObservation = { conversationId: checked.conversationId!,
+    linkId: project.remote.linkId, status: 'not-project', observedAt: 1250 };
+  api.checkChatGptProjectMembership = vi.fn(async () => ({ ok: true, data: { status: 'not-project', observedAt: 1250 } }));
+  menu().click(); await settle();
+  expect(entry().querySelector<HTMLElement>('.sess-project-membership')?.dataset.membership).toBe('not-project');
+  expect(entry().querySelector<HTMLElement>('.sess-project-membership')?.title).toContain('not in a ChatGPT Project');
+  expect(w.document.querySelector('.project-match-count')?.textContent).toBe('Verified matches: 0');
+  // Unlink/relink to the same remote id creates a new association, not a new observation.
+  project.remote.linkId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  w.document.getElementById('chatRefresh')!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+  await settle();
+  expect(entry().querySelector('.sess-project-membership')).toBeNull();
+  expect(w.document.querySelector('.project-match-count')).toBeNull();
+  // A same-session conversation replacement must not inherit an old membership marker.
+  checked.conversationId = 'replacement-conversation';
+  w.document.getElementById('chatRefresh')!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+  await settle();
+  expect(entry().querySelector('.sess-project-membership')).toBeNull();
+  expect(w.document.querySelectorAll('.project-group .sess')).toHaveLength(2);
 });
 
 it('picks and clears project color without changing project membership', async () => {

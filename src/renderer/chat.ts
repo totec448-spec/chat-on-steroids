@@ -160,6 +160,21 @@ const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
+
+/** Projection only: a local grouping is never inferred from remote membership. */
+function checkedChatGptMembership(summary: SessionSummary): { status: 'linked' | 'other-project' | 'not-project'; observedAt: number } | null {
+  const remote = projects.find(project => project.id === summary.projectId && !project.ungrouped)?.remote;
+  const observed = summary.chatGptProjectObservation;
+  if (!remote?.linkId || !summary.conversationId || !observed ||
+      observed.conversationId !== summary.conversationId || observed.linkId !== remote.linkId) return null;
+  return { status: observed.status, observedAt: observed.observedAt };
+}
+
+function membershipText(status: 'linked' | 'other-project' | 'not-project', observedAt: number): string {
+  if (status === 'linked') return t('Chat is in the linked ChatGPT Project · checked {0}', [ago(observedAt)]);
+  if (status === 'other-project') return t('Chat is in another ChatGPT Project · checked {0}', [ago(observedAt)]);
+  return t('Chat is not in a ChatGPT Project · checked {0}', [ago(observedAt)]);
+}
 /** The row's "⋯" button as the sidebar holds it now; repaints replace it. */
 function rowMenuButton(owner: string): HTMLElement | null {
   return [...document.querySelectorAll<HTMLElement>('[data-row-menu]')].find(button => button.dataset.rowMenu === owner) ?? null;
@@ -168,11 +183,34 @@ function rowMenuButton(owner: string): HTMLElement | null {
 /** Projects whose color or removal is being saved: their choices wait for the answer. */
 const savingProjectColor = new Set<string>();
 const removingProject = new Set<string>();
+const syncingChatGptProject = new Set<string>();
+const checkingChatGptMembership = new Set<string>();
 
 /** A project's menu: its color (a submenu) and taking it off the sidebar. A new chat has its own button on the row. */
 function projectMenuItems(id: string): RowMenuItem[] {
-  const color = projects.find(row => row.id === id)?.color ?? null;
+  const project = projects.find(row => row.id === id);
+  const color = project?.color ?? null;
+  const source = selectedId ? sessions.find(row => row.id === selectedId && row.projectId === id && !!row.conversationId) : undefined;
+  const remote = project?.remote;
+  const busy = syncingChatGptProject.has(id);
+  const removing = removingProject.has(id);
+  const remoteItems: RowMenuItem[] = remote ? [
+    {
+      action: 'verify-chatgpt-project', icon: 'i-retry', label: () => t('Refresh ChatGPT Project link'),
+      disabled: busy || removing || !source,
+      run: () => { if (source) void saveChatGptProjectLink('verify', id, source.id); }
+    },
+    {
+      action: 'unlink-chatgpt-project', icon: 'i-unlink', label: () => t('Remove ChatGPT Project link'), separated: true, disabled: busy || removing,
+      run: () => { void saveChatGptProjectLink('unlink', id); }
+    }
+  ] : [{
+    action: 'link-chatgpt-project', icon: 'i-link', label: () => t('Link ChatGPT Project'),
+    disabled: busy || removing || !source,
+    run: () => { if (source) void saveChatGptProjectLink('link', id, source.id); }
+  }];
   return [
+    ...remoteItems,
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
       submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
@@ -181,11 +219,44 @@ function projectMenuItems(id: string): RowMenuItem[] {
       }))
     },
     {
-      action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removingProject.has(id),
+      action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removing || busy,
       label: () => t('Remove'), title: () => t('Remove project from sidebar; keep conversations and files'),
       run: () => void removeProjectFromSidebar(id)
     }
   ];
+}
+
+async function saveChatGptProjectLink(action: 'link' | 'verify' | 'unlink', id: string, sessionId?: string): Promise<void> {
+  if (syncingChatGptProject.has(id)) return;
+  syncingChatGptProject.add(id);
+  try {
+    const updated = action === 'unlink'
+      ? await run(api.unlinkChatGptProject(id))
+      : action === 'link'
+        ? await run(api.linkChatGptProject(id, sessionId!))
+        : await run(api.verifyChatGptProject(id, sessionId!));
+    if (!updated) return;
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+    // Link/Refresh also records this source chat's exact observed membership in its
+    // durable session summary. Read that new projection instead of inferring it in UI.
+    void loadSessions('changed');
+  } finally {
+    syncingChatGptProject.delete(id);
+  }
+}
+
+async function checkChatGptMembership(projectId: string, sessionId: string): Promise<void> {
+  if (checkingChatGptMembership.has(sessionId)) return;
+  checkingChatGptMembership.add(sessionId);
+  try {
+    const result = await run(api.checkChatGptProjectMembership(projectId, sessionId));
+    if (result) await loadSessions('changed');
+  } finally {
+    checkingChatGptMembership.delete(sessionId);
+    paintSessions();
+  }
 }
 
 async function saveProjectColor(id: string, choice: ProjectColor | null): Promise<void> {
@@ -540,6 +611,15 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const mark = icon('i-pinned', 'ico sess-pin-mark');
     top.append(mark);
   }
+  const membership = checkedChatGptMembership(summary);
+  if (membership) {
+    const mark = icon(membership.status === 'linked' ? 'i-check-circle' : 'i-warning', 'ico sess-project-membership');
+    mark.dataset.membership = membership.status;
+    const status = () => membershipText(membership.status, membership.observedAt);
+    ui(mark, 'title', status);
+    ui(mark, 'aria-label', status);
+    top.append(mark);
+  }
   ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
     if (sessionTooltipDismissed === summary.id) return;
@@ -628,6 +708,15 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
         run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } }
     );
+    if (summary.projectId && projects.some(project => project.id === summary.projectId && !project.ungrouped && project.remote)) {
+      items.push({
+        action: 'check-chatgpt-membership', icon: 'i-retry',
+        label: () => t('Check chat in linked ChatGPT Project'),
+        title: () => t('Check only this current chat; do not move it between local projects'),
+        disabled: checkingChatGptMembership.has(summary.id),
+        run: () => void checkChatGptMembership(summary.projectId!, summary.id)
+      });
+    }
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
@@ -996,7 +1085,25 @@ function paintSessions(): void {
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
-    heading.append(icon('i-folder'), label); section.append(heading);
+    heading.append(icon('i-folder'), label);
+    let matchSummary: HTMLElement | null = null;
+    if (project?.remote?.provider === 'chatgpt') {
+      const remote = icon('i-check-circle', 'ico project-remote-status');
+      const observedAt = project.remote.lastObservedAt;
+      const status = () => t('Linked to a ChatGPT Project · checked {0}', [ago(observedAt)]);
+      ui(remote, 'aria-label', status);
+      ui(remote, 'title', status);
+      heading.append(remote);
+      const observed = sessions.filter(entry => entry.projectId === id && checkedChatGptMembership(entry));
+      if (observed.length > 0) {
+        const count = observed.filter(entry => checkedChatGptMembership(entry)?.status === 'linked').length;
+        const matches = el('span', 'project-match-count', () => t('Verified matches: {0}', [count]));
+        ui(matches, 'title', () => t('Verified matches: {0}', [count]));
+        matchSummary = matches;
+      }
+    }
+    section.append(heading);
+    if (matchSummary) section.append(matchSummary);
     // Native `toggle` is queued after activation. A concurrent activity repaint can replace
     // this node first and lose the click. Commit the summary's pointer/keyboard click to the
     // one disclosure owner synchronously, then project it onto this details element.
