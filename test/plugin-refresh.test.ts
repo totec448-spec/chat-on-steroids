@@ -117,15 +117,15 @@ it('deduplicates unchanged reconnects, durably acknowledges a matching generatio
 });
 it('reports the schema ChatGPT confirmed per surface, and nothing for a click that never confirmed', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
-  expect(await confirmedPluginSchemas()).toEqual({});
+  expect(confirmedPluginSchemas()).toEqual({});
   expect(await claim(request)).toBe(true);
-  expect(await confirmedPluginSchemas()).toEqual({});
+  expect(confirmedPluginSchemas()).toEqual({});
   expect(await completePluginRefresh({ ...request, appId, tools })).toBe(true);
   const first = pluginRefreshPublications()[0]!.schemaId;
-  expect(await confirmedPluginSchemas()).toEqual({ core: first });
+  expect(confirmedPluginSchemas()).toEqual({ core: first });
   // A newer contract is not confirmed by the older completion.
   publish('2', [{ ...tools[0]!, description: 'New contract' }]); await pendingPluginRefreshes();
-  expect(await confirmedPluginSchemas()).toEqual({ core: first });
+  expect(confirmedPluginSchemas()).toEqual({ core: first });
   expect(pluginRefreshPublications()[0]!.schemaId).not.toBe(first);
 });
 it('requires a recognizable exact tool set for enrollment and refreshes stale definitions', async () => {
