@@ -12219,7 +12219,7 @@
     limit.published = limit.retryAt;
     emit({
       kind: 'chat_error',
-      text: 'ChatGPT temporarily rate-limited loading this conversation history. Chat On Steroids is pausing automatic recovery until the provider Retry-After window ends.',
+      text: t('content_history_rate_limited', 'ChatGPT temporarily rate-limited loading this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends.'),
       recoverable: false,
       blocking: true,
       retryAt: limit.retryAt

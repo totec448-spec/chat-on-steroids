@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "Endpoint tiếp tục tùy chỉnh không hợp lệ. Hãy kiểm tra URL trong Cài đặt; dùng HTTPS hoặc endpoint HTTP cục bộ."
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT tạm thời giới hạn quyền truy cập lịch sử cuộc trò chuyện này. Chat On Steroids tạm dừng khôi phục tự động cho đến khi hết thời gian chờ."
+  },
   "content_goal_error_rate_limited": {
     "message": "Nhà cung cấp tiếp tục đang giới hạn tần suất yêu cầu. Hãy chờ lần thử lại được hiển thị hoặc chọn mô hình tiếp tục khác."
   },

@@ -2071,7 +2071,7 @@
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Traduza textos com precisão e naturalidade, mantendo consistentes o sentido, o tom, a formatação e a terminologia.",
   "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Transforme um objetivo em um plano claro e realista: escopo, marcos, tarefas, riscos e um primeiro passo que pode começar hoje.",
   "ChatGPT history temporarily rate-limited": "Histórico do ChatGPT temporariamente limitado",
-  "Automatic recovery is paused until ChatGPT’s Retry-After window ends. Reloading earlier can prolong the limit.": "A recuperação automática fica pausada até o fim do período Retry-After do ChatGPT. Recarregar antes pode prolongar o limite.",
-  "Retry allowed in {0}": "Nova tentativa permitida em {0}",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "A recuperação automática fica pausada durante a espera pelo limite do histórico. Recarregar antes pode prolongar o limite.",
+  "Retry check in {0}": "Verificar novamente em {0}",
   "Retry window ended": "Período de nova tentativa encerrado"
 }

@@ -462,7 +462,26 @@ describe('MAIN-world usage projection', () => {
     expect(h.posts).toHaveLength(2);
   });
 
-  it('uses the history-specific Retry-After fallback and ignores unrelated or unbounded 429s', async () => {
+  it('covers the observed singular history endpoint even when the 429 has no Retry-After header', async () => {
+    const h = harness();
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    await h.feed({ detail: 'Too many requests', private: 'NEVER_PROJECT_BODY' },
+      `https://chatgpt.com/backend-api/conversation/${id}?num_turns=10`, {}, { status: 429 });
+    expect(h.posts).toEqual([{
+      type: 'cos-history-rate-limit', conversationId: id,
+      observedAt: Date.parse('2026-09-05T12:00:00Z'),
+      retryAt: Date.parse('2026-09-05T12:01:00Z')
+    }]);
+    expect(JSON.stringify(h.posts)).not.toContain('NEVER_PROJECT_BODY');
+    h.request();
+    expect(h.posts).toHaveLength(2);
+    expect(h.posts[1]).toEqual(h.posts[0]);
+    h.advance(60_001);
+    h.request();
+    expect(h.posts).toHaveLength(2);
+  });
+
+  it('uses the history-specific Retry-After header fallback and bounds unusable header values', async () => {
     const h = harness();
     const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     await h.feed({}, `https://chatgpt.com/backend-api/conversations/${id}`, {},
@@ -471,8 +490,9 @@ describe('MAIN-world usage projection', () => {
     const count = h.posts.length;
     await h.feed({}, 'https://chatgpt.com/backend-api/conversations', {}, { status: 429, headers: { 'Retry-After': '30' } });
     await h.feed({}, `https://chatgpt.com/backend-api/conversations/${id}`, {}, { status: 429, headers: { 'Retry-After': '999999' } });
+    expect(h.posts.at(-1)?.retryAt).toBe(Date.parse('2026-09-05T12:01:00Z'));
     await h.feed({}, `https://example.test/backend-api/conversations/${id}`, {}, { status: 429, headers: { 'Retry-After': '30' } });
-    expect(h.posts).toHaveLength(count);
+    expect(h.posts).toHaveLength(count + 1);
   });
 
   it('accepts HTTP-date Retry-After and ignores non-GET history responses', async () => {
