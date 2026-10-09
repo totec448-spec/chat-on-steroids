@@ -5378,7 +5378,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Waiting a few seconds for the reconnected connector to take over this chat") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
