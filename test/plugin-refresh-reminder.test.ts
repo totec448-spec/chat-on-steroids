@@ -61,3 +61,20 @@ it('dismisses only the reminder and leaves simultaneous extension or update noti
   expect(document.getElementById('pluginRefreshReminder')!.hidden).toBe(true);
   expect(update.hidden).toBe(false);
 });
+
+it('does not ask for a manual refresh once ChatGPT confirmed the new schema, and asks again for a later one', async () => {
+  let { paintPluginRefreshReminder: paint } = await import('../src/renderer/plugin-refresh-reminder.js');
+  const notice = document.getElementById('pluginRefreshReminder')!;
+  paint({ core: 'schema-a' }, { core: 'schema-a' });
+  paint({ core: 'schema-b' }, { core: 'schema-a' });
+  expect(notice.hidden).toBe(false);
+  // Automatic plugin refresh finished: ChatGPT now holds schema-b.
+  paint({ core: 'schema-b' }, { core: 'schema-b' });
+  expect(notice.hidden).toBe(true);
+  vi.resetModules();
+  ({ paintPluginRefreshReminder: paint } = await import('../src/renderer/plugin-refresh-reminder.js'));
+  paint({ core: 'schema-b' }, {});
+  expect(notice.hidden).toBe(true);
+  paint({ core: 'schema-c' }, { core: 'schema-b' });
+  expect(notice.hidden).toBe(false);
+});
