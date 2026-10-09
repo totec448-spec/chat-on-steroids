@@ -12277,6 +12277,10 @@
     if (terminal.length !== 1) return;
     const response = terminal[0].rawText;
     if (typeof response !== 'string' || !response.trim() || response.length > 16000) return;
+    // On GPT-6 the page model can still hold only `::chatgpt-content-reference{…}` when the turn
+    // ends; the answer's own text arrives a scan later. A bare reference is never the decision
+    // (Windows, 2026-10-09: three Goal helpers in a row failed as "not JSON").
+    if (/^\s*(?:::chatgpt-content-reference\{[^}\n]*\}\s*)+$/.test(response)) return;
     decision.response = response;
     publishDesktopDecision(decision);
   }
