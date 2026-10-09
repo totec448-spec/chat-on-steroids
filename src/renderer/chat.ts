@@ -1264,7 +1264,10 @@ function paintDeliveryControls(): void {
   const immediateAction = $('sendOptions').querySelector<HTMLElement>('[data-delivery="auto"]');
   if (immediateAction) immediateAction.hidden = (nativeFiles && working) || canInject;
   const injectionAction = $('sendOptions').querySelector<HTMLElement>('[data-delivery="tool"]');
-  const explicitInjection = (canInject || canSendDirectly) && (!files.length || injectableAttachments(files));
+  // A text for the running turn goes through ChatGPT's composer either way (Send directly); Inject now
+  // stays a separate choice only where it differs: a Pro turn, or images into the tool result.
+  const explicitInjection = (canInject && (!files.length || injectableAttachments(files))) ||
+    (canSendDirectly && files.length > 0 && injectableAttachments(files));
   if (injectionAction) injectionAction.hidden = !explicitInjection;
   if ($<HTMLSelectElement>('sendMode').value === 'tool' && !explicitInjection) $<HTMLSelectElement>('sendMode').value = 'auto';
   if (canInject && explicitInjection && $<HTMLSelectElement>('sendMode').value === 'auto') $<HTMLSelectElement>('sendMode').value = 'tool';
