@@ -2728,6 +2728,15 @@ input[readonly] {
   color: var(--soft);
 }
 
+.msg.rich blockquote.native-prompt-readonly {
+  padding: 0.65em 0.9em;
+  border-radius: var(--r-sm);
+  background: var(--wash);
+  color: var(--ink);
+}
+.msg.rich .native-prompt-readonly li { margin: 0.2em 0; }
+.msg.rich .native-prompt-readonly em { color: var(--soft); font-size: 0.9em; }
+
 .msg.rich code {
   font-family: var(--mono);
   font-size: 0.94em;
