@@ -180,6 +180,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "永久移除約 1 GB 最舊的本機圖片記錄？聊天文字與原始檔案會保留。",
   "Freed {0} MB. {1} GB of image storage is now available.": "已釋出 {0} MB。目前有 {1} GB 圖片儲存空間可用。",
   "Waiting for the next tool call": "等待下一次工具呼叫",
+  "Waiting a few seconds for the reconnected connector to take over this chat": "正在等待幾秒，讓重新連線的連接器接管此對話",
   "Image cleanup failed. No further cleanup was requested.": "圖片清理失敗。未要求進一步清理。",
   "Collapse a folder before expanding more folders.": "請先收合一個資料夾，再展開其他資料夾。",
   "Save or discard an existing project draft before editing another project.": "編輯其他專案前，請先儲存或捨棄現有專案草稿。",
