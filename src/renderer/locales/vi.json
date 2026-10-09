@@ -973,7 +973,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1M token đầu vào được lưu đệm · nhập đơn giá so sánh đã xác minh",
   "Unknown rate": "Không xác định đơn giá",
   "{0} cached-input USD per million tokens": "{0} USD đầu vào được lưu đệm trên một triệu token",
-  "{0} + unpriced": "{0} + phần chưa có đơn giá",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "{0} token ước tính; {1} chưa có đơn giá so sánh. Giá trị tương đương đầu vào được lưu đệm, không phải hóa đơn.",
   "{0}: {1} estimated tokens": "{0}: {1} token ước tính",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Ngữ cảnh cuối của giao diện phía nhà cung cấp (giới hạn ở {2} token cho ước tính này) × số lần gọi công cụ duy nhất ÷ {0} × đơn giá đầu vào được lưu đệm của từng mô hình ÷ 1M × {1}.",

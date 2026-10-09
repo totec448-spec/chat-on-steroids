@@ -986,7 +986,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1M кэшированного ввода · укажите проверенную ставку для сравнения",
   "Unknown rate": "Ставка неизвестна",
   "{0} cached-input USD per million tokens": "{0} USD за миллион токенов кэшированного ввода",
-  "{0} + unpriced": "{0} + без цены",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "Оценочно {0} токенов; для {1} нет ставки сравнения. Эквивалент кэшированного ввода, не счёт.",
   "{0}: {1} estimated tokens": "{0}: оценочно {1} токенов",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Итоговый контекст фронтенда (для этой оценки максимум {2} токенов) × уникальные вызовы инструментов ÷ {0} × ставка кэшированного ввода каждой модели ÷ 1M × {1}.",
