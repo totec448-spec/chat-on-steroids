@@ -248,6 +248,25 @@ it('reads a DIL answer as the Markdown the page falls back to, not as its conten
   answer.contentReferences = [{ type: 'dil', source_message_id: OTHER, model_dil_v2: { fallbackMarkdown: 'Not this one' } }];
   expect((await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === ANSWER).rawText).toContain('::chatgpt-content-reference');
 });
+it('reads a DIL answer as the model wrote it, without the escapes its fallback adds to plain text', async () => {
+  // Measured on GPT-6 (2026-10-09): the fallback escapes literal punctuation outside code, so the Goal
+  // marker arrived as \[\[COS\_GOAL:COMPLETE\]\] and every Loop decision as invalid JSON (2\^300).
+  const f = fixture();
+  const answer = f.entry.turn.items[2];
+  answer.content = `::chatgpt-content-reference{index="0" source_message_id="${ANSWER}"}`;
+  const read = async (fallbackMarkdown: string) => {
+    answer.contentReferences = [{ type: 'dil', source_message_id: ANSWER, model_dil_v2: { fallbackMarkdown } }];
+    return (await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === ANSWER).rawText;
+  };
+  expect(await read('Done.\n\n\\[\\[COS\\_GOAL:COMPLETE\\]\\]')).toBe('Done.\n\n[[COS_GOAL:COMPLETE]]');
+  expect(JSON.parse(await read('{"action":"continue","reply":"Recompute 2\\^300 with \\`echo\\` \\#1"}')))
+    .toEqual({ action: 'continue', reply: 'Recompute 2^300 with `echo` #1' });
+  expect(await read('## Title\n\n**bold** `code`\n2\\^10 = 1024 \\[ok\\] C:\\\\Users'))
+    .toBe('## Title\n\n**bold** `code`\n2^10 = 1024 [ok] C:\\Users');
+  // Code keeps its own text: fences and spans are verbatim in the fallback already.
+  expect(await read('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and \\_after\\_'))
+    .toBe('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and _after_');
+});
 it('requires the final item and successful turn, while retaining exact messages on reload', async () => {
   const f = fixture(); f.entry.turn.items[2].completed = true;
   expect((await f.ask()).turns[0].endMessageId).toBeNull();
