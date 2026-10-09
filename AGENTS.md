@@ -3998,8 +3998,9 @@ and a reconnect of the same process after an outage changes nothing). `tunnel/ro
 holds such messages for `ROUTE_SETTLE_MS` (12 s) after each new process's first connected report:
 `/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
 conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
-lets the chat say why the message waits. Measured on Windows: sent at once, 15 of 18 calls waited;
-held 12 s, 12 of 13 arrived in under 20 s. `test/tunnel-route-settle.test.ts`, the
+lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
+waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
+the app, back to back, so the takeover can occasionally outlast the hold). `test/tunnel-route-settle.test.ts`, the
 `tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
