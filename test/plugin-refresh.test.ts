@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, confirmedPluginSchemas, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { APP_VERSION } from '../src/main/version.js';
 import { buildServer } from '../src/main/mcp/tools.js';
@@ -114,6 +114,19 @@ it('deduplicates unchanged reconnects, durably acknowledges a matching generatio
   publish('2', [{ ...tools[0]!, description: 'New contract' }]); const updated = (await pendingPluginRefreshes())[0]!;
   expect(updated.id).not.toBe(request.id); expect(updated.appId).toBe(appId);
   expect(await completePluginRefresh({ ...request, appId, tools })).toBe(false);
+});
+it('reports the schema ChatGPT confirmed per surface, and nothing for a click that never confirmed', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  expect(confirmedPluginSchemas()).toEqual({});
+  expect(await claim(request)).toBe(true);
+  expect(confirmedPluginSchemas()).toEqual({});
+  expect(await completePluginRefresh({ ...request, appId, tools })).toBe(true);
+  const first = pluginRefreshPublications()[0]!.schemaId;
+  expect(confirmedPluginSchemas()).toEqual({ core: first });
+  // A newer contract is not confirmed by the older completion.
+  publish('2', [{ ...tools[0]!, description: 'New contract' }]); await pendingPluginRefreshes();
+  expect(confirmedPluginSchemas()).toEqual({ core: first });
+  expect(pluginRefreshPublications()[0]!.schemaId).not.toBe(first);
 });
 it('requires a recognizable exact tool set for enrollment and refreshes stale definitions', async () => {
   publish(); const first = (await pendingPluginRefreshes())[0]!;
