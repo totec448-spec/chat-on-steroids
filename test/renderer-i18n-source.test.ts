@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
+import { RECOMMENDED_SKILLS } from '../src/shared/recommended-skills.js';
 
 /**
  * The catalog tests compare the catalogs with each other, so a string that no catalog has
@@ -57,5 +58,12 @@ it('keeps the sub-agent list labels translated in the Russian catalog', () => {
   // Health says only a problem now (Degraded); the states and the action count are the rest.
   for (const key of ['Degraded', 'Opening', 'Waking', 'No tab', 'Idle', '{0} actions']) {
     expect(catalog[key]?.trim(), key).toBeTruthy();
+  }
+});
+
+it('translates every recommended skill description in every catalog', () => {
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect(RECOMMENDED_SKILLS.filter(skill => !Object.hasOwn(catalog, skill.description)).map(skill => skill.id), locale).toEqual([]);
   }
 });
