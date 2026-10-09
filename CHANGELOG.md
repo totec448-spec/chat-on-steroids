@@ -9,6 +9,35 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.31] — Ready for GPT-6, with a timeline that reads like ChatGPT
+
+ChatGPT's GPT-6 rollout changed how its page works, and this release catches up. You can pick GPT-6 in the app, and Goal, Loop and Compact & Resume work on it again. The timeline now shows a turn in rounds the way ChatGPT does, the Sub-agents list says what each worker is doing, and Setup asks up front what ChatGPT may do on your computer.
+
+### ✨ Highlights
+
+- **Ready for GPT-6.** The model picker shows GPT-6, GPT-5.6 and GPT-5.5 with Instant, Medium and High, and Goal and Loop use GPT-6 by default. The two known issues from 2.1.30 are fixed: Compact & Resume carries the whole summary over to the new chat again, and the model menu lists ChatGPT's models correctly.
+- **A timeline in rounds.** Each turn reads in rounds like ChatGPT's own. The model's sentences between steps are kept, each round is titled with ChatGPT's own summary, the live line says what ChatGPT is doing right now, and formulas render.
+- **A clearer Sub-agents list.** Each worker is named for its job and shows its own task, its state and its model at a glance.
+- **Setup asks what ChatGPT may do.** A new Access step offers the same permission switches as Workspace, and the last step tells you plainly when access is limited.
+- **Panels in the title bar.** The panel buttons moved into the title bar, and the right panel now runs the full height of the window. A project's new chat is one click again: the pencil beside its menu.
+
+### 🛠 Fixed
+
+- **Goal and Loop on GPT-6:**
+  - Goal recognizes a finished task again.
+  - Loop no longer stops with "the structured decision was not JSON".
+  - The helper chats Goal and Loop use for their decisions close again instead of piling up in Chrome.
+- **Compact & Resume** no longer reloads the chat it starts from, which could make the first attempt fail with "the Send button or message box was not ready".
+- **Model list:** refreshing it no longer fails when an open chat still uses a model ChatGPT has retired. On a translated ChatGPT page, Extra High is listed the same way as on an English one.
+- **Several computers on one account:** a new worker tab now calls this computer's Chat On Steroids, even before its page has listed its apps.
+- **Recovery:** a chat that leaves ChatGPT's "could not be loaded" page keeps its automatic recovery.
+- **Attachments:** a file shown as one of ChatGPT's newer file tiles is recognized, so a message with it is no longer held back in the draft.
+- **Search** lists chats whose title matches first, before matches in the chat's text.
+
+### 💛 Thank you
+
+To **@Haz4rdovisk** for the GPT-6 model picker, the timeline in rounds, the Sub-agents list, the new Setup step and the title bar layout. To **@Gokuencinar** for the attachment, search, timeline and journal fixes, and to **@m1d0e1** for the formula rendering idea that the timeline builds on. And to **@tude91979059-byte**, whose long runs on GPT-6 showed where the app no longer understood ChatGPT's page.
+
 ## [2.1.30] — See what's new, and long runs that stop and recover more calmly
 
 After an update, the app now shows a short summary of what changed. A message ChatGPT never picks up no longer causes endless reloads: the app tries three times, then says so. Sub-agents on slow connections get more time, your settings survive a file the app can't read, and the View menu in the title bar matches the rest of the app.
