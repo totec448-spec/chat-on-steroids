@@ -252,7 +252,7 @@
   "Loop response source": "ループの応答生成元",
   "Loop keeps going until you switch it off.": "ループは無効にするまで続きます。",
   "Goal, Loop and Plan model": "ゴール・ループ・計画のモデル",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "ChatGPT がメッセージや計画を生成するときのモデルです。計画には、下で GPT-5.6 と「高」を選択してください。",
+  "Model for ChatGPT-generated messages and plans.": "ChatGPT がメッセージや計画を生成するときのモデルです。",
   "Goal, Loop and Plan reasoning": "ゴール・ループ・計画の推論強度",
   "Used with the ChatGPT model above; independent from API reasoning.": "上の ChatGPT モデルに適用されます。API の推論設定とは独立しています。",
   "Include tool details in handoffs": "引き継ぎにツールの詳細を含める",
