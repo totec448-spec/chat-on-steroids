@@ -283,7 +283,8 @@ interface TurnFixture {
   viewItems?: any[];
   viewStatus?: string;
   /** A visible `.markdown` block: its text, or markup when the test is about the markup. */
-  rendered?: Array<string | { html: string; nativeId?: string; fiberProps?: Record<string, unknown>; fiber?: Fiber; staleMessageStamp?: string; pillFibers?: Fiber[] }>;
+  rendered?: Array<string | { html: string; nativeId?: string; selectedMessageId?: string; selectedConversationId?: string;
+    fiberProps?: Record<string, unknown>; fiber?: Fiber; staleMessageStamp?: string; pillFibers?: Fiber[] }>;
   activities?: Array<{ label: string; fiber: Fiber; staleThoughtStamp?: string; v5?: boolean }>;
   images?: Array<{ assetId: string; clones?: number }>;
   staleStamp?: string;
@@ -388,7 +389,13 @@ async function scan(
           if (entry.pillFibers?.[at]) (pill as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = entry.pillFibers[at];
         });
       }
-      section.append(block);
+      if (typeof entry !== 'string' && entry.selectedMessageId) {
+        const selection = document.createElement('div');
+        selection.setAttribute('data-chatgpt-selection-message-id', entry.selectedMessageId);
+        if (entry.selectedConversationId) selection.setAttribute('data-chatgpt-selection-conversation-id', entry.selectedConversationId);
+        selection.append(block);
+        section.append(selection);
+      } else section.append(block);
     }
     for (const entry of turn.activities ?? []) {
       const row = document.createElement(entry.v5 ? 'div' : 'span');
@@ -975,6 +982,35 @@ describe('the calls a turn says it made', () => {
         renderedHtml: ''
       }
     ]);
+  });
+
+  it('retains the end of a long final from an exact GPT-6 DIL selection wrapper', async () => {
+    const id = '6d83d23a-24b5-474d-b0a6-410f875ac985';
+    const prose = `TASK: keep every requirement.\n${'Synthetic handoff detail. '.repeat(6_500)}\nEND_OF_BRIEF`;
+    const html = `<div data-decor="${'z'.repeat(50_000)}">${prose}</div>`;
+    expect(html.length).toBeGreaterThan(120_000);
+    const result = await scan([], [{ id: 'large-final', messages: [authored(id, prose, { endTurn: true, status: 'finished_successfully' })],
+      rendered: [{ html, selectedMessageId: id, selectedConversationId: THREAD }] }]);
+    const message = result.turns[0]!.messages[0]!;
+    expect(message.rawText).toBe(prose);
+    expect(result.turns[0]!.endMessageId).toBe(id);
+    expect(message.renderedHtml.length).toBeGreaterThan(120_000);
+    expect(message.renderedHtml).toContain('END_OF_BRIEF');
+    expect(message.renderedHtml).not.toContain('data-decor');
+  });
+
+  it('does not give an unowned or foreign long block the larger final allowance', async () => {
+    const id = 'large-native-final';
+    const prose = 'TASK: synthetic verified content';
+    const html = `<div>${'Unrelated visible text '.repeat(7_000)}</div>`;
+    for (const rendered of [
+      [{ html }],
+      [{ html, selectedMessageId: id, selectedConversationId: 'another-conversation' }],
+      [{ html, selectedMessageId: id, selectedConversationId: THREAD }, { html, selectedMessageId: id, selectedConversationId: THREAD }]
+    ]) {
+      const result = await scan([], [{ id: 'large-final', messages: [authored(id, prose, { endTurn: true, status: 'finished_successfully' })], rendered }]);
+      expect(result.turns[0]!.messages[0]!.renderedHtml).toBe('');
+    }
   });
 
   it('keeps public preambles complete when ChatGPT visually hides them during streaming and reload', async () => {
