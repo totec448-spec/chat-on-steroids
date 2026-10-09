@@ -977,7 +977,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1 M de tokens de entrada em cache · introduza uma taxa de comparação verificada",
   "Unknown rate": "Taxa desconhecida",
   "{0} cached-input USD per million tokens": "{0} USD de entrada em cache por milhão de tokens",
-  "{0} + unpriced": "{0} + sem preço",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "{0} tokens estimados; {1} não têm taxa de comparação. Equivalente de entrada em cache, não é uma fatura.",
   "{0}: {1} estimated tokens": "{0}: {1} tokens estimados",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Contexto final do frontend (limitado a {2} tokens para esta estimativa) × chamadas de ferramentas únicas ÷ {0} × taxa de entrada em cache de cada modelo ÷ 1 M × {1}.",

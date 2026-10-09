@@ -287,6 +287,8 @@
 .heat-day, .heat-month { align-self: center; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1; white-space: nowrap; }
 .heat-month { align-self: end; padding-bottom: 2px; }
 .heat-month.is-end { text-align: right; }
+/* A narrow window scrolls the year to its newest weeks; the weekday names stay beside them. */
+.heat-day { position: sticky; left: -18px; z-index: 1; align-self: stretch; display: flex; align-items: center; margin-left: -18px; padding-left: 18px; background: var(--card); box-shadow: 0 -3px 0 var(--card), 0 3px 0 var(--card); }
 .heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 .heat-legend .heat-cell { width: 11px; height: 11px; }
 .heat-legend > span:first-child { margin-right: 4px; }
