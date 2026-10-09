@@ -2587,6 +2587,37 @@ it('never titles a tool group with the app\'s own recovery note', async () => {
   expect(timeline.children[0]!.textContent).toContain('Reloaded chat to recover an interrupted response.');
 });
 
+it('closes a stopped turn with a line saying it stopped, after any late work, and keeps the request line', async () => {
+  // 2026-10-09: "ChatGPT has not yet confirmed that generation stopped" was the last word on a
+  // turn the page had already ended as stopped. The request stays where it was made; the end of
+  // the turn says it stopped once nothing runs any more.
+  const request = 'Stop requested. The finish hold was released; ChatGPT has not yet confirmed that generation stopped.';
+  const stoppedLine = 'Stopped. ChatGPT no longer shows this turn running.';
+  const { w, append } = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'g-stop' },
+    { ...toolCall(2, 'before-stop'), turnId: 'g-stop' } as SessionEvent,
+    { seq: 3, time: T0 + 3000, source: 'app', kind: 'progress', turnId: 'g-stop', progressId: 'finish-release:g-stop', message: text(request) }
+  ]);
+  const timeline = w.document.getElementById('timeline')!;
+  const lines = () => [...timeline.querySelectorAll('.ev')].map(row => row.textContent ?? '');
+  const last = () => lines().at(-1)!;
+  expect(lines().some(line => line.includes(stoppedLine))).toBe(false);
+  await append([{ seq: 4, time: T0 + 3200, source: 'extension', kind: 'turn_end', turnId: 'g-stop', outcome: 'stopped' }]);
+  expect(last()).toContain(stoppedLine);
+  expect(lines().filter(line => line.includes(request))).toHaveLength(1);
+  // A call ChatGPT dispatched before it obeyed reopens the turn: nothing says it stopped yet.
+  await append([
+    { ...toolCall(5, 'late'), time: T0 + 4000, turnId: 'g-stop' } as SessionEvent,
+    { seq: 6, time: T0 + 4000, source: 'app', kind: 'turn_start', turnId: 'g-stop' }
+  ]);
+  expect(lines().some(line => line.includes(stoppedLine))).toBe(false);
+  // The page ends it again: the line closes the turn, after the late call.
+  await append([{ seq: 7, time: T0 + 9000, source: 'extension', kind: 'turn_end', turnId: 'g-stop', outcome: 'stopped' }]);
+  expect(lines().filter(line => line.includes(stoppedLine))).toHaveLength(1);
+  expect(last()).toContain(stoppedLine);
+  expect(lines().filter(line => line.includes(request))).toHaveLength(1);
+});
+
 it('folds five consecutive status polls while retaining each exact tool row', async () => {
   const status = (seq: number): SessionEvent => {
     const event = toolCall(seq, `status-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
