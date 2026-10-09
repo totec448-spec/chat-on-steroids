@@ -33,6 +33,13 @@ ChatGPT's GPT-6 rollout changed how its page works, and this release catches up.
 - **Recovery:** a chat that leaves ChatGPT's "could not be loaded" page keeps its automatic recovery.
 - **Attachments:** a file shown as one of ChatGPT's newer file tiles is recognized, so a message with it is no longer held back in the draft.
 - **Search** lists chats whose title matches first, before matches in the chat's text.
+- **Goal and Loop keep going** when you send your own message while their helper is still working. Before, the Loop stopped with "Helper delivery was not confirmed" until you pressed **Start a new helper**.
+- **Your saved models are used again.** A model you picked in Settings before this version (for Goal and Loop, sub-agents or new chats) was saved under its old short name, such as "6" or "5.6". It no longer matched ChatGPT's new full names, so ChatGPT's current model was used instead.
+- **Formulas** use all of their own fonts again.
+
+### ⚠️ Known issue
+
+- **Right after an update or restart,** the next tool call from a chat that was already open can take about two minutes to arrive, while ChatGPT shows "Still waiting for the current operation to complete". It then goes through by itself. New chats aren't affected. The delay is in how ChatGPT routes calls to the restarted connection ([#1220](https://github.com/totec448-spec/chat-on-steroids/issues/1220)).
 
 ### 💛 Thank you
 
