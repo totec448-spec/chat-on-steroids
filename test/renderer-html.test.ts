@@ -27,6 +27,60 @@ afterAll(() => {
 });
 
 describe('captured ChatGPT rendered HTML', () => {
+  it('keeps the matching examples in the screenshot structured as Markdown, including the two warnings', () => {
+    const answer = '## Examples from sample data\n\n' +
+      '✅ **Strong matching candidate**\n\nCSV: `Sample product 20mg 30 tablets`\n\n' +
+      'Existing: `SAMPLE PRODUCT 20MG 30 TABLETS`\n\n98% name similarity.\n\n---\n\n' +
+      '⚠️ **Must not merge automatically**\n\nCSV: `Example product 70mg 60 tablets`\n\n' +
+      'Existing: `EXAMPLE PRODUCT 50MG 60 TABLETS`\n\nStrength differs.';
+    const rendered = renderedMarkdown(answer);
+    expect(rendered.querySelector('h2')?.textContent).toBe('Examples from sample data');
+    expect(rendered.querySelectorAll('strong')).toHaveLength(2);
+    expect(rendered.querySelectorAll('code')).toHaveLength(4);
+    expect(rendered.querySelector('hr')).not.toBeNull();
+    expect(rendered.textContent).toContain('⚠️ Must not merge automatically');
+  });
+
+  it('shows a provider-rendered form as a safe read-only question with the choices and no live controls', () => {
+    const pointer = '::chatgpt-content-reference{index="0" source_message_id="same-message"}';
+    const capture = whole('<div><p>Review these candidates.</p><form>' +
+      '<fieldset><legend>How should I proceed?</legend>' +
+      '<label><input type="radio" name="choice" value="safe">Merge strong matches only</label>' +
+      '<label><input type="radio" name="choice" value="review">Review all matches</label>' +
+      '<button type="submit" onclick="alert(1)">Continue</button></fieldset></form></div>');
+    const rendered = renderedMarkdown(pointer, capture);
+    expect(rendered.textContent).toContain('Review these candidates.');
+    expect(rendered.textContent).toContain('How should I proceed?');
+    expect(rendered.textContent).toContain('Merge strong matches only');
+    expect(rendered.textContent).toContain('Review all matches');
+    expect(rendered.querySelector('.native-prompt-readonly')?.textContent).not.toContain('Continue');
+    expect(rendered.textContent).toContain('Answer this prompt in ChatGPT');
+    expect(rendered.querySelector('.native-prompt-readonly')).not.toBeNull();
+    expect(rendered.querySelector('form, input, button, fieldset')).toBeNull();
+    expect(rendered.querySelector('[onclick]')).toBeNull();
+  });
+
+  it('mirrors an anchored native choice prompt alongside the canonical Markdown without mirroring unrelated controls', () => {
+    const capture = whole('<div><p>Which option should we use?</p>' +
+      '<div role="radiogroup" aria-label="Which option should we use?">' +
+      '<div role="radio" aria-checked="false">Keep the original</div>' +
+      '<div role="radio" aria-checked="false">Merge the records</div></div>' +
+      '<button aria-label="Copy">Copy</button></div>');
+    const rendered = renderedMarkdown('**Which option should we use?**', capture);
+    expect(rendered.textContent).toContain('Keep the original');
+    expect(rendered.textContent).toContain('Merge the records');
+    expect(rendered.textContent?.match(/Which option should we use\?/g)).toHaveLength(1);
+    expect(rendered.textContent).toContain('Answer this prompt in ChatGPT');
+    expect(rendered.textContent).not.toContain('Copy');
+    expect(rendered.querySelector('[role="radio"], button')).toBeNull();
+    expect(renderedMarkdown('An unrelated newer reply.', capture).textContent).not.toContain('Merge the records');
+    // A long introduction must not hide a legitimately matching prompt at the end.
+    const later = renderedMarkdown('Background. '.repeat(40) + '\n\n**Which option should we use?**', capture);
+    expect(later.textContent).toContain('Keep the original');
+    // A malicious or escaped sample of a form is not an interactive prompt.
+    const unsafe = whole('<pre><form><p>Which option should we use?</p><button>Fake choice</button></form></pre>');
+    expect(renderedMarkdown('**Which option should we use?**', unsafe).textContent).not.toContain('Fake choice');
+  });
   it('renders ChatGPT\'s writing block as a titled quote instead of its raw directive', () => {
     const rendered = renderedMarkdown(':::writing{variant="standard" id="58321" title="Clear <rewrite>"}\nWe want the app to be **faster**.\n:::\n\nAfter the block.');
     const quote = rendered.querySelector('blockquote')!;
