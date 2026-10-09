@@ -771,6 +771,15 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.remove.mock.calls).toEqual([[7]]);
     expect(h.create).not.toHaveBeenCalled();
   });
+  it('closes a sent temporary helper that ChatGPT moved to its own chat', async () => {
+    // After Send the helper lives at /c/<id>?temporary-chat=true and no longer carries cos-input.
+    const h = await worker([{ id: firstId, conversationId: secondId, owner: '7:planner:1', lifetime: 'temporary-planner', close: true, retire: true } as any]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}?temporary-chat=true` });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'planner', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_id, message) => message.type === 'clf-close-temporary-planner' ? { safe: true } as never : { ok: true });
+    await h.maintain();
+    expect(h.remove.mock.calls).toEqual([[7]]);
+  });
   it.each(['draft', 'navigation'])('keeps a retiring helper when %s prevents safe closure', async reason => {
     const work = { id: secondId, conversationId: null };
     const h = await worker([{ id: firstId, conversationId: null, owner: '7:planner:1', lifetime: 'temporary-planner', close: true, replacements: [work] } as any]);
