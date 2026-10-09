@@ -147,9 +147,11 @@ function paintCost(): void {
   const grid = el('div', 'heat-grid'); grid.setAttribute('role', 'group');
   grid.style.gridTemplateColumns = `var(--heat-label) repeat(${weeks}, minmax(0, 1fr))`;
   const place = (node: HTMLElement, row: number, column: string) => { node.style.gridRow = String(row); node.style.gridColumn = column; grid.append(node); };
-  for (let row = 0; row < 7; row += 2) {
+  // Every row owns its label cell, named on every other day: the column stays opaque while a
+  // narrow window scrolls the weeks underneath it.
+  for (let row = 0; row < 7; row += 1) {
     const label = el('span', 'heat-day'); label.setAttribute('aria-hidden', 'true');
-    ui(label, 'textContent', () => new Date(2026, 8, 21 + row).toLocaleDateString(currentLanguage(), { weekday: 'short' }));
+    if (row % 2 === 0) ui(label, 'textContent', () => new Date(2026, 8, 21 + row).toLocaleDateString(currentLanguage(), { weekday: 'short' }));
     place(label, row + 2, '1');
   }
   // Label each of the twelve months, including a month starting in the current week.
