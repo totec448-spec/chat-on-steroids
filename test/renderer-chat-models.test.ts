@@ -148,6 +148,23 @@ it('keeps an unknown non-Latin saved worker model unverified instead of matching
   expect(model.value).toBe('完全不同'); expect(model.selectedOptions[0]!.disabled).toBe(true);
 });
 
+it('shows the built-in Goal, Loop and Plan model as the one GPT-6 the picker lists (#1217)', async () => {
+  // 2.1.31 test round: the default was the lane alias gpt-6-thinking, so this select listed "GPT-6" and
+  // a selected "GPT-6 · gpt-6-thinking" with its internal id on every fresh install.
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: 'gpt-6', label: 'GPT-6', efforts: ['none', 'medium', 'high', 'xhigh'], aliases: ['gpt-6', 'gpt-6-thinking'] },
+    { id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['none', 'medium', 'high', 'xhigh'] }];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', models } }) } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve(); await Promise.resolve();
+  const helper = dom.window.document.getElementById('helperModel') as HTMLSelectElement;
+  expect([...helper.options].map(option => option.textContent)).toEqual(['GPT-6', 'GPT-5.6']);
+  expect(helper.value).toBe('gpt-6');
+  expect((dom.window.document.getElementById('helperReasoning') as HTMLSelectElement).value).toBe('high');
+});
+
 it.each([true, false])('a model-rejection refresh waits beyond cached availability (still available=%s)', async available => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -447,7 +464,7 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   expect(dom.window.document.getElementById('workerModelVerification')!.title)
     .toBe("This ChatGPT account doesn't offer this model, so ChatGPT's current model is used.");
   expect(dom.window.document.getElementById('helperModelVerification')!.hasAttribute('hidden')).toBe(true);
-  // The built-in helper default is ChatGPT's GPT-6 thinking lane.
+  // The built-in helper default is the GPT-6 family; this account lists it as gpt-6-thinking, which it resolves to.
   expect(select('helperModel').value).toBe('gpt-6-thinking');
   // Selects without the badge still say so in the option itself.
   applyChatModels({ multiAgent: { defaultModel: 'unseen', defaultReasoning: 'high' }, goal: { helperModel: 'first', helperReasoning: 'ultra' } } as Config);
