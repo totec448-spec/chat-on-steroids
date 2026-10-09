@@ -57,7 +57,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const installed = new Set(skills.map(skill => skill.id));
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const available = recommended.filter(entry => !installed.has(entry.id) &&
-      `${entry.id} ${entry.name} ${entry.description}`.toLocaleLowerCase().includes(query));
+      `${entry.id} ${entry.name} ${entry.description} ${t(entry.description)}`.toLocaleLowerCase().includes(query));
     section.hidden = available.length === 0;
     ui($('skillsRecommendedCount'), 'textContent', () => t(available.length === 1 ? '{0} skill' : '{0} skills', [available.length]));
     const host = $('skillsRecommended');
@@ -68,7 +68,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const body = el('div', 'plugin-entry pet-library-entry');
       const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
       const title = el('div', 'plugin-card-title');
-      title.append(el('h2', '', entry.name), el('p', 'muted', entry.description));
+      title.append(el('h2', '', entry.name), el('p', 'muted', () => t(entry.description)));
       const foot = el('div', 'plugin-card-foot');
       foot.append(el('span', 'skill-library-id', `/${entry.id}`));
       const install = el('button', 'btn skill-recommended-install', () => t('Install')) as HTMLButtonElement;
