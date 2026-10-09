@@ -2441,7 +2441,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         pluginRefreshRequests: getConfig().ui.autoRefreshPlugins === true ? pluginRefreshPublications().map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })) : [],
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
-        inputs: [...pendingInputs.filter(input => (!input.conversationId || runningToolCalls(input.conversationId) === 0) &&
+        // A message for the running turn goes in while a call runs: ChatGPT keeps that call's result (#1231).
+        inputs: [...pendingInputs.filter(input => (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
             !inputHeldElsewhere(input, browser)),
           ...inputRows.filter(row => row.lifetime === 'temporary-planner' && ['sent', 'cancelled', 'failed'].includes(row.state))
             // After Send, ChatGPT moves a helper to /c/<id>?temporary-chat=true without its cos-input
