@@ -2050,5 +2050,6 @@
   "Your settings stay put": "Tus ajustes se mantienen",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Un archivo de ajustes que la app no puede leer ya no lo restablece todo: la app lo lee igualmente o guarda una copia.",
   "Recovery stays on": "La recuperación sigue activa",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Cuando la app reutiliza la pestaña de un chat inactivo para un chat nuevo, ese chat conserva su recuperación automática."
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Cuando la app reutiliza la pestaña de un chat inactivo para un chat nuevo, ese chat conserva su recuperación automática.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Detenido. ChatGPT ya no muestra este turno en curso."
 }
