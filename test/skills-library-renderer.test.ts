@@ -203,3 +203,34 @@ it('offers recommended skills that are not installed yet and installs one on req
   expect(installRecommendedSkill).toHaveBeenCalledWith('code-review');
   expect(w.document.querySelector('[data-skill-id="code-review"]')).not.toBeNull();
 });
+
+it('shows recommended skill descriptions in the interface language and finds them by that text', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+    <section id="skillsRecommendedSection" hidden><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div></section>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const { RECOMMENDED_SKILLS } = await import('../src/shared/recommended-skills.js');
+  const review = RECOMMENDED_SKILLS.find(skill => skill.id === 'code-review')!;
+  const writing = RECOMMENDED_SKILLS.find(skill => skill.id === 'clear-writing')!;
+  const api = {
+    listManagedSkills: vi.fn(async () => ({ ok: true as const, data: [] })),
+    listRecommendedSkills: vi.fn(async () => ({ ok: true as const, data: [review, writing].map(({ id, name, description }) => ({ id, name, description, installed: false })) })),
+    skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] }))
+  };
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+    initSkillsLibrary(api as never)();
+    const card = () => w.document.querySelector('[data-recommended-skill-id="code-review"] p.muted')?.textContent;
+    await vi.waitFor(() => expect(card()).toMatch(/^Prüfe eine Änderung/));
+    const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
+    search.value = 'befunde'; search.dispatchEvent(new w.Event('input'));
+    await vi.waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('[data-recommended-skill-id]')].map(item => item.dataset.recommendedSkillId)).toEqual(['code-review']));
+  } finally { setLanguage('en'); }
+});
