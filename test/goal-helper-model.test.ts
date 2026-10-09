@@ -44,6 +44,19 @@ it('resolves a saved display label to its unique observed family', () => {
   expect(goalHelperSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
 });
 
+it('resolves a label saved before models had full names (2.1.31: "6" is now "GPT-6")', () => {
+  // A Mac config kept helperModel "6" from the old picker; after the rename every Goal decision
+  // silently fell back to ChatGPT's current selection.
+  state.models = [
+    { id: 'gpt-6', label: 'GPT-6', efforts: ['none', 'medium', 'high', 'xhigh'], aliases: ['gpt-6', 'gpt-6-thinking'] },
+    { id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['none', 'medium', 'high', 'xhigh'] }
+  ];
+  state.goal = { helperModel: '6', helperReasoning: 'high' };
+  expect(goalHelperSelection()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+  state.goal = { helperModel: '5.6', helperReasoning: 'pro' };
+  expect(goalHelperSelection()).toEqual({ model: 'gpt-5-6', reasoningEffort: null });
+});
+
 it('keeps rejecting a display label shared by several families', () => {
   state.models.push({ id: 'gpt-5-5-pro', label: '5.5', efforts: ['pro'] });
   state.goal = { helperModel: '5.5', helperReasoning: 'high' };

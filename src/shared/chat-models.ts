@@ -52,8 +52,11 @@ const normalizeChatModelName = (value: string): string =>
 export function resolveChatModel(models: ChatModelOption[], value: string): ChatModelOption | undefined {
   const exact = models.filter(choice => choice.id === value || choice.aliases?.includes(value));
   if (exact.length) return exact.length === 1 ? exact[0] : undefined;
-  const name = normalizeChatModelName(value);
-  const matches = name ? models.filter(choice => normalizeChatModelName(choice.label) === name) : [];
+  // Labels became full names in 2.1.31 ("6" → "GPT-6", "5.6" → "GPT-5.6"); a value saved under the
+  // older label still means the same family, so a leading "GPT" never decides the match.
+  const bare = (text: string): string => normalizeChatModelName(text).replace(/^gpt(?=\d)/, '');
+  const name = bare(value);
+  const matches = name ? models.filter(choice => bare(choice.label) === name) : [];
   return matches.length === 1 ? matches[0] : undefined;
 }
 /** Keep the selected generation intact; Pro is already a complete model label. */
