@@ -1930,6 +1930,8 @@
     baselineSections = [];
     baselineMarks = [];
     stopRequestedAt = 0;
+    stoppedEnd = null;
+    resumedFromStop = null;
     stallReported = false;
     fiberTerminalMessageId = null;
     // The settle window names a turn in the conversation being left behind. Carrying it
@@ -1962,6 +1964,52 @@
   }
 
   const stoppedAppCommands = new Set();
+  /**
+   * The turn this document last ended as stopped, while it stays this document's turn.
+   *
+   * ChatGPT can still deliver a call it dispatched before it obeyed Stop, and recorder.ts then
+   * reopens the turn because the same request kept calling tools after the page's end. Only
+   * this page can tell whether ChatGPT is really running that turn again: see
+   * resumeStoppedTurn() and the idle branch of stopAppTurn().
+   */
+  let stoppedEnd = null;
+  /**
+   * A stopped turn this document follows again because exact work proved it reopened. The
+   * user's Stop still stands: ChatGPT going quiet without a final answer ends it as stopped
+   * (endOutcome), while a final answer still completes it and running keeps it open.
+   */
+  let resumedFromStop = null;
+  function resumeStoppedTurn(recordedQuestionId) {
+    const resumed = turnId;
+    stopRequestedAt = 0;
+    if (!adoptOpenTurn(resumed, recordedQuestionId)) return false;
+    resumedFromStop = resumed;
+    return true;
+  }
+  function restateStoppedEnd() {
+    if (!stoppedEnd || stoppedEnd.turnId !== turnId || generating) return false;
+    emit({ kind: 'turn_end', turnId, outcome: 'stopped', ...(stoppedEnd.detail ? { detail: stoppedEnd.detail } : {}) });
+    void flush();
+    return true;
+  }
+  /**
+   * A stopped turn the app holds open again although its live projection names no active turn:
+   * its own feed carries this page's `turn_end` and still records the turn, which only a reopening
+   * after that end produces. Follow it again as for a call started after Stop. Each reopening is
+   * proven by a newer call of the turn, and is answered once, so an end the app does not take
+   * cannot become a repeating stream of them.
+   */
+  function reconcileReopenedStop(data, recordedQuestionId) {
+    if (generating || !stoppedEnd || stoppedEnd.turnId !== turnId || data.recordedTurnId !== turnId ||
+        ![...streamBySeq.values()].some(entry => entry?.kind === 'turn_end' && entry.turnId === turnId)) return;
+    let reopening = -1;
+    for (const [seq, entry] of streamBySeq) {
+      if (entry?.kind === 'tool_call' && entry.turnId === turnId && seq > reopening) reopening = seq;
+    }
+    if (stoppedEnd.resumedFor === reopening) return;
+    stoppedEnd.resumedFor = reopening;
+    resumeStoppedTurn(recordedQuestionId);
+  }
   function stopQuestionMatches(userMessageId) {
     const users = CLF_DOM.messages().filter(message => message.role === 'user' && message.id);
     return typeof userMessageId === 'string' && !!userMessageId && users.at(-1)?.id === userMessageId;
@@ -1994,6 +2042,29 @@
     if (stoppedAppCommands.has(commandId)) {
       await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected, status: 'sent' });
       return true;
+    }
+    // The app asks to stop a turn this page already ended as stopped and that late work reopened,
+    // whether or not this page follows it again (see stoppedEnd). With ChatGPT idle there is
+    // nothing to click: the answer is the end, said again or taken by the quiet path at once.
+    const idleStopped = () => current() && !CLF_DOM.generating() &&
+      (generating ? resumedFromStop === expected : stoppedEnd?.turnId === expected);
+    if (idleStopped()) {
+      const reply = await ask({ type: 'stop_redeem', id: commandId, client: RUN_ID, conversationId: target });
+      observe();
+      const command = reply?.command;
+      if (!reply?.ok || command?.type !== 'stop' || command.turnId !== expected || command.conversationId !== target) return false;
+      let stopped = false;
+      if (idleStopped()) {
+        if (generating) { stopRequestedAt = Date.now(); stopped = true; }
+        else stopped = restateStoppedEnd();
+      }
+      if (stopped) {
+        stoppedAppCommands.add(commandId);
+        if (stoppedAppCommands.size > 100) stoppedAppCommands.delete(stoppedAppCommands.values().next().value);
+      }
+      await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected,
+        status: stopped ? 'sent' : 'failed', error: stopped ? undefined : 'native_stop_unavailable_or_turn_changed' });
+      return stopped;
     }
     const native = currentAssistantTurn();
     const nativeId = pageTurnIds.get(expected);
@@ -2186,7 +2257,7 @@
    * gives no evidence for, so it is never made: an unexplained stop stays unknown.
    */
   function endOutcome(turn, nativeFinal = false) {
-    if (stopRequestedAt && !nativeFinal) return {
+    if ((stopRequestedAt || (resumedFromStop && resumedFromStop === turnId)) && !nativeFinal) return {
       outcome: 'stopped',
       detail: t('content_turn_stop_requested', 'Stop was requested; the native page no longer shows generation.')
     };
@@ -2544,6 +2615,11 @@
     const nativeEnd = result.outcome === 'completed' ? fiberTurnFor(ended) : null;
     const imageEnd = nativeEnd?.endMessageId && nativeEnd.images?.some(image =>
       image.messageId === nativeEnd.endMessageId && image.providerStatus === 'finished_successfully');
+    if (endedTurnId) {
+      // The same turn ending again keeps the reopening it already followed (reconcileReopenedStop).
+      const resumedFor = stoppedEnd?.turnId === endedTurnId ? stoppedEnd.resumedFor : undefined;
+      stoppedEnd = result.outcome === 'stopped' ? { turnId: endedTurnId, detail: result.detail, resumedFor } : null;
+    }
     if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result,
       ...(imageEnd ? { providerMessageId: nativeEnd.endMessageId } : {}) });
     // Same moment, the other reader: the goal loop wants this turn's answer while `ended`
@@ -6931,7 +7007,8 @@
       appSettledQuestionId = typeof data.settledQuestionId === 'string' && data.settledQuestionId ? data.settledQuestionId : null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress(turnId, 'tool-resumed');
       const recordedQuestionId = typeof data.recordedQuestionId === 'string' ? data.recordedQuestionId : null;
-      if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) adoptOpenTurn(turnId, recordedQuestionId);
+      if (resumedStoppedTurn && !generating && appActiveTurnId === turnId) resumeStoppedTurn(recordedQuestionId);
+      reconcileReopenedStop(data, recordedQuestionId);
       const lateAdoption = !generating && !turnId && genCount === 0 && !stopRequestedAt && !commandAttempt &&
         recordedQuestionId && stopQuestionMatches(recordedQuestionId);
       if (resumeIdentityPending || lateAdoption) {

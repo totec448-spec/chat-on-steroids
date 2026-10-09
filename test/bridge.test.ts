@@ -3107,6 +3107,31 @@ describe('automatic compaction', () => {
     });
   });
 
+  // 2026-10-09: briefly opening an old worker chat whose turn had been open since 09-25 filed an
+  // automatic compaction at 408k tokens, and its pickups reloaded the chat for 50 minutes.
+  it('does not compact a chat whose only claim to work is a turn opened long ago', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac1d';
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'turn_start', time: Date.now() - 8 * 24 * 60 * 60_000, turnId: 'turn-left-open' }, ...over()]
+        }
+      });
+      await settled();
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      const sessionId = activity.body.sessionId as string;
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(continuationForSession(sessionId)).toBeNull();
+
+      // A turn that really runs now still compacts.
+      await request('POST', '/events', { body: { conversationId, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-now' }, ...over()] } });
+      await settled();
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true }), { timeout: 3000 });
+    });
+  });
+
   it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac09';
@@ -11982,6 +12007,29 @@ describe('unattributed activity recovery', () => {
     await events(SOLO, [openTurn('turn-new-work')]);
     await request('POST', '/closed', { body: { conversationId: SOLO } });
     expect(await maintenance()).toMatchObject({ conversationId: SOLO, reason: 'no-tab' });
+  });
+
+  /**
+   * A turn whose page went away mid-turn stays open on purpose: ChatGPT may still be working on
+   * it. But one left that way for days is not a running turn. Measured 2026-10-09: a test chat's
+   * turn had been open since 2026-10-01; opening the chat for a few seconds and leaving it made
+   * the app reopen its tab, and the watchdog ended the turn ten minutes later. Activity still
+   * counts on its own clock; only the bare open turn ages out.
+   */
+  it('does not reopen a chat whose only claim to work is a turn opened long ago', async () => {
+    vi.useFakeTimers();
+    try {
+      const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
+      await pair();
+      await events(SOLO, [openTurn('turn-left-open')]);
+      await attributed(SOLO, true);
+      vi.setSystemTime(Date.now() + 8 * 24 * 60 * 60_000);
+      await request('POST', '/closed', { body: { conversationId: SOLO } });
+      expect(await maintenance()).toBeNull();
+      expect(getLog().filter(entry => entry.message.includes('closed its last tab')).at(-1)?.message).toContain('no turn is running in it');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([undefined, false, true])('recovers an owned mid-turn departure only without manual dismissal (manual=%s)', async manual => {

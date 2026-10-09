@@ -1067,7 +1067,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "美元／百万缓存输入 Token · 请输入已核实的对比单价",
   "Unknown rate": "未知单价",
   "{0} cached-input USD per million tokens": "{0} 每百万缓存输入 Token 的美元单价",
-  "{0} + unpriced": "{0} + 未定价部分",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "估算 {0} Token，其中 {1} 无对比单价。仅为缓存输入等值估算，并非账单。",
   "{0}: {1} estimated tokens": "{0}：估算 {1} Token",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "最终前端上下文（本估算最多计入 {2} 个 token）× 去重工具调用数 ÷ {0} × 各模型缓存输入单价 ÷ 一百万 × {1}。",
@@ -2050,5 +2049,6 @@
   "Your settings stay put": "设置不会丢失",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "应用无法读取的设置文件不再导致全部重置：应用会照常读取，或保留一份副本。",
   "Recovery stays on": "恢复保持开启",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "当应用把一个空闲对话的标签页用于新对话时，该对话仍保留自动恢复。"
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "当应用把一个空闲对话的标签页用于新对话时，该对话仍保留自动恢复。",
+  "Stopped. ChatGPT no longer shows this turn running.": "已停止。ChatGPT 不再显示此轮次正在运行。"
 }

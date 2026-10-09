@@ -973,7 +973,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1M token đầu vào được lưu đệm · nhập đơn giá so sánh đã xác minh",
   "Unknown rate": "Không xác định đơn giá",
   "{0} cached-input USD per million tokens": "{0} USD đầu vào được lưu đệm trên một triệu token",
-  "{0} + unpriced": "{0} + phần chưa có đơn giá",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "{0} token ước tính; {1} chưa có đơn giá so sánh. Giá trị tương đương đầu vào được lưu đệm, không phải hóa đơn.",
   "{0}: {1} estimated tokens": "{0}: {1} token ước tính",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Ngữ cảnh cuối của giao diện phía nhà cung cấp (giới hạn ở {2} token cho ước tính này) × số lần gọi công cụ duy nhất ÷ {0} × đơn giá đầu vào được lưu đệm của từng mô hình ÷ 1M × {1}.",
@@ -2050,5 +2049,6 @@
   "Your settings stay put": "Cài đặt của bạn được giữ nguyên",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Tệp cài đặt mà ứng dụng không đọc được không còn đặt lại mọi thứ: ứng dụng vẫn đọc nó hoặc giữ một bản sao.",
   "Recovery stays on": "Khôi phục vẫn bật",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Khi ứng dụng dùng lại tab của một cuộc trò chuyện yên tĩnh cho cuộc trò chuyện mới, cuộc trò chuyện đó vẫn giữ khôi phục tự động."
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Khi ứng dụng dùng lại tab của một cuộc trò chuyện yên tĩnh cho cuộc trò chuyện mới, cuộc trò chuyện đó vẫn giữ khôi phục tự động.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Đã dừng. ChatGPT không còn hiển thị lượt này đang chạy."
 }

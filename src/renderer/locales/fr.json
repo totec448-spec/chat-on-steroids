@@ -986,7 +986,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1 M d'entrée mise en cache · saisissez un tarif de comparaison vérifié",
   "Unknown rate": "Tarif inconnu",
   "{0} cached-input USD per million tokens": "{0} USD d'entrée mise en cache par million de jetons",
-  "{0} + unpriced": "{0} + sans tarif",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "{0} jetons estimés ; {1} n'ont pas de tarif de comparaison. Équivalent d'entrée mise en cache, pas une facture.",
   "{0}: {1} estimated tokens": "{0} : {1} jetons estimés",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Contexte final du frontend (plafonné à {2} jetons pour cette estimation) × appels d'outil uniques ÷ {0} × tarif d'entrée mise en cache de chaque modèle ÷ 1 M × {1}.",
@@ -2050,5 +2049,6 @@
   "Your settings stay put": "Vos réglages restent en place",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Un fichier de réglages que l'app ne peut pas lire ne réinitialise plus tout : l'app le lit quand même ou en garde une copie.",
   "Recovery stays on": "La récupération reste active",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Quand l'app réutilise l'onglet d'une conversation inactive pour une nouvelle, celle-ci garde sa récupération automatique."
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Quand l'app réutilise l'onglet d'une conversation inactive pour une nouvelle, celle-ci garde sa récupération automatique.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Arrêté. ChatGPT n’affiche plus ce tour en cours."
 }
