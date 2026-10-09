@@ -13186,8 +13186,9 @@
         sendResponse({ safe: temporaryPlannerPage() && (location.href.includes(`cos-input=${message.id}`) || routedHelper) &&
           !generating && !CLF_DOM.generating() && pendingTools === 0 && !CLF_DOM.hasComposerAttachments() &&
           !(CLF_DOM.composer()?.textContent || '').trim() &&
-          // A remembered helper whose decision is gone may still show its own one prompt.
-          (users.length === 0 || (exact && users.length === 1 && (desktopDecision ? matchesSubmittedUser(users[0], desktopDecision.text) : !!servedPlanner))) });
+          // A remembered helper whose decision is gone may still show its own one prompt. The app
+          // inserted that prompt, so ChatGPT may store it Markdown-escaped, as its receipt allows.
+          (users.length === 0 || (exact && users.length === 1 && (desktopDecision ? matchesSubmittedBootstrap(users[0], desktopDecision.text) : !!servedPlanner))) });
         return false;
       }
       if (message.type === 'clf-render-stream') {
