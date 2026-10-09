@@ -469,6 +469,8 @@ type CommandStep = typeof COMMAND_STEPS[number];
  * the model takes seconds; this leaves room for a throttled background tab.
  */
 const RESUME_STEP_STALL_MS = 3 * 60_000;
+/** How long a turn's start alone, with no activity since, keeps its closed tab worth reopening. */
+const OPEN_TURN_RECOVERY_MS = 60 * 60_000;
 const RESUME_STALL_STEPS: ReadonlySet<CommandStep> = new Set(['composer', 'model', 'composer-after-model']);
 
 const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
@@ -2821,9 +2823,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // Read before closeConversation() forgets the page: the
       // page's own open turn, or this app's standing definition of a chat that is working —
       // an attributed call or current-turn observation inside the silence window.
+      // A bare open turn ages out: one left open by a page that went away days ago is not a
+      // running turn, and reopening its tab on a brief visit only wakes the ten-minute watchdog
+      // (2026-10-09). Activity in the silence window still counts however old the turn is.
       const working =
         liveConversations().some(
-          (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId))
+          (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId)) &&
+            (entry.activeTurnStartedAt === null || Date.now() - entry.activeTurnStartedAt < OPEN_TURN_RECOVERY_MS)
         ) || (activeUntil.get(id)?.until ?? 0) > Date.now();
       const manual = body['manual'] === true;
       if (manual) {

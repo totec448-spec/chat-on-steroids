@@ -11984,6 +11984,29 @@ describe('unattributed activity recovery', () => {
     expect(await maintenance()).toMatchObject({ conversationId: SOLO, reason: 'no-tab' });
   });
 
+  /**
+   * A turn whose page went away mid-turn stays open on purpose: ChatGPT may still be working on
+   * it. But one left that way for days is not a running turn. Measured 2026-10-09: a test chat's
+   * turn had been open since 2026-10-01; opening the chat for a few seconds and leaving it made
+   * the app reopen its tab, and the watchdog ended the turn ten minutes later. Activity still
+   * counts on its own clock; only the bare open turn ages out.
+   */
+  it('does not reopen a chat whose only claim to work is a turn opened long ago', async () => {
+    vi.useFakeTimers();
+    try {
+      const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
+      await pair();
+      await events(SOLO, [openTurn('turn-left-open')]);
+      await attributed(SOLO, true);
+      vi.setSystemTime(Date.now() + 8 * 24 * 60 * 60_000);
+      await request('POST', '/closed', { body: { conversationId: SOLO } });
+      expect(await maintenance()).toBeNull();
+      expect(getLog().filter(entry => entry.message.includes('closed its last tab')).at(-1)?.message).toContain('no turn is running in it');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([undefined, false, true])('recovers an owned mid-turn departure only without manual dismissal (manual=%s)', async manual => {
     const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
     await pair();
