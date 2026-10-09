@@ -244,7 +244,7 @@
   "Loop response source": "Источник ответов Цикла",
   "Loop keeps going until you switch it off.": "Цикл продолжает работу, пока вы его не отключите.",
   "Goal, Loop and Plan model": "Модель для Цели, Цикла и Плана",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "Модель для сообщений и планов, создаваемых ChatGPT. Для планирования ниже выберите GPT-5.6 и High.",
+  "Model for ChatGPT-generated messages and plans.": "Модель для сообщений и планов, создаваемых ChatGPT.",
   "Goal, Loop and Plan reasoning": "Уровень рассуждений для Цели, Цикла и Плана",
   "Used with the ChatGPT model above; independent from API reasoning.": "Используется с указанной выше моделью ChatGPT и не зависит от уровня рассуждений API.",
   "Include tool details in handoffs": "Включать сведения об инструментах в передачу контекста",

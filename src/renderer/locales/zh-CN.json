@@ -252,7 +252,7 @@
   "Loop response source": "循环回复来源",
   "Loop keeps going until you switch it off.": "循环会持续运行，直到你关闭它。",
   "Goal, Loop and Plan model": "目标、循环和计划模型",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "用于 ChatGPT 生成的消息和计划。规划时可在下方选择 GPT-5.6 和高推理强度。",
+  "Model for ChatGPT-generated messages and plans.": "用于 ChatGPT 生成的消息和计划。",
   "Goal, Loop and Plan reasoning": "目标、循环和计划推理强度",
   "Used with the ChatGPT model above; independent from API reasoning.": "用于上方的 ChatGPT 模型，与 API 推理设置相互独立。",
   "Include tool details in handoffs": "在交接中包含工具详情",
