@@ -226,7 +226,8 @@ it.each(['2026-09-28', '2026-10-01', '2027-01-01', '2028-02-29'])('draws an annu
   expect(cells.filter(cell => cell.dataset.level && cell.dataset.level !== '0')).toHaveLength(2);
   const cellAt = (cell: HTMLElement) => [cell.style.gridRow, cell.style.gridColumn];
   expect(cellAt(today)).toEqual([String(todayRow + 2), '53']);
-  expect([...heat.querySelectorAll('.heat-day')].map(label => label.textContent)).toEqual(['Mon', 'Wed', 'Fri', 'Sun']);
+  // Every row has its (sticky) label cell; every other day is named.
+  expect([...heat.querySelectorAll('.heat-day')].map(label => label.textContent)).toEqual(['Mon', '', 'Wed', '', 'Fri', '', 'Sun']);
   expect(heat.querySelectorAll('.heat-month')).toHaveLength(12);
   expect(new Set([...heat.querySelectorAll('.heat-month')].map(label => label.textContent)).size).toBe(12);
   expect(heat.querySelector('.heat-legend')!.textContent).toBe('LessMore');
