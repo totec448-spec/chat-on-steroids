@@ -2076,6 +2076,9 @@ opening authority; navigation and delayed adoption never fabricate another submi
 An exact terminal Fiber descriptor on the latest assistant turn also vetoes recovery of an
 unrecorded generation from a persistent Stop control. An older terminal before a newer user
 question grants no such veto; a presentation artifact must not mint another active turn.
+A recovered generation has no Send baseline. Its history is the finals Fiber reported before
+the generation was first seen plus those drawn above its question; a final that arrives inside
+the settle window for that question is its own and may end it.
 
 Native Send/Stop controls belong to the current composer's form and must be rendered outside
 transcript/extension surfaces. Hidden, inert or quoted controls grant no action; multiple Send

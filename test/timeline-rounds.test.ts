@@ -138,6 +138,55 @@ describe('timeline rounds from the turn outline', () => {
     ].map(line => line.startsWith('"') ? `work[] ${line}` : line));
   });
 
+  // A message you send while the turn works reaches it inside a call's result (#1231). It stands
+  // where it arrived; the outline's later rounds follow it instead of being drawn above it.
+  const injected = (): FlowRow => {
+    const event = { ...base(), source: 'app', kind: 'user_message', inputId: 'i1', inputDelivery: 'confirmed', message: text('Also say BLUE') } as SessionEvent;
+    return { key: `input:${event.seq}`, event };
+  };
+
+  it('keeps a message sent during the turn between the rounds it arrived between', () => {
+    const rows = [user(), call('Created a.txt'), call('Created b.txt'), injected(), call('Created c.txt'), call('Ran ls', 'exec_command'), answer()];
+    expect(shape(structureTimeline(rows, { [TURN]: gpt6 }, false))).toEqual([
+      `row ${rows[0]!.key}`,
+      'say "Vou criar os três arquivos em sequência."',
+      'say "Vou criar `a.txt` com uma linha de teste."',
+      `work[${rows[1]!.key}] "Adicionado arquivo de teste ao projeto"`,
+      'say "Vou criar `b.txt` com uma linha de teste."',
+      `work[${rows[2]!.key}] "Adicionou o arquivo B ao projeto"`,
+      `row ${rows[3]!.key}`,
+      `work[${rows[4]!.key},${rows[5]!.key}] "Adicionados e listados arquivos"`,
+      `row ${rows[6]!.key}`
+    ]);
+  });
+
+  it('splits a round a message arrived in the middle of, titling the part that finished it', () => {
+    const rows = [user(), call('Created a.txt'), call('Created b.txt'), call('Created c.txt'), injected(), call('Ran ls', 'exec_command'), answer()];
+    const parts = structureTimeline(rows, { [TURN]: gpt6 }, false);
+    expect(shape(parts).slice(5)).toEqual([
+      `work[${rows[2]!.key}] "Adicionou o arquivo B ao projeto"`,
+      `work[${rows[3]!.key}]`,
+      `row ${rows[4]!.key}`,
+      `work[${rows[5]!.key}] "Adicionados e listados arquivos"`,
+      `row ${rows[6]!.key}`
+    ]);
+    expect(new Set(parts.map(part => part.key)).size).toBe(parts.length);
+  });
+
+  it('draws a sentence once when the message splits the turn before it', () => {
+    const rows = [user(), call('Created a.txt'), injected(), say('Vou criar `b.txt` com uma linha de teste.', 'm-3'), call('Created b.txt'), answer()];
+    expect(shape(structureTimeline(rows, { [TURN]: gpt6.slice(0, 7) }, false))).toEqual([
+      `row ${rows[0]!.key}`,
+      'say "Vou criar os três arquivos em sequência."',
+      'say "Vou criar `a.txt` com uma linha de teste."',
+      `work[${rows[1]!.key}] "Adicionado arquivo de teste ao projeto"`,
+      `row ${rows[2]!.key}`,
+      `say ${rows[3]!.key}`,
+      `work[${rows[4]!.key}] "Adicionou o arquivo B ao projeto"`,
+      `row ${rows[5]!.key}`
+    ]);
+  });
+
   it('keeps the answer out of the rounds while it is still being written', () => {
     const rows = [user(), call('Created a.txt'), say('Done: three files.', 'answer-1')];
     const trace: TurnTrace = [...gpt6.slice(2, 4), { kind: 'answer', id: 'answer-1' }];
