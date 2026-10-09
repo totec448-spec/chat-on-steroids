@@ -1936,7 +1936,39 @@
     const own = (Array.isArray(item.contentReferences) ? item.contentReferences : []).filter(reference =>
       reference?.type === 'dil' && id && reference.source_message_id === id &&
       typeof reference.model_dil_v2?.fallbackMarkdown === 'string' && reference.model_dil_v2.fallbackMarkdown.trim());
-    return own.length === 1 ? own[0].model_dil_v2.fallbackMarkdown.slice(0, MAX_RENDERED_TEXT) : content;
+    return own.length === 1 ? unescapeFallbackMarkdown(own[0].model_dil_v2.fallbackMarkdown).slice(0, MAX_RENDERED_TEXT) : content;
+  }
+  /**
+   * The reply as the model wrote it. `fallbackMarkdown` keeps its formatting but backslash-escapes
+   * every literal punctuation mark in plain text (measured on GPT-6, 2026-10-09: `2\^10 = 1024 \[ok\]`,
+   * and the Goal marker as `\[\[COS\_GOAL:COMPLETE\]\]`), while code spans and fenced code keep
+   * theirs verbatim. Every reader of a reply (Goal markers, Loop decisions, compaction briefs) expects
+   * the model's own text, so outside code each `\` before ASCII punctuation is dropped, as Markdown
+   * itself would on rendering.
+   */
+  function unescapeFallbackMarkdown(markdown) {
+    let fence = null;
+    return markdown.split('\n').map(line => {
+      const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (fence) {
+        if (marker && marker[0] === fence[0] && marker.length >= fence.length && !line.slice(line.indexOf(marker) + marker.length).trim()) fence = null;
+        return line;
+      }
+      if (marker && !(marker[0] === '`' && line.slice(line.indexOf(marker) + marker.length).includes('`'))) { fence = marker; return line; }
+      let out = '';
+      for (let at = 0; at < line.length;) {
+        const char = line[at];
+        if (char === '\\' && /[!-\/:-@[-`{-~]/.test(line[at + 1] || '')) { out += line[at + 1]; at += 2; continue; }
+        if (char === '`') {
+          const run = /^`+/.exec(line.slice(at))[0];
+          const close = new RegExp(`(?<!\`)${run}(?!\`)`).exec(line.slice(at + run.length));
+          if (close) { const end = at + run.length + close.index + run.length; out += line.slice(at, end); at = end; continue; }
+          out += run; at += run.length; continue;
+        }
+        out += char; at++;
+      }
+      return out;
+    }).join('\n');
   }
   /**
    * The provider's own outline of a shell turn's work, in its order: what the model said between
