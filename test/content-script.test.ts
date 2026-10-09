@@ -3934,6 +3934,21 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
    * as markup that stops mid-element, and the app draws the rest of the message inside the
    * unclosed box it ended in. Neither may cut; the canonical text carries the message.
    */
+  it('passes a complete large stable final through the content-script recorder', async () => {
+    live = await harness();
+    const html = `<div>${'Synthetic handoff prose. '.repeat(6_000)}END_OF_BRIEF</div>`;
+    expect(html.length).toBeGreaterThan(120_000);
+    await replyFiber([], [{
+      turnId: null, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], activities: [],
+      messages: [{ messageId: 'long-final', rawMessageId: 'long-final', role: 'assistant', stable: true,
+        createTime: 1_780_000_000_003, rawText: 'TASK: synthetic brief', renderedHtml: html }]
+    }]);
+    await live.hook.flush();
+    await settle();
+    expect(emitted(live.sent, 'assistant_message').find(row => row.event.messageId === 'long-final')?.event)
+      .toMatchObject({ renderedHtml: html, text: 'TASK: synthetic brief' });
+  });
+
   it('drops an oversized rendered capture instead of publishing cut markup', async () => {
     live = await harness();
     const prose = 'Everything after the code block.';
@@ -3950,7 +3965,7 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
           messageId: 'assistant-over-scan-cap',
           rawMessageId: 'assistant-over-scan-cap',
           role: 'assistant',
-          stable: true,
+          stable: false,
           createTime: 1_780_000_000_001,
           rawText: prose,
           renderedHtml: `<p>${'x'.repeat(130_000)}</p>`

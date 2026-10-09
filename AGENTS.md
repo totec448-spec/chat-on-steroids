@@ -2810,7 +2810,16 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    `turn_end`, exactly one nonempty final. That outranks the mounted Fiber shape, which can
    lose the terminal when ChatGPT remounts a long answer under another assistant id. A second
    generation for the same user message (Retry/regenerate) fails closed; never pick the
-   newest final. The user may edit the **content instructions** used to
+   newest final. After #1205 resolves the native GPT-6 `dil` reference to its
+   `fallbackMarkdown`, large stable finals can still have more than 120k of
+   rendered HTML. The page attaches a bounded (256k), escaped visible-text
+   rendering only with a unique, exact native/Fiber/selection message owner;
+   duplicate, foreign and positional-only DOM associations never authorize it.
+   Content and the `/events` parser preserve this larger final; the existing
+   recorder cap spills full HTML to an overflow asset. The handoff reader retrieves
+   the whole authored text (and any overflow) before the existing 96k-character
+   replacement-prompt budget retains its beginning and end. Ordinary streaming
+   markup keeps the 120k presentation cap. The user may edit the **content instructions** used to
    write that brief; continuation markers, send/provenance framing, tool-detail policy and the
    requirement that the compaction reply contain only the brief remain code-owned invariants.
    The shipped content prompt asks for a lossless, dense operational handoff: roughly

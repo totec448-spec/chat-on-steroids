@@ -89,6 +89,9 @@
   const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
+  // An exact, stable assistant final can have far more than 120k of decorative
+  // markup around the prose. Carry a compact text rendering, not a cut HTML tag.
+  const MAX_LARGE_FINAL_HTML = 256_000;
   // A 15k–20k-token compaction answer is routinely 60k–90k characters. Capping public
   // assistant prose at 32k here made the canonical session transcript lose the back half
   // even though Compact & Resume itself carried the full DOM answer. One event still stays
@@ -947,6 +950,15 @@
       try {
         const holder = block.closest && block.closest('[data-message-id]');
         id = holder ? str(holder.getAttribute('data-message-id')) : null;
+        if (!id && conversationId) {
+          // GPT-6's DIL wrapper may expose its owner only here, not on a
+          // data-message-id parent. Match both identities, never the DOM order.
+          const selected = block.closest && block.closest(
+            '[data-chatgpt-selection-message-id][data-chatgpt-selection-conversation-id]');
+          if (selected?.getAttribute('data-chatgpt-selection-conversation-id') === conversationId) {
+            id = str(selected.getAttribute('data-chatgpt-selection-message-id'));
+          }
+        }
       } catch {
         id = null;
       }
@@ -1069,10 +1081,22 @@
         // lost while the visible remainder ends as an unclosed box. The canonical raw text is
         // always carried beside this, so an absent capture costs presentation, never content.
         const markup = block.innerHTML;
-        renderedHtml =
-          markup.length <= Math.min(MAX_RENDERED_HTML, budget.remaining)
-            ? budgetedText(markup, budget, MAX_RENDERED_HTML)
-            : '';
+        if (markup.length <= Math.min(MAX_RENDERED_HTML, budget.remaining)) {
+          renderedHtml = budgetedText(markup, budget, MAX_RENDERED_HTML);
+        } else if (out[target].role === 'assistant' && id === turnEndMessageId(messages) &&
+                   exactAnchors.get(block) === id) {
+          // The native model text remains the canonical answer (#1205). For a
+          // uniquely owned completed answer, save its visible long-form prose too.
+          // A positional/ambiguous match cannot authorize this larger capture.
+          const visible = typeof block.innerText === 'string' && block.innerText.trim()
+            ? block.innerText : block.textContent || '';
+          const escaped = visible.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
+          const compact = `<div>${escaped}</div>`;
+          if (visible.trim() && compact.length <= Math.min(MAX_LARGE_FINAL_HTML, budget.remaining)) {
+            renderedHtml = budgetedText(compact, budget, MAX_LARGE_FINAL_HTML);
+          }
+        }
       } catch {
         renderedHtml = '';
       }
