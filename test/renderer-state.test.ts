@@ -38,6 +38,67 @@ afterEach(() => {
   vi.resetModules();
 });
 
+it('shows a model saved under its old short label as the model it resolves to (2.1.31 release check)', async () => {
+  // A Mac config kept the Goal model "6" from before full names. #1219 resolves it to GPT-6, but the
+  // generic settings pass then wrote the raw "6" back into the select, which matched no option, so the
+  // setting showed blank on every start and state push.
+  const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+  dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+  installDialog(dom.window);
+  const w = dom.window;
+  w.HTMLElement.prototype.animate = vi.fn() as any;
+  Object.assign(globalThis, { window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+    DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+    HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement });
+  if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+  let stateListener: (state: any) => void = () => undefined;
+  const state = {
+    config: {
+      roots: [{ name: 'repo', path: 'C:\\repo' }], readOnly: true,
+      capabilities: { browse: true, search: true, read: true, metadata: true, create: false, edit: false, move: false, deleteFile: false,
+        command: false, screen: false, control: false, clipboardRead: false, clipboardWrite: false },
+      commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
+      tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
+      ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', defaultChatModel: '5.6', defaultChatReasoning: 'high' },
+      sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
+      compaction: { auto: true, autoTokens: 300000, handoffPrompt: DEFAULT_HANDOFF_PROMPT },
+      multiAgent: { enabled: false, maxWorkers: 2, globalMaxWorkers: 0, allowUnattributedCalls: false, recoverAgentTabs: true, defaultModel: '6', defaultReasoning: 'high' },
+      goal: { enabled: false, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' as const, prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
+        helperModel: '6', helperReasoning: 'high' }
+    },
+    status: { state: 'disconnected', detail: '', publicUrl: null, localUrl: null, handshakeAt: null, lastRequestAt: null, lastToolCallAt: null, health: null, surfaces: [] },
+    hasApiKey: false, hasGoalKey: false, resolvedBinary: null, bundledTunnelVersion: null,
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.1.31', latest: null, stage: 'idle', error: null, checkedAt: null }
+  };
+  const models = [
+    { id: 'gpt-6', label: 'GPT-6', efforts: ['none', 'medium', 'high', 'xhigh'], aliases: ['gpt-6', 'gpt-6-thinking'] },
+    { id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['none', 'medium', 'high', 'xhigh'] }];
+  const ok = (data: any) => Promise.resolve({ ok: true, data });
+  const api: any = new Proxy({
+    getState: () => ok(state),
+    getLog: () => ok([]),
+    getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+    getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models }),
+    onStateChanged: (fn: any) => { stateListener = fn; return () => undefined; },
+    onLogEntry: () => () => undefined,
+    onSwarmChanged: () => () => undefined,
+    onSessionChanged: () => () => undefined,
+    listSessions: () => ok({ sessions: [], activeId: null, pressure: [] })
+  }, { get(target, prop) { if (prop in target) return (target as any)[prop]; return (..._args: any[]) => ok(null); } });
+  Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+  await import('../src/renderer/main.js');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const value = (id: string) => (w.document.getElementById(id) as HTMLSelectElement).value;
+  const shown = () => ({ helper: value('helperModel'), worker: value('workerModel'), chat: value('defaultChatModel') });
+  expect(shown()).toEqual({ helper: 'gpt-6', worker: 'gpt-6', chat: 'gpt-5-6' });
+  stateListener(structuredClone(state));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(shown()).toEqual({ helper: 'gpt-6', worker: 'gpt-6', chat: 'gpt-5-6' });
+  expect(value('helperReasoning')).toBe('high');
+});
+
 it('does not overwrite a focused dirty settings field on an unsolicited state push', async () => {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
