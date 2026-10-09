@@ -276,6 +276,44 @@ function recordedParts(run: FlowRow[], turnId: string | undefined, live: boolean
 }
 
 /**
+ * An outlined turn's rounds, shared out over the runs its work was recorded in. Rows that stand on
+ * their own can split a turn's work: a message you sent while it worked (it reached the turn inside a
+ * call's result, #1231) or an error. Each round goes to the run its rows are in, and a round split by
+ * such a row is drawn in pieces, the last one carrying its recap. A sentence the app never recorded
+ * goes with the round it introduces; a round with no recorded rows stays after the one before it.
+ */
+function shareOut(parts: RoundPart[], runOf: ReadonlyMap<string, number>, count: number): RoundPart[][] {
+  const out: RoundPart[][] = Array.from({ length: count }, () => []);
+  const anchor = (part: RoundPart): number | undefined => {
+    if (part.kind === 'say') return part.rowKey === undefined ? undefined : runOf.get(part.rowKey);
+    if (part.kind === 'work') return part.rows.length ? runOf.get(part.rows[0]!) : undefined;
+    return undefined;
+  };
+  let at = 0;
+  parts.forEach((part, index) => {
+    let run = anchor(part);
+    if (run === undefined && part.kind === 'say') {
+      for (const next of parts.slice(index + 1)) { const found = anchor(next); if (found !== undefined) { run = found; break; } }
+    }
+    at = Math.max(at, run ?? at);
+    if (part.kind !== 'work' || !part.rows.length) { out[at]!.push(part); return; }
+    const pieces = new Map<number, string[]>();
+    for (const key of part.rows) {
+      const piece = Math.max(at, runOf.get(key) ?? at);
+      pieces.set(piece, [...pieces.get(piece) ?? [], key]);
+    }
+    const order = [...pieces.keys()].sort((a, b) => a - b);
+    order.forEach((piece, position) => {
+      const last = position === order.length - 1;
+      out[piece]!.push({ ...part, key: position ? `${part.key}:${piece}` : part.key, rows: pieces.get(piece)!,
+        recap: last ? part.recap : null, live: last && part.live });
+    });
+    at = order.at(-1)!;
+  });
+  return out;
+}
+
+/**
  * The timeline as rounds. `working` says the newest turn is still running: its last round is the
  * live one, unless a recap already closed it. `liveTurnId` names that turn, so its outline shows
  * even before any of its work is recorded (a new chat's first sentences come before its first call).
@@ -310,19 +348,22 @@ export function structureTimeline(rows: readonly FlowRow[], traces: Readonly<Rec
     }
     out.push({ kind: 'row', key: row.key });
   };
+  // An outline describes a turn once, over all its runs; each run then shows its share (shareOut).
+  const shares = new Map<(typeof runs)[number], RoundPart[]>();
   let at = 0;
   for (const run of runs) {
     while (at < run.start) passThrough(rows[at++]!);
     const turnId = runTurn(run.rows);
     const trace = turnId ? traces[turnId] : undefined;
     const live = run === liveRun;
-    // An outline describes a turn once; a later run of the same turn (after an error row, say) reads as recorded.
     if (turnId && trace && !traced.has(turnId)) {
       traced.add(turnId);
-      out.push(...tracedParts(run.rows, trace, turnId, live, recapsOf(turnId)));
-    } else {
-      out.push(...recordedParts(run.rows, turnId, live, !live, recapsOf(turnId)));
+      const own = runs.filter(other => runTurn(other.rows) === turnId);
+      const runOf = new Map(own.flatMap((other, index) => other.rows.map(row => [row.key, index] as const)));
+      const parts = tracedParts(own.flatMap(other => other.rows), trace, turnId, own.at(-1) === liveRun, recapsOf(turnId));
+      shareOut(parts, runOf, own.length).forEach((share, index) => shares.set(own[index]!, share));
     }
+    out.push(...shares.get(run) ?? recordedParts(run.rows, turnId, live, !live, recapsOf(turnId)));
     at = run.start + run.rows.length;
   }
   while (at < rows.length) passThrough(rows[at++]!);
