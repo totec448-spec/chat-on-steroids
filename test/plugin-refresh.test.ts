@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, pluginRefreshStatuses, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { APP_VERSION } from '../src/main/version.js';
 import { buildServer } from '../src/main/mcp/tools.js';
@@ -16,6 +16,41 @@ afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); aw
 const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
+it('projects refresh evidence without creating, repairing or rearming browser work', async () => {
+  publish();
+  expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+  expect(await readDurable('plugin-refresh')).toBeNull();
+  const request = (await pendingPluginRefreshes())[0]!;
+  expect((await pluginRefreshStatuses()).core).toEqual({ schemaId: request.schemaId, state: 'pending' });
+  await claim(request);
+  expect((await pluginRefreshStatuses()).core?.state).toBe('refreshing');
+  await completePluginRefresh({ ...request, appId, tools });
+  expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+  publish('2', [{ ...tools[0]!, description: 'Changed contract' }]);
+  expect((await pluginRefreshStatuses()).core?.state).toBe('pending');
+  const next = (await pendingPluginRefreshes())[0]!;
+  await failPluginRefresh({ id: next.id, error: 'private diagnostic detail' });
+  const saved = await readDurable('plugin-refresh') as any[];
+  saved[0].parked = true; saved[0].parkedBy = 'older-app';
+  await writeDurableNow('plugin-refresh', saved);
+  const wakes = wake.mock.calls.length;
+  const projected = await pluginRefreshStatuses();
+  expect(projected.core?.state).toBe('failed');
+  expect(JSON.stringify(projected)).not.toContain('private');
+  expect(await readDurable('plugin-refresh')).toEqual(saved);
+  expect(wake).toHaveBeenCalledTimes(wakes);
+  unpublishPluginSurface('core');
+  expect(await pluginRefreshStatuses()).toEqual({});
+});
+
+it('keeps manual, corrupt and ambiguous refresh evidence out of the current state', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  await requireManualPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual action needed' });
+  expect((await pluginRefreshStatuses()).core?.state).toBe('manual');
+  await writeDurableNow('plugin-refresh', [{ invalid: true }]);
+  expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+});
+
 it('debounces only changed declarations for twenty seconds and fences stale claims', async () => {
   publish(); const old = (await pendingPluginRefreshes())[0]!;
   const change = (description: string) => publishPluginSurface('core', 'Chat On Steroids Core', '1', 'Instructions', [{ ...tools[0]!, description }]);

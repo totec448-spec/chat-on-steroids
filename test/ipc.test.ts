@@ -650,6 +650,7 @@ describe('explicit settings replace the published tool contract', () => {
       const before = snapshot();
       const beforeState = await handlers.get('state:get')!(null, undefined) as any;
       expect(beforeState.data.connectorSchemas.core).toBe(before.schemaId);
+      expect(beforeState.data.connectorRefresh.core).toEqual({ schemaId: before.schemaId, state: 'unknown' });
       const tool = kind === 'finish' ? 'session_finish' : 'exec_command';
       expect(before.tools.map(row => row.name)).toContain(tool);
       expect(before.tools.map(row => row.name)).not.toContain('session');

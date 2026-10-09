@@ -3941,6 +3941,15 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+`pluginRefreshStatuses()` projects the existing ledger without creating debt, repairing rows or
+waking the browser. `AppState.connectorRefresh` carries only each currently published surface's
+schema fingerprint and `unknown/current/pending/refreshing/manual/failed` state; no app IDs,
+tools or raw errors leave the owner through this projection. Activity's Update status card
+combines it with the updater, bridge and connection owners. All checks pass only after a
+successful release check with no newer app, a live paired extension at the running version,
+and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
+exact current schema. Optional off connectors do not block completion; unknown and historical
+connection proof never pass. Review setup only opens Setup; displaying this card starts no work.
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names

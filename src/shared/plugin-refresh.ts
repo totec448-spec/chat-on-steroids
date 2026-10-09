@@ -1,4 +1,9 @@
 export type PluginSurface = 'core' | 'desktop' | 'plugins';
+/** Read-only projection of the existing refresh ledger; no IDs, tools or browser actions. */
+export interface PluginRefreshStatus {
+  schemaId: string;
+  state: 'unknown' | 'current' | 'pending' | 'refreshing' | 'manual' | 'failed';
+}
 export interface PluginToolSchema {
   name: string;
   description: string;

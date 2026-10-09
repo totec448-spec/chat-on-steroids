@@ -7,7 +7,7 @@ import { notePluginInstalled } from './connector-proof.js';
 import { surfaceDefinition } from './mcp/surfaces.js';
 import { APP_VERSION } from './version.js';
 import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
-import type { PluginPublication, PluginRefreshRequest, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
+import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
@@ -140,6 +140,26 @@ export async function enrolledPluginSurfaces(): Promise<PluginSurface[]> {
   catch { return []; }
 }
 export function pluginRefreshPublications(): PluginPublication[] { return structuredClone([...publications.values()]); }
+/** Reading update status must not create refresh debt, repair rows or wake a browser. */
+export function pluginRefreshStatuses(): Promise<Partial<Record<PluginSurface, PluginRefreshStatus>>> {
+  return serial(async () => {
+    let current: Row[] = [];
+    try {
+      current = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh') ?? []);
+      if (new Set(current.map(row => row.surface)).size !== current.length) current = [];
+    } catch { /* Unreadable evidence is unknown, never a successful refresh. */ }
+    return Object.fromEntries([...publications.values()].map(publication => {
+      const row = current.find(candidate => candidate.surface === publication.surface);
+      const state: PluginRefreshStatus['state'] = !row ? 'unknown'
+        : row.schemaId !== publication.schemaId ? 'pending'
+        : row.manual ? 'manual'
+        : row.parked || row.error ? 'failed'
+        : row.appId && row.completedSchemaId === publication.schemaId ? 'current'
+        : row.attempted && row.appId ? 'refreshing' : 'pending';
+      return [publication.surface, { schemaId: publication.schemaId, state }];
+    }));
+  });
+}
 /** One fresh browser attempt after an explicit Restart, only before any Refresh claim. */
 export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
   return serial(async () => {

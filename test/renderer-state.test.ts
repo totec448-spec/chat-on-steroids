@@ -2280,6 +2280,68 @@ it('says nothing about being current until the check has actually answered', asy
 /**
  * A staged update is not "up to date", and it is not a failure either.
  */
+it('reports update readiness only from checked versions and current connector evidence', async () => {
+  const { window: w, state, push } = await mountChat();
+  const ready = structuredClone(state);
+  ready.update.checkedAt = Date.now();
+  ready.bridge = { ...ready.bridge, paired: true, present: true, extensionVersion: ready.update.current };
+  ready.status = { ...ready.status, state: 'connected', surfaces: [{ id: 'core', connectorName: 'Chat On Steroids Core', optional: false,
+    available: true, state: 'live', detail: '', description: 'Core connector', cardSummary: 'Files and terminal', localUrl: null, publicUrl: null,
+    lastRequestAt: Date.now(), lastToolCallAt: null, tools: ['read'] }] };
+  ready.connectorSchemas = { core: 'schema-a' };
+  ready.connectorRefresh = { core: { schemaId: 'schema-a', state: 'current' } };
+  const summary = () => w.document.getElementById('updateReadinessSummary')!;
+  push(ready);
+  expect(summary()?.dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(ready.update.current);
+  expect(w.document.querySelector('[data-update-part="extension"]')!.textContent).toContain(ready.update.current);
+
+  const notReady = [
+    (s: any) => { s.update.checkedAt = null; },
+    (s: any) => { s.update.stage = 'failed'; },
+    (s: any) => { s.update.latest = '2.0.3'; s.update.stage = 'ready'; },
+    (s: any) => { s.bridge.present = false; },
+    (s: any) => { s.bridge.paired = false; },
+    (s: any) => { s.bridge.extensionVersion = null; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.1'; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.3'; },
+    (s: any) => { s.status.state = 'offline'; },
+    (s: any) => { s.status.surfaces[0].state = 'error'; },
+    (s: any) => { s.status.surfaces[0].lastRequestAt = null; s.status.surfaces[0].proof = { requestAt: Date.now() }; },
+    (s: any) => { s.connectorRefresh = {}; },
+    (s: any) => { s.connectorRefresh.core.schemaId = 'old-schema'; },
+    (s: any) => { s.connectorRefresh.core.state = 'refreshing'; },
+    (s: any) => { s.status.surfaces = []; }
+  ];
+  for (const change of notReady) {
+    const next = structuredClone(ready); change(next); push(next);
+    expect(summary().dataset.ready).toBe('false');
+    expect(summary().textContent).not.toBe('All checks passed');
+  }
+  const optionalOff = structuredClone(ready);
+  optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
+  push(optionalOff);
+  expect(summary().dataset.ready).toBe('true');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(summary().textContent).toBe('すべての確認が完了しました');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain('最新版です');
+  setLanguage('en');
+});
+
+it('keeps update readiness actions stable and does not start update or connection work on pushes', async () => {
+  const installUpdate = vi.fn(), connect = vi.fn(), refreshUpdate = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { installUpdate, connect, refreshUpdate });
+  const button = w.document.getElementById('updateReviewSetup') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  button.focus(); push(structuredClone(state));
+  expect(w.document.activeElement).toBe(button);
+  expect(installUpdate).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(refreshUpdate).not.toHaveBeenCalled();
+  button.click();
+  expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
+});
+
 it('reports a staged update in the Activity line and the header bar', async () => {
   const mounted = await mountChat();
   const staged = structuredClone(mounted.state) as any;

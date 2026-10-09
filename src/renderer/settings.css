@@ -52,6 +52,16 @@
 .settings-page-head { display: grid; align-items: initial; gap: 0; min-height: 0; margin-bottom: 30px; padding: 0; border: 0; }
 .settings-page-head h1 { margin: 0; font-size: calc(30px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.8px; line-height: 1.2; }
 .settings-page-head p { max-width: 68ch; margin: 9px 0 0; color: var(--soft); font-size: calc(14px * var(--text-scale, 1)); line-height: 1.6; }
+[data-panel='activity'] { overflow-y: auto; }
+.activity-content { grid-template-rows: auto auto minmax(120px, 1fr); }
+.update-readiness { min-height: min-content; grid-template-rows: none; align-content: start; margin-bottom: 20px; padding: 20px; gap: 12px; }
+.update-readiness h2 { min-height: 0; padding: 0; }
+.update-readiness ul { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.update-readiness .check > div { min-width: 0; overflow-wrap: anywhere; }
+.update-readiness .check p { margin: 4px 0 0; }
+.update-readiness .btn { align-self: flex-start; }
+#updateReadinessSummary { margin: 0; color: var(--soft); }
+#updateReadinessSummary.is-ok { color: var(--green); }
 .workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 28px; }
 .workspace-column { display: contents; }
 .workspace-section { grid-column: 1; min-width: 0; }

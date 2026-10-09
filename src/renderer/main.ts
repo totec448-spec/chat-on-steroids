@@ -3,6 +3,7 @@ import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from '
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
+import { paintUpdateReadiness } from './update-readiness.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -1485,6 +1486,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
+  paintUpdateReadiness(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {});
 
   // ---- health numbers and facts
@@ -2434,6 +2436,7 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
+$('updateReviewSetup').addEventListener('click', () => showTab('setup'));
 
 /**
  * Install the update that is already downloaded.
