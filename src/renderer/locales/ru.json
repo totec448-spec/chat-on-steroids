@@ -2051,6 +2051,7 @@
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Файл настроек, который приложение не может прочитать, больше не сбрасывает всё: приложение всё равно читает его или сохраняет копию.",
   "Recovery stays on": "Восстановление остаётся включённым",
   "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Когда приложение использует вкладку тихого чата для нового чата, этот чат сохраняет автоматическое восстановление.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Остановлено. ChatGPT больше не показывает этот ход как выполняющийся.",
   "Update check failed": "Не удалось проверить обновления",
   "Downloading {0}": "Загрузка {0}",
   "Ready to install {0}": "Готово к установке {0}",

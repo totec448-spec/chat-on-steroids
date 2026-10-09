@@ -21799,6 +21799,104 @@ describe('app Stop command uses current native turn proof', () => {
     expect(emitted(live!.sent, 'turn_end')).toEqual([]);
   });
 
+  /**
+   * 2026-10-09, live: Stop during a command. ChatGPT cancelled the turn, but a call it had already
+   * dispatched reached the app 1.7 s later, and recorder.ts reopened the turn because the same
+   * request kept calling tools. This page had ended the turn and never said so again, so the app
+   * showed Thinking under "Stop requested" indefinitely, and a second Stop was never answered.
+   */
+  describe('a stopped turn the app reopens on a late call', () => {
+    async function stoppedThenReopened() {
+      const h = await setup();
+      expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+      stopGenerating(live!.document);
+      live!.advance(30_000);
+      live!.hook.observe(); await settle(); await live!.hook.flush();
+      expect(ends()).toEqual([expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })]);
+      const endedAt = live!.window.Date.now();
+      live!.advance(1700);
+      const reopened = (withEnd = true, active = false) => () => ({ ok: true, data: { entries: [], nextSince: 102,
+        activeTurnId: active ? h.request.turnId : null,
+        recordedTurnId: h.request.turnId, pendingTools: 0, stream: [
+          ...(withEnd ? [{ seq: 100, kind: 'turn_end', turnId: h.request.turnId, outcome: 'stopped', time: endedAt }] : []),
+          { seq: 101, callId: 'dispatched-before-cancel', kind: 'tool_call', turnId: h.request.turnId, time: live!.window.Date.now(),
+            requestId: 'wfr_same_stopped_request', attribution: 'request_id', tool: 'exec_command', outcome: 'ok' }] } });
+      return { ...h, reopened };
+    }
+    const ends = () => emitted(live!.sent, 'turn_end').map(row => row.event);
+    const settleReopened = async () => {
+      await live!.hook.pullActivity(); live!.hook.observe(); await settle();
+      live!.advance(live!.hook.TURN_SETTLE_MS);
+      await live!.hook.pullActivity(); live!.hook.observe(); await settle(); await live!.hook.flush();
+    };
+
+    // With an active projection the late call itself resumes the turn; without one (the
+    // 2026-10-09 incident), the page's own end beside the recorded turn proves the reopening.
+    it.each([false, true])('ends it as stopped again once ChatGPT has stayed idle for the settle window (active: %s)', async active => {
+      const h = await stoppedThenReopened();
+      live!.reply.set('activity', h.reopened(true, active));
+      await settleReopened();
+      expect(ends()).toEqual([
+        expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' }),
+        expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
+      ]);
+      expect(h.clicks()).toBe(1);
+    });
+
+    it('follows the turn again when ChatGPT is still running it, so a second Stop can click', async () => {
+      const h = await stoppedThenReopened();
+      live!.reply.set('activity', h.reopened());
+      startGenerating(live!.document, { send: false });
+      const button = live!.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+      Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+      let clicks = 0; button.addEventListener('click', () => { clicks++; });
+      await settleReopened();
+      expect(ends()).toHaveLength(1);
+      expect(await live!.runtimeMessage({ ...h.request, id: '2222222222222222' })).toEqual({ ok: true });
+      expect(clicks).toBe(1);
+    });
+
+    it('follows each reopening once, even if the app keeps the turn open', async () => {
+      const h = await stoppedThenReopened();
+      live!.reply.set('activity', h.reopened());
+      await settleReopened();
+      await settleReopened();
+      await settleReopened();
+      expect(ends()).toHaveLength(2);
+      // A newer late call is a new reopening.
+      const later = h.reopened();
+      live!.reply.set('activity', () => {
+        const reply = later();
+        const stream: Array<Record<string, unknown>> = reply.data.stream;
+        stream.push({ ...stream.at(-1)!, seq: 103, callId: 'dispatched-later' });
+        return { ...reply, data: { ...reply.data, nextSince: 104 } };
+      });
+      await settleReopened();
+      expect(ends()).toHaveLength(3);
+    });
+
+    it('waits for the app to hold the page\'s own end before reading the turn as reopened', async () => {
+      const h = await stoppedThenReopened();
+      live!.reply.set('activity', h.reopened(false));
+      await settleReopened();
+      expect(ends()).toHaveLength(1);
+    });
+
+    it('answers a second Stop for the turn it already ended while ChatGPT is idle', async () => {
+      const h = await stoppedThenReopened();
+      const second = { ...h.request, id: '2222222222222222' };
+      expect(await live!.runtimeMessage(second)).toEqual({ ok: true });
+      await live!.hook.flush();
+      expect(live!.sent.filter(message => message.type === 'stop_ack' && message.id === second.id))
+        .toEqual([expect.objectContaining({ status: 'sent' })]);
+      expect(ends()).toEqual([
+        expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' }),
+        expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
+      ]);
+      expect(h.clicks()).toBe(1);
+    });
+  });
+
   it('captures a completed final hydrated later in a hidden tab after the settle window', async () => {
     live = await harness();
     startGenerating(live.document);

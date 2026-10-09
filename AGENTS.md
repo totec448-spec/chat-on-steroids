@@ -2484,6 +2484,13 @@ can then record a stopped page view, while a canonical final retains its stronge
 Exact app-correlated work started after Stop can withdraw the local veto only for the same active
 turn, with no pending app Stop or canonical final. Old results, foreign turns and finish-only
 calls cannot do so. Browser recovery still requires the main process's exact current authority.
+The page that ended the turn as stopped follows it again when the recorder reopens it, also when
+the live projection names no active turn but the feed holds that page's own stopped end beside
+the recorded turn; each reopening is followed once. Such a turn keeps the user's Stop: native
+idleness without a canonical final ends it as stopped again, and an app Stop for it while the
+page is idle is answered by that end instead of a click. The timeline keeps the app's Stop note
+where Stop was asked and closes the turn with a stopped line at the stopped end that is still the
+turn's last lifecycle boundary, so a reopening moves that line after the late work.
 Neither a click receipt nor a page-local stopped outcome claims provider-side cancellation.
 An already-earned MCP activity window remains visible through a stopped page observation:
 ten minutes for Pro, three otherwise. That retained display grants no input or reload while

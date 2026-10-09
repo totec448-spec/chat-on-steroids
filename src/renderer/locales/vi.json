@@ -2051,6 +2051,7 @@
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Tệp cài đặt mà ứng dụng không đọc được không còn đặt lại mọi thứ: ứng dụng vẫn đọc nó hoặc giữ một bản sao.",
   "Recovery stays on": "Khôi phục vẫn bật",
   "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Khi ứng dụng dùng lại tab của một cuộc trò chuyện yên tĩnh cho cuộc trò chuyện mới, cuộc trò chuyện đó vẫn giữ khôi phục tự động.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Đã dừng. ChatGPT không còn hiển thị lượt này đang chạy.",
   "Update check failed": "Không thể kiểm tra bản cập nhật",
   "Downloading {0}": "Đang tải {0}",
   "Ready to install {0}": "Sẵn sàng cài đặt {0}",

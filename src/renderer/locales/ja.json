@@ -2051,6 +2051,7 @@
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "アプリが読めない設定ファイルがあってもすべてがリセットされることはありません。そのまま読み込むか、コピーを残します。",
   "Recovery stays on": "復旧は有効のまま",
   "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "アプリが静かなチャットのタブを新しいチャットに再利用しても、そのチャットの自動復旧は有効のままです。",
+  "Stopped. ChatGPT no longer shows this turn running.": "停止しました。ChatGPT ではこのターンはもう実行中として表示されません。",
   "Update check failed": "更新の確認に失敗しました",
   "Downloading {0}": "{0}をダウンロード中",
   "Ready to install {0}": "{0}をインストールできます",

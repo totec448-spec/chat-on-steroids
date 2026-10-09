@@ -2051,6 +2051,7 @@
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Uygulamanın okuyamadığı bir ayar dosyası artık her şeyi sıfırlamaz: uygulama onu yine de okur ya da bir kopyasını saklar.",
   "Recovery stays on": "Kurtarma açık kalır",
   "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Uygulama sessiz bir sohbetin sekmesini yeni bir sohbet için kullandığında, o sohbetin otomatik kurtarması açık kalır.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Durduruldu. ChatGPT bu turu artık çalışıyor olarak göstermiyor.",
   "Update check failed": "Güncelleme kontrolü başarısız",
   "Downloading {0}": "{0} indiriliyor",
   "Ready to install {0}": "{0} yüklenmeye hazır",
