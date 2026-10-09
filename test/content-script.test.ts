@@ -4507,6 +4507,28 @@ describe('the app-owned chronological stream', () => {
     expect(section.querySelectorAll('[data-clf-call]')).toHaveLength(4);
   });
 
+  it('rewrites nothing when the once-a-second render finds the stream unchanged', async () => {
+    // Every identical attribute write wakes each MutationObserver on the page, ChatGPT's included:
+    // an idle chat took ~60 such writes a second (measured 2026-10-09).
+    const owner = 'idle-owner';
+    const rows = [{ seq: 1, time: 100, kind: 'turn_start', turnId: owner },
+      { seq: 2, time: 110, kind: 'tool_call', turnId: owner, callId: 'idle-call', tool: 'read', summary: { title: 'Read file' } },
+      { seq: 3, time: 200, kind: 'assistant_message', turnId: owner, messageId: 'idle-final', text: 'Done', final: true }];
+    live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], resetActivity: true, stream: rows } }) });
+    renderingOn(); const section = assistantTurn(live.document, 'idle-page', []);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'idle-page', messages: [{ messageId: 'idle-final',
+      rawMessageId: 'idle-final', stable: true, rawText: 'Done', renderedHtml: '<p>Done</p>' }] } }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(section.querySelectorAll('.clf-stream')).not.toHaveLength(0);
+    const records: MutationRecord[] = [];
+    const observer = new (live.document.defaultView as unknown as { MutationObserver: typeof MutationObserver }).MutationObserver(list => records.push(...list));
+    observer.observe(live.document.documentElement, { subtree: true, attributes: true, childList: true, characterData: true });
+    live.hook.renderStreams(); live.hook.renderStreams();
+    await Promise.resolve();
+    records.push(...observer.takeRecords()); observer.disconnect();
+    expect(records.map(record => `${(record.target as Element).className || (record.target as Element).tagName} ${record.type} ${record.attributeName ?? ''}`)).toEqual([]);
+  });
+
   it('groups twenty calls around public interim prose and retains open nodes across updates', async () => {
     const owner = 'read20-owner';
     const calls = Array.from({ length: 20 }, (_, i) => ({ seq: i + 3 + (i >= 10 ? 1 : 0), time: 120 + i * 10,
