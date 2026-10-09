@@ -1866,7 +1866,7 @@ export function goalHelperSelection(): { model: string | null; reasoningEffort: 
   if (key) refreshForUnoffered(`goal helper ${key}`);
   if (key && key !== helperFallbackLogged) {
     helperFallbackLogged = key;
-    const line = `goal: the helper ${notes.join(' and ')} is not offered by this ChatGPT account; using ChatGPT's current selection`;
+    const line = `goal: the helper ${notes.join(' and ')} ${notes.length > 1 ? 'are' : 'is'} not offered by this ChatGPT account; using ChatGPT's current selection`;
     // Falling back from the built-in defaults is routine, not a problem: nobody chose them, and as a
     // warning it showed as "1 problem" in Activity on every start for accounts without them.
     const defaults = defaultConfig().goal;
