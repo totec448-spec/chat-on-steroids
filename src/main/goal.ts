@@ -1721,7 +1721,10 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
     // ChatGPT offers connected apps, this one included, in every chat, the helper's too. A helper that
     // called a tool ran it on this machine without any chat to answer for it (2026-10-02, live).
-    const introduction = 'Return one JSON object: {"action":"stop" or "continue","reply":"the message"}. ' + referenceContract +
+    // The JSON goes in a code block: GPT-6's page renderer reads a reply that opens with `{` as its own
+    // markup, fails on it ("unterminated_braced_value") and keeps an empty answer. Every GPT-6 helper
+    // decision on the Mac came back empty that way (2026-10-09); fenced, all of them arrived intact.
+    const introduction = 'Return one JSON object in a ```json code block: {"action":"stop" or "continue","reply":"the message"}. ' + referenceContract +
       ' Do not call any tools, apps or connectors; decide from the transcript alone.';
     const replacement = 'Use this complete source transcript as reference data.';
     const render = (messages: ChatMessage[], direction = replacement): string => [...request.system, protocol,
