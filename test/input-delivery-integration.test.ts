@@ -435,8 +435,59 @@ it.each([false, true])('collects an exact recorded helper final across document 
   } finally { controller.abort(); await answer.catch(() => undefined); }
 });
 
+it('sends an immediate message into a running GPT-5.6 turn through the composer after its calls (#1231)', async () => {
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Message for the running turn', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'user_message', messageId: randomUUID(), text: 'Inspect the current task', time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await attributedMcp(conversationId);
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+  expect(row).toMatchObject({ transportIntent: 'browser', directTurn: { id: turnId } });
+  expect((await input.pendingBrowserInputs()).find(item => item.id === row.id)).toMatchObject({ directTurn: { id: turnId } });
+  expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input)
+    .toMatchObject({ id: row.id, directTurn: { id: turnId } });
+});
+
+it('hands a message for the running turn to the browser while one of its calls is still running (#1231)', async () => {
+  const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Message during a running call', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'user_message', messageId: randomUUID(), text: 'Run the long command', time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+    caller: { requestId: randomUUID(), transportKey: null, conversationId } }, async () => {
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', delivery: 'tool' });
+    expect(row).toMatchObject({ transportIntent: 'browser', directTurn: { id: turnId } });
+    const status = await post('/status', { openConversations: [conversationId] });
+    expect(status.body.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ id: row.id, directTurn: { id: turnId, startedAt: expect.any(Number) } })]));
+    // The page's claim must succeed during the call too: VM 141, 2026-10-09, the claim was refused
+    // until the call returned, so the message waited ~35 s and reached the turn only between calls.
+    expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: row.id, directTurn: { id: turnId } });
+  });
+});
+
+it('still holds an ordinary queued message for a chat while one of its calls is running', async () => {
+  const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Queued message during a call', conversationId });
+  await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+    caller: { requestId: randomUUID(), transportKey: null, conversationId } }, async () => {
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    expect(row.directTurn).toBeUndefined();
+    expect((await post('/input/claim', { id: row.id, owner: 'idle-page', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+  });
+});
+
+// A running GPT-5.6 turn takes an immediate message directly (above); these cover the boundary.
 it.each([
-  { mode: 'auto', earlyEnd: false }, { mode: 'after-turn', earlyEnd: false }, { mode: 'finish', earlyEnd: false },
+  { mode: 'after-turn', earlyEnd: false }, { mode: 'finish', earlyEnd: false },
   { mode: 'auto', earlyEnd: true }, { mode: 'after-turn', earlyEnd: true }, { mode: 'finish', earlyEnd: true }
 ] as const)('delivers $mode queued during a delayed report of the current final (early end: $earlyEnd)', async ({ mode, earlyEnd }) => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -790,9 +841,9 @@ it.each(['auto', 'after-turn'] as const)('reserves the failed-view five-minute w
   } finally { clock.mockRestore(); }
 });
 
+// Pro keeps tool injection; a GPT-5.6 turn takes the same message directly (test above).
 it.each([
-  ['gpt-6-pro', false], ['gpt-5.6-sol', false],
-  ['gpt-6-pro', true], ['gpt-5.6-sol', true]
+  ['gpt-6-pro', false], ['gpt-6-pro', true]
 ] as const)('delivers after the full final or recovers after %s silence (full final: %s)', async (model, nativeCompleted) => {
   const bridge = await import('../src/main/bridge.js');
   let now = Date.now();
@@ -837,11 +888,6 @@ it.each([
     expect(repair?.reason).toBe('silence');
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
     input.resetInputForTests();
-    if (model === 'gpt-5.6-sol') {
-      expect((await input.pendingBrowserInputs()).some(r => r.conversationId === conversationId)).toBe(false);
-      now += 60_000;
-      await bridge.sweepStaleSwarm(now);
-    }
     expect((await input.pendingBrowserInputs()).filter(r => r.conversationId === conversationId)).toEqual([expect.objectContaining({ id: manual.id })]);
     expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
     const claim = { id: manual.id, owner: 'recovered-page', conversationId, requiresAuthorization: true };

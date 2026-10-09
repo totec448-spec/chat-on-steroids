@@ -112,11 +112,11 @@ async function send(rawBody: unknown): Promise<ActionReply> {
   await controllable(body.sessionId);
   if (!session.conversationId) throw new RequestError(409, 'no_chat', 'this session has no ChatGPT chat to send to');
 
-  // A send to a tool-free turn stops the answer being written, then sends. That is a decision
-  // for the caller, not a default.
+  // A send into an answer being written ends that part of the turn: ChatGPT continues with the
+  // message. That is a decision for the caller, not a default.
   const interrupting = !!(await sessionInputPolicy(body.sessionId)).directTurn;
   if (interrupting && body.interrupt !== true) {
-    throw new RequestError(409, 'would_interrupt', 'the chat is answering; pass interrupt:true to stop that answer and send');
+    throw new RequestError(409, 'would_interrupt', 'the chat is answering; pass interrupt:true to send into that answer');
   }
 
   const input: InputArgs = {

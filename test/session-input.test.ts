@@ -263,8 +263,22 @@ describe('durable user input ownership', () => {
     expect((await listInputs())[0]).toMatchObject({ state: 'sent', messageId: 'native-message' });
   });
 
-  it('queues an explicit injection before the first tool for that exact turn without browser fallback', async () => {
+  // A message inside a tool result never reached the model on GPT-5.6/6 (#1231): Inject now goes
+  // through ChatGPT's composer whenever the running turn takes a message, tool calls or not.
+  it('sends an explicit Inject now into the running turn through the composer, tool calls or not', async () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
+    binding.lastToolCallAt = 950;
+    const row = await enqueueInput(input({ delivery: 'tool' }));
+    expect(row).toMatchObject({ state: 'queued', transportIntent: 'browser', directTurn: { id: 'plain-turn' } });
+    expect(row.delivery).toBeUndefined();
+    expect(row.toolTurnId).toBeUndefined();
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: row.id, directTurn: row.directTurn })]);
+    expect(await offerToolInput(sessionId, binding.conversationId, 'later-call', now)).toEqual([]);
+  });
+
+  it('keeps an explicit injection on a Pro turn in its tool result without browser fallback', async () => {
+    binding.model = 'gpt-5.6-pro'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
     binding.lastToolCallAt = 800;
     const row = await enqueueInput(input({ delivery: 'tool' }));
@@ -279,7 +293,7 @@ describe('durable user input ownership', () => {
   });
 
   it('fails an explicit injection visibly when its exact turn ends without a tool', async () => {
-    binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
+    binding.model = 'gpt-5.6-pro'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
     const row = await enqueueInput(input({ delivery: 'tool' }));
     resetInputForTests();
@@ -296,7 +310,7 @@ describe('durable user input ownership', () => {
   });
 
   it('does not leak a restarted explicit injection into a newer inactive turn', async () => {
-    binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'original-turn';
+    binding.model = 'gpt-5.6-pro'; binding.activeTurnId = 'original-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'original-turn', time: 900 };
     const row = await enqueueInput(input({ delivery: 'tool' }));
     resetInputForTests();
@@ -320,28 +334,36 @@ describe('durable user input ownership', () => {
     expect(await sessionInputPolicy(sessionId, { exact: true, possible: true, model })).toMatchObject({ canInject: true, directTurn: null });
   });
 
-  it.each(['tool', 'turn', 'rebind', 'blocked'])('revokes an unsubmitted direct correction after %s changes', async change => {
+  it('keeps an unsubmitted direct correction when its turn calls a tool', async () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
     const direct = await enqueueInput(input());
     await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true);
-    if (change === 'tool') binding.lastToolCallAt = 950;
+    binding.lastToolCallAt = 950;
+    expect(await authorizeBrowserInput(direct.id, 'native-page', 'conversation-a')).toBe(true);
+  });
+
+  it.each(['turn', 'rebind', 'blocked'])('revokes an unsubmitted direct correction after %s changes', async change => {
+    binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
+    const direct = await enqueueInput(input());
+    await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true);
     if (change === 'turn') { binding.activeTurnId = 'new-turn'; binding.end = { ...binding.end, turnId: 'new-turn', time: 1001 }; }
     if (change === 'rebind') binding.conversationId = 'conversation-b';
     if (change === 'blocked') binding.blocked = true;
     expect(await authorizeBrowserInput(direct.id, 'native-page', 'conversation-a')).toBe(false);
   });
 
-  it('switches at the first running MCP call, retains injection afterward, and resets on the next turn', async () => {
+  it('keeps direct delivery through the turn\'s running and finished MCP calls, and moves to the next turn', async () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
     const context: CallContext = { startedAt: 950, transportKey: null, agent: null, outcome: null,
       caller: { conversationId: binding.conversationId, requestId: 'first-call', transportKey: null }, evidence: emptyEvidence() };
     await trackInFlight(context, async () => {
-      expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: true, directTurn: null });
+      expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: false, directTurn: { id: 'plain-turn' } });
       binding.lastToolCallAt = 950;
     });
-    expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: true, directTurn: null });
+    expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: false, directTurn: { id: 'plain-turn' } });
     binding.activeTurnId = 'next-turn'; binding.end = { ...binding.end, turnId: 'next-turn', time: 1001 };
     expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: false, directTurn: { id: 'next-turn' } });
     const after = await enqueueInput(input({ mode: 'after-turn' }));
