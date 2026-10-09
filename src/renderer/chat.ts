@@ -5156,14 +5156,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     previous?.multiAgent.endSleepingWorkerProcesses
   );
 
-  applyChatValue($<HTMLSelectElement>('workerModel'), config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel);
-  applyChatValue($<HTMLSelectElement>('workerReasoning'), config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning);
-  applyChatValue($<HTMLSelectElement>('defaultChatModel'), config.ui.defaultChatModel ?? '', previous?.ui.defaultChatModel);
-  applyChatValue($<HTMLSelectElement>('defaultChatReasoning'), config.ui.defaultChatReasoning ?? '', previous?.ui.defaultChatReasoning);
+  // The model and reasoning selects are painted by applyChatModels above, which resolves a saved
+  // value (an old short label such as "6") to the catalog's id. Writing the raw saved value here
+  // again matched no option and showed those settings blank (2.1.31 release check).
   applyChatValue($<HTMLSelectElement>('goalBackend'), config.goal.backend ?? 'chatgpt', previous?.goal.backend);
   applyChatValue($<HTMLSelectElement>('loopBackend'), config.goal.loopBackend ?? 'chatgpt', previous?.goal.loopBackend);
-  applyChatValue($<HTMLSelectElement>('helperModel'), config.goal.helperModel ?? DEFAULT_HELPER_CHAT_MODEL, previous?.goal.helperModel);
-  applyChatValue($<HTMLSelectElement>('helperReasoning'), config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning);
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
