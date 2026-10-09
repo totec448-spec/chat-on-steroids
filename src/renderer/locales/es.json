@@ -244,7 +244,7 @@
   "Loop response source": "Fuente de respuestas de Bucle",
   "Loop keeps going until you switch it off.": "Bucle sigue trabajando hasta que lo desactives.",
   "Goal, Loop and Plan model": "Modelo para Objetivo, Bucle y Plan",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "Modelo para los mensajes y planes generados por ChatGPT. Para planificar, selecciona GPT-5.6 y razonamiento Alto a continuación.",
+  "Model for ChatGPT-generated messages and plans.": "Modelo para los mensajes y planes generados por ChatGPT.",
   "Goal, Loop and Plan reasoning": "Razonamiento para Objetivo, Bucle y Plan",
   "Used with the ChatGPT model above; independent from API reasoning.": "Se usa con el modelo de ChatGPT de arriba; es independiente del razonamiento de la API.",
   "Include tool details in handoffs": "Incluir detalles de herramientas en los resúmenes de continuidad",

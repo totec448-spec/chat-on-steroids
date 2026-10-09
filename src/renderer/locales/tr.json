@@ -244,7 +244,7 @@
   "Loop response source": "Döngü yanıt kaynağı",
   "Loop keeps going until you switch it off.": "Döngü, siz kapatana kadar devam eder.",
   "Goal, Loop and Plan model": "Hedef, Döngü ve Plan modeli",
-  "Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.": "ChatGPT'nin oluşturduğu mesajlar ve planlar için model. Planlama için aşağıdan GPT-5.6 ve Yüksek seçeneklerini seçin.",
+  "Model for ChatGPT-generated messages and plans.": "ChatGPT'nin oluşturduğu mesajlar ve planlar için model.",
   "Goal, Loop and Plan reasoning": "Hedef, Döngü ve Plan akıl yürütme düzeyi",
   "Used with the ChatGPT model above; independent from API reasoning.": "Yukarıdaki ChatGPT modeliyle kullanılır; API akıl yürütme ayarından bağımsızdır.",
   "Include tool details in handoffs": "Araç ayrıntılarını devir özetlerine ekle",
