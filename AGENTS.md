@@ -3768,12 +3768,16 @@ production renderer in isolated Electron with color, queue/push, theme, reset, r
 layout checks. It does not operate the installed app or a provider conversation.
 
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
-in ChatGPT. Its X stores only the acknowledged running `state.update.current` version in
-`cos.plugins.refreshReminder.dismissedVersion`; downloading a newer version does not rearm
-it. No acknowledgement shows the reminder, including the first version with this feature.
-It survives restart until dismissed, returns for a different running version and is hidden
-in Settings. It stacks with update/extension notices and never marks an actual connector
-refresh complete or starts a browser action.
+in ChatGPT. It compares `AppState.connectorSchemas` (the declaration fingerprints the local
+MCP server publishes per surface) with the ones acknowledged in
+`cos.plugins.refreshReminder.acknowledgedSchemas`. The first schema seen per surface is a
+silent baseline; a different one shows the reminder until its X is clicked.
+`AppState.confirmedConnectorSchemas` carries, per surface, the schema ChatGPT confirmed after a
+refresh click or found already current (`confirmedPluginSchemas()` reads `completedSchemaId`
+from `state/plugin-refresh.json`); a current schema confirmed there counts as acknowledged, so
+the reminder disappears once automatic plugin refresh lands. The reminder is hidden in
+Settings, stacks with update/extension notices and never marks a refresh complete or starts a
+browser action.
 
 ### Project Files workspace
 
