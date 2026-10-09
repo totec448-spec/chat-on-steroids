@@ -2050,5 +2050,6 @@
   "Your settings stay put": "설정이 그대로 유지됨",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "앱이 읽을 수 없는 설정 파일이 있어도 모든 설정이 초기화되지 않습니다. 앱이 그대로 읽거나 사본을 보관합니다.",
   "Recovery stays on": "복구는 계속 켜짐",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "앱이 조용한 채팅의 탭을 새 채팅에 다시 사용해도 그 채팅의 자동 복구는 유지됩니다."
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "앱이 조용한 채팅의 탭을 새 채팅에 다시 사용해도 그 채팅의 자동 복구는 유지됩니다.",
+  "Stopped. ChatGPT no longer shows this turn running.": "중지됨. ChatGPT에서 이 턴이 더 이상 실행 중으로 표시되지 않습니다."
 }
