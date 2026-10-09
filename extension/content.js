@@ -985,8 +985,9 @@
    */
   let mentionCore = true;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
-                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest,
+                             matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null,
+                             whileGenerating = false) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -12391,7 +12392,7 @@
   async function acceptDesktopInput(message) {
     const silencePickup = typeof message.silenceTurnId === 'string';
     let sourceQuiet = silencePickup;
-    if (desktopInputBusy || modelCatalogBusy || !alive || (generating && !message.directTurn && !silencePickup) || pendingTools > 0 || goalBusy || job?.busy) return false;
+    if (desktopInputBusy || modelCatalogBusy || !alive || (generating && !message.directTurn && !silencePickup) || (pendingTools > 0 && !message.directTurn) || goalBusy || job?.busy) return false;
     const target = message.conversationId || null;
     const forEpoch = epoch;
     const sourceTurn = turnId;
@@ -12492,7 +12493,7 @@
       // Keep the input queued until this same document exposes its composer again.
       const composer = await waitPageView(() => (message.directTurn || !CLF_DOM.generating()) &&
         (message.directTurn ? CLF_DOM.composerVisible() && CLF_DOM.composer() : writableComposer()),
-        () => onTarget() && (message.directTurn || silencePickup || !generating) && pendingTools === 0, 15000);
+        () => onTarget() && (message.directTurn || ((silencePickup || !generating) && pendingTools === 0)), 15000);
       if (!composer && onTarget() && CLF_DOM.generating() && await confirmedProviderTerminal() && onTarget() && CLF_DOM.generating()) {
         // Only after readiness expires, re-prove the exact terminal: a Retry or
         // new user turn must never become authority to reload the page.
@@ -12542,32 +12543,22 @@
         'ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.'
       ));
       if (message.directTurn) {
-        // The offer only wakes this document. The just-committed outbox claim
-        // authorizes interrupting this exact tool-free turn, like handoff's Stop
-        // then normal Send. A changed question, tool call or lost claim forbids it.
-        if (input.directTurn?.id !== message.directTurn.id || pendingTools > 0) return fail(t(
+        // The offer only wakes this document. The just-committed outbox claim names the exact turn
+        // this message is for; a changed turn or a lost claim forbids sending it into another one.
+        // ChatGPT takes a message while it works and folds it into the running turn, a call still
+        // running included (measured 2026-10-09, #1231), so nothing is stopped first.
+        if (input.directTurn?.id !== message.directTurn.id) return fail(t(
           'content_delivery_turn_changed',
           'The turn changed before direct delivery.'
         ));
-        if (CLF_DOM.generating()) {
-          if (turnId !== input.directTurn.id || !requestNativeStop(onTarget)) return fail(t(
-            'content_delivery_stop_failed',
-            'The current answer could not be stopped.'
-          ));
-        }
-        const idle = await waitPageView(() => !CLF_DOM.generating() && !generating && CLF_DOM.composerVisible(),
-          () => onTarget() && pendingTools === 0, INTERRUPT_WAIT_MS);
-        if (!idle || !onTarget()) return fail(t(
-          'content_delivery_chat_changed_or_busy',
-          'The chat changed or did not stop. The message was not sent.'
-        ));
-        // Publish the native stopped/completed boundary before final Send policy.
         await flush();
         if (!onTarget()) return fail(t(
           'content_delivery_chat_changed',
           'The chat changed before direct delivery.'
         ));
       }
+      // A message for the running turn keeps that turn's model: the picker belongs to the next turn.
+      const intoRunningTurn = () => !!message.directTurn && CLF_DOM.generating();
       const temporary = input.lifetime === 'temporary-planner';
       // On the newer shell an empty temporary chat is proven only by the page-model stamp, and
       // nothing else scans a document with no conversation yet: ask for one before judging.
@@ -12583,7 +12574,7 @@
       const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
-      if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) return fail(
+      if (!intoRunningTurn() && !(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) return fail(
         providerLimitation() || t(
           'content_delivery_model_unconfirmed',
           'Requested model or reasoning could not be confirmed'
@@ -12591,14 +12582,14 @@
       );
       // Native picker closure can precede re-enabling the same editor. Wait before
       // its one insertion; a disabled editing host is not a rejected helper prompt.
-      if (!await waitPageView(writableComposer, () => onTarget() && !CLF_DOM.generating(), 15000)) return fail(t(
+      if (!await waitPageView(writableComposer, () => onTarget() && (!!message.directTurn || !CLF_DOM.generating()), 15000)) return fail(t(
         'content_delivery_editor_not_writable',
         'The ChatGPT editor did not become writable before sending.'
       ));
       // Same allowance as the draft check above, for the same reason: text this delivery itself left
       // behind is not a composer that "changed". Re-read rather than reusing `ownResidue`, because
       // model selection and the writability wait sit between the two and can replace the editor.
-      if (!onTarget() || CLF_DOM.generating() ||
+      if (!onTarget() || (CLF_DOM.generating() && !message.directTurn) ||
           (!ownsFreshPage() && (CLF_DOM.composer()?.textContent || '').trim() &&
             sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) ||
           CLF_DOM.hasComposerAttachments()) return fail(t(
@@ -12694,7 +12685,7 @@
       // ChatGPT switches its own image tool off for a message that mentions an app).
       input.purpose === 'decision' || (input.coreMention === false && !input.recovery && !agent) ? null
         : input.recovery || agent || mentionCore ? currentCoreMention() : null,
-      sentRequestSince);
+      sentRequestSince, !!message.directTurn);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {

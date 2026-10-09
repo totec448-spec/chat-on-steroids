@@ -1142,7 +1142,7 @@ plain names. ChatGPT records a connector's calls under the exact name typed (cal
 
 | Delivery choice | Eligibility and behavior |
 | --- | --- |
-| Immediate / `auto` | In an exact active non-Pro turn before its first MCP call, **Send directly** claims that original turn, stops its native generation, then uses normal browser Send. **Inject now** is a separate choice, including before the first call: authored `delivery: tool` captures the exact turn, waits visibly in the existing outbox, and only enters that turn's eligible outer MCP result. It never falls back to browser Send and fails visibly if its turn ends before delivery. After the first MCP call, injection remains available; Pro (including Astra) keeps injection throughout. A new turn resets eligibility; old tool history does not count. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
+| Immediate / `auto` | In an exact active non-Pro turn, **Send directly** claims that original turn and uses ChatGPT's own Send while the turn works. ChatGPT folds the message into the turn: it ends the running part as interrupted and continues with the message, keeping the result of a call still running. Nothing is stopped first, and the running turn's model is kept. **Inject now** takes the same native path whenever the turn takes it, because text inside a tool result never reached the model (measured 2026-10-09, #1231: ChatGPT passes a command's output alone and treats any other result's text as untrusted). Tool injection remains for Pro (including Astra), for an unproven model, and for image injection: authored `delivery: tool` then captures the exact turn, waits visibly in the existing outbox, enters only that turn's eligible outer MCP result, and fails visibly if its turn ends before delivery. A new turn resets eligibility. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
 | After turn | Existing-session FIFO spends one distinct completion or confirmed failure/silence-refresh ticket per browser claim. Replays/restart cannot drain the next entry. Does not block an otherwise eligible immediate tool injection. |
 | Finish checkpoint | Waits for a successful finish-tool boundary; ordinary eligible chats can deliver after verified completion. Astra's separate after-turn opt-in remains explicit. Checkpoints inherit the current chat model. |
 | Native attachment | Browser upload/send only. A file-bearing active-chat input waits for the browser-safe boundary; it never becomes a tool-result file reference. |
@@ -1164,12 +1164,11 @@ rechecks composer and attachment nodes, crosses app authorization, then **rechec
 every await before Send**. Native stable user-message and conversation identity establish
 acceptance. Composer insertion, button disappearance and a local “sent” variable do not.
 
-Direct active-turn corrections freeze `directTurn` in the same outbox entry. The existing
-turn-start and last-tool evidence plus in-flight MCP custody decide eligibility; no separate
-tool-seen flag owns it. Recheck the exact claim before native interruption and before Send.
-Navigation, a newer question, an occupied draft or a first MCP call during preparation can
-revoke delivery. A claimed browser correction never also enters a tool result. After-turn
-entries retain their source-boundary policy and never acquire interruption authority.
+Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
+start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
+before Send. Navigation, a newer question or an occupied draft during preparation can revoke
+delivery. A claimed browser correction never also enters a tool result. After-turn entries
+retain their source-boundary policy and never acquire interruption authority.
 
 Native **Thinking failed** is recognized only by its exact visible disclosure button inside the
 current assistant turn, excluding quoted Markdown, old turns and app UI. It immediately records
@@ -4057,7 +4056,7 @@ supplies only `id`, `sessionId`, `text` up to 64,000 characters, and `interrupt`
 send from the composer does. The message can therefore reach ChatGPT, and a model that reads it
 can act under the capabilities the user has granted. A row sent this way is `automatic:false`,
 like one typed in the app. Worker and helper chats and chats with no ChatGPT chat yet are refused,
-and a send that would stop the answer being written needs `interrupt:true`; because the outbox
+and a send into an answer being written needs `interrupt:true`; because the outbox
 decides that itself when it admits the row, a row it marked as interrupting after the caller's check
 is withdrawn and refused. The caller's lowercase UUID is the outbox id: a repeat returns the
 existing row (200, `replayed:true`) and never reaches `enqueueInput`, and the same id with a
