@@ -663,7 +663,8 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({
       error: 'After-turn pickup was withdrawn before Send.', detail: 'turn-progressed' }));
   });
-  it.each(['accepted', 'refused', 'new-question', 'draft'])('direct delivery stops only the claimed source turn before normal Send (%s)', async change => {
+  // ChatGPT takes a message while it works and folds it into the running turn (#1231): nothing is stopped.
+  it.each(['accepted', 'refused', 'new-question', 'draft'])('direct delivery sends into the claimed running turn without stopping it (%s)', async change => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => {
@@ -689,10 +690,32 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn }),
       JSON.stringify(live.sent.filter(message => message.type === 'desktop_input')))
       .toEqual({ ok: change === 'accepted' });
-    expect(stops).toHaveBeenCalledTimes(change === 'accepted' ? 1 : 0);
+    expect(stops).not.toHaveBeenCalled();
     expect(sends()).toBe(change === 'accepted' ? 1 : 0);
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
+  });
+  it('sends a message into the running turn while one of its calls is still running (#1231)', async () => {
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 1 } }),
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'direct-correction', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn })).toEqual({ ok: true });
+    expect(sends()).toBe(1);
+    expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
   it.each(['answered', 'generating'] as const)('opens a new chat\'s first turn from its accepted Send when ChatGPT drops the question (#942, %s)', async shape => {
     // 2026-10-02, live: the app's first message in a new chat was confirmed with its exact native

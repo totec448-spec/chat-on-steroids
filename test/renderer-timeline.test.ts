@@ -2720,23 +2720,28 @@ it('shows injection only for an exact active turn, never merely recent chat acti
   expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('auto');
 });
 
-it('shows Send directly before MCP, keeps After this turn selected, and changes the visible menu after MCP', async () => {
+// A text for the running turn goes through ChatGPT's composer (#1231), so a running turn offers
+// Send directly alone; Inject now stays for a Pro turn, which keeps tool injection.
+it('shows Send directly alone for a running turn, keeps After this turn selected, and offers Inject now on a Pro turn', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api;
   const original = api.getSessionControls;
-  let tools = false;
+  let pro = false;
   api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data,
-    activeTurnId: 'plain-turn', canInject: tools, canSendDirectly: !tools, queueAtFinish: false } });
+    activeTurnId: 'plain-turn', canInject: pro, canSendDirectly: !pro, queueAtFinish: false } });
   await append([]);
   const options = w.document.getElementById('sendOptions')!;
   expect(options.hidden).toBe(false);
   expect(options.querySelector('[data-delivery="auto"]')!.textContent).toBe('Send directly');
-  expect((options.querySelector('[data-delivery="tool"]') as HTMLElement).hidden).toBe(false);
+  expect((options.querySelector('[data-delivery="tool"]') as HTMLElement).hidden).toBe(true);
+  await append([toolCall(1, 'first-mcp-call')]);
+  expect(options.querySelector('[data-delivery="auto"]')!.textContent).toBe('Send directly');
   (options.querySelector('[data-delivery="after-turn"]') as HTMLButtonElement).click();
   await append([]);
   expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('after-turn');
-  tools = true;
-  await append([toolCall(1, 'first-mcp-call')]);
+  pro = true;
+  await append([toolCall(2, 'second-mcp-call')]);
+  expect((options.querySelector('[data-delivery="tool"]') as HTMLElement).hidden).toBe(false);
   expect(options.querySelector('[data-delivery="auto"]')!.textContent).toBe('Inject now');
   expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('after-turn');
 });
