@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ToolSchema } from '@modelcontextprotocol/core';
-import { Client, StreamableHTTPClientTransport, UnauthorizedError, type Tool, type CallToolResult } from '@modelcontextprotocol/client';
+import { Client, ProtocolError, StreamableHTTPClientTransport, UnauthorizedError, type Tool, type CallToolResult } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { getMcpConfigForManifest, vAny } from '@anthropic-ai/mcpb/browser';
 import { getSecret, setSecret, clearSecret } from '../secrets.js';
@@ -42,6 +42,17 @@ interface Live {
   users: number;
   oauth?: PluginOAuth;
 }
+
+/** Protocol errors created locally after a successful tool response still mean the server broke its declared contract. */
+function isLocalToolOutputValidationError(error: unknown): boolean {
+  if (!(error instanceof ProtocolError)) return false;
+  return (
+    (error.message.startsWith('Tool ') && error.message.includes(' has an output schema but did not return structured content')) ||
+    error.message.startsWith("Structured content does not match the tool's output schema:") ||
+    error.message.startsWith('Failed to validate structured content:')
+  );
+}
+
 const boundedFetch: typeof fetch = async (input, init) => {
   const response = await fetch(input, { ...init, redirect: 'error' });
   if (!response.body) return response;
@@ -869,6 +880,12 @@ export class PluginManager {
       if (result.isError) onOutcome?.('tool_execution_error');
       return this.redactResult(result);
     } catch (error) {
+      // A JSON-RPC error response proves the server is still speaking MCP. Treat it
+      // as a tool execution failure, not as a broken transport that needs restart.
+      // Keep client-side output-schema failures fatal: those mean the server returned
+      // a successful response that violated the contract CoS discovered for the tool.
+      if (error instanceof ProtocolError && !isLocalToolOutputValidationError(error))
+        return errorResult(`PLUGIN_TOOL_ERROR: ${error.message}`);
       // A failed/ambiguous call must not leave a broken process running idle.
       if (this.live.get(row.id) === live && this.records.includes(row)) {
         const needsAuth = error instanceof PluginNeedsAuth || error instanceof UnauthorizedError;

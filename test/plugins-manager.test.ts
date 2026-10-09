@@ -26,7 +26,7 @@ import * as durableModule from '../src/main/durable.js';
 
 const fixture = `const readline=require('node:readline');
 const tools=[{name:'Echo.Mixed',description:'Echo fixture',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value'],additionalProperties:false},annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},outputSchema:{type:'object',properties:{value:{type:'string'}},required:['value']}}];
-readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;let result;if(m.method==='initialize')result={protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'CoS test fixture',version:'1'}};else if(m.method==='tools/list')result={tools};else if(m.method==='tools/call')result={content:[{type:'text',text:process.env.TEST_SECRET||m.params.arguments.value}],structuredContent:{value:m.params.arguments.value},isError:m.params.arguments.value==='error'};else result={};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`;
+readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-32603,message:'invalid tool arguments'}})+'\\n');return;}let result;if(m.method==='initialize')result={protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'CoS test fixture',version:'1'}};else if(m.method==='tools/list')result={tools};else if(m.method==='tools/call')result={content:[{type:'text',text:process.env.TEST_SECRET||m.params.arguments.value}],structuredContent:{value:m.params.arguments.value},isError:m.params.arguments.value==='error'};else result={};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`;
 let dir: string, manager: PluginManager, entry: string;
 beforeEach(async () => {
   dir = await makeTempDir('plugins-test-');
@@ -110,6 +110,21 @@ describe('external plugin authority', () => {
     expect(disabled).toContain('This call was not dispatched.');
     expect(disabled).not.toContain('Restart this plugin');
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a plugin ready after a JSON-RPC tool error response', async () => {
+    await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } });
+
+    const outcome = vi.fn();
+    const failed = await manager.call('Echo.Mixed', { value: 'rpc-error' }, outcome);
+    expect(failed.isError).toBe(true);
+    expect(JSON.stringify(failed)).toContain('PLUGIN_TOOL_ERROR');
+    expect(JSON.stringify(failed)).toContain('invalid tool arguments');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_execution_error');
+    expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+
+    expect(JSON.stringify(await manager.call('Echo.Mixed', { value: 'still connected' }))).toContain('still connected');
+    expect(manager.snapshot().plugins[0]?.status).toBe('ready');
   });
 
   it('preserves accepted protocol results and treats upstream error text only as execution output', async () => {
