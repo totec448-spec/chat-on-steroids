@@ -454,6 +454,7 @@
   "Waiting for the ChatGPT composer to finish loading.": "Esperando a que termine de cargar el cuadro de mensaje de ChatGPT.",
   "The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.": "El cuadro de mensaje de ChatGPT está oculto. Cierra los ajustes o diálogos nativos para usar esta pestaña.",
   "The native model picker is already being inspected.": "Ya se está inspeccionando el selector de modelos nativo.",
+  "The open chats show no readable model picker. Refresh opens a separate discovery page.": "Los chats abiertos no muestran un selector de modelos legible. Actualizar abre una página de detección aparte.",
   "The browser companion has not answered the page readiness check.": "La extensión del navegador no ha respondido a la comprobación de disponibilidad de la página.",
   "The discovery page changed or closed. Retry to start a new inspection.": "La página de detección cambió o se cerró. Vuelve a intentarlo para iniciar otra inspección.",
   "Opening one separate discovery page. Existing chats are left untouched.": "Abriendo una página de detección independiente. Los chats existentes no se modifican.",

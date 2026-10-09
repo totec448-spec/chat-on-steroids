@@ -454,6 +454,7 @@
   "Waiting for the ChatGPT composer to finish loading.": "Ожидание загрузки редактора сообщения ChatGPT.",
   "The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.": "Редактор сообщения ChatGPT скрыт. Закройте встроенные настройки или диалоги, чтобы использовать эту вкладку.",
   "The native model picker is already being inspected.": "Встроенное меню выбора модели уже проверяется.",
+  "The open chats show no readable model picker. Refresh opens a separate discovery page.": "В открытых чатах нет читаемого меню выбора модели. «Обновить» откроет отдельную страницу для определения моделей.",
   "The browser companion has not answered the page readiness check.": "Сопутствующее расширение браузера не ответило на проверку готовности страницы.",
   "The discovery page changed or closed. Retry to start a new inspection.": "Страница обнаружения изменилась или закрылась. Повторите, чтобы начать новую проверку.",
   "Opening one separate discovery page. Existing chats are left untouched.": "Открывается отдельная страница обнаружения. Существующие чаты не затрагиваются.",

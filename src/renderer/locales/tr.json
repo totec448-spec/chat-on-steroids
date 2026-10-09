@@ -454,6 +454,7 @@
   "Waiting for the ChatGPT composer to finish loading.": "ChatGPT mesaj alanının yüklenmesi bekleniyor.",
   "The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.": "ChatGPT mesaj alanı gizli. Bu sekmeyi kullanmak için ChatGPT'nin ayarlarını veya iletişim kutularını kapatın.",
   "The native model picker is already being inspected.": "ChatGPT'nin model seçicisi zaten inceleniyor.",
+  "The open chats show no readable model picker. Refresh opens a separate discovery page.": "Açık sohbetlerde okunabilir bir model seçici yok. Yenile, ayrı bir algılama sayfası açar.",
   "The browser companion has not answered the page readiness check.": "Yardımcı tarayıcı eklentisi, sayfanın hazır olma kontrolüne yanıt vermedi.",
   "The discovery page changed or closed. Retry to start a new inspection.": "Model algılama sayfası değişti veya kapandı. Yeni bir inceleme başlatmak için tekrar deneyin.",
   "Opening one separate discovery page. Existing chats are left untouched.": "Model algılama için ayrı bir sayfa açılıyor. Mevcut sohbetlere müdahale edilmiyor.",
