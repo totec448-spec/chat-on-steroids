@@ -463,6 +463,7 @@
   "Waiting for the ChatGPT composer to finish loading.": "ChatGPT の入力欄の読み込み完了を待っています。",
   "The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.": "ChatGPT の入力欄が隠れています。このタブを使うには、ChatGPT の設定画面やダイアログを閉じてください。",
   "The native model picker is already being inspected.": "ChatGPT のモデル選択欄はすでに調査中です。",
+  "The open chats show no readable model picker. Refresh opens a separate discovery page.": "開いているチャットに読み取れるモデル選択欄がありません。更新すると検出用の別ページが開きます。",
   "The browser companion has not answered the page readiness check.": "連携用拡張機能から、ページの準備状態の確認に対する応答がありません。",
   "The discovery page changed or closed. Retry to start a new inspection.": "検出用のページが変わったか閉じられました。再試行すると新たに調査します。",
   "Opening one separate discovery page. Existing chats are left untouched.": "検出用のページを別に1つ開いています。既存のチャットは変更しません。",

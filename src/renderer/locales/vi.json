@@ -441,6 +441,7 @@
   "Waiting for the ChatGPT composer to finish loading.": "Đang chờ composer ChatGPT tải xong.",
   "The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.": "Composer ChatGPT đang bị ẩn. Đóng cài đặt hoặc hộp thoại native để dùng tab này.",
   "The native model picker is already being inspected.": "Bộ chọn mô hình native đang được kiểm tra.",
+  "The open chats show no readable model picker. Refresh opens a separate discovery page.": "Các cuộc trò chuyện đang mở không có bộ chọn mô hình đọc được. Làm mới sẽ mở một trang phát hiện riêng.",
   "The browser companion has not answered the page readiness check.": "Companion trình duyệt chưa phản hồi kiểm tra trạng thái sẵn sàng của trang.",
   "The discovery page changed or closed. Retry to start a new inspection.": "Trang khám phá đã thay đổi hoặc đóng. Thử lại để bắt đầu kiểm tra mới.",
   "Opening one separate discovery page. Existing chats are left untouched.": "Đang mở một trang khám phá riêng. Các cuộc trò chuyện hiện có được giữ nguyên.",

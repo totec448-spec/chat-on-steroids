@@ -538,6 +538,16 @@ describe('one synchronous page snapshot per observer turn', () => {
     expect(await live.runtimeMessage({ type: 'clf-model-catalog-state' })).toMatchObject({ ready: true });
     expect(await live.runtimeMessage({ type: 'clf-tab-close-check', conversationId: null })).toMatchObject({ safe: true, conversationId: null });
   });
+  it('keeps a borrowed chat out of model discovery while its picker is unreadable', async () => {
+    live = await harness();
+    await settle();
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    Object.defineProperty(composer, 'getClientRects', { value: () => [{ width: 400, height: 60 }] });
+    const readable = vi.spyOn(live.window.CLF_DOM, 'modelPickerReadable').mockResolvedValue(false);
+    expect(await live.runtimeMessage({ type: 'clf-model-catalog-state' })).toEqual({ ready: false, reason: 'picker_unreadable' });
+    readable.mockResolvedValue(true);
+    expect(await live.runtimeMessage({ type: 'clf-model-catalog-state' })).toEqual({ ready: true, reason: null });
+  });
   it('permits closing only an exact idle document with no text or attachment draft', async () => {
     live = await harness();
     await settle();
