@@ -1072,12 +1072,12 @@ describe('browser decision lifetime', () => {
     expect(await claimBrowserInput(entry.id, 'fresh-marker-document', null)).toMatchObject({ id: entry.id, state: 'browser' });
   });
   it('requires a deliberate exact-source retry and never revives the previous owner', async () => {
-    const controller = new AbortController();
-    const first = requestBrowserDecision('Choose', controller.signal, { sourceSessionId: sessionId });
+    const first = requestBrowserDecision('Choose', new AbortController().signal, { sourceSessionId: sessionId });
     const rejected = expect(first).rejects.toThrow('cancelled');
     const row = (await listInputs())[0]!;
     await claimBrowserInput(row.id, 'old-document', null);
-    controller.abort(); await rejected;
+    // Only a person's cancellation of a claimed helper pauses it for a deliberate retry.
+    expect(await cancelInput(row.id)).toBe(true); await rejected;
     expect(await pausedBrowserHelpers()).toEqual([{ id: row.id, sourceSessionId: sessionId }]);
     expect(await authorizeBrowserHelperRetry(row.id, 'wrong-source')).toBe(false);
     vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk busy'));
@@ -1110,17 +1110,34 @@ describe('browser decision lifetime', () => {
     expect(await completeBrowserDecision(row.id, 'helper', 'reply', 'helper-conversation')).toBe(true);
     await expect(answer).resolves.toBe('reply');
   });
-  it('blocks duplicate source helpers and new tabs after an ambiguous fresh cancellation', async () => {
-    const controller = new AbortController();
-    const answer = requestBrowserDecision('Choose', controller.signal, { sourceSessionId: sessionId });
+  it('blocks a duplicate helper while one runs, and after a person cancelled a claimed one', async () => {
+    const answer = requestBrowserDecision('Choose', new AbortController().signal, { sourceSessionId: sessionId });
     const rejected = expect(answer).rejects.toThrow('goal_browser_cancelled');
     const row = (await listInputs())[0]!;
     await expect(requestBrowserDecision('Again', new AbortController().signal, { sourceSessionId: sessionId })).rejects.toThrow('goal_browser_busy');
     await claimBrowserInput(row.id, 'document', null);
-    controller.abort();
+    expect(await cancelInput(row.id)).toBe(true);
     await rejected;
     await expect(requestBrowserDecision('Retry', new AbortController().signal, { sourceSessionId: sessionId })).rejects.toThrow('goal_browser_send_unconfirmed');
     expect(await listInputs()).toHaveLength(1);
+  });
+  it('starts the next helper on its own after the app cancelled a claimed one (user decision 2026-10-09)', async () => {
+    // VM 2026-10-09: a new turn superseded a claimed Loop helper, and every later decision failed
+    // with "Helper delivery was not confirmed" until someone pressed "Start a new helper".
+    const controller = new AbortController();
+    const answer = requestBrowserDecision('Choose', controller.signal, { sourceSessionId: sessionId });
+    const rejected = expect(answer).rejects.toThrow('goal_browser_cancelled');
+    const row = (await listInputs())[0]!;
+    await claimBrowserInput(row.id, 'document', null);
+    controller.abort();
+    await rejected;
+    expect(await pausedBrowserHelpers()).toEqual([]);
+    const next = requestBrowserDecision('Retry', new AbortController().signal, { sourceSessionId: sessionId });
+    const fresh = (await listInputs()).find(entry => entry.state === 'queued')!;
+    expect(fresh.id).not.toBe(row.id);
+    await claimBrowserInput(fresh.id, 'new-document', null);
+    expect(await completeBrowserDecision(fresh.id, 'new-document', 'accepted', 'helper-new-chat')).toBe(true);
+    await expect(next).resolves.toBe('accepted');
   });
   it('lets a source retry after a confirmed temporary helper send timed out', async () => {
     // 2026-10-02, live: a Temporary Chat helper confirmed its prompt, its answer was never taken,
