@@ -451,6 +451,24 @@ it('sends an immediate message into a running GPT-5.6 turn through the composer 
     .toMatchObject({ id: row.id, directTurn: { id: turnId } });
 });
 
+it('hands a message for the running turn to the browser while one of its calls is still running (#1231)', async () => {
+  const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Message during a running call', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'user_message', messageId: randomUUID(), text: 'Run the long command', time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+    caller: { requestId: randomUUID(), transportKey: null, conversationId } }, async () => {
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', delivery: 'tool' });
+    expect(row).toMatchObject({ transportIntent: 'browser', directTurn: { id: turnId } });
+    const status = await post('/status', { openConversations: [conversationId] });
+    expect(status.body.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ id: row.id, directTurn: { id: turnId, startedAt: expect.any(Number) } })]));
+  });
+});
+
 // A running GPT-5.6 turn takes an immediate message directly (above); these cover the boundary.
 it.each([
   { mode: 'after-turn', earlyEnd: false }, { mode: 'finish', earlyEnd: false },
