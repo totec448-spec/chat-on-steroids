@@ -2104,6 +2104,25 @@ function chatIsWorking(conversationId: string): boolean {
   return Boolean(current && (current.generating || current.activeTurnId));
 }
 
+/**
+ * Whether a chat is working now, for decisions that act on it: reopening its tab, filing an
+ * automatic compaction. A bare open turn counts only for `OPEN_TURN_RECOVERY_MS` after its start;
+ * one left open by a page that went away days ago is history, and briefly visiting that chat must
+ * not reopen its tab or compact it (2026-10-09: a worker chat whose turn had been open since
+ * 09-25 filed a compaction at 408k tokens and reloaded itself for 50 minutes). Activity in the
+ * silence window counts however old the turn is.
+ */
+function liveTurnIsCurrent(conversationId: string, now = Date.now()): boolean {
+  return liveConversations().some((entry) => entry.conversationId === conversationId &&
+    (entry.generating || Boolean(entry.activeTurnId)) &&
+    (entry.activeTurnStartedAt === null || now - entry.activeTurnStartedAt < OPEN_TURN_RECOVERY_MS));
+}
+
+/** liveTurnIsCurrent, or activity in the silence window: what a closed tab's reopening reads. */
+function chatIsWorkingNow(conversationId: string, now = Date.now()): boolean {
+  return liveTurnIsCurrent(conversationId, now) || (activeUntil.get(conversationId)?.until ?? 0) > now;
+}
+
 async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const receivedAt = Date.now();
   const { ok: originAllowed, origin } = originOf(req);
@@ -2823,14 +2842,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // Read before closeConversation() forgets the page: the
       // page's own open turn, or this app's standing definition of a chat that is working —
       // an attributed call or current-turn observation inside the silence window.
-      // A bare open turn ages out: one left open by a page that went away days ago is not a
-      // running turn, and reopening its tab on a brief visit only wakes the ten-minute watchdog
-      // (2026-10-09). Activity in the silence window still counts however old the turn is.
-      const working =
-        liveConversations().some(
-          (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId)) &&
-            (entry.activeTurnStartedAt === null || Date.now() - entry.activeTurnStartedAt < OPEN_TURN_RECOVERY_MS)
-        ) || (activeUntil.get(id)?.until ?? 0) > Date.now();
+      // A bare open turn ages out (chatIsWorkingNow): reopening the tab of a chat whose turn was
+      // left open days ago only wakes the ten-minute watchdog (2026-10-09).
+      const working = chatIsWorkingNow(id);
       const manual = body['manual'] === true;
       if (manual) {
         // User departure withdraws activity and pending browser actions. Preserve
@@ -6778,7 +6792,7 @@ async function considerAutomaticCompaction(conversationId: string, sessionId: st
   const hasCurrentWork = (): boolean => {
     const grant = activeUntil.get(conversationId);
     const now = Date.now();
-    return chatIsWorking(conversationId) || Boolean(grant?.sessionId === sessionId && grant.mcpBacked &&
+    return liveTurnIsCurrent(conversationId, now) || Boolean(grant?.sessionId === sessionId && grant.mcpBacked &&
       !grant.thinkingFailed && grant.evidenceAt <= now && grant.until > now);
   };
   if (!failedTurn && !hasCurrentWork()) return;
