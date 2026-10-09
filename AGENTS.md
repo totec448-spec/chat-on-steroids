@@ -3773,8 +3773,8 @@ MCP server publishes per surface) with the ones acknowledged in
 `cos.plugins.refreshReminder.acknowledgedSchemas`. The first schema seen per surface is a
 silent baseline; a different one shows the reminder until its X is clicked.
 `AppState.confirmedConnectorSchemas` carries, per surface, the schema ChatGPT confirmed after a
-refresh click or found already current (`confirmedPluginSchemas()` reads `completedSchemaId`
-from `state/plugin-refresh.json`); a current schema confirmed there counts as acknowledged, so
+refresh click or found already current (`confirmedPluginSchemas()`, an in-memory copy of
+`completedSchemaId` from `state/plugin-refresh.json`, kept current on every read and write); a current schema confirmed there counts as acknowledged, so
 the reminder disappears once automatic plugin refresh lands. The reminder is hidden in
 Settings, stacks with update/extension notices and never marks a refresh complete or starts a
 browser action.

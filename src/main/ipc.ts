@@ -510,7 +510,7 @@ async function buildState(): Promise<AppState> {
     connectorSchemas: Object.fromEntries(
       pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
     ),
-    confirmedConnectorSchemas: await confirmedPluginSchemas(),
+    confirmedConnectorSchemas: confirmedPluginSchemas(),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
