@@ -28,6 +28,7 @@ ChatGPT's GPT-6 rollout changed how its page works, and this release catches up.
   - Loop no longer stops with "the structured decision was not JSON".
   - The helper chats Goal and Loop use for their decisions close again instead of piling up in Chrome.
 - **Compact & Resume** no longer reloads the chat it starts from, which could make the first attempt fail with "the Send button or message box was not ready".
+- **Very long Compact & Resume summaries** keep their end when ChatGPT's page draws more than 120 KB for them.
 - **Model list:** refreshing it no longer fails when an open chat still uses a model ChatGPT has retired. On a translated ChatGPT page, Extra High is listed the same way as on an English one.
 - **Several computers on one account:** a new worker tab now calls this computer's Chat On Steroids, even before its page has listed its apps.
 - **Recovery:** a chat that leaves ChatGPT's "could not be loaded" page keeps its automatic recovery.
@@ -44,7 +45,7 @@ ChatGPT's GPT-6 rollout changed how its page works, and this release catches up.
 
 ### 💛 Thank you
 
-To **@Haz4rdovisk** for the GPT-6 model picker, the timeline in rounds, the Sub-agents list, the new Setup step and the title bar layout. To **@Gokuencinar** for the attachment, search, timeline and journal fixes, and to **@m1d0e1** for the formula rendering idea that the timeline builds on. And to **@tude91979059-byte**, whose long runs on GPT-6 showed where the app no longer understood ChatGPT's page.
+To **@Haz4rdovisk** for the GPT-6 model picker, the timeline in rounds, the Sub-agents list, the new Setup step and the title bar layout. To **@Gokuencinar** for the attachment, search, timeline and journal fixes, and to **@m1d0e1** for the formula rendering idea that the timeline builds on and for keeping very long summaries intact. And to **@tude91979059-byte**, whose long runs on GPT-6 showed where the app no longer understood ChatGPT's page.
 
 ## [2.1.30] — See what's new, and long runs that stop and recover more calmly
 
