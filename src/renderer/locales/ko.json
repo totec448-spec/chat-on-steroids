@@ -2069,5 +2069,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "매개변수, 명확한 조인, 결과 확인을 통해 SQL 쿼리를 정확하고 안전하게 작성, 검토, 최적화합니다.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "긴 문서, 스레드, 녹취록을 정확하게 요약합니다. 핵심 내용, 결정 사항, 남은 질문, 할 일을 정리합니다.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "의미, 어조, 서식, 용어를 일관되게 유지하면서 정확하고 자연스럽게 번역합니다.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "목표를 명확하고 현실적인 계획으로 바꿉니다. 범위, 마일스톤, 작업, 위험, 오늘 시작할 수 있는 첫 단계를 정합니다."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "목표를 명확하고 현실적인 계획으로 바꿉니다. 범위, 마일스톤, 작업, 위험, 오늘 시작할 수 있는 첫 단계를 정합니다.",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "실행 중인 답변에 닿는 메시지, ChatGPT가 묻는 선택지, 확실히 멈추는 중지.",
+  "Messages reach the running answer": "메시지가 실행 중인 답변에 닿습니다",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "직접 전송은 명령이 실행 중일 때도 메시지를 실제 ChatGPT 메시지로 실행 중인 답변에 넣고, 명령은 결과를 그대로 유지합니다.",
+  "ChatGPT's choices in the timeline": "타임라인에 표시되는 ChatGPT의 선택지",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "ChatGPT가 옵션을 고르라고 하면 타임라인에 질문과 선택지가 표시됩니다.",
+  "A Stop that sticks": "확실히 멈추는 중지",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "늦게 도착한 도구 결과가 턴을 다시 열어도 중지가 턴을 끝내고, 타임라인에 중지된 시점이 표시됩니다.",
+  "A clearer Usage page": "더 명확해진 사용량 페이지",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "정수로 표시되는 토큰 수, 가격이 없는 비용의 하한, 가장 최근 몇 주의 활동이 먼저 표시됩니다.",
+  "Skills in your language": "사용자 언어로 보는 스킬",
+  "The recommended skills describe themselves in the language of the app.": "추천 스킬의 설명이 앱의 언어로 표시됩니다."
 }

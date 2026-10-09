@@ -2069,5 +2069,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "パラメーター、明確な結合、結果の確認を通じて、SQL クエリを正しく安全に作成・レビュー・最適化します。",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "長い文書、スレッド、文字起こしを正確に要約します。要点、決定事項、未解決の質問、やるべきことをまとめます。",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "意味、トーン、書式、用語の一貫性を保ちながら、正確で自然な翻訳をします。",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "目標を明確で現実的な計画にします。範囲、マイルストーン、タスク、リスク、今日始められる最初の一歩を示します。"
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "目標を明確で現実的な計画にします。範囲、マイルストーン、タスク、リスク、今日始められる最初の一歩を示します。",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "実行中の回答に届くメッセージ、ChatGPT が尋ねる選択肢、確実に効く停止。",
+  "Messages reach the running answer": "メッセージが実行中の回答に届く",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "「直接送信」は、コマンドの実行中でも、メッセージを本物の ChatGPT メッセージとして実行中の回答に加えます。コマンドの結果はそのまま残ります。",
+  "ChatGPT's choices in the timeline": "ChatGPT の選択肢をタイムラインに",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "ChatGPT が選択肢を選ぶよう求めると、タイムラインに質問と選択肢が表示されます。",
+  "A Stop that sticks": "確実に効く停止",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "遅れて届いたツール結果でターンが再開しても、停止でターンが終わり、タイムラインに停止した時刻が表示されます。",
+  "A clearer Usage page": "わかりやすくなった使用状況ページ",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "トークン数は整数で、価格のないコストは下限として表示し、最新の週のアクティビティを先に表示します。",
+  "Skills in your language": "スキルをあなたの言語で",
+  "The recommended skills describe themselves in the language of the app.": "おすすめのスキルの説明がアプリの言語で表示されます。"
 }
