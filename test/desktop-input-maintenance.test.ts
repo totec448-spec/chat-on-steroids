@@ -75,7 +75,7 @@ it.each([false, true])('never borrows a command-owned opening for model discover
     expect(h.create).not.toHaveBeenCalled();
   }
 });
-it.each(['generating', 'draft', 'attachments', 'input_busy', 'composer_hidden'])('explicit refresh uses one helper without touching a %s user tab', async reason => {
+it.each(['generating', 'draft', 'attachments', 'input_busy', 'composer_hidden', 'picker_unreadable'])('explicit refresh uses one helper without touching a %s user tab', async reason => {
   const h = await worker([]);
   const userTab = { id: 8, url: `https://chatgpt.com/c/${secondId}` }; h.tabs.push(userTab);
   h.sendMessage.mockResolvedValue({ ready: false, reason } as never);
