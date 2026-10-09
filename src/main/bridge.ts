@@ -1523,7 +1523,12 @@ function parseObservations(input: unknown): ChatObservation[] {
       if (!trace || !observation.turnId) continue;
       observation.trace = trace;
     }
-    if (typeof item['renderedHtml'] === 'string') observation.renderedHtml = item['renderedHtml'].slice(0, 120_000);
+    if (typeof item['renderedHtml'] === 'string') {
+      // Keep the whole compact rendering of a stable final through /events.
+      // Cutting its last 100k here could silently lose the end of a handoff.
+      const finalAssistant = kind === 'assistant_message' && item['state'] === 'final' && item['final'] === true;
+      observation.renderedHtml = item['renderedHtml'].slice(0, finalAssistant ? 256_000 : 120_000);
+    }
     if (item['state'] === 'streaming' || item['state'] === 'final') observation.state = item['state'];
     if (typeof item['fiberConversationId'] === 'string') {
       const fiberId = conversationId(item['fiberConversationId']);
