@@ -1489,3 +1489,19 @@ it('reports a chat on a model the account no longer lists as unreadable for disc
   f.doc.body.append(toggle);
   expect(await f.api.modelPickerReadable()).toBe(true);
 });
+it('reads a translated Extra High lane as xhigh, as the English label does', async () => {
+  // German pages label the lanes "Sofort", "Mittel", "Hoch" and "Sehr hoch"; English pages say
+  // "Extra High". Both send max for that lane, so the catalog must not depend on the UI language.
+  const f = fixture();
+  const lanes = [
+    { model: 'gpt-6', modelLabel: 'GPT-6', reasoningEffort: 'none', powerSettingIndex: 0, labels: { effort: 'Sofort' } },
+    { model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'medium', powerSettingIndex: 1, labels: { effort: 'Mittel' } },
+    { model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'max', powerSettingIndex: 2, labels: { effort: 'Sehr hoch' } }];
+  f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[2]; f.props.selectedPowerSelection = lanes[2];
+  const { picker } = await f.ask('clf-picker-ask');
+  expect(picker.choices.map((c: any) => c.effort)).toEqual(['none', 'medium', 'xhigh']);
+  expect(picker.currentBucket).toBe(2);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-thinking', reasoningEffort: 'xhigh' });
+  lanes[2]!.labels.effort = 'Extra High';
+  expect((await f.ask('clf-picker-ask')).picker.choices[2].effort).toBe('xhigh');
+});

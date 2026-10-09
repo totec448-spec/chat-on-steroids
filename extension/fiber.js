@@ -2474,6 +2474,12 @@
     return /^(?:pro|(?:gpt-?)?\d+(?:[.-]\d+)?-pro)$/.test(normalized);
   }
 
+  /** A shell lane's transport effort when its label is translated. The Extra High lane sends max
+   * (English and German pages alike, 2026-10-09), as the September picker's non-Work max did. */
+  function shellLaneTransportEffort(value) {
+    return ({ none:'none', minimal:'minimal', low:'low', medium:'medium', high:'high', xhigh:'xhigh', max:'xhigh' })[value] ?? null;
+  }
+
   // The native closed picker does not mount composerIntelligencePickerState.
   // Its own ancestor carries the current execution model; its visible label
   // carries the selected effort. These are observation, never catalog discovery.
@@ -2488,9 +2494,12 @@
       // The shell picker's selected lane carries the visible effort name: the machine
       // attribute reports its transport value (medium/max) for Pro/Extra High lanes.
       const sel = fiber.memoizedProps?.selectedPowerSelection ?? fiber.memoizedProps?.selectedLabelCandidate;
-      if (lane === null && sel) lane = { model: sel.model,
-        effort: ({ instant:'none', minimal:'minimal', low:'low', medium:'medium', high:'high',
-          'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[String(sel.labels?.effort ?? sel.sliderLabel ?? '').trim().toLowerCase()] ?? null };
+      if (lane === null && sel) {
+        const caption = String(sel.labels?.effort ?? sel.sliderLabel ?? '').trim().toLowerCase();
+        lane = { model: sel.model,
+          effort: ({ instant:'none', minimal:'minimal', low:'low', medium:'medium', high:'high',
+            'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[caption] ?? (caption ? shellLaneTransportEffort(sel.reasoningEffort) : null) };
+      }
       const current = fiber.memoizedProps?.currentModelId;
       if (current === undefined) continue;
       if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
@@ -2558,8 +2567,10 @@
       // The machine reasoningEffort is a lane's transport setting, not its identity: the
       // Pro and Extra High lanes still report medium/max. The lane's visible label is what
       // the picker offers, matching readPickerSnapshot's modelLane/thinkingEffort mapping.
+      // A translated label ("Sehr hoch") falls back to that transport value, where max is Extra High.
       const laneEffort = c => shellProExecutionModel(c?.model) ? 'pro' :
-        effort(String(c?.labels?.effort ?? c?.sliderLabel ?? '').trim().toLowerCase()) ?? effort(c?.reasoningEffort);
+        effort(String(c?.labels?.effort ?? c?.sliderLabel ?? '').trim().toLowerCase()) ??
+        ((c?.labels?.effort ?? c?.sliderLabel) ? shellLaneTransportEffort(c?.reasoningEffort) : effort(c?.reasoningEffort));
       const current = options.filter(o => o?.selected === true);
       if (current.length !== 1) return null;
       const version = group(current[0].id);
