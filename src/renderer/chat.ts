@@ -2117,6 +2117,86 @@ const WRITING_BLOCK: TokenizerAndRendererExtension = {
   }
 };
 
+/**
+ * A native ChatGPT form is not safe to replay in Electron. The recorded markup can, however,
+ * contain the only visible copy of its question and choices. Keep those words as inert text,
+ * never the provider's buttons, editable values, handlers or submission state.
+ *
+ * Ordinary canonical Markdown may be ahead of the recorded DOM. Only borrow a prompt from that
+ * DOM when its question also appears in the current canonical answer; a stale capture must not
+ * append a question from an earlier revision.
+ */
+const NATIVE_PROMPT_GROUPS = 'form, [role="radiogroup"], [role="listbox"], [role="group"]';
+const NATIVE_PROMPT_CONTROL = 'input, textarea, select, button, [role="radio"], [role="checkbox"], [role="option"]';
+const promptWords = (value: string): string => value.replace(/\s+/g, ' ').trim().slice(0, 250);
+const promptMatchText = (value: string): string => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+
+function nativePromptCards(root: ParentNode): Array<{ group: Element; anchor: string; card: HTMLElement; options: string[] }> {
+  const cards: Array<{ group: Element; anchor: string; card: HTMLElement; options: string[] }> = [];
+  for (const group of root.querySelectorAll(NATIVE_PROMPT_GROUPS)) {
+    if (cards.length >= 8) break;
+    if (group.closest('[hidden], [aria-hidden="true"], svg, math, script, style, template, pre, code')) continue;
+    if (group.parentElement?.closest(NATIVE_PROMPT_GROUPS)) continue;
+    const role = group.getAttribute('role');
+    const controls = [...group.querySelectorAll(NATIVE_PROMPT_CONTROL)].filter(control =>
+      !control.closest('[hidden], [aria-hidden="true"]'));
+    if (!controls.length || (role === 'group' && !controls.some(control =>
+      control.matches('input, textarea, select, [role="radio"], [role="checkbox"]')))) continue;
+    const heading = group.querySelector('legend, h1, h2, h3, h4, [role="heading"], p');
+    const preceding = group.previousElementSibling;
+    const anchor = promptWords(group.getAttribute('aria-label') || heading?.textContent ||
+      (preceding?.matches('p, h1, h2, h3, h4') ? preceding.textContent : '') || '');
+    const options: string[] = [];
+    const actions: string[] = [];
+    const add = (value: string): void => { const label = promptWords(value); if (label && !options.includes(label) && options.length < 16) options.push(label); };
+    for (const control of controls) {
+      if (control.matches('input')) {
+        const type = (control.getAttribute('type') || 'text').toLowerCase();
+        if (type === 'hidden' || type === 'password' || type === 'submit' || type === 'button') continue;
+        const id = control.getAttribute('id');
+        const label = control.closest('label') ?? (id ? [...group.querySelectorAll('label')].find(node => node.getAttribute('for') === id) : null);
+        add(label?.textContent || control.getAttribute('aria-label') || control.getAttribute('placeholder') || '');
+      } else if (control.matches('select')) {
+        for (const option of control.querySelectorAll('option')) add(option.textContent || '');
+      } else if (control.matches('[role="radio"], [role="checkbox"], [role="option"]')) {
+        add(control.getAttribute('aria-label') || control.textContent || '');
+      } else if (control.matches('textarea')) {
+        add(control.getAttribute('aria-label') || control.getAttribute('placeholder') || '');
+      } else if (control.matches('button') && group.matches('form')) {
+        const label = promptWords(control.textContent || control.getAttribute('aria-label') || '');
+        if (label && !actions.includes(label)) actions.push(label);
+      }
+    }
+    // An action such as Continue is not a third radio choice. In a button-only prompt,
+    // retaining its label is still more useful than dropping the prompt altogether.
+    if (!options.length) for (const action of actions) add(action);
+    if (!options.length) continue;
+    const card = document.createElement('blockquote');
+    card.className = 'native-prompt-readonly';
+    if (anchor) {
+      const headingLine = document.createElement('p');
+      const strong = document.createElement('strong');
+      strong.textContent = anchor;
+      headingLine.append(strong);
+      card.append(headingLine);
+    }
+    const list = document.createElement('ul');
+    for (const option of options) {
+      const row = document.createElement('li');
+      row.textContent = option;
+      list.append(row);
+    }
+    card.append(list);
+    const instruction = document.createElement('p');
+    const explanation = document.createElement('em');
+    explanation.textContent = t('Answer this prompt in ChatGPT');
+    instruction.append(explanation);
+    card.append(instruction);
+    cards.push({ group, anchor, card, options });
+  }
+  return cards;
+}
+
 export function renderedMarkdown(source: string, capture?: StoredText, references?: readonly MessageReference[]): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
@@ -2179,6 +2259,21 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const html = parser.parse(text, { async: false });
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
   drawMath(box, math);
+  if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
+    const template = document.createElement('template');
+    template.innerHTML = capture.text;
+    const current = promptMatchText(box.textContent ?? '');
+    for (const prompt of nativePromptCards(template.content)) {
+      // An independently recorded question anchors the captured choices to this revision.
+      // Never replace the canonical answer or repeat choices it already includes.
+      if (prompt.anchor.length < 8 || !current.includes(promptMatchText(prompt.anchor)) ||
+          prompt.options.every(option => current.includes(promptMatchText(option)))) continue;
+      // The canonical Markdown already displays this exact question above the choices.
+      // Repeating it inside the native prompt card made it read as two questions.
+      prompt.card.querySelector(':scope > p:first-child')?.remove();
+      box.append(prompt.card);
+    }
+  }
   if (pills.size) {
     for (const anchor of box.querySelectorAll('a[href]')) {
       const probe = anchor.textContent?.match(PILL_PLACEHOLDER)?.[1];
@@ -2208,12 +2303,18 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // Parsing untrusted captured HTML constructs a second tree before sanitisation. Bound it
   // before innerHTML so a valid but huge recorded turn cannot freeze/OOM the renderer.
   template.innerHTML = html.text.slice(0, MAX_RENDERED_HTML_CHARS);
+  // Preserve user-facing native forms before the sanitizer intentionally removes active form
+  // elements. These replacement nodes contain text only and undergo that same sanitizer.
+  const prompts = nativePromptCards(template.content);
+  for (const prompt of prompts) prompt.group.replaceWith(prompt.card);
   sanitizeHtmlTree(template.content, {
     allowedTags: RENDERED_TAGS,
     dropTags: DROP_RENDERED_TAGS,
     safeHref: safeRenderedHref,
     preserveDirection: true
   });
+  // Only reapply our own presentation class, after the capture's untrusted classes are gone.
+  for (const prompt of prompts) prompt.card.classList.add('native-prompt-readonly');
   box.append(template.content);
   const openLink = (event: MouseEvent): void => {
     if (event.type === 'auxclick' && event.button !== 1) return;
