@@ -2900,6 +2900,11 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'turn_start':
       return el('p', 'meta', () => event.detail ? t("Turn reopened — {0}", [event.detail]) : t("Turn started"));
     case 'turn_end': {
+      if (stoppedTurnEnd(event, context?.history ?? events)) {
+        const line = el('p', 'meta is-progress thinking-line turn-stopped');
+        line.append(icon('i-check-circle', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
+        return line;
+      }
       const line = el(
         'p',
         event.outcome === 'completed' ? 'meta' : 'meta is-warn',
@@ -3020,6 +3025,20 @@ function answerActions(turnId: string): HTMLElement {
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
   bar.append(copy, menu);
   return bar;
+}
+
+/**
+ * A turn's stopped end, while it is still that turn's last word: the line that says it stopped.
+ *
+ * The app's Stop note stays where Stop was asked (finish.ts) and says what was known then. The
+ * end of the turn is where it stopped: the page's stopped end, after every call the turn made.
+ * Late work can reopen the turn (recorder.ts); that end then stops being the last word, and the
+ * next stopped end, after the late work, says it again.
+ */
+function stoppedTurnEnd(event: SessionEvent, history: readonly SessionEvent[]): boolean {
+  if (event.kind !== 'turn_end' || event.outcome !== 'stopped' || !event.turnId) return false;
+  return !history.some(later => later.seq > event.seq && later.turnId === event.turnId &&
+    (later.kind === 'turn_start' || later.kind === 'turn_end'));
 }
 
 function eventRow(event: SessionEvent): HTMLElement {
@@ -3783,12 +3802,14 @@ function paintDetail(followBottom = historyBefore === null): void {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
-    if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind)) continue;
+    if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind) &&
+        !stoppedTurnEnd(item.event, events)) continue;
     const key = itemKey(item);
     const answerTurn = item.kind === 'event' && item.event.kind === 'assistant_message' && item.event.turnId &&
       anchors.get(item.event.turnId) === item.event.seq ? item.event.turnId : null;
     const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '');
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '') +
+      (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '');
     keep.add(key);
     const cached = rowCache.get(key);
     const workerIds = JSON.stringify(item.kind === 'event' ? participatingWorkers(item.event, workers).map(worker => worker.id) : []);

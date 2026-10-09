@@ -986,7 +986,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 1 milyon önbelleğe alınmış girdi · doğrulanmış bir karşılaştırma fiyatı girin",
   "Unknown rate": "Bilinmeyen fiyat",
   "{0} cached-input USD per million tokens": "{0} önbelleğe alınmış girdi fiyatı: milyon token başına USD",
-  "{0} + unpriced": "{0} + fiyatlandırılmamış",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "Tahmini {0} token; {1} için karşılaştırma fiyatı yok. Önbelleğe alınmış girdi karşılığıdır, fatura değildir.",
   "{0}: {1} estimated tokens": "{0}: tahmini {1} token",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "Arayüzdeki son bağlam (bu tahmin için en fazla {2} token) × benzersiz araç çağrıları ÷ {0} × her modelin önbelleğe alınmış girdi fiyatı ÷ 1 milyon × {1}.",
@@ -2050,5 +2049,6 @@
   "Your settings stay put": "Ayarlarınız yerinde kalır",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "Uygulamanın okuyamadığı bir ayar dosyası artık her şeyi sıfırlamaz: uygulama onu yine de okur ya da bir kopyasını saklar.",
   "Recovery stays on": "Kurtarma açık kalır",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Uygulama sessiz bir sohbetin sekmesini yeni bir sohbet için kullandığında, o sohbetin otomatik kurtarması açık kalır."
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "Uygulama sessiz bir sohbetin sekmesini yeni bir sohbet için kullandığında, o sohbetin otomatik kurtarması açık kalır.",
+  "Stopped. ChatGPT no longer shows this turn running.": "Durduruldu. ChatGPT bu turu artık çalışıyor olarak göstermiyor."
 }

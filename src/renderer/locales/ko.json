@@ -963,7 +963,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "USD / 캐시 입력 100만 토큰 · 확인된 비교 단가 입력",
   "Unknown rate": "단가 알 수 없음",
   "{0} cached-input USD per million tokens": "{0} 캐시 입력 기준 USD / 100만 토큰",
-  "{0} + unpriced": "{0} + 단가 미지정",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "추정 토큰 {0}개 중 {1}개는 비교 단가가 없습니다. 캐시 입력 기준 환산값이며 실제 청구액이 아닙니다.",
   "{0}: {1} estimated tokens": "{0}: 추정 토큰 {1}개",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "최종 프런트엔드 컨텍스트(이 추정에서는 최대 {2}토큰) × 고유 도구 호출 수 ÷ {0} × 각 모델의 캐시 입력 단가 ÷ 100만 × {1}.",
@@ -2050,5 +2049,6 @@
   "Your settings stay put": "설정이 그대로 유지됨",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "앱이 읽을 수 없는 설정 파일이 있어도 모든 설정이 초기화되지 않습니다. 앱이 그대로 읽거나 사본을 보관합니다.",
   "Recovery stays on": "복구는 계속 켜짐",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "앱이 조용한 채팅의 탭을 새 채팅에 다시 사용해도 그 채팅의 자동 복구는 유지됩니다."
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "앱이 조용한 채팅의 탭을 새 채팅에 다시 사용해도 그 채팅의 자동 복구는 유지됩니다.",
+  "Stopped. ChatGPT no longer shows this turn running.": "중지됨. ChatGPT에서 이 턴이 더 이상 실행 중으로 표시되지 않습니다."
 }

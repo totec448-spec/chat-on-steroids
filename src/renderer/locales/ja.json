@@ -1067,7 +1067,6 @@
   "USD / 1M cached input · enter a verified comparison rate": "キャッシュ入力100万トークンあたりの USD · 確認済みの比較単価を入力",
   "Unknown rate": "単価不明",
   "{0} cached-input USD per million tokens": "{0}のキャッシュ入力100万トークンあたりの USD",
-  "{0} + unpriced": "{0}＋単価未設定分",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "推定{0}トークン。うち{1}には比較単価がありません。キャッシュ入力の相当額であり、請求額ではありません。",
   "{0}: {1} estimated tokens": "{0}：推定{1}トークン",
   "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "最終フロントエンドコンテキスト（この推定では最大{2}トークン）× 重複を除いたツール呼び出し数 ÷ {0} × 各モデルのキャッシュ入力単価 ÷ 100万 × {1}。",
@@ -2050,5 +2049,6 @@
   "Your settings stay put": "設定が消えない",
   "A settings file the app can't read no longer resets everything: the app reads it anyway or keeps a copy.": "アプリが読めない設定ファイルがあってもすべてがリセットされることはありません。そのまま読み込むか、コピーを残します。",
   "Recovery stays on": "復旧は有効のまま",
-  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "アプリが静かなチャットのタブを新しいチャットに再利用しても、そのチャットの自動復旧は有効のままです。"
+  "When the app reuses a quiet chat's tab for a new chat, that chat keeps its automatic recovery.": "アプリが静かなチャットのタブを新しいチャットに再利用しても、そのチャットの自動復旧は有効のままです。",
+  "Stopped. ChatGPT no longer shows this turn running.": "停止しました。ChatGPT ではこのターンはもう実行中として表示されません。"
 }
