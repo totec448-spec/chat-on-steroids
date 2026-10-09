@@ -84,6 +84,7 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 const { startTunnel } = await import('../src/main/tunnel/index.js');
+const { ROUTE_SETTLE_MS, resetRouteSettleForTests, tunnelRouteSettling } = await import('../src/main/tunnel/route-settle.js');
 
 const settings = {
   kind: 'openai' as const,
@@ -259,6 +260,40 @@ describe('OpenAI tunnel process ownership', () => {
    * The same rule the offline caption already follows (see UNREACHABLE_CONFIRM_MS): one failed
    * poll is not a verdict. A genuinely dead client still gets replaced one pass later.
    */
+  it('holds existing chats for each new client process, not for every connected report (#1220)', async () => {
+    vi.useFakeTimers();
+    resetRouteSettleForTests();
+    let ready = true;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/readyz') return ready ? new Response('ok') : new Response('mcp probe failed', { status: 503 });
+      if (url.pathname === '/metrics') return new Response('commands_poll_last_successful_timestamp_seconds 0\ncommands_poll_errors_total 0\n');
+      if (url.pathname === '/api/status') return Response.json({ uptime_seconds: 50, channels: [] });
+      return new Response('missing', { status: 404 });
+    }));
+    const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/secret', settings, apiKey: 'test', report: () => undefined });
+    try {
+      expect(tunnelRouteSettling()).toBe(false);
+      await vi.advanceTimersByTimeAsync(10);
+      fixture.health.url = 'http://127.0.0.1:34567';
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(tunnelRouteSettling(), 'the first connect starts the takeover').toBe(true);
+      await vi.advanceTimersByTimeAsync(ROUTE_SETTLE_MS);
+      expect(tunnelRouteSettling(), 'later connected reports of the same process do not extend it').toBe(false);
+
+      ready = false;
+      await vi.advanceTimersByTimeAsync(36_000);
+      expect(fixture.children).toHaveLength(2);
+      ready = true;
+      fixture.health.url = 'http://127.0.0.1:34568';
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(tunnelRouteSettling(), 'a replacement process is a new takeover').toBe(true);
+    } finally {
+      await handle.stop();
+      resetRouteSettleForTests();
+    }
+  });
+
   it('replaces the client only after a readiness failure survives a second pass', async () => {
     vi.useFakeTimers();
     let ready = true;
