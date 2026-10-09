@@ -83,10 +83,19 @@ it('shows the published translation, keeps English for anything unknown, and rep
 it('formats translated main-process text without changing the allowlisted source contract', async () => {
   const texts = await import('../src/main/main-texts.js');
   texts.setMainTextTranslations({
+    'Worker {0}': de['Worker {0}'],
+    'Chat “{0}”': de['Chat “{0}”'],
+    'This chat': de['This chat'],
+    'An unattributed caller': de['An unattributed caller'],
     '{0} is about to control your desktop.': '{0} übernimmt gleich Ihren Desktop.'
   });
-  expect(texts.formatMainText('{0} is about to control your desktop.', ['Worker 2']))
-    .toBe('Worker 2 übernimmt gleich Ihren Desktop.');
+  const worker = texts.formatMainText('Worker {0}', [2]);
+  expect(worker).toBe('Agent 2');
+  expect(texts.formatMainText('{0} is about to control your desktop.', [worker]))
+    .toBe('Agent 2 übernimmt gleich Ihren Desktop.');
+  expect(texts.formatMainText('Chat “{0}”', ['A & B'])).toBe('Chat „A & B“');
+  expect(texts.mainText('This chat')).toBe('Dieser Chat');
+  expect(texts.mainText('An unattributed caller')).toBe('Nicht zugeordneter Aufrufer');
 });
 
 it('starts a launch to the tray in the last language, before any window has published', async () => {

@@ -33,6 +33,10 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
     'Desktop control': t('Desktop control'),
+    'Worker {0}': t('Worker {0}'),
+    'Chat “{0}”': t('Chat “{0}”'),
+    'This chat': t('This chat'),
+    'An unattributed caller': t('An unattributed caller'),
     '{0} is about to control your desktop.': t('{0} is about to control your desktop.'),
     'Starting automatically in {0} seconds.': t('Starting automatically in {0} seconds.'),
     'Starting automatically in 1 second.': t('Starting automatically in 1 second.'),

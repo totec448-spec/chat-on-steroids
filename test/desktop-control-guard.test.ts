@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setMainTextTranslations } from '../src/main/main-texts.js';
 
 const fixture = vi.hoisted(() => ({
   config: { ui: { desktopControlGuard: false } },
@@ -37,11 +38,13 @@ beforeEach(() => {
   fixture.call.caller = { sessionId: 'session-1', conversationId: 'conversation-1', requestId: 'request-1', transportKey: 'transport-1' };
   fixture.sessionTitle = 'Fixture chat';
   fixture.warnings.length = 0;
+  setMainTextTranslations({});
   clearDesktopControlGuardBlocks();
   setDesktopControlGuardPresenter(null);
 });
 
 afterEach(() => {
+  setMainTextTranslations({});
   vi.useRealTimers();
   clearDesktopControlGuardBlocks();
   setDesktopControlGuardPresenter(null);
@@ -113,6 +116,39 @@ describe('Desktop control guard', () => {
       operation: 'type_text',
       description: 'Clicked in a window'
     });
+  });
+
+  it('localizes every caller label without changing the underlying caller identity', async () => {
+    setMainTextTranslations({
+      'Worker {0}': 'Agent {0}',
+      'Chat “{0}”': 'Chat „{0}“',
+      'This chat': 'Dieser Chat',
+      'An unattributed caller': 'Nicht zugeordneter Aufrufer'
+    });
+    const labels: string[] = [];
+    setDesktopControlGuardPresenter({
+      prompt: async request => { labels.push(request.label); return 'allow'; }
+    });
+
+    fixture.call.agent = 'worker-2';
+    await admitDesktopControl('click');
+    fixture.call.agent = 'worker-custom';
+    await admitDesktopControl('click');
+    fixture.call.agent = null;
+    await admitDesktopControl('click');
+    fixture.sessionTitle = '';
+    await admitDesktopControl('click');
+    fixture.call.caller.sessionId = '';
+    fixture.call.caller.conversationId = '';
+    await admitDesktopControl('click');
+
+    expect(labels).toEqual([
+      'Agent 2',
+      'Agent worker-custom',
+      'Chat „Fixture chat“',
+      'Dieser Chat',
+      'Nicht zugeordneter Aufrufer'
+    ]);
   });
 
   it('never lets a post-operation hook failure rewrite a completed native result', async () => {

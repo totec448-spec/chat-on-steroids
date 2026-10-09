@@ -1,4 +1,5 @@
 import { getConfig } from './config.js';
+import { formatMainText, mainText } from './main-texts.js';
 import { logWarn } from './logger.js';
 import { currentCall } from './mcp/call-context.js';
 import { getSession } from './session/store.js';
@@ -60,19 +61,19 @@ async function callerLabel(): Promise<string> {
   const call = currentCall();
   if (call?.agent && call.agent !== 'prime') {
     const worker = call.agent.replace(/^worker-/, '');
-    return /^\d+$/.test(worker) ? 'Worker ' + worker : 'Worker ' + call.agent;
+    return formatMainText('Worker {0}', [/^\d+$/.test(worker) ? worker : call.agent]);
   }
   const sessionId = call?.caller.sessionId;
   if (sessionId) {
     try {
       const summary = await getSession(sessionId);
       const title = summary?.title?.replace(/\s+/g, ' ').trim().slice(0, 80);
-      if (title) return 'Chat “' + title + '”';
+      if (title) return formatMainText('Chat “{0}”', [title]);
     } catch {
       // Exact caller identity remains valid if presentation metadata cannot be read.
     }
   }
-  return call?.caller.conversationId ? 'This chat' : 'An unattributed caller';
+  return call?.caller.conversationId ? mainText('This chat') : mainText('An unattributed caller');
 }
 
 async function requestFor(operation: string): Promise<DesktopControlGuardRequest> {
