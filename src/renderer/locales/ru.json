@@ -2081,5 +2081,9 @@
   "A clearer Usage page": "Более понятная страница использования",
   "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Целые числа токенов, нижняя граница для затрат без цены и самые свежие недели активности в начале.",
   "Skills in your language": "Skills на вашем языке",
-  "The recommended skills describe themselves in the language of the app.": "Рекомендуемые skills описаны на языке приложения."
+  "The recommended skills describe themselves in the language of the app.": "Рекомендуемые skills описаны на языке приложения.",
+  "ChatGPT history temporarily rate-limited": "История ChatGPT временно ограничена",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Автоматическое восстановление приостановлено на время ограничения доступа к истории чата. Преждевременная перезагрузка может продлить ограничение.",
+  "Retry check in {0}": "Повторная проверка через {0}",
+  "Retry window ended": "Интервал ожидания завершён"
 }

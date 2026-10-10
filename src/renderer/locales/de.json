@@ -2081,5 +2081,9 @@
   "A clearer Usage page": "Eine klarere Nutzungsseite",
   "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Ganze Token-Zahlen, eine Untergrenze für Kosten ohne Preis und die neuesten Wochen der Aktivität zuerst.",
   "Skills in your language": "Skills in deiner Sprache",
-  "The recommended skills describe themselves in the language of the app.": "Die empfohlenen Skills beschreiben sich in der Sprache der App."
+  "The recommended skills describe themselves in the language of the app.": "Die empfohlenen Skills beschreiben sich in der Sprache der App.",
+  "ChatGPT history temporarily rate-limited": "ChatGPT-Verlauf vorübergehend begrenzt",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Die automatische Wiederherstellung wird während der Wartezeit wegen der Begrenzung des Chatverlaufs pausiert. Ein früheres Neuladen kann die Begrenzung verlängern.",
+  "Retry check in {0}": "Erneute Prüfung in {0}",
+  "Retry window ended": "Wartezeit beendet"
 }

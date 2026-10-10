@@ -2081,5 +2081,9 @@
   "A clearer Usage page": "Trang Mức sử dụng rõ ràng hơn",
   "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Số token là số nguyên, mức tối thiểu cho chi phí chưa có giá và các tuần hoạt động mới nhất hiển thị trước.",
   "Skills in your language": "Kỹ năng bằng ngôn ngữ của bạn",
-  "The recommended skills describe themselves in the language of the app.": "Các kỹ năng được đề xuất tự mô tả bằng ngôn ngữ của ứng dụng."
+  "The recommended skills describe themselves in the language of the app.": "Các kỹ năng được đề xuất tự mô tả bằng ngôn ngữ của ứng dụng.",
+  "ChatGPT history temporarily rate-limited": "Lịch sử ChatGPT tạm thời bị giới hạn tần suất",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Khôi phục tự động tạm dừng trong thời gian chờ do giới hạn truy cập lịch sử. Tải lại quá sớm có thể kéo dài giới hạn.",
+  "Retry check in {0}": "Kiểm tra lại sau {0}",
+  "Retry window ended": "Đã hết thời gian chờ thử lại"
 }

@@ -2081,5 +2081,9 @@
   "A clearer Usage page": "更清楚的用量頁面",
   "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "整數的權杖數、無價格成本的下限，並優先顯示最近幾週的活動。",
   "Skills in your language": "以你的語言顯示技能",
-  "The recommended skills describe themselves in the language of the app.": "推薦的技能會用應用程式的語言描述自己。"
+  "The recommended skills describe themselves in the language of the app.": "推薦的技能會用應用程式的語言描述自己。",
+  "ChatGPT history temporarily rate-limited": "ChatGPT 歷史記錄暫時受到速率限制",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "因對話歷史存取限流而等待期間，自動復原將暫停。提前重新載入可能延長限制。",
+  "Retry check in {0}": "{0} 後重新檢查",
+  "Retry window ended": "重試等待時間已結束"
 }

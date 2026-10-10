@@ -2081,5 +2081,9 @@
   "A clearer Usage page": "わかりやすくなった使用状況ページ",
   "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "トークン数は整数で、価格のないコストは下限として表示し、最新の週のアクティビティを先に表示します。",
   "Skills in your language": "スキルをあなたの言語で",
-  "The recommended skills describe themselves in the language of the app.": "おすすめのスキルの説明がアプリの言語で表示されます。"
+  "The recommended skills describe themselves in the language of the app.": "おすすめのスキルの説明がアプリの言語で表示されます。",
+  "ChatGPT history temporarily rate-limited": "ChatGPT の履歴が一時的にレート制限されています",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "履歴へのアクセス制限による待機中は自動復旧を一時停止します。早く再読み込みすると制限が長引く可能性があります。",
+  "Retry check in {0}": "{0} 後に再確認",
+  "Retry window ended": "再試行待機期間が終了しました"
 }
