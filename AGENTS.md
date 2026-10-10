@@ -310,6 +310,10 @@ waits up to 1.5 s for `keychain:noticeReady` (5 s for a window still loading; no
 All first callers share that one gate, because the first call of any kind (the availability check
 included) sets up the encryptor. The renderer shows `#keychainNotice` only if `keychain:waiting`
 false has not come within 600 ms. A successful call records the build; a refused one does not.
+`keychain()` also counts calls in flight (`keychainReadPending()`). While one is still waiting on
+the prompt, Chromium's teardown waits for it too and `app.exit()` never returns, so the shutdown
+sequence's exit hook ends the process with `process.reallyExit()` on macOS in that case, after
+every phase and the final log flush.
 
 Settings use validated current config and `effectiveCapabilities()`. Fresh-install defaults,
 legacy omitted fields and malformed-file recovery are three different cases. User choices must
