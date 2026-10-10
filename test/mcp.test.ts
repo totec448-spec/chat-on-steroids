@@ -22,9 +22,11 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
+import { skillCatalogInstructions } from '../src/main/skills.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
 import { friendlyError } from '../src/main/mcp/kernel.js';
+import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { SURFACE_LIST, surfaceDefinition, type SurfaceId } from '../src/main/mcp/surfaces.js';
 import {
   createSession,
@@ -1048,10 +1050,37 @@ describe('2025-era clients', () => {
       'read-only=off; plans=off; workers=off.'
     );
     expect(instructions).not.toContain(approved);
-    // Compactness must not come at the cost of changing safe tool-call handling.
-    expect(instructions).toContain('Never replay successful patches or commands.');
-    expect(instructions).toContain('identity, session_id and output-limit errors are not Read-only.');
-    expect(instructions.length).toBeLessThan(18_000);
+    // The catalogue is generated from the installed Skills library (including a native
+    // directory and metadata), so its size cannot be part of the fixed Core budget.
+    const catalog = skillCatalogInstructions();
+    expect(instructions).toContain(catalog);
+    const custom = getConfig().mcp.instructions.trim();
+    const standing = custom
+      ? `\n\nThe user's own standing instructions for this connector:\n${custom}`
+      : '';
+    if (standing) expect(instructions).toContain(standing);
+    const fixedInstructions = instructions.replace(catalog, '').replace(standing, '');
+    // The remainder is the instruction text maintained by the app, independent of the
+    // caller's installed Skills and standing preferences.
+    expect(fixedInstructions.length).toBeLessThan(18_000);
+  });
+
+  it('excludes dynamic Skills metadata and user preferences from the fixed instruction budget', () => {
+    const config = getConfig();
+    const previousInstructions = config.mcp.instructions;
+    const extraCatalog = `${skillCatalogInstructions()}\n${'- test-skill metadata '.repeat(250)}`;
+    const custom = 'A test-only standing preference';
+    try {
+      config.mcp.instructions = custom;
+      const generated = serverInstructions(ctx, 'core', process.platform, extraCatalog);
+      expect(generated.length).toBeGreaterThan(18_000);
+      const standing = `\n\nThe user's own standing instructions for this connector:\n${custom}`;
+      expect(generated).toContain(extraCatalog);
+      expect(generated).toContain(standing);
+      expect(generated.replace(extraCatalog, '').replace(standing, '').length).toBeLessThan(18_000);
+    } finally {
+      config.mcp.instructions = previousInstructions;
+    }
   });
 
   it('points at the other connector rather than pretending the capability does not exist', async () => {
