@@ -2088,5 +2088,14 @@
   "Retry window ended": "Yeniden deneme bekleme süresi sona erdi",
   "Open a new chat with this summary": "Bu özetle yeni sohbet aç",
   "Opening a new chat with the saved summary": "Kayıtlı özetle yeni sohbet açılıyor",
-  "This summary can no longer be used. Start Compact & Resume again.": "Bu özet artık kullanılamaz. Sıkıştır ve sürdür'ü yeniden başlatın."
+  "This summary can no longer be used. Start Compact & Resume again.": "Bu özet artık kullanılamaz. Sıkıştır ve sürdür'ü yeniden başlatın.",
+  "Automatic Continue cancelled by new activity.": "Otomatik devam, yeni etkinlik nedeniyle iptal edildi.",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "Etkin turu veya bir ayar değiştiği için otomatik takip mesajı iptal edildi.",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "Otomatik takip mesajı ayarlar tarafından iptal edildi. Önceden iletilen giriş ChatGPT'ye ulaşmış olabilir.",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "Yerel olarak iptal edildi; teslimat daha sonra ChatGPT'de onaylandı.",
+  "Not injected: the selected turn ended before an eligible tool call.": "Eklenmedi: seçilen tur, uygun bir araç çağrısından önce bitti.",
+  "Not sent: ChatGPT did not accept the message.": "Gönderilmedi: ChatGPT mesajı kabul etmedi.",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "Gönderilmedi: tarayıcı bu mesajı 60 saniye içinde almadı.",
+  "Replaced by your new instruction before delivery.": "Teslimattan önce yeni talimatınızla değiştirildi.",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Teslimat onayı beklemesi durduruldu. Mesaj zaten gönderilmiş olabilir; yeniden gönderilmeyecek."
 }

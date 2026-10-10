@@ -2088,5 +2088,14 @@
   "Retry window ended": "Wartezeit beendet",
   "Open a new chat with this summary": "Neuen Chat mit dieser Zusammenfassung öffnen",
   "Opening a new chat with the saved summary": "Neuer Chat mit der gespeicherten Zusammenfassung wird geöffnet",
-  "This summary can no longer be used. Start Compact & Resume again.": "Diese Zusammenfassung ist nicht mehr verwendbar. Starte Komprimieren & Fortsetzen neu."
+  "This summary can no longer be used. Start Compact & Resume again.": "Diese Zusammenfassung ist nicht mehr verwendbar. Starte Komprimieren & Fortsetzen neu.",
+  "Automatic Continue cancelled by new activity.": "Automatisches Fortsetzen wegen neuer Aktivität abgebrochen.",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "Automatische Folgenachricht abgebrochen, weil sich ihr Durchlauf oder eine Einstellung geändert hat.",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "Automatische Folgenachricht durch die Einstellungen abgebrochen. Bereits angebotene Eingaben können ChatGPT schon erreicht haben.",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "Lokal abgebrochen; die Zustellung wurde später in ChatGPT bestätigt.",
+  "Not injected: the selected turn ended before an eligible tool call.": "Nicht eingespielt: Der gewählte Durchlauf endete vor einem passenden Tool-Aufruf.",
+  "Not sent: ChatGPT did not accept the message.": "Nicht gesendet: ChatGPT hat die Nachricht nicht angenommen.",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "Nicht gesendet: Der Browser hat diese Nachricht nicht innerhalb von 60 Sekunden übernommen.",
+  "Replaced by your new instruction before delivery.": "Vor der Zustellung durch deine neue Anweisung ersetzt.",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Das Warten auf die Zustellbestätigung wurde beendet. Die Nachricht wurde möglicherweise schon gesendet; sie wird nicht erneut gesendet."
 }
