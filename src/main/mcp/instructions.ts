@@ -10,7 +10,6 @@
  * that server does not have, which is exactly the confusion the split exists to end.
  */
 
-import { LAUNCHES_WINDOWS_POWERSHELL_5 } from '../codex/tool-specs.js';
 import { CODING_INSTRUCTIONS } from './coding-instructions.js';
 import { skillCatalogInstructions } from '../skills.js';
 import { listSkillLibrary, skillLibraryInstructions } from '../skill-library.js';
@@ -127,8 +126,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     );
     if (windows) lines.push(
       'PowerShell does not expand * or ? for native programs. Regex \\x22 matches double quotes. Use script files for complex JavaScript; nested -Command/-e can corrupt quotes or expand variables. Pipe loops as @(foreach (...) { ... }) | Format-Table.',
-      'rg/ripgrep uses the bundled executable. Omit 2>&1 on native programs in PowerShell: stderr is captured; redirecting it can leave $? false after exit 0.',
-      ...(LAUNCHES_WINDOWS_POWERSHELL_5 ? ['This is Windows PowerShell 5.1, without && or ||. Use cmds or A; if ($?) { B }.'] : [])
+      'rg/ripgrep uses the bundled executable. Omit 2>&1 on native programs in PowerShell: stderr is captured; redirecting it can leave $? false after exit 0.'
     );
     else lines.push('exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless requested otherwise). The bundled ripgrep directory is first on PATH.');
     if (config.commandAllowlist.enabled) lines.push(
