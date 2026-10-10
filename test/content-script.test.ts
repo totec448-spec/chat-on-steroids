@@ -4547,6 +4547,9 @@ describe('the app-owned chronological stream', () => {
     const observer = new (live.document.defaultView as unknown as { MutationObserver: typeof MutationObserver }).MutationObserver(list => records.push(...list));
     observer.observe(live.document.documentElement, { subtree: true, attributes: true, childList: true, characterData: true });
     live.hook.renderStreams(); live.hook.renderStreams();
+    // The compact control sits inside ChatGPT's composer: its unchanged repaint wrote the same
+    // labels and flags every second, waking the transcript observer as well.
+    live.hook.renderControl(); live.hook.renderControl();
     await Promise.resolve();
     records.push(...observer.takeRecords()); observer.disconnect();
     expect(records.map(record => `${(record.target as Element).className || (record.target as Element).tagName} ${record.type} ${record.attributeName ?? ''}`)).toEqual([]);
