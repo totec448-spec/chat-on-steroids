@@ -743,6 +743,31 @@ function takeReveals(browser: string | null): string[] {
   return [...new Set(taken.map(entry => entry.conversationId))];
 }
 
+/**
+ * The chat last selected in the app, for its tab in the background window (#1249). With
+ * Background chats on, chats live in a minimized window of their own, and switching chats in
+ * the app left that window showing whichever tab it had before. Only the newest selection
+ * counts, only a browser that already has the chat open receives it, and it lapses after a
+ * few seconds: a selection is never a reason to open, move or focus anything.
+ */
+const FOLLOW_TTL_MS = 10_000;
+let pendingFollow: { conversationId: string; at: number } | null = null;
+
+export function followChatInBackground(conversationId: string): void {
+  if (getConfig().ui.backgroundChats !== true || !browserWakeConnected() || !revealCapable()) return;
+  pendingFollow = { conversationId, at: Date.now() };
+  wakeBrowserWork();
+}
+
+function takeFollow(browser: string | null): string | null {
+  const entry = pendingFollow;
+  if (!entry || !browser) return null;
+  if (Date.now() - entry.at > FOLLOW_TTL_MS || getConfig().ui.backgroundChats !== true) { pendingFollow = null; return null; }
+  if (!chatHolders(entry.conversationId).includes(browser)) return null;
+  pendingFollow = null;
+  return entry.conversationId;
+}
+
 /** An input goes to the browser holding its chat or, when none does, to the first one handed it. */
 function inputHeldElsewhere(input: { id: string; conversationId: string | null }, browser: string | null): boolean {
   if (input.conversationId && chatHolders(input.conversationId).length > 0) return chatHeldElsewhere(input.conversationId, browser);
@@ -2460,6 +2485,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (browser && req.method === 'POST') browserChats.set(browser, openSet);
     const canReveal = req.method === 'POST' && revealRequested;
     if (canReveal) revealBrowsers.set(browser ?? '', Date.now());
+    const follow = canReveal ? takeFollow(browser) : null;
     if (req.method === 'POST' && imageExportRequested) imageExportBrowsers.set(browser ?? '', Date.now());
     const pendingInputs = await pendingBrowserInputs();
     const pendingIds = new Set(pendingInputs.map(input => input.id));
@@ -2498,6 +2524,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         revivals,
         placement: pendingBrowserPlacement(null, browser),
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
+        ...(follow ? { follow } : {}),
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
@@ -10740,6 +10767,7 @@ export function resetBridgeForTests(): void {
   revealBrowsers.clear();
   imageExportBrowsers.clear();
   for (const entry of pendingReveals.splice(0)) entry.settle(false);
+  pendingFollow = null;
   openingCustody.clear();
   extensionVersion = null;
   externalExtension = null;
