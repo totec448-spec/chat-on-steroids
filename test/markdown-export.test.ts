@@ -66,4 +66,9 @@ it('names files safely from chat titles', () => {
   expect(markdownFileName('   ...  ')).toBe('chat.md');
   expect(markdownFileName('Plan', ' - answer')).toBe('Plan - answer.md');
   expect(markdownFileName('x'.repeat(200)).length).toBe(83);
+  // Truncating UTF-16 at a fixed length must not split an emoji into a lone surrogate.
+  const prefix = 'x'.repeat(79);
+  expect(markdownFileName(`${prefix}🧪 test`)).toBe(`${prefix}.md`);
+  expect(markdownFileName(`${'x'.repeat(78)}🧪 test`)).toBe(`${'x'.repeat(78)}🧪.md`);
+  expect(markdownFileName(`${prefix}🧪 test`, ' - answer')).toBe(`${prefix} - answer.md`);
 });
