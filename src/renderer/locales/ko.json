@@ -2128,5 +2128,16 @@
   "Replaced by your new instruction before delivery.": "전달 전에 새 지시로 대체되었습니다.",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "전달 확인 대기를 멈췄습니다. 메시지가 이미 전송되었을 수 있으므로 다시 보내지 않습니다.",
   "Waiting for the browser extension to connect": "브라우저 확장 프로그램 연결을 기다리는 중",
-  "Waiting for the running tool call to finish": "실행 중인 도구 호출이 끝나기를 기다리는 중"
+  "Waiting for the running tool call to finish": "실행 중인 도구 호출이 끝나기를 기다리는 중",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "저장된 요약 재사용, 메시지가 기다리는 이유 표시, 선택을 따라가는 백그라운드 창.",
+  "Reuse a saved summary": "저장된 요약 재사용",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "ChatGPT가 요약을 쓴 뒤 압축 후 계속이 멈추면, 처음부터 다시 하지 않고 그 요약으로 새 채팅을 열 수 있습니다.",
+  "See why a message waits": "메시지가 기다리는 이유 보기",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "대기 중인 메시지가 브라우저 확장 프로그램이나 실행 중인 도구 호출을 기다릴 때 그렇게 알려 줍니다.",
+  "The background window follows you": "백그라운드 창이 따라옵니다",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "백그라운드 채팅이 켜져 있으면 앱에서 선택한 채팅이 백그라운드 창에 표시됩니다.",
+  "Calmer when ChatGPT is busy": "ChatGPT가 바쁠 때도 차분하게",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT가 기록 로드를 제한하면 복구가 다시 로드하지 않고 요청된 시간만큼 기다립니다.",
+  "Lighter on your computer": "컴퓨터에 더 가볍게",
+  "Open ChatGPT chats use much less CPU while they wait.": "열려 있는 ChatGPT 채팅이 대기 중에 CPU를 훨씬 적게 씁니다."
 }

@@ -2115,8 +2115,8 @@
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "因對話歷史存取限流而等待期間，自動復原將暫停。提前重新載入可能延長限制。",
   "Retry check in {0}": "{0} 後重新檢查",
   "Retry window ended": "重試等待時間已結束",
-  "Open a new chat with this summary": "用這份摘要開啟新對話",
-  "Opening a new chat with the saved summary": "正在用已儲存的摘要開啟新對話",
+  "Open a new chat with this summary": "用這份摘要開啟新聊天",
+  "Opening a new chat with the saved summary": "正在用已儲存的摘要開啟新聊天",
   "This summary can no longer be used. Start Compact & Resume again.": "這份摘要已無法使用。請重新開始壓縮並繼續。",
   "Automatic Continue cancelled by new activity.": "因有新活動，已取消自動繼續。",
   "Automatic follow-up cancelled because its active turn or setting changed.": "由於進行中的回合或設定已變更，已取消自動後續訊息。",
@@ -2128,5 +2128,16 @@
   "Replaced by your new instruction before delivery.": "送達前已被你的新指示取代。",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "已停止等待送達確認。這則訊息可能已經傳送；不會重新傳送。",
   "Waiting for the browser extension to connect": "正在等待瀏覽器擴充功能連線",
-  "Waiting for the running tool call to finish": "正在等待執行中的工具呼叫完成"
+  "Waiting for the running tool call to finish": "正在等待執行中的工具呼叫完成",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "重複使用已儲存的摘要，查看訊息等待的原因，以及跟隨你的背景視窗。",
+  "Reuse a saved summary": "重複使用已儲存的摘要",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "如果壓縮並繼續在 ChatGPT 寫完摘要後停止，可以用這份摘要開啟新聊天，而不必從頭開始。",
+  "See why a message waits": "查看訊息等待的原因",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "排隊中的訊息會說明它在等待瀏覽器擴充功能，還是在等待正在執行的工具呼叫。",
+  "The background window follows you": "背景視窗跟隨你",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "開啟背景聊天後，背景視窗會顯示你在應用程式中選擇的聊天。",
+  "Calmer when ChatGPT is busy": "ChatGPT 忙碌時更從容",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "當 ChatGPT 限制歷史記錄的載入速度時，復原會依要求等待，而不是反覆重新載入。",
+  "Lighter on your computer": "更省電腦資源",
+  "Open ChatGPT chats use much less CPU while they wait.": "開啟的 ChatGPT 聊天在等待時使用的 CPU 大幅減少。"
 }

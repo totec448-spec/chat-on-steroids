@@ -2128,5 +2128,16 @@
   "Replaced by your new instruction before delivery.": "Teslimattan önce yeni talimatınızla değiştirildi.",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Teslimat onayı beklemesi durduruldu. Mesaj zaten gönderilmiş olabilir; yeniden gönderilmeyecek.",
   "Waiting for the browser extension to connect": "Tarayıcı uzantısının bağlanması bekleniyor",
-  "Waiting for the running tool call to finish": "Çalışan araç çağrısının bitmesi bekleniyor"
+  "Waiting for the running tool call to finish": "Çalışan araç çağrısının bitmesi bekleniyor",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "Kayıtlı bir özeti yeniden kullanın, bir mesajın neden beklediğini görün ve sizi izleyen bir arka plan penceresi.",
+  "Reuse a saved summary": "Kayıtlı bir özeti yeniden kullanın",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "Sıkıştır ve sürdür, ChatGPT özetini yazdıktan sonra durursa baştan başlamak yerine yeni sohbeti o özetle açın.",
+  "See why a message waits": "Bir mesajın neden beklediğini görün",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "Sıradaki bir mesaj, tarayıcı uzantısını veya çalışan bir araç çağrısını beklediğinde bunu söyler.",
+  "The background window follows you": "Arka plan penceresi sizi izler",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "Arka plan sohbetleri açıkken, uygulamada seçtiğiniz sohbet arka plan penceresinde gösterilir.",
+  "Calmer when ChatGPT is busy": "ChatGPT meşgulken daha sakin",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT geçmişin yüklenmesini sınırladığında kurtarma, yeniden yüklemek yerine istenen süre kadar bekler.",
+  "Lighter on your computer": "Bilgisayarınıza daha hafif",
+  "Open ChatGPT chats use much less CPU while they wait.": "Açık ChatGPT sohbetleri beklerken çok daha az CPU kullanır."
 }

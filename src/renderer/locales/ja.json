@@ -2128,5 +2128,16 @@
   "Replaced by your new instruction before delivery.": "配信前に新しい指示で置き換えられました。",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "配信確認の待機を終了しました。メッセージはすでに送信されている可能性があるため、再送信しません。",
   "Waiting for the browser extension to connect": "ブラウザー拡張機能の接続を待っています",
-  "Waiting for the running tool call to finish": "実行中のツール呼び出しの完了を待っています"
+  "Waiting for the running tool call to finish": "実行中のツール呼び出しの完了を待っています",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "保存した要約の再利用、メッセージが待つ理由の表示、選択に追従するバックグラウンドウィンドウ。",
+  "Reuse a saved summary": "保存した要約を再利用",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "ChatGPT が要約を書いた後に「圧縮して再開」が止まった場合、最初からやり直さずにその要約で新しいチャットを開けます。",
+  "See why a message waits": "メッセージが待つ理由がわかる",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "キュー内のメッセージが、ブラウザー拡張機能や実行中のツール呼び出しを待っているときにそう表示します。",
+  "The background window follows you": "バックグラウンドウィンドウが追従",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "「バックグラウンドのチャット」がオンのとき、アプリで選んだチャットがバックグラウンドウィンドウに表示されます。",
+  "Calmer when ChatGPT is busy": "ChatGPT が混雑しても落ち着いて",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT が履歴の読み込みを制限したとき、再読み込みを繰り返さず、求められた時間だけ待って復旧します。",
+  "Lighter on your computer": "パソコンに優しく",
+  "Open ChatGPT chats use much less CPU while they wait.": "開いている ChatGPT のチャットが待機中に使う CPU が大幅に減りました。"
 }

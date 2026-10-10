@@ -2128,5 +2128,16 @@
   "Replaced by your new instruction before delivery.": "Заменено вашей новой инструкцией до доставки.",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Ожидание подтверждения доставки прекращено. Сообщение, возможно, уже отправлено; повторно оно отправлено не будет.",
   "Waiting for the browser extension to connect": "Ожидание подключения расширения браузера",
-  "Waiting for the running tool call to finish": "Ожидание завершения текущего вызова инструмента"
+  "Waiting for the running tool call to finish": "Ожидание завершения текущего вызова инструмента",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "Повторное использование сохранённого резюме, причина ожидания сообщения и фоновое окно, которое следует за вами.",
+  "Reuse a saved summary": "Повторно использовать сохранённое резюме",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "Если «Сжать и продолжить» остановилось после того, как ChatGPT написал резюме, откройте новый чат с этим резюме, а не начинайте заново.",
+  "See why a message waits": "Видно, почему сообщение ждёт",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "Сообщение в очереди показывает, когда оно ждёт расширение браузера или завершение текущего вызова инструмента.",
+  "The background window follows you": "Фоновое окно следует за вами",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "Когда включены фоновые чаты, фоновое окно показывает чат, выбранный в приложении.",
+  "Calmer when ChatGPT is busy": "Спокойнее, когда ChatGPT занят",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Когда ChatGPT ограничивает загрузку истории, восстановление ждёт столько, сколько он просит, а не перезагружает снова.",
+  "Lighter on your computer": "Легче для компьютера",
+  "Open ChatGPT chats use much less CPU while they wait.": "Открытые чаты ChatGPT в ожидании используют гораздо меньше CPU."
 }
