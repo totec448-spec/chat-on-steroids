@@ -5272,12 +5272,13 @@ let bridgePresent = true;
 /**
  * Why a queued message is still waiting, when the app knows for certain: without the extension
  * nothing is sent, and a message for a chat waits while one of its tool calls runs, because
- * ChatGPT would otherwise keep that call's result (#1231). Mid-turn sends do not wait for calls.
+ * ChatGPT would otherwise keep that call's result (#1231). Mid-turn sends do not wait for calls,
+ * and an after-turn message also waits for the answer to end, so neither claims this reason.
  */
 function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (!bridgePresent) return 'extension';
-  if (entry.sessionId && entry.sessionId === runningToolsFor && runningTools.length > 0 && !entry.directTurn) return 'tool-call';
+  if (entry.mode === 'auto' && entry.sessionId && entry.sessionId === runningToolsFor && runningTools.length > 0 && !entry.directTurn) return 'tool-call';
   return null;
 }
 
