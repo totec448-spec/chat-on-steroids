@@ -2070,5 +2070,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "SQL sorgularını parametreler, net birleştirmeler ve sonuç kontrolüyle doğru ve güvenli biçimde yazın, inceleyin veya optimize edin.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Uzun belgeleri, yazışmaları veya dökümleri doğru biçimde özetleyin: ana noktalar, kararlar, açık sorular ve yapılacaklar.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Metni anlamı, tonu, biçimi ve terminolojiyi tutarlı tutarak doğru ve doğal biçimde çevirin.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Bir hedefi açık ve gerçekçi bir plana dönüştürün: kapsam, kilometre taşları, görevler, riskler ve bugün başlanabilecek ilk adım."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Bir hedefi açık ve gerçekçi bir plana dönüştürün: kapsam, kilometre taşları, görevler, riskler ve bugün başlanabilecek ilk adım.",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "Süren yanıta ulaşan mesajlar, ChatGPT'nin sorduğu seçenekler ve işe yarayan bir Durdur.",
+  "Messages reach the running answer": "Mesajlar süren yanıta ulaşır",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "Doğrudan gönder, bir komut çalışırken bile mesajınızı gerçek bir ChatGPT mesajı olarak süren yanıta ekler ve komut sonucunu korur.",
+  "ChatGPT's choices in the timeline": "ChatGPT'nin seçenekleri zaman çizelgesinde",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "ChatGPT sizden bir seçenek seçmenizi istediğinde zaman çizelgesi soruyu ve seçenekleri gösterir.",
+  "A Stop that sticks": "İşe yarayan bir Durdur",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "Geç gelen bir araç sonucu turu yeniden açsa bile Durdur turu bitirir ve zaman çizelgesi ne zaman durduğunu gösterir.",
+  "A clearer Usage page": "Daha anlaşılır bir Kullanım sayfası",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Tam sayı token sayıları, fiyatı olmayan maliyetler için bir alt sınır ve önce en yeni haftaların etkinliği.",
+  "Skills in your language": "Beceriler sizin dilinizde",
+  "The recommended skills describe themselves in the language of the app.": "Önerilen beceriler kendilerini uygulamanın dilinde tanıtır."
 }

@@ -2070,5 +2070,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "Пишите, проверяйте или оптимизируйте SQL-запросы правильно и безопасно: с параметрами, понятными соединениями и проверкой результатов.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Точно резюмируйте длинные документы, переписки или расшифровки: главное, решения, открытые вопросы и задачи.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Переводите текст точно и естественно, сохраняя смысл, тон, форматирование и единую терминологию.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Превращайте цель в ясный и реалистичный план: рамки, этапы, задачи, риски и первый шаг, который можно сделать уже сегодня."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Превращайте цель в ясный и реалистичный план: рамки, этапы, задачи, риски и первый шаг, который можно сделать уже сегодня.",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "Сообщения, которые доходят до текущего ответа, варианты, которые предлагает ChatGPT, и остановка, которая срабатывает.",
+  "Messages reach the running answer": "Сообщения доходят до текущего ответа",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "«Отправить напрямую» добавляет ваше сообщение в текущий ответ как настоящее сообщение ChatGPT, даже пока выполняется команда, и команда сохраняет свой результат.",
+  "ChatGPT's choices in the timeline": "Варианты ChatGPT на временной шкале",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "Когда ChatGPT просит выбрать вариант, временная шкала показывает вопрос и варианты ответа.",
+  "A Stop that sticks": "Остановка, которая срабатывает",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "Остановка завершает ход, даже если запоздавший результат инструмента снова открыл его, а временная шкала показывает, когда он был остановлен.",
+  "A clearer Usage page": "Более понятная страница использования",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Целые числа токенов, нижняя граница для затрат без цены и самые свежие недели активности в начале.",
+  "Skills in your language": "Skills на вашем языке",
+  "The recommended skills describe themselves in the language of the app.": "Рекомендуемые skills описаны на языке приложения."
 }

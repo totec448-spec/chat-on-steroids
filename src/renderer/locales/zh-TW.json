@@ -2070,5 +2070,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "正確且安全地撰寫、審查或最佳化 SQL 查詢：使用參數、清楚的聯結，並核對結果。",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "準確摘要長篇文件、討論串或逐字稿：重點、決定、未解問題與待辦事項。",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "準確且自然地翻譯文字，保持意義、語氣、格式與術語一致。",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "把目標化為清楚、可行的計畫：範圍、里程碑、任務、風險，以及今天就能開始的第一步。"
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "把目標化為清楚、可行的計畫：範圍、里程碑、任務、風險，以及今天就能開始的第一步。",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "能送達進行中回答的訊息、ChatGPT 請你選擇的選項，以及真正有效的停止。",
+  "Messages reach the running answer": "訊息送達進行中的回答",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "「直接傳送」會把你的訊息作為真正的 ChatGPT 訊息加入進行中的回答，即使命令正在執行也可以，命令會保留它的結果。",
+  "ChatGPT's choices in the timeline": "時間軸中顯示 ChatGPT 的選項",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "當 ChatGPT 請你選擇一個選項時，時間軸會顯示問題和選項。",
+  "A Stop that sticks": "真正有效的停止",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "即使延遲的工具結果重新開啟了本回合，停止也會結束本回合，時間軸會顯示停止的時間。",
+  "A clearer Usage page": "更清楚的用量頁面",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "整數的權杖數、無價格成本的下限，並優先顯示最近幾週的活動。",
+  "Skills in your language": "以你的語言顯示技能",
+  "The recommended skills describe themselves in the language of the app.": "推薦的技能會用應用程式的語言描述自己。"
 }
