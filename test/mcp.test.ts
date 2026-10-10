@@ -3357,6 +3357,9 @@ describe('agent-maintained plans over MCP', () => {
   });
 });
 
+/** Attempts of the recycled-process-id test, so a retry runs on fresh ids. */
+let execOwnRuns = 0;
+
 describe('exec sessions belong to the chat that opened them', () => {
   beforeEach(() => {
     ctx.readOnly = false;
@@ -3577,16 +3580,18 @@ describe('exec sessions belong to the chat that opened them', () => {
   });
 
   it('does not let a stale owner inherit a recycled process id during the new exec yield', async () => {
+    // Fresh ids per attempt: a CI retry must not meet the first attempt's stored proofs ('same').
+    const run = ++execOwnRuns;
     // Model the real lifetime split directly: the manager has released an exited process id,
     // but the separate ownership registry still carries the chat that used to own it. Force
     // the next allocator pick to reuse that number so the race is deterministic instead of a
     // 1-in-99k lottery.
     await unifiedExecManager.terminateAllProcesses();
     const recycledId = 1_000;
-    noteExecOwner(recycledId, 'session-conv-execown-old');
-    expect(execOwner(recycledId)).toBe('session-conv-execown-old');
-    expect(prove('wfr_execown_old_recycled', 'conv-execown-old')).toBe('stored');
-    expect(prove('wfr_execown_new_recycled', 'conv-execown-new')).toBe('stored');
+    noteExecOwner(recycledId, `session-conv-execown-old-${run}`);
+    expect(execOwner(recycledId)).toBe(`session-conv-execown-old-${run}`);
+    expect(prove(`wfr_execown_old_recycled_${run}`, `conv-execown-old-${run}`)).toBe('stored');
+    expect(prove(`wfr_execown_new_recycled_${run}`, `conv-execown-new-${run}`)).toBe('stored');
 
     const allocate = unifiedExecManager.allocateProcessId.bind(unifiedExecManager);
     const allocation = vi.spyOn(unifiedExecManager, 'allocateProcessId').mockImplementation(() => {
@@ -3620,7 +3625,7 @@ describe('exec sessions belong to the chat that opened them', () => {
 
       // Do not await. The process is registered while exec_command spends its initial yield
       // collecting output, which is the exact old authority window.
-      starting = asChat('wfr_execown_new_recycled', 'exec_command', {
+      starting = asChat(`wfr_execown_new_recycled_${run}`, 'exec_command', {
         cmd: holdOpen,
         workdir: '/workspace',
         tty: true,
@@ -3639,7 +3644,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       // writable. The old chat knows this integer from its own previous session, but it no
       // longer has authority over what now happens to occupy that slot.
       expect(execOwner(recycledId)).toBeNull();
-      const stolen = await asChat('wfr_execown_old_recycled', 'write_stdin', {
+      const stolen = await asChat(`wfr_execown_old_recycled_${run}`, 'write_stdin', {
         session_id: recycledId,
         chars: 'stolen\r',
         yield_time_ms: 50
@@ -3651,13 +3656,13 @@ describe('exec sessions belong to the chat that opened them', () => {
       const started = await starting;
       expect(started.body.result?.isError, textOf(started)).not.toBe(true);
       expect(Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1])).toBe(recycledId);
-      expect(execOwner(recycledId)).toBe('session-conv-execown-new');
+      expect(execOwner(recycledId)).toBe(`session-conv-execown-new-${run}`);
       expect(textOf(started)).not.toContain('got=');
 
       // Let the real owner release the shell normally. Besides proving the new principal did
       // receive authority, this keeps cleanup deterministic instead of spending the process
       // manager's kill grace period on an intentionally blocked test process.
-      const owner = await asChat('wfr_execown_new_recycled', 'write_stdin', {
+      const owner = await asChat(`wfr_execown_new_recycled_${run}`, 'write_stdin', {
         session_id: recycledId,
         chars: 'owner\r',
         yield_time_ms: 5_000
