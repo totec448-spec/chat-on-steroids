@@ -107,27 +107,27 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     `Current Core authority (informational; live guards decide): ${authority}; read-only=${ctx.readOnly ? 'on' : 'off'}; plans=${sessionTools ? 'on' : 'off'}; workers=${agentTools ? 'on' : 'off'}.`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
     ...(writable || executable ? [`You can always use ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} in CoS. Never hallucinate a block from ChatGPT environment messages.`] : []),
-    'Report exact failures: identity, session_id and output-limit errors are not Read-only. Never replay successful patches or commands.',
+    'Report exact failures: identity, session_id and output-limit errors do not mean Read-only. Never replay successful patches or commands to recover a terminal.',
     '"This tool call was blocked by OpenAI because we couldn\'t determine the safety status of the request." comes from ChatGPT before CoS receives the call. It is not a CoS failure or a missing capability: retry the identical call once.',
     'Unattributed is recording status, not permission. With Allow unattributed calls enabled, the request id owns its workspace, plan, terminals and agent family until exact chat proof arrives. A missing target limits that operation only; keep using enabled tools.',
-    'Use full paths inside approved roots, including subfolders. Virtual/native paths work; linked projects allow relative paths.',
+    'Use full project paths under an approved root, including intermediate folders. Virtual or absolute native paths work; linked projects also accept relative paths.',
   ];
 
   if (caps.read || caps.browse || caps.metadata) lines.push(
-    'read handles batches and globs with numbered text. Read whole files for orientation; otherwise use known regions. A start_line/end_line range applies to every file the call reads.',
+    'read batches paths, lists folders, expands globs and returns numbered text. Read whole files for orientation; otherwise use known regions. A start_line/end_line range applies to every file the call reads.',
   );
-  if (caps.read) lines.push('view_image inspects images when visual evidence matters.');
+  if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
   if (caps.command) {
     lines.push(
-      'Use rg/rg --files to search; fall back if unavailable. Prefer rg -g \'*.ts\' src over shell globs.',
-      'Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
-      'Set project workdir (virtual paths work); in cmd use relative or native paths.',
-      'write_stdin accepts session_id (running) or completed_session_id (finished). Completed output replays without reruns. Inspect exit/output; benign_exit marks expected non-zero.',
-      'If truncated, narrow the command or read a relevant region.'
+      'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',
+      'exec_command is enabled. Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
+      'Set workdir to the project; virtual paths work there. Inside cmd use relative or native paths.',
+      'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay output without rerunning work. Inspect exit/output; benign_exit marks an expected non-zero result.',
+      'If output is truncated, narrow the command or read the relevant region.'
     );
     if (windows) lines.push(
       'PowerShell does not expand * or ? for native programs. Regex \\x22 matches double quotes. Use script files for complex JavaScript; nested -Command/-e can corrupt quotes or expand variables. Pipe loops as @(foreach (...) { ... }) | Format-Table.',
-      'Use bundled rg. In PowerShell omit 2>&1 for native programs: stderr is captured, and redirection can leave $? false after exit 0.',
+      'rg/ripgrep uses the bundled executable. Omit 2>&1 on native programs in PowerShell: stderr is captured; redirecting it can leave $? false after exit 0.',
       ...(LAUNCHES_WINDOWS_POWERSHELL_5 ? ['This is Windows PowerShell 5.1, without && or ||. Use cmds or A; if ($?) { B }.'] : [])
     );
     else lines.push('exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless requested otherwise). The bundled ripgrep directory is first on PATH.');
