@@ -1050,37 +1050,32 @@ describe('2025-era clients', () => {
       'read-only=off; plans=off; workers=off.'
     );
     expect(instructions).not.toContain(approved);
-    // The catalogue is generated from the installed Skills library (including a native
-    // directory and metadata), so its size cannot be part of the fixed Core budget.
+    // The same fixture differs between Windows and macOS by the extra PowerShell
+    // guidance (340 characters), not by installed Skills or a user preference.
+    // Compare the actual HTTP payload to this host's rendered instructions, then
+    // normalize only the platform-specific wording to the macOS baseline. Keep the
+    // full Skills catalogue and user instructions inside the length budget.
     const catalog = skillCatalogInstructions();
+    const native = serverInstructions(ctx, 'core', process.platform, catalog);
+    const macOS = serverInstructions(ctx, 'core', 'darwin', catalog);
+    expect(instructions).toBe(native);
     expect(instructions).toContain(catalog);
-    const custom = getConfig().mcp.instructions.trim();
-    const standing = custom
-      ? `\n\nThe user's own standing instructions for this connector:\n${custom}`
-      : '';
-    if (standing) expect(instructions).toContain(standing);
-    const fixedInstructions = instructions.replace(catalog, '').replace(standing, '');
-    // The remainder is the instruction text maintained by the app, independent of the
-    // caller's installed Skills and standing preferences.
-    expect(fixedInstructions.length).toBeLessThan(18_000);
+    const platformDelta = native.length - macOS.length;
+    expect(instructions.length - platformDelta).toBeLessThan(18_000);
   });
 
-  it('excludes dynamic Skills metadata and user preferences from the fixed instruction budget', () => {
-    const config = getConfig();
-    const previousInstructions = config.mcp.instructions;
-    const extraCatalog = `${skillCatalogInstructions()}\n${'- test-skill metadata '.repeat(250)}`;
-    const custom = 'A test-only standing preference';
-    try {
-      config.mcp.instructions = custom;
-      const generated = serverInstructions(ctx, 'core', process.platform, extraCatalog);
-      expect(generated.length).toBeGreaterThan(18_000);
-      const standing = `\n\nThe user's own standing instructions for this connector:\n${custom}`;
-      expect(generated).toContain(extraCatalog);
-      expect(generated).toContain(standing);
-      expect(generated.replace(extraCatalog, '').replace(standing, '').length).toBeLessThan(18_000);
-    } finally {
-      config.mcp.instructions = previousInstructions;
-    }
+  it('normalizes only platform text and continues counting full Skills metadata', () => {
+    const catalog = skillCatalogInstructions();
+    const extraCatalog = `${catalog}\n${'- test Skill metadata '.repeat(150)}`;
+    const macOS = serverInstructions(ctx, 'core', 'darwin', catalog);
+    const windows = serverInstructions(ctx, 'core', 'win32', catalog);
+    const expandedMacOS = serverInstructions(ctx, 'core', 'darwin', extraCatalog);
+    const expandedWindows = serverInstructions(ctx, 'core', 'win32', extraCatalog);
+    // Adding Skills metadata does not change the OS-specific delta or disappear
+    // from the normalized budget, even when it takes that budget over the cap.
+    expect(expandedWindows.length - expandedMacOS.length).toBe(windows.length - macOS.length);
+    expect(expandedMacOS.length - macOS.length).toBe(extraCatalog.length - catalog.length);
+    expect(expandedMacOS.length).toBeGreaterThan(18_000);
   });
 
   it('points at the other connector rather than pretending the capability does not exist', async () => {
