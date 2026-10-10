@@ -34,6 +34,7 @@ app.whenReady().then(async () => {
   const helper = path.join(output, 'main.cjs');
   buildSync({ stdin: { contents: [
     "export {registerWorkspaceTerminalIpc} from './src/main/workspace-terminal-ipc.ts';",
+    "export {workspaceTerminalsExited} from './src/main/workspace-terminal.ts';",
     "export {initConfigPath, defaultConfig, saveConfig} from './src/main/config.ts';",
     "export {initDurableStore, flushDurable} from './src/main/durable.ts';",
     "export {addProject} from './src/main/projects.ts';"
@@ -198,7 +199,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(await js('errors'), []);
     const result = { actualPty: true, projectCwd: true, projectlessHomeCwd: true, singleRightTabRow: true, rightTabClosesPty: true, rightPanelHidePreservesPty: true, persistentEnvironmentAndCd: true, keyboardInput: true, hiddenPanelContinuity: true, bottomPanelClose: true, bottomMenuVisible: true, rightMenuClickable: true, rightAndBottomIndependent: true, lastBottomTabClosesPanel: true, multipleTabs: true, ctrlC: true, exitCode: 7, closeRetiresShell: true, geometry };
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
-  } finally { win.destroy(); win = null; await server.close(); await backend.flushDurable(); }
+  } finally { win.destroy(); win = null; await server.close(); await backend.flushDurable(); await backend.workspaceTerminalsExited(); }
   // Let Electron run before-quit so the IPC owner disposes any remaining PTYs before the
   // native ConPTY backend unloads. app.exit() skips those handlers and can crash Windows CI.
   app.quit();
