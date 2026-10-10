@@ -83,6 +83,7 @@ const {
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   revealChatInBrowser,
+  followChatInBackground,
   startBridge,
   stopBridge,
   sweepStaleSwarm,
@@ -15351,6 +15352,71 @@ describe('opening a chat in the browser that runs the extension (#882)', () => {
       // Withdrawn, so a late poll cannot open the chat a second time beside the OS's copy.
       expect((await poll(BROWSER_A)).reveals).toEqual([]);
     } finally { vi.useRealTimers(); await close(socket); }
+  });
+});
+
+describe('selecting a chat in the app selects its background tab (#1249)', () => {
+  const CHAT = 'abcdabcd-1111-4222-8333-555555555555';
+  const OTHER = 'abcdabcd-1111-4222-8333-666666666666';
+  const BROWSER_A = 'aaaaaaaaaaaaaaaa3333';
+  const BROWSER_B = 'bbbbbbbbbbbbbbbb4444';
+  const connect = async () => {
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    return socket;
+  };
+  const close = async (socket: WebSocket) => { const closed = once(socket, 'close'); socket.close(); await closed; };
+  const poll = async (browser: string, openConversations: string[] = []) =>
+    (await request('POST', '/status', { browser, body: { openConversations, canReveal: true } })).body;
+  const background = async (on: boolean) => {
+    const config = getConfig();
+    await saveConfig({ ...config, ui: { ...config.ui, backgroundChats: on } });
+  };
+
+  it('hands the newest selection once, only to the browser that has the chat open', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_A, [OTHER]);
+      await poll(BROWSER_B, [CHAT]);
+      const woken = once(socket, 'message');
+      followChatInBackground(OTHER);
+      followChatInBackground(CHAT);
+      expect(String((await woken)[0])).toBe('wake');
+      // A browser without the chat is never asked to open it.
+      expect((await poll(BROWSER_A, [OTHER])).follow).toBeUndefined();
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); }
+  });
+
+  it('asks for nothing with Background chats off', async () => {
+    await pair();
+    await background(false);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); await background(true); }
+  });
+
+  it('lets an old selection lapse instead of acting on it later', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, []);
+      followChatInBackground(CHAT);
+      const later = Date.now() + 11_000;
+      const now = vi.spyOn(Date, 'now').mockReturnValue(later);
+      try {
+        expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+      } finally { now.mockRestore(); }
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); }
   });
 });
 
