@@ -1306,6 +1306,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "永久移除约 1 GB 的最旧本地图片记录？聊天文本和原始文件将保留。",
   "Freed {0} MB. {1} GB of image storage is now available.": "已释放 {0} MB。现在有 {1} GB 的图片存储空间可用。",
   "Waiting for the next tool call": "等待下一次工具调用",
+  "Sending in a moment…": "稍后发送…",
   "Image cleanup failed. No further cleanup was requested.": "图片清理失败。未请求进一步清理。",
   "Collapse a folder before expanding more folders.": "请先折叠一个文件夹，再展开更多文件夹。",
   "Save or discard an existing project draft before editing another project.": "编辑其他项目之前，请先保存或放弃现有项目草稿。",
