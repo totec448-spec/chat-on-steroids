@@ -69,12 +69,12 @@ export function checkPullRequest({ body, files, draft = false, fromFork = false,
   }
 
   if (files.some((file) => UI.test(file.path)) && !/!\[[^\]]*\]\(|<img\s/i.test(section(text, 'screenshots')) &&
-      !/^no visual change:\s*\S.{10,}/im.test(text)) {
+      !/^(?:[-*]\s+(?:\[[ xX]\]\s+)?)?no visual changes?:\s*\S.{10,}/im.test(text)) {
     problems.push('This changes the interface: add before and after screenshots under "## Screenshots", or write "No visual change: <reason>" when nothing on screen changes.');
   }
 
   if (files.some((file) => CONTRACT.test(file.path)) && !files.some((file) => file.path === 'AGENTS.md') &&
-      !/^no contract change:\s*\S.{10,}/im.test(text)) {
+      !/^(?:[-*]\s+(?:\[[ xX]\]\s+)?)?no contract changes?:\s*\S.{10,}/im.test(text)) {
     problems.push('This changes a shared contract (preload, IPC or src/shared): update AGENTS.md in the same PR, or write "No contract change: <reason>".');
   }
   if (fromFork && !maintainerCanModify) {
