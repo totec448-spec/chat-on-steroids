@@ -2994,8 +2994,27 @@ visible candidate. The link alone is not readiness: the source editor must be mo
 idle and attachment-free before the one click. Source readiness has a bounded 60-second phase;
 the native transition then gets its own bounded 12-second phase. Destination proof requires the
 exact Project home, a connected ready editor and no displayed source turns. User interaction,
-cancellation or a foreign route revokes the attempt; no extra tab or second click compensates
-for a missing result.
+cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
+One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
+route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
+taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
+2026-10-10). The source route changing under the click is that drop, so the same single link is
+clicked again, at most twice (`PROJECT_RECLICKS`); a 250 ms watch sees `replaceState`, which
+mutates no DOM. On a failed entry the worker retires that source tab (`?clf=<id>&clf_project=1`)
+after the page proves it idle and empty (`retireFailedCommandTab`, `failedEntry` in content.js).
+
+The source half's `dispatched-unresolved` fence is never replayed on doubt. A click that never
+reached ChatGPT has no marker to end it, so the dispatch records the chat's newest user message
+before the click (`sourceSend.before`, `dispatchedAt`): a document loaded after the click, idle,
+15 s or more later, that still shows that same message as the newest proves ChatGPT never received
+it. That proof is read only from the pickup's ready view (an editable composer, nothing running,
+the pre-click question shown), because a transcript can hydrate in steps, and it is read again 3 s
+later with the same verdict. Then `releaseUndeliveredSourceDispatchNow` hands the fence back to `attempted-unresolved` (the
+app re-checks every condition) for one new Send. ChatGPT restores an unsent draft on every load,
+so an earlier attempt's own handoff request can stay in the box; in its text the marker runs
+straight into the instruction (`]]Chat On Steroids…`). `handoffMarked` recognizes it: the repair
+check does not hold on it, and the attempt replaces it only when it is exactly the instruction
+under another token (`handoffResidue`); edited text stays the person's draft (#134).
 
 The brief includes the original task, accepted steering, current result, remaining checks and
 relevant durable ids. Linked project instructions and current executor settings still apply.
