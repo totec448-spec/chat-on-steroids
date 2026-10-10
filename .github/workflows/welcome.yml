@@ -22,7 +22,7 @@ jobs:
         with:
           issue_message: |
             Thanks for your first issue, and welcome! 👋 Two things help us most:
-            - the app and extension versions (click the connection dot at the bottom left of the app), and your OS and browser;
+            - the exact app and extension versions (Settings → Activity in the app shows both), and your OS and browser;
             - the steps that lead to the problem, and what you expected instead.
 
             If we need more details we will ask here. Screenshots are welcome; please blur names, chat text and paths.
