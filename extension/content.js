@@ -195,6 +195,13 @@
   function rememberCleanup(cleanup) {
     stopCleanups.push(cleanup);
   }
+  // An identical attribute write still queues a mutation record for every observer on the page,
+  // this script's and ChatGPT's own. The once-a-second render rewrote ~60 unchanged attributes a
+  // second on an idle chat (measured 2026-10-09), so the hot paths write only on a change.
+  function setAttr(node, name, value) { if (node.getAttribute(name) !== value) node.setAttribute(name, value); }
+  function setData(node, key, value) { if (node.dataset[key] !== value) node.dataset[key] = value; }
+  function setHidden(node, hidden) { if (node.hidden !== hidden) node.hidden = hidden; }
+
   function listen(target, type, listener, options) {
     target.addEventListener(type, listener, options);
     rememberCleanup(() => target.removeEventListener(type, listener, options));
@@ -6685,7 +6692,7 @@
       // an old-known/new-unknown authored descriptor never enters this branch.
       if (!websiteRender && compatiblePriorKey && existing &&
           identity.messageMatches.length === 0 && identity.missingMessages === false) {
-        for (const node of nodes) if (node.dataset) node.dataset.clfStreamKey = streamKey;
+        for (const node of nodes) if (node.dataset) setData(node, 'clfStreamKey', streamKey);
         // Root continuity is presentation identity, not continuing proof that a native
         // connector row is covered. Re-evaluate the current answered/app/request evidence on
         // every paint so an in-flight or restamped row becomes visible immediately.
@@ -6705,7 +6712,7 @@
         record.strongKeys = [...strongStreamIdentityKeys(rendered)];
         record.anchors = placement.anchors;
         streamRootsByKey.set(streamKey, record);
-        for (const node of nodes) if (node.dataset) node.dataset.clfStreamKey = streamKey;
+        for (const node of nodes) if (node.dataset) setData(node, 'clfStreamKey', streamKey);
         CLF_DOM.replaceActivity(turn, null, true);
         syncNativeActivity(turn, [], websiteRender ? placement : null);
         painted.add(streamKey);
@@ -6728,10 +6735,10 @@
       for (const gap of gaps) {
         kept.add(gap.key);
         const root = record.chunks.get(gap.key) || document.createElement('div');
-        root.className = 'clf-stream';
-        root.dataset.clfKey = streamKey;
-        root.dataset.clfGap = gap.key;
-        root.dataset.clfTurn = turn.id || groupKey || 'anchored';
+        if (root.className !== 'clf-stream') root.className = 'clf-stream';
+        setData(root, 'clfKey', streamKey);
+        setData(root, 'clfGap', gap.key);
+        setData(root, 'clfTurn', turn.id || groupKey || 'anchored');
         renderStreamChunk(root, gap.entries, record, retainedRows, retainedGroups, priorGroups);
         record.chunks.set(gap.key, root);
         CLF_DOM.replaceActivity(gap.turn || turn, root, true, gap);
@@ -6752,7 +6759,7 @@
       record.completeAt = Date.now();
       record.strongKeys = [...strongStreamIdentityKeys(rendered)];
       record.anchors = placement.anchors;
-      for (const node of nodes) if (node.dataset) node.dataset.clfStreamKey = streamKey;
+      for (const node of nodes) if (node.dataset) setData(node, 'clfStreamKey', streamKey);
       CLF_DOM.replaceActivity(turn, null, true);
       syncNativeActivity(turn, coveredNativeBlocks(turn, gaps), websiteRender ? placement : null);
       painted.add(streamKey);
@@ -8668,6 +8675,10 @@
 
   function renderControl() {
     if (!control || !control.root.isConnected) return;
+    // These writes stay unconditional for now (unlike the stream's, see setAttr): they sit inside
+    // ChatGPT's composer, so each one wakes watchTranscript, and a hidden tab's resumed Goal answer
+    // currently relies on that wake (content-script test "continues the first resumed answer that
+    // finished while the replacement tab was hidden"). Replace that wake before trimming these.
     const state = currentState();
     const busy = state.mode === 'busy' || state.mode === 'waiting';
     control.root.hidden = state.mode === 'hidden';
