@@ -2085,5 +2085,14 @@
   "ChatGPT history temporarily rate-limited": "Histórico do ChatGPT temporariamente limitado",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "A recuperação automática fica suspensa durante a espera pelo limite do histórico. Recarregar antes pode prolongar a limitação.",
   "Retry check in {0}": "Verificar novamente em {0}",
-  "Retry window ended": "Período de nova tentativa terminado"
+  "Retry window ended": "Período de nova tentativa terminado",
+  "Automatic Continue cancelled by new activity.": "Continuação automática cancelada por nova atividade.",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "Mensagem de seguimento automática cancelada porque o turno ativo ou uma definição mudou.",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "Mensagem de seguimento automática cancelada pelas definições. A entrada já oferecida pode ter chegado ao ChatGPT.",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "Cancelado localmente; a entrega foi confirmada mais tarde no ChatGPT.",
+  "Not injected: the selected turn ended before an eligible tool call.": "Não injetado: o turno selecionado terminou antes de uma chamada de ferramenta adequada.",
+  "Not sent: ChatGPT did not accept the message.": "Não enviado: o ChatGPT não aceitou a mensagem.",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "Não enviado: o navegador não recolheu esta mensagem em 60 segundos.",
+  "Replaced by your new instruction before delivery.": "Substituído pela sua nova instrução antes da entrega.",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Deixou de esperar pela confirmação de entrega. A mensagem pode já ter sido enviada; não será reenviada."
 }
