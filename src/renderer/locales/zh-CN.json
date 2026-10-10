@@ -2085,5 +2085,8 @@
   "ChatGPT history temporarily rate-limited": "ChatGPT 历史记录暂时受到速率限制",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "因对话历史访问限流而等待期间，自动恢复将暂停。提前重新加载可能延长限制。",
   "Retry check in {0}": "{0} 后重新检查",
-  "Retry window ended": "重试等待时间已结束"
+  "Retry window ended": "重试等待时间已结束",
+  "Open a new chat with this summary": "用这份摘要打开新对话",
+  "Opening a new chat with the saved summary": "正在用已保存的摘要打开新对话",
+  "This summary can no longer be used. Start Compact & Resume again.": "这份摘要已无法使用。请重新开始压缩并继续。"
 }

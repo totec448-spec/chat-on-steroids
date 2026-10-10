@@ -2085,5 +2085,8 @@
   "ChatGPT history temporarily rate-limited": "ChatGPT-Verlauf vorübergehend begrenzt",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Die automatische Wiederherstellung wird während der Wartezeit wegen der Begrenzung des Chatverlaufs pausiert. Ein früheres Neuladen kann die Begrenzung verlängern.",
   "Retry check in {0}": "Erneute Prüfung in {0}",
-  "Retry window ended": "Wartezeit beendet"
+  "Retry window ended": "Wartezeit beendet",
+  "Open a new chat with this summary": "Neuen Chat mit dieser Zusammenfassung öffnen",
+  "Opening a new chat with the saved summary": "Neuer Chat mit der gespeicherten Zusammenfassung wird geöffnet",
+  "This summary can no longer be used. Start Compact & Resume again.": "Diese Zusammenfassung ist nicht mehr verwendbar. Starte Komprimieren & Fortsetzen neu."
 }

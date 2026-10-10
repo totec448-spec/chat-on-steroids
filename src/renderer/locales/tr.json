@@ -2085,5 +2085,8 @@
   "ChatGPT history temporarily rate-limited": "ChatGPT geçmişi geçici olarak hız sınırına takıldı",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Sohbet geçmişine yönelik hız sınırı beklemesi sırasında otomatik kurtarma duraklatılır. Erken yenileme sınırı uzatabilir.",
   "Retry check in {0}": "{0} sonra yeniden kontrol",
-  "Retry window ended": "Yeniden deneme bekleme süresi sona erdi"
+  "Retry window ended": "Yeniden deneme bekleme süresi sona erdi",
+  "Open a new chat with this summary": "Bu özetle yeni sohbet aç",
+  "Opening a new chat with the saved summary": "Kayıtlı özetle yeni sohbet açılıyor",
+  "This summary can no longer be used. Start Compact & Resume again.": "Bu özet artık kullanılamaz. Sıkıştır ve sürdür'ü yeniden başlatın."
 }
