@@ -2097,5 +2097,7 @@
   "Not sent: ChatGPT did not accept the message.": "送信されませんでした: ChatGPT がメッセージを受け付けませんでした。",
   "Not sent: the browser did not pick up this message within 60 seconds.": "送信されませんでした: ブラウザーが 60 秒以内にこのメッセージを受け取りませんでした。",
   "Replaced by your new instruction before delivery.": "配信前に新しい指示で置き換えられました。",
-  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "配信確認の待機を終了しました。メッセージはすでに送信されている可能性があるため、再送信しません。"
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "配信確認の待機を終了しました。メッセージはすでに送信されている可能性があるため、再送信しません。",
+  "Waiting for the browser extension to connect": "ブラウザー拡張機能の接続を待っています",
+  "Waiting for the running tool call to finish": "実行中のツール呼び出しの完了を待っています"
 }
