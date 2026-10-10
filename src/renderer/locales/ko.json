@@ -2081,5 +2081,9 @@
   "A clearer Usage page": "더 명확해진 사용량 페이지",
   "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "정수로 표시되는 토큰 수, 가격이 없는 비용의 하한, 가장 최근 몇 주의 활동이 먼저 표시됩니다.",
   "Skills in your language": "사용자 언어로 보는 스킬",
-  "The recommended skills describe themselves in the language of the app.": "추천 스킬의 설명이 앱의 언어로 표시됩니다."
+  "The recommended skills describe themselves in the language of the app.": "추천 스킬의 설명이 앱의 언어로 표시됩니다.",
+  "ChatGPT history temporarily rate-limited": "ChatGPT 기록이 일시적으로 요청 제한됨",
+  "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "대화 기록 속도 제한 대기 중에는 자동 복구가 일시 중지됩니다. 일찍 새로고침하면 제한 시간이 늘어날 수 있습니다.",
+  "Retry check in {0}": "{0} 후 다시 확인",
+  "Retry window ended": "재시도 대기 시간이 끝났습니다"
 }

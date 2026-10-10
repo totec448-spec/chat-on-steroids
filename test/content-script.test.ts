@@ -142,6 +142,7 @@ interface Hook {
   pullActivity(): Promise<void>;
   activityPullDelay(input: Record<string, boolean>): number;
   currentActivityPullDelay(): number;
+  recoverConversationLoad(now?: number): boolean;
   notePresentation(messageId: string, text: string, now?: number): boolean;
   presentationPending(now?: number): boolean;
   runCommand(): Promise<void>;
@@ -12049,6 +12050,66 @@ describe('evidence from the page context', () => {
     }
     await settle();
     expect(live.sent.filter((message) => message.type === 'correlate')).toEqual([]);
+  });
+
+  it('turns an exact history Retry-After projection into one blocking non-recoverable chat error', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const observedAt = live.window.Date.now();
+    const publish = (retryAt: number, id = conversationId) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window,
+      origin: 'https://chatgpt.com',
+      data: { type: 'cos-history-rate-limit', conversationId: id, observedAt, retryAt }
+    }));
+
+    publish(observedAt + 24_000);
+    await settle();
+    expect(emitted(live.sent, 'chat_error')).toEqual([
+      expect.objectContaining({
+        conversationId,
+        event: expect.objectContaining({
+          blocking: true,
+          recoverable: false,
+          retryAt: observedAt + 24_000,
+          text: expect.stringContaining('retry wait')
+        })
+      })
+    ]);
+
+    publish(observedAt + 20_000);
+    publish(observedAt + 30_000, '11111111-2222-3333-4444-555555555555');
+    await settle();
+    expect(emitted(live.sent, 'chat_error')).toHaveLength(1);
+
+    publish(observedAt + 31_000);
+    await settle();
+    expect(emitted(live.sent, 'chat_error')).toHaveLength(2);
+    expect(emitted(live.sent, 'chat_error').at(-1)?.event.retryAt).toBe(observedAt + 31_000);
+  });
+
+  it('does not press ChatGPT history Retry inside the provider Retry-After window', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const now = live.window.Date.now();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window,
+      origin: 'https://chatgpt.com',
+      data: { type: 'cos-history-rate-limit', conversationId, observedAt: now, retryAt: now + 24_000 }
+    }));
+    await settle();
+
+    expect(live.hook.recoverConversationLoad(now + 6_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(now + 23_999)).toBe(false);
+    expect(clicks).toBe(0);
+
+    expect(live.hook.recoverConversationLoad(now + 24_001)).toBe(false);
+    expect(live.hook.recoverConversationLoad(now + 29_002)).toBe(true);
+    expect(clicks).toBe(1);
   });
 
   it('does not let a stale owned Fiber turn bypass a rejected live ownership handshake', async () => {

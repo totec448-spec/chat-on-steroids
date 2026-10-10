@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "The custom continuation endpoint is invalid. Check its URL in Settings; use HTTPS or a local HTTP endpoint."
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT temporarily limited access to this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends."
+  },
   "content_goal_error_rate_limited": {
     "message": "The continuation provider is rate-limiting requests. Wait for the displayed retry, or choose another continuation model."
   },

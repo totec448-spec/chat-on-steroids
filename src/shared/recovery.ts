@@ -1,6 +1,6 @@
 /** Read-only projection of an existing recovery deadline. Never authorizes an action. */
 export type RecoveryCountdown = {
-  kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped';
+  kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped' | 'provider-limit';
   deadline: number;
   /** Attempts already spent for a pickup that stopped at its durable limit. */
   attempts?: number;

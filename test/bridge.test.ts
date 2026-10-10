@@ -9748,6 +9748,109 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('holds automatic recovery until the history Retry-After deadline and exposes that wait', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [
+        { kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('history-limited')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      const retryAt = Date.now() + CHAT_SILENCE_MS + 60_000;
+      await events(PRIME, [{
+        kind: 'chat_error', time: Date.now(), turnId: 'history-limited', recoverable: false, blocking: true,
+        retryAt, text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }]);
+      const session = (await findSessionByConversation(PRIME))!;
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'provider-limit', deadline: retryAt }]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      // The now-eligible silence handout is still the authoritative notice;
+      // the provider deadline extends it rather than concealing it.
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'silence', deadline: retryAt }]);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('refuses a pre-existing repair handout while a newer history Retry-After is active', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [
+        { kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('history-limit-race')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
+      await sweepStaleSwarm(Date.now());
+      const handout = await maintenance();
+      expect(handout).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+      const session = (await findSessionByConversation(PRIME))!;
+      // An already-handed recovery owns the notice. Adding a provider delay
+      // must fence the claim, not hide that existing action behind a new row.
+      const before = (await sessionControlsFor(session.id)).recovery ?? [];
+      expect(before).toEqual([{ kind: 'silence', deadline: expect.any(Number) }]);
+
+      const retryAt = Date.now() + 31_000;
+      await events(PRIME, [{
+        kind: 'chat_error', time: Date.now(), turnId: 'history-limit-race', recoverable: false, blocking: true,
+        retryAt, text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }]);
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{
+        kind: 'silence', deadline: Math.max(before[0]!.deadline, retryAt)
+      }]);
+      expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(31_001);
+      expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps the history Retry-After deadline across a reversible bridge stop/start', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [
+        { kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('history-limit-restart')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      const retryAt = Date.now() + CHAT_SILENCE_MS + 60_000;
+      await events(PRIME, [{
+        kind: 'chat_error', time: Date.now(), turnId: 'history-limit-restart', recoverable: false, blocking: true,
+        retryAt, text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }]);
+      const session = (await findSessionByConversation(PRIME))!;
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'provider-limit', deadline: retryAt }]);
+
+      await stopBridge();
+      const restarted = await startBridge();
+      expect(restarted).not.toBeNull();
+      base = `http://127.0.0.1:${restarted}`;
+      expect((await sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'provider-limit', deadline: retryAt }]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['goal', 'loop'] as const)('preserves the existing %s silence deadline after a provider access limit', async mode => {
     vi.useFakeTimers();
     try {
@@ -14074,6 +14177,71 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('defers the queued Goal cold-browser startup until a history Retry-After expires', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0174-0000-4000-8000-000000000174';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-cold-limit' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-cold-limit' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-cold-limit', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-cold-limit', messageId: 'a-cold-limit', text: 'First part done.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      expect(goalPendingReplyFor(chat)).not.toBeNull();
+      const retryAt = Date.now() + 3 * 60_000;
+      await request('POST', '/events', { body: { conversationId: chat, events: [{
+        kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true, retryAt,
+        text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }] } });
+
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
+      const authority = recoveryBrowserWake.mock.calls[0]?.[3];
+      expect(await authority?.current()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('cold-starts again after Retry-After when an unclaimed Goal handout lost its browser', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0176-0000-4000-8000-000000000176';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-handed-limit' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-handed-limit' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-handed-limit', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-handed-limit', messageId: 'a-handed-limit', text: 'First part done.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const handout = (await request('GET', '/status')).body.repairs?.[0];
+      expect(handout).toMatchObject({ conversationId: chat, reason: 'goal' });
+      recoveryBrowserWake.mockClear();
+
+      const retryAt = Date.now() + 31_000;
+      await request('POST', '/events', { body: { conversationId: chat, events: [{
+        kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true, retryAt,
+        text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }] } });
+      expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(false);
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+
+      // No further browser poll occurs: the handed token remains unclaimed while the browser is
+      // absent. The app-side deadline must own one cold start when Retry-After expires.
+      await vi.advanceTimersByTimeAsync(31_001);
+      expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
+      const authority = recoveryBrowserWake.mock.calls[0]?.[3];
+      expect(await authority?.current()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   /** A missing page pickup gets a durable, visible stop instead of an endless reload loop. */
   it('stops queued pickup after three persisted reload attempts and preserves the original input', async () => {
     vi.useFakeTimers();
@@ -14115,6 +14283,15 @@ describe('the goal loop over the bridge', () => {
       expect(row).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
         kind: 'pickup-stopped', deadline: Date.now(), attempts: 3, next: 'queue'
+      });
+      const stoppedAt = Date.now();
+      await request('POST', '/events', { body: { conversationId: chat, events: [{
+        kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
+        retryAt: Date.now() + 60_000,
+        text: 'ChatGPT temporarily rate-limited loading this conversation history.'
+      }] } });
+      expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
+        kind: 'pickup-stopped', deadline: stoppedAt, attempts: 3, next: 'queue'
       });
 
       // Dropping in-memory bridge/input state models a restart. Durable ownership restores the

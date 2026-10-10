@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "Der eigene Endpunkt für die Fortsetzung ist ungültig. Prüfe die URL in den Einstellungen; nutze HTTPS oder einen lokalen HTTP-Endpunkt."
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT hat den Zugriff auf diesen Chatverlauf vorübergehend begrenzt. Chat On Steroids pausiert die automatische Wiederherstellung bis zum Ablauf der Wartezeit."
+  },
   "content_goal_error_rate_limited": {
     "message": "Der Anbieter der Fortsetzung drosselt die Anfragen. Warte auf den angezeigten neuen Versuch oder wähle ein anderes Modell für die Fortsetzung."
   },
