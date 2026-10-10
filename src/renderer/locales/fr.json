@@ -1,4 +1,5 @@
 {
+  "Answer this prompt in ChatGPT": "Répondez à cette question dans ChatGPT",
   "Clear search": "Effacer la recherche",
   "Jump to latest": "Aller au plus récent",
   "No chats match": "Aucun chat ne correspond",
@@ -1305,6 +1306,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "Supprimer définitivement environ 1 Go des images locales enregistrées les plus anciennes ? Le texte des chats et les fichiers d'origine seront conservés.",
   "Freed {0} MB. {1} GB of image storage is now available.": "{0} Mo libérés. {1} Go de stockage d'images sont maintenant disponibles.",
   "Waiting for the next tool call": "En attente du prochain appel d'outil",
+  "Sending in a moment…": "Envoi dans un instant…",
   "Image cleanup failed. No further cleanup was requested.": "Le nettoyage des images a échoué. Aucun autre nettoyage n'a été demandé.",
   "Collapse a folder before expanding more folders.": "Réduisez un dossier avant d'en déplier d'autres.",
   "Save or discard an existing project draft before editing another project.": "Enregistrez ou abandonnez un brouillon de projet existant avant d'en modifier un autre.",
@@ -2068,5 +2070,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "Écrivez, relisez ou optimisez des requêtes SQL de façon correcte et sûre, avec des paramètres, des jointures claires et une vérification des résultats.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Résumez fidèlement de longs documents, fils de discussion ou transcriptions : points clés, décisions, questions ouvertes et actions à mener.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Traduisez un texte avec précision et naturel, en gardant cohérents le sens, le ton, la mise en forme et la terminologie.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Transformez un objectif en plan clair et réaliste : périmètre, jalons, tâches, risques et une première étape à lancer dès aujourd'hui."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Transformez un objectif en plan clair et réaliste : périmètre, jalons, tâches, risques et une première étape à lancer dès aujourd'hui.",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "Des messages qui rejoignent la réponse en cours, les choix que ChatGPT vous propose et un Arrêter qui tient.",
+  "Messages reach the running answer": "Les messages rejoignent la réponse en cours",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "Envoyer directement ajoute votre message à la réponse en cours comme un vrai message ChatGPT, même pendant qu'une commande s'exécute, et la commande garde son résultat.",
+  "ChatGPT's choices in the timeline": "Les choix de ChatGPT dans la chronologie",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "Quand ChatGPT vous demande de choisir une option, la chronologie affiche la question et ses choix.",
+  "A Stop that sticks": "Un Arrêter qui tient",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "Arrêter met fin au tour même si un résultat d'outil tardif le rouvre, et la chronologie indique quand il s'est arrêté.",
+  "A clearer Usage page": "Une page Utilisation plus claire",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Des nombres de tokens entiers, un minimum pour les coûts sans prix et les semaines d'activité les plus récentes en premier.",
+  "Skills in your language": "Les compétences dans votre langue",
+  "The recommended skills describe themselves in the language of the app.": "Les compétences recommandées se décrivent dans la langue de l'app."
 }

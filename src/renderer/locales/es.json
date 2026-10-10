@@ -1,4 +1,5 @@
 {
+  "Answer this prompt in ChatGPT": "Responde a esta pregunta en ChatGPT",
   "Clear search": "Borrar búsqueda",
   "Jump to latest": "Ir a lo más reciente",
   "No chats match": "Ningún chat coincide",
@@ -1305,6 +1306,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "¿Eliminar permanentemente aproximadamente 1 GB de las imágenes locales más antiguas? Se conservarán el texto y los archivos originales.",
   "Freed {0} MB. {1} GB of image storage is now available.": "Se liberaron {0} MB. Ahora hay {1} GB disponibles para imágenes.",
   "Waiting for the next tool call": "Esperando la siguiente llamada a una herramienta",
+  "Sending in a moment…": "Se enviará en un momento…",
   "Image cleanup failed. No further cleanup was requested.": "Falló la limpieza de imágenes. No se solicitó ninguna limpieza adicional.",
   "Collapse a folder before expanding more folders.": "Contrae una carpeta antes de expandir más carpetas.",
   "Save or discard an existing project draft before editing another project.": "Guarda o descarta un borrador existente antes de editar otro proyecto.",
@@ -2068,5 +2070,16 @@
   "Write, review or optimise SQL queries correctly and safely, with parameters, clear joins and a check of the results.": "Escribe, revisa u optimiza consultas SQL de forma correcta y segura, con parámetros, joins claros y una comprobación de los resultados.",
   "Summarise long documents, threads or transcripts accurately: key points, decisions, open questions and action items.": "Resume con precisión documentos, hilos o transcripciones largos: puntos clave, decisiones, preguntas abiertas y tareas pendientes.",
   "Translate text accurately and naturally, keeping meaning, tone, formatting and terminology consistent.": "Traduce textos con precisión y naturalidad, manteniendo coherentes el significado, el tono, el formato y la terminología.",
-  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Convierte un objetivo en un plan claro y realista: alcance, hitos, tareas, riesgos y un primer paso que pueda empezar hoy."
+  "Turn a goal into a clear, realistic plan: scope, milestones, tasks, risks and a first step that can start today.": "Convierte un objetivo en un plan claro y realista: alcance, hitos, tareas, riesgos y un primer paso que pueda empezar hoy.",
+  "Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.": "Mensajes que llegan a la respuesta en curso, las opciones que ChatGPT te pide elegir y un Detener que funciona.",
+  "Messages reach the running answer": "Los mensajes llegan a la respuesta en curso",
+  "Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.": "Enviar directamente añade tu mensaje a la respuesta en curso como un mensaje real de ChatGPT, incluso mientras se ejecuta un comando, y el comando conserva su resultado.",
+  "ChatGPT's choices in the timeline": "Las opciones de ChatGPT en la cronología",
+  "When ChatGPT asks you to pick an option, the timeline shows the question and its choices.": "Cuando ChatGPT te pide elegir una opción, la cronología muestra la pregunta y sus opciones.",
+  "A Stop that sticks": "Un Detener que funciona",
+  "Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.": "Detener termina el turno aunque un resultado tardío de una herramienta lo reabra, y la cronología indica cuándo se detuvo.",
+  "A clearer Usage page": "Una página de Uso más clara",
+  "Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.": "Recuentos de tokens enteros, un mínimo para los costes sin precio y las semanas de actividad más recientes primero.",
+  "Skills in your language": "Skills en tu idioma",
+  "The recommended skills describe themselves in the language of the app.": "Los skills recomendados se describen en el idioma de la app."
 }
