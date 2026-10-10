@@ -5,7 +5,23 @@ import { projectWorkspace } from './projects.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 
-type Entry = { projectId: string | null; cwd: string; pty: IPty; unacked: number; paused: boolean };
+type Entry = { projectId: string | null; cwd: string; pty: IPty; unacked: number; paused: boolean; exited: Promise<void> };
+
+/**
+ * Exits still owed by shells this app closed. On Windows, ConPTY reports a killed shell's exit
+ * from a native thread; if the process ends before that lands, Electron dies with 0xC0000409
+ * (seen in the Windows UI checks, 2026-10-09/10). Shutdown waits for these, bounded.
+ */
+const owedExits = new Set<Promise<void>>();
+export function resetWorkspaceTerminalExitsForTests(): void { owedExits.clear(); }
+export async function workspaceTerminalsExited(timeoutMs = 3_000): Promise<void> {
+  if (!owedExits.size) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.allSettled([...owedExits]),
+    new Promise<void>(resolve => { timer = setTimeout(resolve, timeoutMs); })
+  ]).finally(() => clearTimeout(timer));
+}
 /** Human-operated shells belong to one renderer lifetime, never an MCP caller or its output queue. */
 export class WorkspaceTerminals {
   private entries = new Map<string, Entry>();
@@ -30,7 +46,9 @@ export class WorkspaceTerminals {
       const pty = spawn(shell.shellPath, shell.shellType === 'powershell' ? ['-NoLogo'] : [], {
         name: 'xterm-256color', cols, rows, cwd, env, useConpty: true
       });
-      const entry: Entry = { projectId, cwd, pty, unacked: 0, paused: false };
+      let markExited!: () => void;
+      const exited = new Promise<void>(resolve => { markExited = resolve; });
+      const entry: Entry = { projectId, cwd, pty, unacked: 0, paused: false, exited };
       this.entries.set(id, entry);
       pty.onData(data => {
         if (this.entries.get(id) !== entry) return;
@@ -42,6 +60,7 @@ export class WorkspaceTerminals {
         if (entry.unacked >= 262_144 && !entry.paused) { entry.paused = true; pty.pause(); }
       });
       pty.onExit(({ exitCode }) => {
+        markExited();
         if (this.entries.get(id) !== entry) return;
         this.entries.delete(id); this.emit({ id, exitCode });
       });
@@ -66,7 +85,10 @@ export class WorkspaceTerminals {
   close(id: string): void {
     this.pending.delete(id);
     const entry = this.entries.get(id); this.entries.delete(id);
-    try { entry?.pty.kill(); } catch { /* Already exited. */ }
+    if (!entry) return;
+    owedExits.add(entry.exited);
+    void entry.exited.then(() => owedExits.delete(entry.exited));
+    try { entry.pty.kill(); } catch { /* Already exited. */ }
   }
   dispose(): void { this.pending.clear(); for (const id of this.entries.keys()) this.close(id); }
 }

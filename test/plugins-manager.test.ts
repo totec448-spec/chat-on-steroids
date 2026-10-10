@@ -18,6 +18,7 @@ vi.mock('../src/main/secrets.js', () => ({
 }));
 import { initDurableStore } from '../src/main/durable.js';
 import { getSecret } from '../src/main/secrets.js';
+import * as configModule from '../src/main/config.js';
 import { PluginManager } from '../src/main/plugins/manager.js';
 import { PluginOAuth, PluginNeedsAuth } from '../src/main/plugins/oauth.js';
 import * as pluginInstaller from '../src/main/plugins/installer.js';
@@ -44,17 +45,75 @@ afterEach(async () => {
   await removeTempDir(dir);
 });
 describe('external plugin authority', () => {
-  it('classifies an unknown Plugins name without dispatching or implying a disabled Core permission', async () => {
+  it.each(['read', 'exec_command', 'write_stdin', 'agents'] as const)('names the Core connector for %s without dispatching or implying a disabled permission', async (name) => {
     const upstream = vi.spyOn(Client.prototype, 'callTool');
     const outcome = vi.fn();
-    const result = await manager.call('read', { path: 'example.txt' }, outcome);
-    expect(JSON.stringify(result)).toContain('UNKNOWN_TOOL');
-    expect(JSON.stringify(result)).toContain('current Plugins catalog');
-    expect(JSON.stringify(result)).not.toContain('PLUGIN_DISABLED');
-    expect(JSON.stringify(result)).toContain('This call was not dispatched.');
-    expect(result.isError).toBe(true);
+    const result = await manager.call(name, { path: 'example.txt' }, outcome);
+    const text = JSON.stringify(result);
+    expect(text).toContain('UNKNOWN_TOOL');
+    expect(text).toContain('current Plugins catalog');
+    expect(text).toContain('Chat On Steroids Core');
+    expect(text).toContain('Discover or select');
+    expect(text).not.toContain('PLUGIN_DISABLED');
+    expect(text).not.toContain('is connected');
+    expect(text).not.toContain('is enabled');
+    expect(text).not.toContain('already ran');
+    expect(text).not.toContain('already completed');
+    expect(text).not.toContain('safe to replay');
+    expect(text).toContain('This call was not dispatched.');
+    expect(result).toEqual({ isError: true, content: [{ type: 'text', text: expect.stringContaining('UNKNOWN_TOOL') }] });
     expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_rejected');
     expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('names the current installation Core connector and follows a suffix change', async () => {
+    const previous = configModule.getConfig();
+    const suffix = vi.spyOn(configModule, 'getConfig');
+    try {
+      suffix.mockReturnValue({ ...previous, connectorSuffix: 'Alpha' });
+      const first = JSON.stringify(await manager.call('exec_command'));
+      expect(first).toContain('Chat On Steroids Core (Alpha)');
+      expect(first).toContain('UNKNOWN_TOOL');
+      expect(first).toContain('This call was not dispatched.');
+      suffix.mockReturnValue({ ...previous, connectorSuffix: 'Beta' });
+      const second = JSON.stringify(await manager.call('write_stdin'));
+      expect(second).toContain('Chat On Steroids Core (Beta)');
+      expect(second).not.toContain('Alpha');
+      expect(second).toContain('UNKNOWN_TOOL');
+      expect(second).not.toContain('is connected');
+      expect(second).not.toContain('already ran');
+    } finally {
+      suffix.mockRestore();
+    }
+  });
+
+  it.each(['not_a_real_tool', 'Exec_Command', 'exec'] as const)('keeps generic unknown-tool guidance for %s', async (name) => {
+    const upstream = vi.spyOn(Client.prototype, 'callTool');
+    const outcome = vi.fn();
+    const text = JSON.stringify(await manager.call(name, {}, outcome));
+    expect(text).toContain('UNKNOWN_TOOL: This tool name is not in the current Plugins catalog. It may be stale or belong to another connector. Check the current Plugins tool list.');
+    expect(text).not.toContain('Chat On Steroids Core');
+    expect(text).not.toContain('Discover or select');
+    expect(text).toContain('This call was not dispatched.');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_rejected');
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('keeps an external exec_command on its plugin and refuses PLUGIN_DISABLED after disable', async () => {
+    await fs.writeFile(entry, fixture.replaceAll('Echo.Mixed', 'exec_command'));
+    const row = (await manager.install({ name: 'Fixture', source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    const upstream = vi.spyOn(Client.prototype, 'callTool');
+    expect((await manager.call('exec_command', { value: 'hello' })).structuredContent).toEqual({ value: 'hello' });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    await manager.setEnabled(row.id, false);
+    const outcome = vi.fn();
+    const disabled = JSON.stringify(await manager.call('exec_command', { value: 'blocked' }, outcome));
+    expect(disabled).toContain('PLUGIN_DISABLED');
+    expect(disabled).not.toContain('Chat On Steroids Core');
+    expect(disabled).not.toContain('UNKNOWN_TOOL');
+    expect(disabled).toContain('This call was not dispatched.');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_rejected');
+    expect(upstream).toHaveBeenCalledTimes(1);
   });
 
   it('uses exposure conflicts for refused calls even while either claimant is disabled', async () => {

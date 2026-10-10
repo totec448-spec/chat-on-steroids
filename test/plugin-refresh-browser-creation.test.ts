@@ -38,6 +38,24 @@ it('does not create a plugin helper in browser-only mode', async () => {
   await context.run([{}], true, true);
   expect(create).not.toHaveBeenCalled();
 });
+it('opens a renewed explicit observation after closure without reopening the same request', async () => {
+  const oldId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const newId = 'ffffffff-1111-4222-8333-444444444444';
+  let id = oldId;
+  const saved: Record<string, unknown> = { pluginRefreshOwner: { id: oldId, tab: 8 } };
+  const create = vi.fn(async () => ({ id: 9 }));
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], createChatTab: create,
+    call: async () => ({ ok: true, data: { requests: [{ id, appId: null, observeOnly: true }] } }),
+    chrome: { storage: { session: { get: async () => saved, set: async (next: object) => Object.assign(saved, next) } },
+      tabs: { query: async () => [], get: async () => { throw Error('closed'); } } } });
+  vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
+  await context.run([{}], true);
+  expect(create).not.toHaveBeenCalled();
+  id = newId; await context.run([{}], true);
+  expect(create).toHaveBeenCalledExactlyOnceWith(`https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${newId}`, true);
+  await context.run([{}], true);
+  expect(create).toHaveBeenCalledTimes(1);
+});
 
 it('records browser creation failure before claim and retries the same obligation', async () => {
   const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId: 'asdk_app_synthetic' };

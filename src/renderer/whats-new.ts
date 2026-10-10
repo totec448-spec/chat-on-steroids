@@ -14,6 +14,16 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.32': {
+    lead: () => t('Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.'),
+    highlights: [
+      { icon: 'i-bolt', title: () => t('Messages reach the running answer'), text: () => t('Send directly puts your message into the running answer as a real ChatGPT message, even while a command runs, and the command keeps its result.') },
+      { icon: 'i-check-circle', title: () => t("ChatGPT's choices in the timeline"), text: () => t('When ChatGPT asks you to pick an option, the timeline shows the question and its choices.') },
+      { icon: 'i-ban', title: () => t('A Stop that sticks'), text: () => t('Stop ends the turn even when a late tool result reopens it, and the timeline says when it stopped.') },
+      { icon: 'i-chart', title: () => t('A clearer Usage page'), text: () => t('Whole token counts, a lower bound for costs without a price, and the newest weeks of activity first.') },
+      { icon: 'i-skill', title: () => t('Skills in your language'), text: () => t('The recommended skills describe themselves in the language of the app.') }
+    ]
+  },
   '2.1.31': {
     lead: () => t('GPT-6 support, a timeline that reads like ChatGPT, and a clearer view of your sub-agents.'),
     highlights: [

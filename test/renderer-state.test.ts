@@ -2319,6 +2319,13 @@ it('reports update readiness only from checked versions and current connector ev
     expect(summary().dataset.ready).toBe('false');
     expect(summary().textContent).not.toBe('All checks passed');
   }
+  const working = structuredClone(ready);
+  working.connectorRefresh = { core: { schemaId: 'schema-a', state: 'unknown', responding: true } };
+  push(working);
+  expect(summary().dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('Ready to use; full connector schema not verified');
+  expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(false);
+  push(ready);
   const optionalOff = structuredClone(ready);
   optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
   push(optionalOff);

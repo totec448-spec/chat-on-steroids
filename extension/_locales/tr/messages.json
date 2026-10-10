@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "Özel devam uç noktası geçersiz. URL'sini Ayarlar'da kontrol edin; HTTPS veya yerel bir HTTP uç noktası kullanın."
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT bu sohbet geçmişine erişimi geçici olarak sınırladı. Chat On Steroids bekleme süresi bitene kadar otomatik kurtarmayı duraklatır."
+  },
   "content_goal_error_rate_limited": {
     "message": "Devam sağlayıcısı istek hızını sınırlıyor. Gösterilen yeniden denemeyi bekleyin veya başka bir devam modeli seçin."
   },

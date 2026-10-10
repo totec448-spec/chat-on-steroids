@@ -15,8 +15,8 @@ body:
     id: version
     attributes:
       label: App version
-      description: Activity → update status, or the browser companion popup. Stable releases only; canary builds are not supported.
-      placeholder: "1.9.4"
+      description: 'The exact number, shown under Settings → Activity or in the browser extension popup. "latest" is not accepted: reports without a version number are closed until one is added. Stable releases only; canary builds are not supported.'
+      placeholder: "2.1.32"
     validations:
       required: true
 

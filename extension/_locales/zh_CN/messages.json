@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。"
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT 暂时限制了对此对话历史的访问。Chat On Steroids 将暂停自动恢复，直到等待期结束。"
+  },
   "content_goal_error_rate_limited": {
     "message": "继续提供者正在限制请求频率。请等待显示的重试时间，或选择其他继续模型。"
   },

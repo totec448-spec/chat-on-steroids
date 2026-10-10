@@ -204,7 +204,11 @@ app.whenReady().then(async () => {
     for(const [width,zoom] of [[1100,1],[800,1],[1100,1.17],[800,1.17],[1100,1.5]]) {
       win.setSize(width,900); win.webContents.setZoomFactor(zoom);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-      await js(`document.getElementById('setupProfile').scrollIntoView({block:'center'});document.getElementById('setupProfile').click()`);
+      // Scroll, let a frame pass, then open: anchor fallbacks (flip-block) are chosen from the frame's
+      // scroll snapshot, so opening in the same task as the scroll could keep a stale "below" placement.
+      await js(`document.getElementById('setupProfile').scrollIntoView({block:'center'})`);
+      await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+      await js(`document.getElementById('setupProfile').click()`);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
       const profileBounds = await js(`(() => {const r=document.getElementById('setupProfileMenu').getBoundingClientRect();return {width:r.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom,viewport:[innerWidth,innerHeight],open:document.getElementById('setupProfileMenu').matches(':popover-open')}})()`);
       assert.ok(profileBounds.width>0 && profileBounds.right<=profileBounds.viewport[0] && profileBounds.left>=0 && profileBounds.top>=0 && profileBounds.bottom<=profileBounds.viewport[1],JSON.stringify({width,zoom,profileBounds}));

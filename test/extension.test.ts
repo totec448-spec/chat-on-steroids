@@ -1930,6 +1930,48 @@ describe('active agent tab discard protection', () => {
     }
   });
 
+  it.each([
+    ['selects its tab in the Background chats window', 'dddddddd-eeee-4fff-8aaa-777777777777', 12],
+    ['leaves a chat whose only tab is in the user\'s window alone', 'dddddddd-eeee-4fff-8aaa-888888888888', null]
+  ])('follows the chat selected in the app: %s (#1249)', async (_name, target, selected) => {
+    const BACKGROUND = 9;
+    let handed = false;
+    let polls = 0;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea({ chatBackgroundWindow: BACKGROUND }),
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') {
+          polls++;
+          const follow = handed ? undefined : target;
+          handed = true;
+          return response(200, { ok: true, repairs: [], ...(follow ? { follow } : {}) });
+        }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [
+        // The user's own window holds a lower-numbered copy of the first chat; it is never touched.
+        { id: 3, windowId: 7, url: 'https://chatgpt.com/c/dddddddd-eeee-4fff-8aaa-777777777777', status: 'complete', active: true },
+        { id: 4, windowId: 7, url: 'https://chatgpt.com/c/dddddddd-eeee-4fff-8aaa-888888888888', status: 'complete' },
+        { id: 11, windowId: BACKGROUND, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete', active: true },
+        { id: 12, windowId: BACKGROUND, url: 'https://chatgpt.com/c/dddddddd-eeee-4fff-8aaa-777777777777', status: 'complete', active: false }
+      ],
+      windowsGet: async (windowId: number) => ({ id: windowId, focused: false, state: 'minimized' } as { focused?: boolean })
+    });
+
+    await worker.fireAlarm();
+    await vi.waitFor(() => expect(polls).toBeGreaterThan(0));
+    if (selected) await vi.waitFor(() => expect(worker.tabsUpdate).toHaveBeenCalledWith(selected, { active: true }));
+    else await new Promise(resolve => setTimeout(resolve, 50));
+    expect(worker.tabsUpdate.mock.calls.filter(([id]) => id === 3 || id === 4)).toEqual([]);
+    expect(worker.tabsUpdate.mock.calls.filter(([, change]) => (change as { active?: boolean }).active === true))
+      .toHaveLength(selected ? 1 : 0);
+    expect(worker.windowsUpdate.mock.calls.filter(([, change]) => (change as { focused?: boolean }).focused === true)).toEqual([]);
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+  });
+
   it('hands an image export to the tab showing its chat and posts the page\'s answer, once (#889)', async () => {
     const SHOWN = 'dddddddd-eeee-4fff-8aaa-444444444444';
     const CLOSED = 'dddddddd-eeee-4fff-8aaa-555555555555';

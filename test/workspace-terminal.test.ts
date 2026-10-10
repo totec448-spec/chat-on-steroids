@@ -7,7 +7,7 @@ vi.mock('node-pty', () => ({ spawn: mocks.spawn }));
 vi.mock('../src/main/projects.js', () => ({ projectWorkspace: mocks.workspace }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({}), effectiveCapabilities: () => ({ command: mocks.command }) }));
 vi.mock('../src/main/codex/shell.js', () => ({ defaultUserShell: () => ({ shellPath: 'shell', shellType: 'bash' }) }));
-import { WorkspaceTerminals } from '../src/main/workspace-terminal.js';
+import { resetWorkspaceTerminalExitsForTests, WorkspaceTerminals, workspaceTerminalsExited } from '../src/main/workspace-terminal.js';
 beforeEach(() => { vi.clearAllMocks(); mocks.command = true; mocks.spawn.mockReturnValue(mocks.pty); mocks.workspace.mockResolvedValue({ real: '/project' }); });
 
 it('captures project cwd and cancels a pending spawn when its tab closes', async () => {
@@ -59,4 +59,28 @@ it('never falls back to home when a selected project cannot be resolved', async 
   const service = new WorkspaceTerminals(vi.fn(), '/home');
   await expect(service.create('one', 'missing-project', 80, 24)).rejects.toThrow('Project is unavailable');
   expect(mocks.spawn).not.toHaveBeenCalled();
+});
+it('lets shutdown wait for a closed shell\'s exit, bounded, so ConPTY is not torn down mid-exit', async () => {
+  // Earlier tests close shells whose mocked exits never fire.
+  resetWorkspaceTerminalExitsForTests();
+  await expect(workspaceTerminalsExited(10)).resolves.toBeUndefined();
+  const service = new WorkspaceTerminals(vi.fn(), '/home'); await service.create('one', null, 80, 24);
+  const exit = mocks.pty.onExit.mock.calls[0]![0] as (event: { exitCode: number }) => void;
+  service.close('one');
+  let done = false;
+  const waiting = workspaceTerminalsExited(5_000).then(() => { done = true; });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(done).toBe(false);
+  const exitedAt = Date.now();
+  exit({ exitCode: 0 });
+  await waiting;
+  expect(done).toBe(true);
+  expect(Date.now() - exitedAt).toBeLessThan(1_000);
+  // An exit that never arrives does not hold shutdown past its budget.
+  await service.create('two', null, 80, 24); service.close('two');
+  const started = Date.now();
+  await workspaceTerminalsExited(30);
+  expect(Date.now() - started).toBeLessThan(1_000);
+  (mocks.pty.onExit.mock.calls[1]![0] as (event: { exitCode: number }) => void)({ exitCode: 0 });
+  await expect(workspaceTerminalsExited(10)).resolves.toBeUndefined();
 });

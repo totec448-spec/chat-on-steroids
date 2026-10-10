@@ -11,7 +11,7 @@
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 3;
+  const OBSERVER_VERSION = 5;
   const prior = window.__cosUsageObserver;
   // An extension update re-executes this file in pages that stay open, and the same protocol
   // version used to keep the *old* code running until the tab was reloaded — measured
@@ -33,6 +33,7 @@
   const nativePost = window.postMessage.bind(window);
   const post = (...args) => { if (active) nativePost(...args); };
   let latest = null;
+  let latestHistoryLimit = null;
   let requestOrder = 0, latestOrder = 0;
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // @ehkogh/#318: the alternate shell also uses bare UUID workflow ids.
@@ -45,6 +46,12 @@
   const originReaders = new Set();
   const readers = new Set();
   const ORIGIN_LISTEN_MS = 15 * 60_000;
+  const MAX_HISTORY_RETRY_MS = 24 * 60 * 60_000;
+  // A 429 may not expose Retry-After at all (including due to response-header
+  // filtering). Back off conservatively instead of entering a reload storm.
+  const HEADERLESS_HISTORY_BACKOFF_MS = 60_000;
+  // ChatGPT has used both the singular and plural history detail routes.
+  const HISTORY_PATH = /^\/backend-api\/conversations?\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
   function publishOrigin(conversationId, requestIds, observedAt) {
     if (!active) return;
     const fresh = requestIds.filter(id => !origins.has(`${conversationId}:${id}`));
@@ -89,6 +96,39 @@
     latestOrder = order;
     latest = { type: 'cos-usage', rows, observedAt }; post(latest, location.origin);
   };
+  function retryAfterAt(response, observedAt) {
+    for (const name of ['retry-after', 'x-oai-history-initial-retry-after']) {
+      const raw = response.headers?.get?.(name);
+      if (typeof raw !== 'string' || !raw.trim()) continue;
+      const value = raw.trim();
+      let retryAt = NaN;
+      if (/^\d{1,6}$/.test(value)) retryAt = observedAt + Number(value) * 1000;
+      else retryAt = Date.parse(value);
+      if (Number.isFinite(retryAt) && retryAt > observedAt && retryAt - observedAt <= MAX_HISTORY_RETRY_MS) return retryAt;
+    }
+    return null;
+  }
+  /**
+   * Provider history throttling happens before the conversation DOM exists.
+   * Project only the exact conversation id plus bounded retry deadline: no body,
+   * request headers, credentials or transcript bytes cross worlds.
+   */
+  function inspectHistoryLimit(response, observedAt, method) {
+    if (!active || method !== 'GET') return;
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin) return;
+    const match = HISTORY_PATH.exec(url.pathname);
+    if (!match || response.status !== 429) return;
+    // Never assume a live Retry-After header exists: a fixed, bounded local
+    // cooldown covers real 429s without a usable header. It is not presented
+    // as a provider-declared retry deadline.
+    const retryAt = retryAfterAt(response, observedAt) ?? observedAt + HEADERLESS_HISTORY_BACKOFF_MS;
+    const projected = { type: 'cos-history-rate-limit', conversationId: match[1], retryAt, observedAt };
+    if (!latestHistoryLimit || projected.retryAt > latestHistoryLimit.retryAt ||
+        projected.conversationId !== latestHistoryLimit.conversationId) latestHistoryLimit = projected;
+    post(projected, location.origin);
+  }
   /**
    * The Core app's identity, read from the page's own system hint list (#861).
    *
@@ -414,6 +454,7 @@
       if (!active) return result;
       void result.then((response) => {
         if (!active) return;
+        const responseAt = Date.now();
         let status = null, streamOpened = false;
         try {
           const url = new URL(response.url);
@@ -427,14 +468,15 @@
           ...(streamOpened && !inspectedResponses.has(response) ? { streamOpened: true } : {}) }, location.origin);
         if (inspectedResponses.has(response)) return;
         inspectedResponses.add(response);
-        void inspect(response, observedAt, order).catch(() => {});
-        void inspectSystemHints(response).catch(() => {});
         let method = 'GET';
         try {
           const explicit = args[1] && typeof args[1].method === 'string' ? args[1].method : null;
           const inherited = args[0] && typeof args[0] === 'object' && typeof args[0].method === 'string' ? args[0].method : null;
           method = String(explicit || inherited || 'GET').toUpperCase();
         } catch { return; }
+        inspectHistoryLimit(response, responseAt, method);
+        void inspect(response, observedAt, order).catch(() => {});
+        void inspectSystemHints(response).catch(() => {});
         if (method === 'POST') void inspectRequestOrigins(response, observedAt).catch(() => {});
       }).catch(() => {
         // Network rejection only retires custody; it cannot prove that the stream is gone.
@@ -456,6 +498,7 @@
   const request = (event) => {
     if (!active || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
     if (latest) post(latest, location.origin);
+    if (latestHistoryLimit && latestHistoryLimit.retryAt > Date.now()) post(latestHistoryLimit, location.origin);
     if (coreMention) post(coreMention, location.origin);
     // Newest first: old evidence must not fill content's 16-ID pending capacity
     // before the current workflow can enter it during document startup.
@@ -464,7 +507,7 @@
   };
   const hide = () => {
     for (const reader of originReaders) void reader.cancel().catch(() => {});
-    origins.clear();
+    origins.clear(); latestHistoryLimit = null;
   };
   window.addEventListener('message', request);
   window.addEventListener('pagehide', hide);
@@ -475,7 +518,7 @@
     dispose() {
       active = false;
       for (const reader of readers) void reader.cancel().catch(() => {});
-      readers.clear(); origins.clear(); latest = null;
+      readers.clear(); origins.clear(); latest = null; latestHistoryLimit = null;
       window.removeEventListener('message', request); window.removeEventListener('pagehide', hide);
       window.removeEventListener('DOMContentLoaded', installFetchObserver);
       window.removeEventListener('DOMContentLoaded', installSocketObserver);

@@ -3,6 +3,8 @@ export type PluginSurface = 'core' | 'desktop' | 'plugins';
 export interface PluginRefreshStatus {
   schemaId: string;
   state: 'unknown' | 'current' | 'pending' | 'refreshing' | 'manual' | 'failed';
+  /** Successful provider tool call under this live publication; not a full-schema claim. */
+  responding?: boolean;
 }
 export interface PluginToolSchema {
   name: string;
@@ -20,4 +22,6 @@ export interface PluginPublication {
 export interface PluginRefreshRequest extends PluginPublication {
   id: string;
   appId: string | null;
+  /** Re-read declarations only; a mismatch cannot grant another Refresh click. */
+  observeOnly?: boolean;
 }

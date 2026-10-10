@@ -18,6 +18,7 @@ import { SURFACE_LIST, surfaceDefinition, surfaceIsUseful, desktopToolNames, typ
 import { getSecret } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
+import { tunnelRouteSettlingUntil } from './tunnel/route-settle.js';
 import { desktopAutomationSupported } from './platform.js';
 import { publishPluginSurface, unpublishPluginSurface, pluginRefreshPublications } from './plugin-refresh.js';
 import { pluginManager } from './plugins/manager.js';
@@ -211,6 +212,7 @@ export function getStatus(): ConnectionStatus {
     ...status,
     lastRequestAt: lastRequestAt(),
     lastToolCallAt: lastToolCallAt(),
+    routeSettlingUntil: tunnelRouteSettlingUntil(),
     surfaces: describeSurfaces()
   };
 }

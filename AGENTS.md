@@ -175,7 +175,8 @@ service-worker lifetime, and local session vs frontend id are recurring sources 
 guarantee. `writeDurableNow()` is the required barrier before an acknowledged control transition
 or browser side effect. Per-file queues allow independent writes; cross-file semantic ordering
 must be explicit in the caller. Missing/corrupt auxiliary state logs and reads as null so the app
-can start; restore may only reconstruct facts from independent durable proof.
+can start; authority ledgers can opt into strict reads, where only a missing file is empty
+and unreadable data throws a generic error. Restore may only reconstruct facts from independent durable proof.
 
 ## 3. Intent, current source and evidence
 
@@ -310,6 +311,10 @@ waits up to 1.5 s for `keychain:noticeReady` (5 s for a window still loading; no
 All first callers share that one gate, because the first call of any kind (the availability check
 included) sets up the encryptor. The renderer shows `#keychainNotice` only if `keychain:waiting`
 false has not come within 600 ms. A successful call records the build; a refused one does not.
+`keychain()` also counts calls in flight (`keychainReadPending()`). While one is still waiting on
+the prompt, Chromium's teardown waits for it too and `app.exit()` never returns, so the shutdown
+sequence's exit hook ends the process with `process.reallyExit()` on macOS in that case, after
+every phase and the final log flush.
 
 Settings use validated current config and `effectiveCapabilities()`. Fresh-install defaults,
 legacy omitted fields and malformed-file recovery are three different cases. User choices must
@@ -635,7 +640,21 @@ Content requires the matching route and document epoch, retaining one-shot strea
 temporary ACK failures for at most 15 minutes using the existing observer/backoff. Missing stream
 metadata retains the Fiber path. Fetch reattachment at DOM readiness captures each downstream
 wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
-The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 2
+The same wrapper passively observes same-origin `GET /backend-api/conversation/<uuid>` and
+`GET /backend-api/conversations/<uuid>` responses that return HTTP 429. It reads no response
+body, request headers, cookies or credentials: only the exact conversation id and a bounded
+retry deadline are projected as
+`cos-history-rate-limit`. Content accepts that projection only for its current exact route and
+records one blocking, non-recoverable `chat_error` with `retryAt`. While the deadline is live,
+ChatGPT's native conversation-load Retry button and CoS browser recovery both defer to it; the
+bridge rechecks the deadline at repair claim, preserves it across reversible bridge stop/start,
+and never treats the limit itself as recovery authority. A deferred Goal/compaction cold-browser
+start reuses the existing single recovery scheduler when the deadline expires. A valid
+`Retry-After` or `x-oai-history-initial-retry-after` response header takes precedence;
+when neither is usable, a 60-second **local fallback** applies instead. This fallback is not
+a claim that ChatGPT supplied a retry deadline. The existing pending-repair and terminal
+pickup-stopped countdowns retain their prior precedence over the generic limit notice.
+The native `f/conversation/resume` stream uses the same complete-event reader. Observer version 5
 has an explicit refresh/disposal handle, also reached by existing MAIN-helper restoration.
 The same fetch wrapper observes exact same-origin POST `f/conversation/resume` HTTP 404s.
 Only `conversation_id` leaves a string JSON request body (bounded to 16 KiB); unsupported or
@@ -1142,7 +1161,7 @@ plain names. ChatGPT records a connector's calls under the exact name typed (cal
 
 | Delivery choice | Eligibility and behavior |
 | --- | --- |
-| Immediate / `auto` | In an exact active non-Pro turn before its first MCP call, **Send directly** claims that original turn, stops its native generation, then uses normal browser Send. **Inject now** is a separate choice, including before the first call: authored `delivery: tool` captures the exact turn, waits visibly in the existing outbox, and only enters that turn's eligible outer MCP result. It never falls back to browser Send and fails visibly if its turn ends before delivery. After the first MCP call, injection remains available; Pro (including Astra) keeps injection throughout. A new turn resets eligibility; old tool history does not count. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
+| Immediate / `auto` | In an exact active non-Pro turn, **Send directly** claims that original turn and uses ChatGPT's own Send while the turn works. ChatGPT folds the message into the turn: it ends the running part as interrupted and continues with the message, keeping the result of a call still running. Nothing is stopped first, and the running turn's model is kept. **Inject now** takes the same native path whenever the turn takes it, because text inside a tool result never reached the model (measured 2026-10-09, #1231: ChatGPT passes a command's output alone and treats any other result's text as untrusted). Tool injection remains for Pro (including Astra), for an unproven model, and for image injection: authored `delivery: tool` then captures the exact turn, waits visibly in the existing outbox, enters only that turn's eligible outer MCP result, and fails visibly if its turn ends before delivery. A new turn resets eligibility. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
 | After turn | Existing-session FIFO spends one distinct completion or confirmed failure/silence-refresh ticket per browser claim. Replays/restart cannot drain the next entry. Does not block an otherwise eligible immediate tool injection. |
 | Finish checkpoint | Waits for a successful finish-tool boundary; ordinary eligible chats can deliver after verified completion. Astra's separate after-turn opt-in remains explicit. Checkpoints inherit the current chat model. |
 | Native attachment | Browser upload/send only. A file-bearing active-chat input waits for the browser-safe boundary; it never becomes a tool-result file reference. |
@@ -1164,12 +1183,11 @@ rechecks composer and attachment nodes, crosses app authorization, then **rechec
 every await before Send**. Native stable user-message and conversation identity establish
 acceptance. Composer insertion, button disappearance and a local “sent” variable do not.
 
-Direct active-turn corrections freeze `directTurn` in the same outbox entry. The existing
-turn-start and last-tool evidence plus in-flight MCP custody decide eligibility; no separate
-tool-seen flag owns it. Recheck the exact claim before native interruption and before Send.
-Navigation, a newer question, an occupied draft or a first MCP call during preparation can
-revoke delivery. A claimed browser correction never also enters a tool result. After-turn
-entries retain their source-boundary policy and never acquire interruption authority.
+Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
+start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
+before Send. Navigation, a newer question or an occupied draft during preparation can revoke
+delivery. A claimed browser correction never also enters a tool result. After-turn entries
+retain their source-boundary policy and never acquire interruption authority.
 
 Native **Thinking failed** is recognized only by its exact visible disclosure button inside the
 current assistant turn, excluding quoted Markdown, old turns and app UI. It immediately records
@@ -1343,6 +1361,12 @@ unproven, the page reports the fixed reason `Native Send receipt was not confirm
 input slot. `failBrowserInput` then retires the authorized row as the same uncertain send the
 outbox expiry produces (cancelled, never resent, a late exact receipt still confirms it), openings
 and Continue included, so later messages in that chat are claimable without a reload (#821).
+The one exception is proof of non-delivery: if, after that wait, ChatGPT still holds exactly the
+submitted text in its composer and shows no newer user row, the page clears that exact draft and
+reports `Native Send did not take the message.` instead. `failBrowserInput` then requeues a manual
+message once (`notTakenRetries`); a second refusal, or any opening, Continue, helper decision or
+temporary planner, ends as failed (`Not sent: ChatGPT did not accept the message.`). Seen when a
+message for the running turn was clicked in the second that turn ended.
 
 Confirmed terminal input receipts stop owning history retries after their exact local session
 directory is positively absent under an available history root. The outbox durably retires them
@@ -2307,6 +2331,12 @@ the chat in `reveals`, under the same holding rule, and focuses its tab or opens
 minimized window). When no such extension is connected, or none takes it within 4 s, the request
 is withdrawn and the app opens the URL through the OS as before.
 
+Selecting a chat in the app (`sessions:followTab`, preload `followSessionTab`) with Background
+chats on hands its conversation to the same extensions as `follow`: only the newest selection,
+only to a browser that already has the chat open, and it lapses after 10 s. The extension makes
+that tab the selected one in its Background chats window. That never focuses the window, opens a
+tab or touches the user's own windows (#1249).
+
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
 chat comes from request correlation (waiting up to 20 s), never from the model. Without one the
@@ -2574,9 +2604,10 @@ tab: if the browser finds one by the time it acts (often the tab a worker wake j
 still loading or answers `clf-page-status`, it reports `repairAction=present` and never reloads it,
 which used to cut a wake off mid-send (#864). Only a silent tab is reloaded. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
-A bare open turn counts as current work for a closed tab for one hour after its start
-(`OPEN_TURN_RECOVERY_MS`); activity in the silence window counts however old the turn is. A turn
-left open by a page that went away days ago must not reopen its tab on a brief visit.
+A bare open turn counts as current work for a closed tab and for automatic compaction for one hour
+after its start (`OPEN_TURN_RECOVERY_MS`, `liveTurnIsCurrent`); activity in the silence window counts
+however old the turn is. A turn left open by a page that went away days ago must not reopen its tab
+or file a compaction on a brief visit.
 An explicit `/closed` departure with `manual: true` persists `browserRecoveryDismissedAt` in the
 existing session metadata and withdraws every unexecuted browser repair. It revokes synthetic
 silence inputs while retaining authored input, continuation tickets, exact request ownership
@@ -2862,6 +2893,18 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    needed. Move the objective and chat switch, retire A's execution authority, then retire
    its browser document only with fresh safe-close proof. B's first answer belongs to the
    exact resumed input, not to an old final from A.
+
+**Reopening from a saved summary (#1215).** A run abandoned after step 3 keeps its handoff on
+disk. `sessions:resumeFromHandoff` (preload `resumeFromHandoff(id, handoffId)`, bridge
+`resumeFromSavedSummary`) starts a new run from it through `reopenWithHandoffNow`: only when that
+handoff is still the session's `lastHandoffId`, no continuation is open, and its provenance
+source is the session's current chat. The new run is an ordinary transaction: it reserves A
+again with the abandoned run's project, records the source request as already sent (nothing is
+asked of ChatGPT), and `attachSummary` writes a fresh handoff with the same text bound to the
+new token. Claim, commit, restart recovery and provenance then work unchanged; a failed attach
+aborts the new run. Timeline `handoff` events carry an optional `continuation` token so the
+reopened run's row owns its handoff; the reuse button is shown only on the newest Compact &
+Resume row.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
@@ -3578,7 +3621,9 @@ status updates preserve the user's current disclosure state.
 
 The recovery row above Goal/Loop shows read-only countdowns from `bridge.ts::sessionControlsFor`:
 activity-based silence and confirmed reload listening, an outbox/Goal native-busy deferral, and each unresolved
-attribution incident's exact candidate deadline. `renderer/recovery.ts` updates only the seconds
+attribution incident's exact candidate deadline. A live conversation-history 429 cooldown projects
+a `provider-limit` row that says when retry is allowed and never promises a reload.
+`renderer/recovery.ts` updates only the seconds
 using the existing visible-chat clock; zero says checking/pending, never sent/reloaded. Fresh
 work or attribution removes the relevant countdown, and native busy projects the same owner's
 extended deadline. Pro silence becomes visible after five minutes without work and counts
@@ -3767,12 +3812,16 @@ production renderer in isolated Electron with color, queue/push, theme, reset, r
 layout checks. It does not operate the installed app or a provider conversation.
 
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
-in ChatGPT. Its X stores only the acknowledged running `state.update.current` version in
-`cos.plugins.refreshReminder.dismissedVersion`; downloading a newer version does not rearm
-it. No acknowledgement shows the reminder, including the first version with this feature.
-It survives restart until dismissed, returns for a different running version and is hidden
-in Settings. It stacks with update/extension notices and never marks an actual connector
-refresh complete or starts a browser action.
+in ChatGPT. It compares `AppState.connectorSchemas` (the declaration fingerprints the local
+MCP server publishes per surface) with the ones acknowledged in
+`cos.plugins.refreshReminder.acknowledgedSchemas`. The first schema seen per surface is a
+silent baseline; a different one shows the reminder until its X is clicked.
+`AppState.confirmedConnectorSchemas` carries, per surface, the schema ChatGPT confirmed after a
+refresh click or found already current (`confirmedPluginSchemas()`, an in-memory copy of
+`completedSchemaId` from `state/plugin-refresh.json`, kept current on every read and write); a current schema confirmed there counts as acknowledged, so
+the reminder disappears once automatic plugin refresh lands. The reminder is hidden in
+Settings, stacks with update/extension notices and never marks a refresh complete or starts a
+browser action.
 
 ### Project Files workspace
 
@@ -3920,10 +3969,18 @@ Refused calls classify the current admission fact: a name absent from every reta
 unknown/stale/wrong-connector; an exact exposure conflict or schema-limit issue is not exposed;
 only a uniquely known disabled integration/tool is disabled. Sign-in, authentication in progress,
 server error, residual unavailability and shutdown keep their separate diagnoses. Connector refresh
-cannot repair those states. Retained declarations and exposure issues explain refusal only; they
-never route a call, select a conflicting owner, start sign-in or reconnect. Every pre-dispatch
-refusal records `tool_rejected` and says the requested tool call was not dispatched. An admitted
-upstream error remains `tool_execution_error`; its arbitrary text cannot redefine admission.
+cannot repair those states. When that absent name is an exact member of `SURFACES.core.tools` and
+Plugins does not also declare it (shared `exec` stays generic), the same `UNKNOWN_TOOL` refusal
+names this installation's Core connector from `surfaceDefinition('core').connectorName` and tells
+the caller to discover or select that connector. Static membership identifies ownership only: the
+text does not report Core as enabled or connected, and it does not treat an earlier launch as
+already run. Case-mismatched names and every other unclaimed name keep the generic unknown-tool
+wording. A retained external declaration, including a tool literally named `exec_command`, still
+uses its conflict, disabled, authentication, startup or shutdown diagnosis and is not redirected.
+Retained declarations and exposure issues explain refusal only; they never route a call, select a
+conflicting owner, start sign-in or reconnect. Every pre-dispatch refusal records `tool_rejected`
+and says the requested tool call was not dispatched. An admitted upstream error remains
+`tool_execution_error`; its arbitrary text cannot redefine admission.
 Refresh observations allow the registrar's one additional code-mode tool. Legacy 64-tool
 snapshots (plus optional code mode) can enroll only as an exact declaration subset of the
 current Plugins publication; refresh completion still requires the complete current catalog.
@@ -3949,21 +4006,52 @@ Refresh targets the exact account-observed installed app id, durably claims befo
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
 `pluginRefreshStatuses()` projects the existing ledger without creating debt, repairing rows or
-waking the browser. `AppState.connectorRefresh` carries only each currently published surface's
-schema fingerprint and `unknown/current/pending/refreshing/manual/failed` state; no app IDs,
+waking the browser. Its parsed rows are cached against `durableRevision('plugin-refresh')`;
+owner commits replace the cached snapshot; another committed write to that ledger or a new
+store invalidates the disk read. `confirmedPluginSchemas()` projects these same committed rows
+for Setup, without a second confirmation cache or repair-on-read. Both projections exclude
+other tunnels and unverified earlier unstable-connection runs. Malformed JSON or unreadable
+refresh state cannot be replaced with fresh click authority. Failed reads stay cached for
+state pushes; an explicit check/Restart retries the read, allowing restored evidence to recover.
+The live publication must also belong to the configured tunnel before status, browser hints or
+refresh receipts can use it; a newly published tunnel starts its full grace even with unchanged tools. Projections
+read committed evidence without joining the refresh mutation queue. `AppState.connectorRefresh`
+carries only each currently published surface's
+schema fingerprint, `unknown/current/pending/refreshing/manual/failed` state and optional
+`responding` boolean; no app IDs,
 tools or raw errors leave the owner through this projection. Activity's Update status card
 combines it with the updater, bridge and connection owners. All checks pass only after a
 successful release check with no newer app, a live paired extension at the running version,
 and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
-exact current schema. Optional off connectors do not block completion; unknown and historical
-connection proof never pass. Review setup only opens Setup; displaying this card starts no work.
+exact current schema. Optional off connectors do not block completion; unknown schema or historical
+connection proof alone never establish full verification. Successful external tool calls under the same live publication
+and tunnel may instead establish **Ready to use; full connector schema not verified** when
+there is no known stale/manual/failed refresh. This is operational evidence, never a full-schema
+claim. `kernel.dispatch` captures `beginPluginToolCall` before work and confirms only a non-error
+outer provider result; HTTP ingress excludes self-tests and tunnel probes, and a changed schema,
+reconnect or changed tunnel invalidates a late result. Completed status collapses its details
+while keeping Update all accessible; a focused action is not hidden on a state push. The event
+card retains a 300px minimum height; title and status tracks keep their content height so the
+Activity page scrolls in short windows without cards overlapping.
+Review setup only opens Setup; displaying this card starts no work.
 `update:all` / preload `updateAll()` is explicit consent to check/stage, apply a supported app
 update via normal shutdown, and refresh published connectors once. `update-all.ts` joins
-concurrent presses and commits refresh intent before quitting; it never changes config or
+concurrent presses and commits refresh intent before quitting or opening a manual download. An app update skips the
+old build's bridge/tunnel connection; the next build connects for the saved refresh request.
+It never changes config or
 secrets. macOS/DEB retain their manual download path, and ambiguous/manual provider refreshes
 stay manual. Its receipt (`restarting/manual/checking-connectors`) is not completion evidence.
-The existing refresh rows record paired `requestedVersion/requestedFromVersion` fields. They
-allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
+The existing refresh rows record paired `requestedVersion/requestedFromVersion` fields,
+`tunnelKey` connection scope, optional `verifiedRun` for unstable connections, and a read-only
+`observe` request. Unscoped legacy or other-profile proof cannot mark the current tunnel verified.
+Explicit requests retain placeholder rows for configured surfaces whose connection failed before
+publication, so the requested target is not lost on quit. The first target publication adopts
+that placeholder once. Rechecking an ambiguous/manual/completed row sets `observe` and hands out
+`PluginRefreshRequest.observeOnly`: the extension may confirm complete matching declarations
+without clicking Refresh. The owner refuses mutating claims even when legacy repair clears
+an impossible click receipt. A mismatch ends the observation; an explicit new check can inspect a
+manually recreated app by its unique connector name and current tunnel rather than a retired app ID.
+The version fields allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
 the new build's schema once, but a later same-build schema change gets no borrowed authority.
 Startup resumes accepted refresh work even with auto-connect off, without another install.
 Extension replacement/reload stays with the existing build-stamp and idle-check owners.
@@ -4005,6 +4093,18 @@ opens the app on click. A skipped or failed notice is not retried; notification 
 tunnel state or recovery. No raw tunnel detail or secret identifier enters the notice.
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
+
+For a few seconds after a new OpenAI tunnel-client process connects (app start, update, or a
+client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
+process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
+and a reconnect of the same process after an outage changes nothing). `tunnel/route-settle.ts`
+holds such messages for `ROUTE_SETTLE_MS` (12 s) after each new process's first connected report:
+`/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
+conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
+lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
+waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
+the app, back to back, so the takeover can occasionally outlast the hold). `test/tunnel-route-settle.test.ts`, the
+`tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
 `/v1/health` (which also lists the routes this build serves), `/v1/status` and the read routes
@@ -4089,7 +4189,7 @@ supplies only `id`, `sessionId`, `text` up to 64,000 characters, and `interrupt`
 send from the composer does. The message can therefore reach ChatGPT, and a model that reads it
 can act under the capabilities the user has granted. A row sent this way is `automatic:false`,
 like one typed in the app. Worker and helper chats and chats with no ChatGPT chat yet are refused,
-and a send that would stop the answer being written needs `interrupt:true`; because the outbox
+and a send into an answer being written needs `interrupt:true`; because the outbox
 decides that itself when it admits the row, a row it marked as interrupting after the caller's check
 is withdrawn and refused. The caller's lowercase UUID is the outbox id: a repeat returns the
 existing row (200, `replayed:true`) and never reaches `enqueueInput`, and the same id with a

@@ -2244,8 +2244,9 @@ var CLF_DOM = (() => {
       const sections = turnNodes(turn);
       if (!sections.length) return false;
       for (const section of sections) {
-        if (replaced) section.setAttribute('data-clf-turn-replaced', '1');
-        else section.removeAttribute('data-clf-turn-replaced');
+        // Only on a change: the once-a-second render reaches here for every rendered turn.
+        if (replaced) { if (section.getAttribute('data-clf-turn-replaced') !== '1') section.setAttribute('data-clf-turn-replaced', '1'); }
+        else if (section.hasAttribute('data-clf-turn-replaced')) section.removeAttribute('data-clf-turn-replaced');
       }
       if (replaced && root) {
         const anchor = placement && placement.anchor;
@@ -2413,7 +2414,7 @@ var CLF_DOM = (() => {
     }
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
     // Why a Send ended without acceptance, as one short code for the caller's diagnostics (#820).
     // It names the first refusal only and never changes what Send does.
     const refused = (why) => { try { explain?.(why); } catch { /* Diagnostics never change Send. */ } return false; };
@@ -2421,7 +2422,11 @@ var CLF_DOM = (() => {
       const box = composer();
       if (!box || !box.isConnected) return refused('editor-missing');
       if (!stillCurrent()) return refused('chat-changed');
-      if (generating() || stopButton()) return refused('page-busy');
+      // A message for the running turn goes out while ChatGPT works: its composer offers Send once it
+      // holds text, and ChatGPT folds the message into that turn (#1231). Only the exact new user row
+      // below accepts it, so this never relies on Stop or a cleared composer.
+      const busy = () => !whileGenerating && generating();
+      if (whileGenerating ? !acceptUserReceipt : generating() || stopButton()) return refused('page-busy');
       if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return refused('editor-disabled');
       // Rich editors use adjacent paragraphs for newlines; textContent concatenates
       // their words. Preserve those boundaries when matching the rendered user message.
@@ -2550,7 +2555,7 @@ var CLF_DOM = (() => {
           // readiness through this same bounded operation; neither a guessed Enter nor
           // an unrelated Stop/composer-clear is evidence that this draft was submitted.
           if (conversationId() !== beforeConversation || composer() !== box || !box.isConnected ||
-              draftText() !== (mentionedDraft ?? submitted) || generating()) return finish(false, generating() ? 'page-busy' : 'draft-changed');
+              draftText() !== (mentionedDraft ?? submitted) || busy()) return finish(false, busy() ? 'page-busy' : 'draft-changed');
           if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return;
           const button = sendButton();
           if (!sendButtonEnabled(button)) return;
@@ -2562,7 +2567,7 @@ var CLF_DOM = (() => {
             // Authorization can await the app. The exact editor, text and native control
             // must still be the ones it authorized; a late answer cannot revive this send.
             if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
-                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || generating() || sendButton() !== control ||
+                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || busy() || sendButton() !== control ||
                 !sendButtonEnabled(control) || box.getAttribute('aria-disabled') === 'true' ||
                 box.getAttribute('contenteditable') === 'false') return finish(false, 'send-not-ready');
             if (mention && !mentionTried) {

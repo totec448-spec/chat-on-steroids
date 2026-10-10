@@ -89,8 +89,20 @@ export function secureStorageCiphertextIsProtected(
  * macOS reads the key from the Keychain, and after an update that read waits on the password
  * prompt; keychain-notice.ts lets the window say so before it starts.
  */
+let keychainCallsInFlight = 0;
+
+/**
+ * Whether a safeStorage call is still waiting on the Keychain, typically on the macOS password
+ * prompt after an update. Quitting reads this: Chromium's own teardown waits for that read, so
+ * `app.exit()` never returns while the prompt is open.
+ */
+export function keychainReadPending(): boolean {
+  return keychainCallsInFlight > 0;
+}
+
 async function keychain<T>(operation: () => Promise<T>, ok: (result: T) => boolean = () => true): Promise<T> {
   await beforeKeychainRead();
+  keychainCallsInFlight += 1;
   try {
     const result = await operation();
     void afterKeychainRead(ok(result));
@@ -98,6 +110,8 @@ async function keychain<T>(operation: () => Promise<T>, ok: (result: T) => boole
   } catch (error) {
     void afterKeychainRead(false);
     throw error;
+  } finally {
+    keychainCallsInFlight -= 1;
   }
 }
 

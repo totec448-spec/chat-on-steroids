@@ -22,9 +22,13 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
+import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../src/main/codex/tool-specs.js';
+import { skillCatalogInstructions } from '../src/main/skills.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
+import { publishPluginSurface, pluginRefreshStatuses, resetPluginRefreshForTests } from '../src/main/plugin-refresh.js';
 import { friendlyError } from '../src/main/mcp/kernel.js';
+import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { SURFACE_LIST, surfaceDefinition, type SurfaceId } from '../src/main/mcp/surfaces.js';
 import {
   createSession,
@@ -244,6 +248,13 @@ let outside: string;
 let endpoint: McpEndpoint;
 let ctx: ToolContext;
 
+/**
+ * Characters of Core server instructions, measured with everything switched on. There is no
+ * provider limit behind it; it keeps the text read at the start of every chat from growing
+ * unnoticed, so raise it only together with a deliberate addition.
+ */
+const CORE_INSTRUCTIONS_BUDGET = 21_500;
+
 function withCaps(overrides: Partial<Capabilities>): Capabilities {
   return { ...DEFAULT_CAPABILITIES, ...overrides };
 }
@@ -424,6 +435,19 @@ describe('endpoint hardening', () => {
 
     await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/src/app.ts'] } });
     expect(lastToolCallAt()).not.toBeNull();
+  });
+
+  it('counts only successful provider calls as current-publication working evidence', async () => {
+    resetPluginRefreshForTests();
+    publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', [{ name: 'read', description: 'Read', inputSchema: { type: 'object' } }]);
+    try {
+      await rawPost(endpoint.urls.core, JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } } }), selfTestHeaders());
+      expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+      await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/missing-file'] } });
+      expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+      await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } });
+      expect((await pluginRefreshStatuses()).core).toMatchObject({ responding: true });
+    } finally { resetPluginRefreshForTests(); }
   });
 
   it('counts a request to either surface as ChatGPT reaching this PC', async () => {
@@ -1048,7 +1072,32 @@ describe('2025-era clients', () => {
       'read-only=off; plans=off; workers=off.'
     );
     expect(instructions).not.toContain(approved);
-    expect(instructions.length).toBeLessThan(18_000);
+    // Budget the actual native-platform payload, including the full Skills catalogue.
+    // PowerShell 5.1 syntax guidance is already present in exec_command's own schema:
+    // duplicating it here used to add exactly 80 characters on 5.1-only hosts.
+    expect(instructions).toBe(serverInstructions(ctx, 'core', process.platform));
+    expect(instructions).toContain(skillCatalogInstructions());
+    expect(instructions.length).toBeLessThan(CORE_INSTRUCTIONS_BUDGET);
+    // The budget counts what a real install sends: every capability, plans, workers and the
+    // finish tool on (a fresh install's defaults), for each platform from every CI host.
+    // Windows carries the most shell guidance; this test's partial context once hid it crossing.
+    const everything = { ...ctx, caps: allCaps(), readOnly: false, sessionTools: true, agentTools: true, exposedFinishTool: true };
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      expect(serverInstructions(everything, 'core', platform).length, platform).toBeLessThan(CORE_INSTRUCTIONS_BUDGET);
+    }
+    if (LAUNCHES_WINDOWS_POWERSHELL_5) {
+      expect(instructions).not.toContain('This is Windows PowerShell 5.1, without && or ||.');
+      expect(EXEC_COMMAND_CMD_DESCRIPTION).toContain('This shell is Windows PowerShell 5.1, which has no && or ||');
+    }
+  });
+
+  it('keeps full Skills metadata in the platform-native instructions budget', () => {
+    const catalog = skillCatalogInstructions();
+    const extraCatalog = `${catalog}\n${'- test Skill metadata '.repeat(250)}`;
+    const native = serverInstructions(ctx, 'core', process.platform, catalog);
+    const expanded = serverInstructions(ctx, 'core', process.platform, extraCatalog);
+    expect(expanded.length - native.length).toBe(extraCatalog.length - catalog.length);
+    expect(expanded.length).toBeGreaterThan(CORE_INSTRUCTIONS_BUDGET);
   });
 
   it('points at the other connector rather than pretending the capability does not exist', async () => {
@@ -3322,6 +3371,9 @@ describe('agent-maintained plans over MCP', () => {
   });
 });
 
+/** Attempts of the recycled-process-id test, so a retry runs on fresh ids. */
+let execOwnRuns = 0;
+
 describe('exec sessions belong to the chat that opened them', () => {
   beforeEach(() => {
     ctx.readOnly = false;
@@ -3542,16 +3594,18 @@ describe('exec sessions belong to the chat that opened them', () => {
   });
 
   it('does not let a stale owner inherit a recycled process id during the new exec yield', async () => {
+    // Fresh ids per attempt: a CI retry must not meet the first attempt's stored proofs ('same').
+    const run = ++execOwnRuns;
     // Model the real lifetime split directly: the manager has released an exited process id,
     // but the separate ownership registry still carries the chat that used to own it. Force
     // the next allocator pick to reuse that number so the race is deterministic instead of a
     // 1-in-99k lottery.
     await unifiedExecManager.terminateAllProcesses();
     const recycledId = 1_000;
-    noteExecOwner(recycledId, 'session-conv-execown-old');
-    expect(execOwner(recycledId)).toBe('session-conv-execown-old');
-    expect(prove('wfr_execown_old_recycled', 'conv-execown-old')).toBe('stored');
-    expect(prove('wfr_execown_new_recycled', 'conv-execown-new')).toBe('stored');
+    noteExecOwner(recycledId, `session-conv-execown-old-${run}`);
+    expect(execOwner(recycledId)).toBe(`session-conv-execown-old-${run}`);
+    expect(prove(`wfr_execown_old_recycled_${run}`, `conv-execown-old-${run}`)).toBe('stored');
+    expect(prove(`wfr_execown_new_recycled_${run}`, `conv-execown-new-${run}`)).toBe('stored');
 
     const allocate = unifiedExecManager.allocateProcessId.bind(unifiedExecManager);
     const allocation = vi.spyOn(unifiedExecManager, 'allocateProcessId').mockImplementation(() => {
@@ -3585,7 +3639,7 @@ describe('exec sessions belong to the chat that opened them', () => {
 
       // Do not await. The process is registered while exec_command spends its initial yield
       // collecting output, which is the exact old authority window.
-      starting = asChat('wfr_execown_new_recycled', 'exec_command', {
+      starting = asChat(`wfr_execown_new_recycled_${run}`, 'exec_command', {
         cmd: holdOpen,
         workdir: '/workspace',
         tty: true,
@@ -3604,7 +3658,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       // writable. The old chat knows this integer from its own previous session, but it no
       // longer has authority over what now happens to occupy that slot.
       expect(execOwner(recycledId)).toBeNull();
-      const stolen = await asChat('wfr_execown_old_recycled', 'write_stdin', {
+      const stolen = await asChat(`wfr_execown_old_recycled_${run}`, 'write_stdin', {
         session_id: recycledId,
         chars: 'stolen\r',
         yield_time_ms: 50
@@ -3616,13 +3670,13 @@ describe('exec sessions belong to the chat that opened them', () => {
       const started = await starting;
       expect(started.body.result?.isError, textOf(started)).not.toBe(true);
       expect(Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1])).toBe(recycledId);
-      expect(execOwner(recycledId)).toBe('session-conv-execown-new');
+      expect(execOwner(recycledId)).toBe(`session-conv-execown-new-${run}`);
       expect(textOf(started)).not.toContain('got=');
 
       // Let the real owner release the shell normally. Besides proving the new principal did
       // receive authority, this keeps cleanup deterministic instead of spending the process
       // manager's kill grace period on an intentionally blocked test process.
-      const owner = await asChat('wfr_execown_new_recycled', 'write_stdin', {
+      const owner = await asChat(`wfr_execown_new_recycled_${run}`, 'write_stdin', {
         session_id: recycledId,
         chars: 'owner\r',
         yield_time_ms: 5_000

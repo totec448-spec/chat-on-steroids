@@ -51,6 +51,7 @@ describe('pull request checklist', () => {
     expect(check({ body: good, files }).join()).toMatch(/screenshots/);
     expect(check({ body: `${good}\n## Screenshots\n\n![before](https://example.com/a.png)\n`, files })).toEqual([]);
     expect(check({ body: `${good}\nNo visual change: only which transcript reads happen changes.`, files })).toEqual([]);
+    expect(check({ body: `${good}\n- [x] No visual changes: only which transcript reads happen changes.`, files })).toEqual([]);
   });
 
   it('rejects stray notes and logs', () => {
@@ -79,6 +80,11 @@ describe('pull request checklist', () => {
     expect(check({ body: good, files }).join()).toMatch(/update AGENTS\.md/);
     expect(check({ body: good, files: [...files, { path: 'AGENTS.md', changes: 4 }] })).toEqual([]);
     expect(check({ body: `${good}\nNo contract change: only a comment in the preload file moved.`, files })).toEqual([]);
+    // Answered as a checklist item, singular or plural (#1274).
+    expect(check({ body: `${good}\n- [x] No contract changes: only the suggested filename is corrected.`, files })).toEqual([]);
+    expect(check({ body: `${good}\n* No contract change: only a comment in the preload file moved.`, files })).toEqual([]);
+    // A mention inside a sentence is not the stated line.
+    expect(check({ body: `${good}\nThere is No contract change: here, I think.`, files }).join()).toMatch(/shared contract/);
     expect(check({ body: good, files: [{ path: 'src/shared/session.ts', changes: 6 }, { path: 'test/a.test.ts', changes: 2 }] }).join())
       .toMatch(/shared contract/);
   });

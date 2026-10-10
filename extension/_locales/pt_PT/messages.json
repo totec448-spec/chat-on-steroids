@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "O endereço de continuação personalizado é inválido. Verifique o URL nas Definições; use HTTPS ou um endereço HTTP local."
   },
+  "content_history_rate_limited": {
+    "message": "O ChatGPT limitou temporariamente o acesso ao histórico desta conversa. O Chat On Steroids suspende a recuperação automática até terminar a espera."
+  },
   "content_goal_error_rate_limited": {
     "message": "O fornecedor de continuação está a limitar os pedidos. Aguarde a nova tentativa indicada ou escolha outro modelo de continuação."
   },

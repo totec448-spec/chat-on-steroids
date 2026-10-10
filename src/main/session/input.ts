@@ -94,6 +94,8 @@ const entrySchema = inputArgs.extend({
   pickupFailedAt: z.number().optional(),
   /** One automatic retry is permitted for an exact, never-authorized browser pickup. */
   pickupRetryCount: z.number().int().nonnegative().optional(),
+  /** Times a Send the page proved untaken (its exact text still in the composer) was requeued. */
+  notTakenRetries: z.number().int().nonnegative().optional(),
   /** Browser reload budget for this exact queued input; survives app restart. */
   pickupRecovery: z.object({ attempts: z.number().int().min(0).max(BROWSER_PICKUP_MAX_ATTEMPTS),
     nextAt: z.number().int().positive().optional(), stoppedAt: z.number().int().positive().optional() }).optional(),
@@ -134,6 +136,9 @@ const UNCONFIRMED_SEND = 'Stopped waiting for delivery confirmation. The message
  * opening read back with `&#x20;` for spaces). The same code in extension/content.js.
  */
 const RECEIPT_UNCONFIRMED = 'Native Send receipt was not confirmed.';
+/** The page clicked Send, yet its exact text stayed in the composer and no new user row appeared. */
+const SEND_NOT_TAKEN = 'Native Send did not take the message.';
+const NOT_TAKEN_FAILED = 'Not sent: ChatGPT did not accept the message.';
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -166,14 +171,14 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const activity = observedActivity ?? deliveryHooks?.activity?.(session) ?? { possible: !!session.activeTurnId, exact: !!session.activeTurnId };
   const stopped = session.finishTurn?.released === true;
   const selection = session.selectedModel?.conversationId === session.conversationId ? session.selectedModel : null;
-  // A previous turn's MCP history must not disable ordinary-chat steering. The
-  // existing start and tool timestamps cover committed work; in-flight custody
-  // also covers the first call before its durable recording has landed.
+  // A message for the running turn goes through ChatGPT's own composer, which accepts it while the
+  // turn works and folds it in, a call still running included. A message inside a tool result never
+  // reached the model: ChatGPT hands it only a command's output and treats any other result's text
+  // as untrusted (measured 2026-10-09, #1231). Pro turns and an unproven model keep tool injection.
   const directTurn = !stopped && activity.exact && end?.kind === 'turn_start' &&
     !!end.turnId && end.turnId === session.activeTurnId && !!selection?.model &&
     activity.model !== 'pro' && activity.model !== 'unknown' &&
-    !isProModel(selection.model, selection.reasoningEffort) &&
-    (session.lastToolCallAt ?? -1) < end.time && inFlightToolCalls(session.conversationId) === 0
+    !isProModel(selection.model, selection.reasoningEffort)
     ? { id: end.turnId, startedAt: end.time } : null;
   const canInject = !stopped && activity.exact && !directTurn;
   // The bridge's retained exact MCP grant can outlive a native UI end. Project
@@ -227,8 +232,7 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (entry.completedTurnId && await eligibleStageEnd(entry) !== entry.completedTurnId) return false;
   if (entry.directTurn) {
     const session = await getSession(entry.sessionId);
-    if (!session || session.conversationId !== entry.conversationId ||
-        (session.lastToolCallAt ?? -1) >= entry.directTurn.startedAt || inFlightToolCalls(session.conversationId) > 0) return false;
+    if (!session || session.conversationId !== entry.conversationId) return false;
     if (session.activeTurnId) return policy.directTurn?.id === entry.directTurn.id;
     const [end] = await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
     return policy.browserAllowed && end?.kind === 'turn_end' && end.turnId === entry.directTurn.id;
@@ -722,6 +726,10 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     const requestedMode = input.mode;
     let toolImages: InputImage[] | undefined;
     let injectionOwner: { conversationId: string; turnId: string } | undefined;
+    // Inject now reaches the model only as a real message (see sessionInputPolicy): when the running
+    // turn takes one, the explicit choice goes through the composer too. Files keep the tool path.
+    if (input.delivery === 'tool' && !input.attachmentDelivery && !input.attachments?.length && !input.images?.length &&
+        input.mode === 'auto' && !finishOwner && !input.stages?.length && policy?.directTurn) delete input.delivery;
     const toolDelivery = input.delivery === 'tool' || input.attachmentDelivery === 'tool';
     if (toolDelivery) {
       const turnId = policy?.directTurn?.id ?? policy?.injectionTurnId;
@@ -1703,7 +1711,9 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
       if (entry.sessionId !== sessionId || entry.dueAt > Date.now()) return entry;
       if (entry.attachments?.length && entry.attachmentDelivery !== 'tool' && entry.delivery !== 'tool') return entry;
       if (entry.delivery === 'tool' && entry.toolTurnId !== activeToolTurn) return entry;
-      if (entry.directTurn && entry.state === 'queued' && session.activeTurnId !== entry.directTurn.id) return entry;
+      // A message for the running turn goes through the composer only: in a tool result the model
+      // never saw it (#1231). If the page cannot take it, it is sent once the turn has ended.
+      if (entry.directTurn && entry.state === 'queued') return entry;
       // ChatGPT may reuse one request id for the whole server turn. Receipt follows
       // the actual invocation start, never a change in that grouping id.
       const received = toolInputReceipt(entry, sessionId, conversationId, startedAt);
@@ -1815,6 +1825,24 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
       await commit(current.map(row => sameDelivery(entry, row) ? { ...row, state: 'cancelled', error: UNCONFIRMED_SEND } : row));
       decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + UNCONFIRMED_SEND));
       decisionWaiters.delete(id);
+      return true;
+    }
+    // Unlike an unconfirmed receipt, this is proof the click did not deliver: ChatGPT left the
+    // exact text in its composer and showed no new user message, and the page has cleared that
+    // draft. Seen when a message for the running turn was clicked in the second the turn ended.
+    // One requeue sends it again; a second refusal is reported instead of retried forever.
+    if (entry.sendAuthorizedAt !== undefined && error === SEND_NOT_TAKEN) {
+      const retry = (entry.notTakenRetries ?? 0) === 0 && manualInput(entry) && !entry.recovery && !entry.opening &&
+        entry.purpose !== 'decision' && !entry.lifetime;
+      logWarn(`input ${entry.id}: ChatGPT did not take the clicked Send; ${retry ? 'queued once more' : 'reported as not sent'}`);
+      await commit(current.map(row => sameDelivery(entry, row) ? retry
+        ? { ...row, state: 'queued', owner: null, offeredAt: undefined, sendAuthorizedAt: undefined, requiresAuthorization: undefined,
+          deliveryText: undefined, error: undefined, notTakenRetries: (row.notTakenRetries ?? 0) + 1 }
+        : { ...row, state: 'failed', error: NOT_TAKEN_FAILED } : row));
+      if (!retry) {
+        decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + NOT_TAKEN_FAILED));
+        decisionWaiters.delete(id);
+      }
       return true;
     }
     if (entry.recovery && entry.requiresAuthorization === true && entry.sendAuthorizedAt === undefined) {

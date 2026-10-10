@@ -19,6 +19,7 @@ const {
   deleteAllSecrets,
   getSecret,
   initSecretsPath,
+  keychainReadPending,
   resetSecretsCacheForTests,
   secureStorageCiphertextIsProtected,
   secureStorageStatus,
@@ -49,6 +50,22 @@ afterEach(async () => {
 });
 
 describe('secret store', () => {
+  it('reports a Keychain read as pending while it waits, so quitting does not wait on the prompt', async () => {
+    // On macOS the first read of a new build waits on the password prompt; quitting then reads
+    // this to end the process instead of waiting on Chromium's teardown (2026-10-10).
+    let answer!: (available: boolean) => void;
+    vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockImplementationOnce(() => new Promise<boolean>(resolve => { answer = resolve; }));
+    expect(keychainReadPending()).toBe(false);
+    const status = secureStorageStatus('darwin');
+    await vi.waitFor(() => expect(keychainReadPending()).toBe(true));
+    answer(true);
+    await status;
+    expect(keychainReadPending()).toBe(false);
+    // A failed read is no longer pending either.
+    vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockRejectedValueOnce(new Error('denied'));
+    await secureStorageStatus('darwin');
+    expect(keychainReadPending()).toBe(false);
+  });
   it('refuses Linux v10 hard-coded-key ciphertext instead of trusting the legacy backend label', async () => {
     vi.mocked(safeStorage.getSelectedStorageBackend).mockReturnValue('basic_text');
     vi.mocked(safeStorage.encryptStringAsync).mockResolvedValueOnce(Buffer.from('v10fallback-ciphertext', 'ascii'));

@@ -91,6 +91,26 @@ let root = '';
  * that exact current attachment invalidates its key before a later lookup may trust it.
  */
 const missingCurrentConversations = new Set<string>();
+/** The journal reader can revisit the same malformed row on every timeline refresh.
+ * Keep warnings informative without presenting unchanged damage as a fresh incident. */
+const recentUnreadableWarned = new Map<string, number>();
+const MAX_RECENT_UNREADABLE_WARNED = 1024;
+
+function reportUnreadableRecentEvents(sessionId: string, damaged: number, fullyScanned: boolean): void {
+  if (damaged === 0) {
+    // A bounded page that never reached the beginning does not prove recovery.
+    if (fullyScanned) recentUnreadableWarned.delete(sessionId);
+    return;
+  }
+  if (damaged <= (recentUnreadableWarned.get(sessionId) ?? 0)) return;
+  recentUnreadableWarned.delete(sessionId);
+  recentUnreadableWarned.set(sessionId, damaged);
+  if (recentUnreadableWarned.size > MAX_RECENT_UNREADABLE_WARNED) {
+    const oldest = recentUnreadableWarned.keys().next().value;
+    if (oldest) recentUnreadableWarned.delete(oldest);
+  }
+  logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
+}
 
 interface AttachmentCatalog {
   /** Durable summary projection used for attachment identity and the renderer summary index. */
@@ -137,6 +157,7 @@ function rememberMissingCurrentConversation(conversationId: string): void {
 
 export function initSessionStore(userDataDir: string): void {
   root = path.join(userDataDir, 'sessions');
+  recentUnreadableWarned.clear();
   sessionAssetUsage.clear();
   globalAssetUsage = null;
   assetMutationEpoch = 0;
@@ -2124,9 +2145,10 @@ async function readRecentEventsFromDisk(
 
   const file = path.join(sessionDir(sessionId), 'events.jsonl');
   let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+  let cursor = 0;
   try {
     handle = await fs.open(file, 'r');
-    let cursor = (await handle.stat()).size;
+    cursor = (await handle.stat()).size;
     let bytes = 0;
     let carry = Buffer.alloc(0);
     while (cursor > 0 && scanning() && bytes < readBudget) {
@@ -2174,7 +2196,7 @@ async function readRecentEventsFromDisk(
   }
   candidates.sort((left, right) => sequence(left) - sequence(right));
   const selected = forward ? candidates.slice(0, cap) : candidates.slice(Math.max(0, candidates.length - cap));
-  if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
+  reportUnreadableRecentEvents(sessionId, damaged, cursor === 0 && scanning());
   const timeline = active?.summary ?? (await readDurableSnapshot(sessionId))?.summary;
   return chronological(projectTimeline(selected, timeline?.timelineTurns, timeline?.requestTurns, messages.values()));
 }
@@ -4096,6 +4118,7 @@ export async function deleteSession(id: string): Promise<void> {
 
 /** Test seam: forgets in-memory state without touching the files. */
 export function resetSessionStoreForTests(): void {
+  recentUnreadableWarned.clear();
   for (const entry of open.values()) if (entry.metaTimer) clearTimeout(entry.metaTimer);
   open.clear();
   opening.clear();
@@ -4115,6 +4138,7 @@ export function resetSessionStoreForTests(): void {
 /** Test seam: puts the store back to never having been told where to write. */
 export function unsetSessionRootForTests(): void {
   root = '';
+  recentUnreadableWarned.clear();
   sessionAssetUsage.clear();
   traceCache.clear();
   globalAssetUsage = null;

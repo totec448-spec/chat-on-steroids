@@ -27,8 +27,10 @@ function persistAcknowledgement(): void {
  * telling an upgraded user to refresh merely because the app version changed. Once a surface has
  * a baseline, a different schema id is actionable until acknowledged. Dismissing remains only a
  * UI acknowledgement; it does not claim that ChatGPT actually refreshed its cached tools.
+ * A schema ChatGPT itself confirmed (automatic plugin refresh, or a page already showing it)
+ * needs nothing from the user, so it counts as acknowledged.
  */
-export function paintPluginRefreshReminder(currentSchemas: ConnectorSchemas): void {
+export function paintPluginRefreshReminder(currentSchemas: ConnectorSchemas, confirmedSchemas: ConnectorSchemas = {}): void {
   const notice = document.getElementById('pluginRefreshReminder')!;
   let changed = false;
   let learnedBaseline = false;
@@ -36,7 +38,9 @@ export function paintPluginRefreshReminder(currentSchemas: ConnectorSchemas): vo
     const current = currentSchemas[surface];
     if (!current) continue;
     const acknowledged = acknowledgedSchemas[surface];
-    if (!acknowledged) {
+    if (confirmedSchemas[surface] === current) {
+      if (acknowledged !== current) { acknowledgedSchemas[surface] = current; learnedBaseline = true; }
+    } else if (!acknowledged) {
       acknowledgedSchemas[surface] = current;
       learnedBaseline = true;
     } else if (acknowledged !== current) changed = true;

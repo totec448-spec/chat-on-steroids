@@ -16,6 +16,15 @@ import { pluginCatalog, reviewedPluginLicense } from './catalog.js';
 import sharp from 'sharp';
 import { pluginExposure } from './exposure.js';
 import { logWarn } from '../logger.js';
+import { SURFACES, surfaceDefinition } from '../mcp/surfaces.js';
+
+/**
+ * How long a local (stdio) plugin may take to start and answer MCP initialize. A Python server's
+ * first start after install compiles its bytecode, and on Windows antivirus scans every new file:
+ * 20 s was not always enough (Unity on a hosted Windows runner, 2026-10-10), and a timed-out start
+ * leaves the plugin in an error state until the user restarts it. Starts run in the background.
+ */
+export const STDIO_START_TIMEOUT_MS = 60_000;
 
 /**
  * Removes a plugin's folder. On Windows a server's process tree can keep its folder locked for a
@@ -724,7 +733,7 @@ export class PluginManager {
           maxBufferSize: 16 * 1024 * 1024,
         });
         this.connecting.set(client, transport);
-        await client.connect(transport, { timeout: 20000 });
+        await client.connect(transport, { timeout: STDIO_START_TIMEOUT_MS });
       }
       const tools = await this.discover(client);
       signal.throwIfAborted();
@@ -843,16 +852,21 @@ export class PluginManager {
         return refused('PLUGIN_START_FAILED: The plugin server could not start. Check its settings and application.');
       // Explain refusal from the same retained catalog/exposure projection that owns
       // publication. Diagnostics never reconnect, authenticate, refresh, or choose a
-      // claimant; they only describe why this exact call was not admitted.
+      // claimant; they only describe why this exact call was not admitted. A name no
+      // retained catalog claims, and that only Core declares, names this install's Core
+      // connector. Static membership is not permission, connectivity, or a replay.
       const candidates = this.records.filter(row => row.catalog.some(tool => tool.name === name));
       const exposure = this.exposure();
       const issue = candidates.map(row => exposure.issues.get(row.id)?.get(name)).find((value): value is string => !!value);
       const row = candidates.length === 1 ? candidates[0] : undefined;
       let reason: string;
       if (issue) reason = `PLUGIN_NOT_EXPOSED: ${issue}`;
-      else if (!candidates.length)
+      else if (!candidates.length) {
         reason = 'UNKNOWN_TOOL: This tool name is not in the current Plugins catalog. It may be stale or belong to another connector. Check the current Plugins tool list.';
-      else if (row) {
+        // Plugins also owns shared names, notably exec. Case must match the Core declaration.
+        if (!SURFACES.plugins.tools.includes(name) && SURFACES.core.tools.includes(name))
+          reason += ` This name belongs to ${surfaceDefinition('core').connectorName}. Discover or select that connector.`;
+      } else if (row) {
         if (!row.enabled || row.disabledTools.includes(name)) reason = 'PLUGIN_DISABLED: Enable this plugin and tool in Plugins before calling it.';
         else if (row.status === 'needs-auth') reason = 'PLUGIN_NEEDS_AUTH: Sign in to this plugin in Plugins before calling it.';
         else if (row.status === 'authenticating') reason = 'PLUGIN_AUTHENTICATING: Finish the current sign-in for this plugin before calling it.';

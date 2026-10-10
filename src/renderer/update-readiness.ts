@@ -7,6 +7,7 @@ interface ReadinessRow {
   label: string;
   status: 'pass' | 'fail' | 'not-run' | 'skipped';
   detail: string;
+  schemaUnchecked?: boolean;
 }
 
 /** Projects existing owners only. Unknown, old proof and a dismissed reminder cannot pass. */
@@ -37,8 +38,10 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
     const off = surface.optional && surface.state === 'off';
     const connected = surface.state === 'live' && status.state === 'connected';
     const verified = connected && surface.lastRequestAt != null && sameSchema && refresh?.state === 'current';
+    const functional = connected && sameSchema && refresh?.responding === true;
     const detail = off ? t('Not enabled') : !connected ? t('Not connected')
       : !sameSchema ? t('Not verified in ChatGPT')
+      : functional && !verified && refresh?.state === 'unknown' ? t('Tool call succeeded; full schema not verified')
       : refresh?.state === 'manual' ? t('Manual refresh required in ChatGPT')
       : refresh?.state === 'failed' ? t('Connector refresh failed')
       : refresh?.state === 'refreshing' ? t('Waiting for refresh confirmation')
@@ -46,7 +49,8 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
       : refresh?.state !== 'current' ? t('Not verified in ChatGPT')
       : surface.lastRequestAt == null ? t('Waiting for a ChatGPT connection') : t('Verified in ChatGPT');
     rows.push({ id: surface.id, label: surface.connectorName,
-      status: off ? 'skipped' : verified ? 'pass' : surface.state === 'error' || (sameSchema && refresh?.state === 'failed') ? 'fail' : 'not-run', detail });
+      schemaUnchecked: !off && functional && !verified,
+      status: off ? 'skipped' : verified || (functional && refresh?.state === 'unknown') ? 'pass' : surface.state === 'error' || (sameSchema && refresh?.state === 'failed') ? 'fail' : 'not-run', detail });
   }
   return rows;
 }
@@ -54,9 +58,15 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
 export function paintUpdateReadiness(next: AppState): void {
   const rows = updateReadiness(next);
   const ready = rows.every(row => row.status === 'pass' || row.status === 'skipped');
+  const schemaUnchecked = rows.some(row => row.schemaUnchecked);
   const summary = $('updateReadinessSummary');
   summary.dataset.ready = String(ready);
-  ui(summary, 'textContent', () => ready ? t('All checks passed') : t('Checks incomplete'));
+  ui(summary, 'textContent', () => ready ? schemaUnchecked ? t('Ready to use; full connector schema not verified') : t('All checks passed') : t('Checks incomplete'));
+  const details = $<HTMLDetailsElement>('updateReadinessDetails');
+  if (details.dataset.ready !== String(ready)) {
+    if (!ready || !details.contains(document.activeElement)) details.open = !ready;
+    details.dataset.ready = String(ready);
+  }
   summary.classList.toggle('is-ok', ready);
   $('updateReadinessRows').replaceChildren(...rows.map(row => {
     const item = el('li', row.status === 'pass' ? 'check is-ok' : row.status === 'fail' ? 'check is-bad' : `check is-${row.status}`);

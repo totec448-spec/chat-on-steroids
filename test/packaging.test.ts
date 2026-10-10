@@ -157,6 +157,9 @@ describe('cross-platform packaging targets', () => {
     expect(installer).toContain('${If} $0 != 0');
     expect(installer).toContain('SetErrorLevel 2');
     expect(installer).toContain('Abort "Windows could not set the folder access needed');
+    // An update aborts before any page exists, which NSIS does silently: the reason must be shown (#1258).
+    expect(installer).toContain('${IfNot} ${Silent}');
+    expect(installer).toMatch(/MessageBox MB_ICONSTOP\|MB_OK "Windows could not set the folder access[^"]*icacls exit code \$0[^"]*run this installer as administrator\."/);
     expect(installer).not.toMatch(/\/(?:reset|remove|T)\b/i);
     expect(installer).not.toMatch(/(?:no-sandbox|disable-gpu-sandbox)/i);
   });

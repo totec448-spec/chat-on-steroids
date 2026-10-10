@@ -70,6 +70,7 @@ const {
   dispatchContinuationSourceSendNow,
   openContinuationNow,
   releaseContinuationDestinationSendNow,
+  reopenWithHandoffNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   restoreContinuations,
@@ -149,6 +150,60 @@ async function readyContinuation(): Promise<{ sessionId: string; token: string }
   await attachSummary(opened.token, SAMPLE_BRIEF);
   return { sessionId: summary.id, token: opened.token };
 }
+
+describe('reopening from a saved summary (#1215)', () => {
+  /** A run that captured its brief and was then abandoned, as when chat B never opened. */
+  async function abandonedAfterCapture(): Promise<{ sessionId: string; token: string; handoffId: string }> {
+    const { sessionId, token } = await readyContinuation();
+    const handoffId = (await getSession(sessionId))!.lastHandoffId!;
+    expect(await abortContinuationNow(token, 'the new chat could not be opened')).toBe(true);
+    return { sessionId, token, handoffId };
+  }
+
+  it('opens chat B from the captured summary through the ordinary claim and commit', async () => {
+    const { sessionId, token, handoffId } = await abandonedAfterCapture();
+    const reopened = await reopenWithHandoffNow(sessionId, handoffId);
+    expect(reopened).toMatchObject({ sessionId, state: 'awaiting-chat' });
+    expect(reopened!.token).not.toBe(token);
+    // A fresh handoff bound to this run, with the same brief: no second summary was asked for.
+    const second = (await getSession(sessionId))!.lastHandoffId!;
+    expect(second).not.toBe(handoffId);
+    expect(await handoffCount(sessionId)).toBe(2);
+    // Each timeline handoff names its own run, so the reopened row can show its summary.
+    const handoffs = (await store.readEvents(sessionId, { kinds: ['handoff'] })).map((event) =>
+      event.kind === 'handoff' ? [event.handoffId, event.continuation] : []);
+    expect(handoffs).toEqual([[handoffId, token], [second, reopened!.token]]);
+    const claim = await claimContinuationNow(reopened!.token, 'page-b');
+    expect(claim?.summary.trim().startsWith(SAMPLE_BRIEF.trim().slice(0, 60))).toBe(true);
+    expect(await commitContinuation(reopened!.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(sessionId)).toBe(CHAT_B);
+  });
+
+  it('survives a restart: its handoff belongs to the reopened run', async () => {
+    const { sessionId, handoffId } = await abandonedAfterCapture();
+    const reopened = await reopenWithHandoffNow(sessionId, handoffId);
+    const snapshot = snapshotContinuations();
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationByToken(reopened!.token)).toMatchObject({ state: 'awaiting-chat' });
+    expect(await claimContinuationNow(reopened!.token, 'page-b')).not.toBeNull();
+    expect(await commitContinuation(reopened!.token, CHAT_B)).toBe(true);
+  });
+
+  it('refuses while a run is open, for an older summary, and once the session moved on', async () => {
+    const { sessionId, token } = await readyContinuation();
+    const handoffId = (await getSession(sessionId))!.lastHandoffId!;
+    expect(await reopenWithHandoffNow(sessionId, handoffId)).toBeNull();
+    expect(await abortContinuationNow(token, 'the new chat could not be opened')).toBe(true);
+    expect(await reopenWithHandoffNow(sessionId, 'not-the-latest-handoff')).toBeNull();
+    const reopened = await reopenWithHandoffNow(sessionId, handoffId);
+    expect(await claimContinuationNow(reopened!.token, 'page-b')).not.toBeNull();
+    expect(await commitContinuation(reopened!.token, CHAT_B)).toBe(true);
+    // The session lives in chat B now, with a newer handoff: the old row's button does nothing.
+    expect(await reopenWithHandoffNow(sessionId, handoffId)).toBeNull();
+    expect(await attachedChat(sessionId)).toBe(CHAT_B);
+  });
+});
 
 describe('capturing the brief', () => {
   it('freezes exact source model intent across selection changes and durable restore', async () => {

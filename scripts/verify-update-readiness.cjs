@@ -6,6 +6,7 @@ const http = require('node:http');
 const assert = require('node:assert/strict');
 const { fixtureConfigSource } = require('./fixtures/app-defaults.cjs');
 const root = path.resolve(__dirname, '..');
+const version = require('../package.json').version;
 const built = path.join(root, 'out/renderer');
 const output = path.join(root, 'outputs/update-readiness');
 const before = process.argv.includes('--before');
@@ -15,17 +16,17 @@ app.whenReady().then(async () => {
     const p = new URLSearchParams(location.search);
     localStorage.setItem('cos.ui.language', p.get('lang') || 'en');
     const state = { config: fixtureConfig({ roots: [{name:'fixture',path:'/fixture/project'}],
-      ui:{theme:p.get('theme')||'dark',lastSeenVersion:'2.1.31'}, multiAgent:{enabled:false} }),
+      ui:{theme:p.get('theme')||'dark',lastSeenVersion:'${version}'}, multiAgent:{enabled:false} }),
       hasApiKey:true, hasGoalKey:false, hasCustomProviderKey:false, connectorSchemas:{core:'schema-a'},
       connectorRefresh:{core:{schemaId:'schema-a',state:'current'}},
       status:{state:'connected',detail:'',health:null,handshakeAt:Date.now(),lastRequestAt:Date.now(),lastToolCallAt:Date.now(),surfaces:[
         {id:'core',connectorName:'Chat On Steroids Core',description:'Core',cardSummary:'Files and terminal',optional:false,available:true,
           tools:['read'],state:'live',detail:'',localUrl:null,publicUrl:null,lastRequestAt:Date.now(),lastToolCallAt:Date.now()}]},
-      bridge:{running:true,paired:true,present:true,extensionVersion:'2.1.31',externalExtension:{present:true,version:'2.1.31',signedIn:true}},
-      update:{current:'2.1.31',latest:null,stage:'idle',checkedAt:Date.now(),error:null}};
+      bridge:{running:true,paired:true,present:true,extensionVersion:'${version}',externalExtension:{present:true,version:'${version}',signedIn:true}},
+      update:{current:'${version}',latest:null,stage:'idle',checkedAt:Date.now(),error:null}};
     const ok=data=>Promise.resolve({ok:true,data}); let listener=()=>{};
     window.fixtureState=state; window.mutations=[];
-    window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),listProjects:()=>ok([]),
+    window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok(Array.from({length:200},(_,i)=>({time:Date.now()+i,level:'info',message:'Fixture event '+(i+1)+': local operation completed'}))),listProjects:()=>ok([]),
       listSessions:()=>ok({sessions:[],activeId:null,pressure:[]}),listInputs:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
       getSwarm:()=>ok({running:false,agents:[],pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]}),
       onStateChanged:fn=>{listener=fn;return()=>{}},onSessionChanged:()=>()=>{},
@@ -64,6 +65,10 @@ app.whenReady().then(async () => {
       await open('lang='+lang+'&theme='+theme);
       await until(`document.getElementById('updateReadinessSummary').dataset.ready==='true'`);
       assert.equal(await js(`document.querySelectorAll('.update-readiness .check.is-ok').length`),3);
+      assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),false,'Completed status is compact');
+      assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return r.height>0&&b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Update all remains visible and receives pointer input');
+      if(lang==='en') await shot('compact-'+theme+'.png');
+      await js(`document.querySelector('#updateReadinessDetails > summary').click()`);
       const geometry = await js(`(()=>{const c=document.querySelector('.update-readiness'),a=document.getElementById('updateReviewSetup').getBoundingClientRect();
         return {clipped:[...c.querySelectorAll('strong,p,button')].some(e=>e.scrollWidth>e.clientWidth+1),sideways:c.scrollWidth>c.clientWidth,bottom:a.bottom,height:c.getBoundingClientRect().height,title:document.getElementById('updateReadinessTitle').textContent}})()`);
       assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<600,JSON.stringify(geometry));
@@ -79,6 +84,15 @@ app.whenReady().then(async () => {
       await pause(600); // DOM delivery precedes offscreen compositor publication.
       await shot('manual-'+lang+'-narrow.png');
     }
+    // A long event history must keep a usable scroll viewport below the status card.
+    win.setContentSize(700,600); await pause(200);
+    assert.ok(await js(`document.getElementById('fullFeed').clientHeight>=100`),'Long event history has a usable viewport even with incomplete status');
+    assert.equal(await js(`(()=>{const cards=[...document.querySelector('.activity-content').children].map(e=>e.getBoundingClientRect());return cards.some((r,i)=>i>0&&r.top<cards[i-1].bottom-1)})()`),false,'Short Activity page does not overlap its cards');
+    await shot('manual-events-narrow.png');
+    // The completed compact card must also retain its action at short heights.
+    await js(`window.fixturePush(window.fixtureState);document.getElementById('updateAll').scrollIntoView({block:'nearest'})`);
+    assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Compact Update all is not covered by the event card');
+    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
     win.setContentSize(700,460);
     await js(`document.getElementById('updateReviewSetup').scrollIntoView({block:'nearest'})`);
     const short = await js(`(()=>{const a=document.getElementById('updateReviewSetup').getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight}})()`);

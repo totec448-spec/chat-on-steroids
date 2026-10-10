@@ -53,13 +53,17 @@
 .settings-page-head h1 { margin: 0; font-size: calc(30px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.8px; line-height: 1.2; }
 .settings-page-head p { max-width: 68ch; margin: 9px 0 0; color: var(--soft); font-size: calc(14px * var(--text-scale, 1)); line-height: 1.6; }
 [data-panel='activity'] { overflow-y: auto; }
-.activity-content { grid-template-rows: auto auto minmax(120px, 1fr); }
-.update-readiness { min-height: min-content; grid-template-rows: none; align-content: start; margin-bottom: 20px; padding: 20px; gap: 12px; }
+.activity-content { grid-template-rows: max-content max-content minmax(300px, 1fr); }
+[data-panel='activity'] .update-readiness { min-height: min-content; grid-template-rows: none; align-content: start; margin-bottom: 20px; padding: 20px; gap: 12px; }
 .update-readiness h2 { min-height: 0; padding: 0; }
 .update-readiness ul { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
 .update-readiness .check > div { min-width: 0; overflow-wrap: anywhere; }
 .update-readiness .check p { margin: 4px 0 0; }
 .update-readiness .btn { justify-self: start; }
+#updateReadinessDetails[open] { display: grid; gap: 12px; }
+#updateReadinessDetails > summary { cursor: pointer; color: var(--soft); }
+#updateReadinessDetails > p { margin: 0; }
+.activity-content > .card:last-child { min-height: 300px; }
 #updateReadinessSummary { margin: 0; color: var(--soft); }
 #updateReadinessSummary.is-ok { color: var(--green); }
 .workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 28px; }
@@ -297,6 +301,8 @@
 .heat-day, .heat-month { align-self: center; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1; white-space: nowrap; }
 .heat-month { align-self: end; padding-bottom: 2px; }
 .heat-month.is-end { text-align: right; }
+/* A narrow window scrolls the year to its newest weeks; the weekday names stay beside them. */
+.heat-day { position: sticky; left: -18px; z-index: 1; align-self: stretch; display: flex; align-items: center; margin-left: -18px; padding-left: 18px; background: var(--card); box-shadow: 0 -3px 0 var(--card), 0 3px 0 var(--card); }
 .heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 .heat-legend .heat-cell { width: 11px; height: 11px; }
 .heat-legend > span:first-child { margin-right: 4px; }

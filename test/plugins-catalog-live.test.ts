@@ -6,6 +6,7 @@ import { terminateProcessTree } from '../src/main/exec.js';
 import path from 'node:path';
 import { createServer } from 'node:http';
 import { pluginCatalog } from '../src/main/plugins/catalog.js';
+import { STDIO_START_TIMEOUT_MS } from '../src/main/plugins/manager.js';
 import { initUvRuntime } from '../src/main/plugins/uv-runtime.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -29,7 +30,7 @@ for (const id of ['blender', 'unity', 'playwright', 'memory']) {
         launch.args.push('--headless', '--browser', 'chromium', '--isolated');
       }
       transport = new StdioClientTransport({ command: launch.command, args: launch.args, cwd: directory, stderr: 'ignore' });
-      await client.connect(transport, { timeout: 20000 });
+      await client.connect(transport, { timeout: STDIO_START_TIMEOUT_MS });
       const names = (await client.listTools({}, { timeout: 15000 })).tools.map(tool => tool.name);
       expect(names.length).toBeGreaterThan(0);
       expect(names).toEqual(expect.arrayContaining(recipe.tools!));

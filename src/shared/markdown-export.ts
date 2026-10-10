@@ -84,7 +84,8 @@ export function sessionMarkdown(title: string, entries: readonly { role: 'user' 
 
 /** A file name from a chat title that every desktop file system accepts. */
 export function markdownFileName(title: string, suffix = ''): string {
+  // The 80-unit limit must not leave half a surrogate pair in the saved filename.
   const base = title.normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim()
-    .replace(/[. ]+$/, '').slice(0, 80).trim() || 'chat';
+    .replace(/[. ]+$/, '').slice(0, 80).replace(/[\uD800-\uDBFF]$/, '').trim() || 'chat';
   return `${base}${suffix}.md`;
 }

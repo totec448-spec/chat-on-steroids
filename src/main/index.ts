@@ -25,7 +25,8 @@ import { openSessionChat, registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
-import { initSecretsPath } from './secrets.js';
+import { workspaceTerminalsExited } from './workspace-terminal.js';
+import { initSecretsPath, keychainReadPending } from './secrets.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -621,6 +622,14 @@ app.on('window-all-closed', () => {
   if (shouldQuitOnWindowAllClosed(process.platform, getConfig().ui.minimizeToTray)) app.quit();
 });
 
+/**
+ * Ends the process at once, without Chromium's teardown. Only for a shutdown sequence that has
+ * already flushed every store and log line.
+ */
+function exitNow(code: number): void {
+  (process as unknown as { reallyExit(code: number): void }).reallyExit(code);
+}
+
 app.on('will-quit', (event) => {
   // A secondary instance called app.quit() only to get out of the primary's way. It must be
   // allowed to exit normally: preventing that quit and flushing/stopping the primary's shared
@@ -650,7 +659,7 @@ app.on('will-quit', (event) => {
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
           Promise.resolve().then(() => loadedCosBrowser()?.stop())]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.
@@ -674,6 +683,11 @@ app.on('will-quit', (event) => {
         // The sequence has just logged its completion; a phase inside it would flush too early.
         void flushLogBeforeExit().finally(() => {
           shutdownComplete = true;
+          // A Keychain read still waiting on the macOS password prompt holds Chromium's teardown,
+          // so app.exit() would leave the process running with nothing to click, ignoring even
+          // SIGTERM (2026-10-10, a new build quit before its prompt was answered). Every phase has
+          // flushed by now; end the process directly instead.
+          if (process.platform === 'darwin' && keychainReadPending()) exitNow(0);
           app.exit(0);
         });
       }

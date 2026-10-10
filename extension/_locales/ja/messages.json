@@ -1076,6 +1076,9 @@
   "content_goal_error_invalid_provider": {
     "message": "カスタム継続エンドポイントが無効です。設定で URL を確認し、HTTPS またはローカル HTTP エンドポイントを使用してください。"
   },
+  "content_history_rate_limited": {
+    "message": "ChatGPT がこの会話履歴へのアクセスを一時的に制限しました。待機時間が終了するまで、Chat On Steroids は自動復旧を一時停止します。"
+  },
   "content_goal_error_rate_limited": {
     "message": "継続プロバイダーがリクエストをレート制限しています。表示されている再試行まで待つか、別の継続モデルを選択してください。"
   },
