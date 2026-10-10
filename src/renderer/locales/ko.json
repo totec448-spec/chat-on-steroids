@@ -1282,6 +1282,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "가장 오래된 로컬 기록 이미지 약 1 GB를 영구 삭제할까요? 대화 텍스트와 원본 파일은 유지됩니다.",
   "Freed {0} MB. {1} GB of image storage is now available.": "{0} MB를 확보했습니다. 이제 이미지 저장 공간 {1} GB를 사용할 수 있습니다.",
   "Waiting for the next tool call": "다음 도구 호출 대기 중",
+  "Sending in a moment…": "잠시 후 전송합니다…",
   "Image cleanup failed. No further cleanup was requested.": "이미지 정리에 실패했습니다. 추가 정리는 요청되지 않았습니다.",
   "Collapse a folder before expanding more folders.": "폴더를 더 펼치려면 먼저 열려 있는 폴더 하나를 접으세요.",
   "Save or discard an existing project draft before editing another project.": "다른 프로젝트를 편집하려면 먼저 기존 프로젝트 초안을 저장하거나 버리세요.",
