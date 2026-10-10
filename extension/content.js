@@ -7041,6 +7041,7 @@
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
       // finished and the page has been repainted with what the draft is doing.
+      const goalBefore = JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]);
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
       if (goalConfig) goalDraft = goalConfig.draft || null;
       const nextBootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
@@ -7079,6 +7080,9 @@
       foldBootstrap();
       renderControl();
       injectStage();
+      // A pull that brought the Goal settings or this chat's resume role re-reads the transcript
+      // with them. A page settled before this pull (a hidden tab) has nothing else to wake it.
+      if (JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]) !== goalBefore) observe();
       // The activity snapshot is now authoritative and visible. Arm the next read before
       // compaction or Goal side effects below can wait on the page for tens of seconds.
       armNextActivityPull();
@@ -8675,33 +8679,29 @@
 
   function renderControl() {
     if (!control || !control.root.isConnected) return;
-    // These writes stay unconditional for now (unlike the stream's, see setAttr): they sit inside
-    // ChatGPT's composer, so each one wakes watchTranscript, and a hidden tab's resumed Goal answer
-    // currently relies on that wake (content-script test "continues the first resumed answer that
-    // finished while the replacement tab was hidden"). Replace that wake before trimming these.
     const state = currentState();
     const busy = state.mode === 'busy' || state.mode === 'waiting';
-    control.root.hidden = state.mode === 'hidden';
-    control.root.dataset.clfMode = state.mode;
+    setHidden(control.root, state.mode === 'hidden');
+    setData(control.root, 'clfMode', state.mode);
     // Only over the chat it is about: an id-less New Chat route inherits nothing.
-    control.blocked.hidden = !(
+    setHidden(control.blocked, !(
       composerChat().state === 'chat' &&
       goalConfig &&
       goalConfig.blocked === 'blocked'
-    );
+    ));
     // Never disabled any more: it opens a sheet, and a sheet that explains why compaction is
     // unavailable is exactly what somebody clicking a dead button wanted to be told.
     control.button.disabled = false;
-    control.button.setAttribute('aria-label', t('content_settings_aria', 'Chat On Steroids settings'));
-    control.button.setAttribute('aria-haspopup', 'dialog');
+    setAttr(control.button, 'aria-label', t('content_settings_aria', 'Chat On Steroids settings'));
+    setAttr(control.button, 'aria-haspopup', 'dialog');
     if (!control.button.hasAttribute('aria-expanded')) control.button.setAttribute('aria-expanded', 'false');
     // The meter only while the button is a button. During a run the control is saying what
     // it is doing, and a fill level is neither the question nor the answer any more.
     const meter = state.action === 'start' ? meterView() : null;
-    control.meter.hidden = meter === null;
+    setHidden(control.meter, meter === null);
     if (meter) {
       control.meterFill.style.width = `${Math.round(meter.filled * 100)}%`;
-      control.meter.dataset.clfLevel = meter.level;
+      setData(control.meter, 'clfLevel', meter.level);
     }
     // The hover says what the settings are, because that is what the button is now. A run in
     // progress, or a failure, is the more urgent thing and takes the line back for as long as
@@ -8713,14 +8713,14 @@
         : state.hint
           ? `${state.label} — ${state.hint}`
           : state.label;
-    control.button.setAttribute('data-clf-tip', meter ? `${tip}\n${meter.tip}` : tip);
+    setAttr(control.button, 'data-clf-tip', meter ? `${tip}\n${meter.tip}` : tip);
     if (menuOpen) renderMenu();
     // The pill carries transient run state — progress, the opened chat, a failure. `idle` and
     // `off` are neither, and their label is the button's own name: a pill reading "Compact"
     // beside the Compact button said nothing and spent scarce composer width doing it. Why the
     // control is off is real information, but it is a sentence, so it lives on the hover tip.
-    control.pill.hidden = state.mode === 'idle' || state.mode === 'off';
-    control.cancel.hidden = state.action !== 'cancel';
+    setHidden(control.pill, state.mode === 'idle' || state.mode === 'off');
+    setHidden(control.cancel, state.action !== 'cancel');
     // One word, always. The pill sits inside ChatGPT's composer and has a button's width
     // to work with; `label · hint` spent all of it on a sentence that then got ellipsed
     // halfway through, so it read as neither. The hint is on the hover tip, in full.
