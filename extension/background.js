@@ -2066,7 +2066,27 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
       elected = elections[input.id];
     }
+    const projectInput = !target && typeof input.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(input.project) ? input.project : null;
+    // An opening made for another Project (the person retried after the earlier one was gone)
+    // is spent on that one; this Project gets its own tab.
+    if (projectInput && elected && elected.project !== projectInput) {
+      delete elections[input.id];
+      await persistLive();
+      elected = null;
+    }
     if (elected?.tab != null) tab = candidates.find(candidate => candidate.id === elected.tab);
+    // The tab opened on this linked Project's page for this new chat finished on ChatGPT's home,
+    // its marker gone: ChatGPT sends a deleted or unavailable Project there (measured 2026-10-10).
+    // Say so instead of leaving the message waiting with nothing on screen.
+    if (projectInput && !tab && elected?.stage === 'ready' && elected.project === projectInput && Number.isInteger(elected.tab)) {
+      const landed = tabs.find(row => row.id === elected.tab);
+      let home = false;
+      try { const url = new URL(landed?.url || ''); home = url.origin === 'https://chatgpt.com' && url.pathname === '/' && !url.search && !url.hash; } catch {}
+      if (landed && !landed.pendingUrl && landed.status === 'complete' && home) {
+        await call('/project-create', { method: 'POST', body: JSON.stringify({ action: 'gone', inputId: input.id, chatgptId: projectInput }) });
+        continue;
+      }
+    }
     // A prepare receipt can be lost after its exact document changes nothing. Do
     // not replay from elapsed time: only the still-elected, still-owned document
     // can prove that it is idle again and therefore no old preparation is live.
@@ -2115,8 +2135,13 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       // unresponsive elected document never grants another opening attempt.
       if (elections[input.id] && !recoveredReuse) continue;
       if (Object.keys(elections).length >= 1000) continue;
-      const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}` : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
-      if (!target && input.lifetime !== 'temporary-planner') {
+      // A new chat of a project with a native ChatGPT Project opens on that Project's own page;
+      // borrowing another tab would go through ChatGPT's New chat, which is the root.
+      const project = projectInput;
+      const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}`
+        : project ? `https://chatgpt.com/g/${project}/project?${marker}#${marker}`
+        : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
+      if (!target && !project && input.lifetime !== 'temporary-planner') {
         const reusable = new Set(reusableConversations);
         const choices = tabs.filter(candidate => !candidate.pinned && !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
           (recoveredReuse ? candidate.id === recoveredReuse.tab :
@@ -2175,14 +2200,15 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
         }
         if (elections[input.id]) continue;
       }
-      await elect(input.id, { tab: null, stage: 'opening', conversationId: target });
+      await elect(input.id, { tab: null, stage: 'opening', conversationId: target, ...(project ? { project } : {}) });
       tab = await createChatTab(url, background);
       await protectCreatedTab(tab);
-      await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
+      await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target, ...(project ? { project } : {}) });
       tabs.push(tab);
       continue;
     }
     offerDesktopInput(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: target,
+      ...(!target && typeof input.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(input.project) ? { project: input.project } : {}),
       ...(input.recovery ? { recovery: input.recovery } : {}),
       ...(input.silenceTurnId ? { silenceTurnId: input.silenceTurnId } : {}),
       ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}) });
@@ -2293,6 +2319,65 @@ function pluginSettingsRoute(url) {
 function pluginRefreshMarker(tab) {
   try { const url = new URL(tab?.pendingUrl || tab?.url || ''); return pluginSettingsRoute(url) ? url.searchParams.get('cos-plugin-refresh') : null; } catch { return null; }
 }
+/**
+ * A new CoS project's native ChatGPT Project, created in one helper tab through ChatGPT's own
+ * dialog. The tab is in the foreground: the dialog needs a laid-out page, and the person has just
+ * added the project. One request at a time; the tab is closed once its request is no longer
+ * pending and the page proves it holds nothing of the person's.
+ */
+let projectCreateFlight = null;
+/** A helper the person closed is opened again, but not more often than this. */
+const PROJECT_CREATE_REOPEN_MS = 120_000;
+function inspectProjectCreates(requests) {
+  if (projectCreateFlight) return projectCreateFlight;
+  // A page that just finished a creation answers after the app has already asked for the next pass,
+  // which this flight then turned away; so a flight that asked a page runs one more pass itself, or a
+  // second project added right after the first waited for an unrelated wake (measured 2026-10-10).
+  let asked = false;
+  projectCreateFlight = (async () => {
+    const list = (Array.isArray(requests) ? requests : [])
+      .filter(request => request && /^[a-f0-9-]{36}$/i.test(String(request.id)) && typeof request.name === 'string' && request.name);
+    const owner = (await chrome.storage.session.get('projectCreateOwner')).projectCreateOwner;
+    if (owner && !list.some(request => request.id === owner.id)) {
+      const tab = await chrome.tabs.get(owner.tab).catch(() => null);
+      if (tab && !tab.pinned && !tab.pendingUrl) {
+        let timer;
+        const proof = await Promise.race([chrome.tabs.sendMessage(tab.id, { type: 'clf-project-create-state', id: owner.id }).catch(() => null),
+          new Promise(resolve => { timer = setTimeout(() => resolve(null), 3000); })]).finally(() => clearTimeout(timer));
+        if (proof?.safe === true) await chrome.tabs.remove(tab.id).catch(() => undefined);
+      }
+      await chrome.storage.session.remove('projectCreateOwner');
+    }
+    // Not maintenance: the person just added the project, so this opens its helper even when
+    // maintenance may not open tabs (browserOnly).
+    if (!list.length) return;
+    // One at a time: the helper's own request while its page works on it, otherwise the first
+    // one nobody holds. A claim whose page is gone (no helper here) does not block the others;
+    // it comes back as `requested` when it lapses.
+    const owned = owner ? list.find(request => request.id === owner.id) : null;
+    if (owned && owned.state !== 'requested') return;
+    const request = owned || list.find(candidate => candidate.state === 'requested');
+    if (!request) return;
+    const mine = owner && owner.id === request.id ? owner : null;
+    const tab = mine ? await chrome.tabs.get(mine.tab).catch(() => null) : null;
+    if (!tab) {
+      // A helper the person closed comes back, at most every two minutes: never a tab on every
+      // status pass, and never a request left waiting for good.
+      if (mine && Date.now() - (mine.openedAt ?? 0) < PROJECT_CREATE_REOPEN_MS) return;
+      const created = await createChatTab(`https://chatgpt.com/?cos-project-create=${request.id}`, false);
+      await chrome.storage.session.set({ projectCreateOwner: { id: request.id, tab: created.id, openedAt: Date.now() } });
+      return;
+    }
+    let timer;
+    try {
+      asked = true;
+      await Promise.race([chrome.tabs.sendMessage(tab.id, { type: 'clf-project-create', request: { id: request.id, name: request.name } }).catch(() => undefined),
+        new Promise(resolve => { timer = setTimeout(resolve, 30000); })]);
+    } finally { clearTimeout(timer); }
+  })().catch(() => undefined).finally(() => { projectCreateFlight = null; if (asked) void maintain(); });
+  return projectCreateFlight;
+}
+
 function inspectRequestedPluginRefresh(publications, background, browserOnly = false) {
   if (pluginRefreshFlight || !Array.isArray(publications) || !publications.length) return pluginRefreshFlight;
   pluginRefreshFlight = (async () => {
@@ -2937,6 +3022,7 @@ async function maintainOnce() {
   inspectRequestedModels(reply.data.modelCatalogRequest);
   await rememberConnectorNames(reply.data.connectorNames);
   inspectRequestedPluginRefresh(reply.data.pluginRefreshRequests, reply.data.background === true, reply.data.browserOnly === true);
+  void inspectProjectCreates(reply.data.projectCreateRequests);
   const repairConversations = new Set(repairs.map(entry => entry.conversationId));
   // Reloading the same document races its final input offer. Repair it now; the
   // still-durable app row is offered on the next status pass after the reload.
@@ -3447,6 +3533,20 @@ async function bindPendingInputProject(message, source, conversationId) {
 }
 
 const HANDLERS = {
+  // Only the tab this worker opened for that exact request may report on it. Creating the Project
+  // navigates that tab to the Project's own page, which drops the marker, so the owner is kept.
+  async project_create(message, _sender, source) {
+    if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(String(message.id || '')) || !source.documentId) return { ok: false };
+    if (!['claim', 'arm', 'done', 'fail'].includes(message.action)) return { ok: false };
+    const owner = (await chrome.storage.session.get('projectCreateOwner')).projectCreateOwner;
+    if (!owner || owner.id !== message.id || owner.tab !== source.tab || !ownsDocument(source)) return { ok: false };
+    const body = JSON.stringify({ action: message.action, id: message.id, client: String(source.documentId).slice(0, 64),
+      ...(typeof message.chatgptId === 'string' ? { chatgptId: message.chatgptId } : {}),
+      ...(typeof message.error === 'string' ? { error: message.error.slice(0, 500) } : {}) });
+    const result = await call('/project-create', { method: 'POST', body });
+    if (['done', 'fail'].includes(message.action) && result.ok && result.data?.ok) void maintain();
+    return result;
+  },
   async plugin_refresh(message, _sender, source) {
     if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(String(message.id || ''))) return { ok: false };
     const tab = await chrome.tabs.get(source.tab);
@@ -3538,7 +3638,7 @@ const HANDLERS = {
     }
     if (message.recoveryAction && message.owner !== owner) return { ok: false };
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
-      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined })
+      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
     });
     if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Acceptance retires this exact helper immediately. Fresh page proof still
@@ -4336,6 +4436,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'desktop_input',
     'model_catalog',
     'plugin_refresh',
+    'project_create',
     'core_plugin',
     'load_failure',
     'usage_observation',

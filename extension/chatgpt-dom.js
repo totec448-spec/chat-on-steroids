@@ -3257,6 +3257,65 @@ var CLF_DOM = (() => {
     });
   }
 
+  /**
+   * ChatGPT's own "new Project" control in its sidebar, or null.
+   *
+   * Located by the attribute ChatGPT's sidebar action carries, not by its label, which is in the
+   * account's language (measured 2026-10-10: `data-app-action-sidebar-project-create`, labelled
+   * "Adicionar novo projeto" on a pt-BR account). Exactly one shown control, or nothing.
+   */
+  function projectCreateControl() {
+    return safe(() => {
+      const shown = [...document.querySelectorAll('button[data-app-action-sidebar-project-create]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
+      return shown.length === 1 ? shown[0] : null;
+    }, null);
+  }
+
+  /**
+   * Opens ChatGPT's collapsed sidebar once so its New project control can show. A narrow window
+   * unmounts the sidebar, and the control lives only there.
+   */
+  function revealSidebar() {
+    return safe(() => {
+      const toggles = [...document.querySelectorAll('button[data-testid="open-sidebar-button"][aria-expanded="false"]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
+      if (toggles.length !== 1) return false;
+      toggles[0].click();
+      return true;
+    }, false);
+  }
+
+  /** Every Project the page links to right now, by id: the account's Projects ChatGPT lists. */
+  function projectIdsShown() {
+    return safe(() => [...new Set([...document.querySelectorAll('a[href]')]
+      .map(link => projectHomeId(new URL(link.href, location.href).pathname)).filter(Boolean))], []);
+  }
+
+  /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
+  function projectCreateForm() {
+    return safe(() => {
+      const dialogs = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+        .filter(node => node.querySelector('input#chatgpt-project-name') && node.getClientRects().length > 0);
+      if (dialogs.length !== 1) return null;
+      const input = dialogs[0].querySelector('input#chatgpt-project-name');
+      const submits = [...dialogs[0].querySelectorAll('button[type="submit"]')];
+      return input && submits.length === 1 ? { dialog: dialogs[0], input, submit: submits[0] } : null;
+    }, null);
+  }
+
+  /** Types a Project name the way React sees a person typing it. */
+  function fillProjectName(input, name) {
+    return safe(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) return false;
+      input.focus();
+      setter.call(input, name);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return input.value === name;
+    }, false);
+  }
+
   async function newChatControl(stillCurrent = () => true) {
     const shown = node => node && !node.closest(OWN_SURFACES) && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const link = (root = document) => [...root.querySelectorAll('a[data-testid="create-new-chat-button"][data-sidebar-item="true"][href="/"]')].find(shown) || null;
@@ -3295,6 +3354,11 @@ var CLF_DOM = (() => {
     prepareChatModelSurface,
     modelPickerReadable,
     newChatControl,
+    projectCreateControl,
+    projectCreateForm,
+    revealSidebar,
+    projectIdsShown,
+    fillProjectName,
     projectHomeId,
     enterProject,
     visibleModelSelection,
