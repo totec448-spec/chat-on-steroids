@@ -2727,6 +2727,22 @@ async function revealChats(ids) {
   }
 }
 
+/**
+ * The chat selected in the app becomes the selected tab of the app's Background chats window
+ * (#1249). Selecting a tab never focuses its window, and nothing is opened or moved: a chat
+ * without a tab there, or a tab in the user's own windows, is left as it is.
+ */
+async function followChat(raw) {
+  const conversationId = cleanConversationId(raw);
+  if (!conversationId) return;
+  const window = await storedBackgroundWindow();
+  if (!Number.isInteger(window?.id)) return;
+  const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS, windowId: window.id });
+  const [tab] = tabs.filter(candidate => candidate.windowId === window.id && conversationForTab(candidate) === conversationId)
+    .sort((a, b) => a.id - b.id);
+  if (tab && !tab.active) await chrome.tabs.update(tab.id, { active: true });
+}
+
 let extensionReloadPending = false;
 /**
  * Why an offered extension update has not happened yet, reported with the next `/status` so the
@@ -2805,6 +2821,7 @@ async function maintainOnce() {
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
+  void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;

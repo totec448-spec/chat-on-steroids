@@ -583,6 +583,19 @@ it.each(['compaction', 'blocked', 'worker'])('retires %s control status when lea
   expect(status.textContent).not.toBe('');
 });
 
+it('asks for the selected chat\'s background tab once per switch (#1249)', async () => {
+  const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+  const { w } = await boot([], true, [], [], { sessions: [first, second] });
+  const api = (w as any).api;
+  const followed: string[] = [];
+  api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${id}"]`)!;
+  row(second.id).click();
+  row(second.id).click();
+  row(first.id).click();
+  expect(followed).toEqual([second.id, first.id]);
+});
+
 it('clears control projections on an existing-session switch and fences A to B to A responses', async () => {
   const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
   const { w, append } = await boot([], true, [], [], { sessions: [first, second] });
