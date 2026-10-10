@@ -9,6 +9,23 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.34] — Goal on every plan, and a background window that stays
+
+Goal and Loop now work on ChatGPT plans that don't show a model picker, such as the Free plan. The Background chats window survives extension updates, and ChatGPT gets clearer hints when it calls a tool on the wrong connector or starts a command that is already running.
+
+### ✨ Highlights
+
+- **Goal on every plan.** On plans without a model picker (for example the Free plan), every Goal or Loop follow-up used to fail with "Requested model or reasoning could not be confirmed". Follow-ups now use the model the chat already has.
+- **A background window that stays.** With **Background chats** on, the extension kept forgetting its background window whenever it updated or reloaded. New background chats then opened another window, and selecting a chat in the app no longer showed its tab there. The same window is now used again.
+- **Clearer when a tool is on another connector.** When ChatGPT runs a script that calls a Chat On Steroids tool its connector doesn't have, the result now names the connector that has it, instead of only "not a function". If your connectors share one Secure Tunnel ID, it also says that this sends calls to the wrong connector.
+- **Fewer repeated commands.** When ChatGPT starts a command that is still running in the same chat and folder, for example after a lost answer, the result now says so and how to read the running one, so copies don't pile up. The new command still runs.
+
+### 💛 Thank you
+
+To **@rishabhpunnackadan-ux** for the detailed reports behind the clearer connector hint and the repeated-command note.
+
+**Updating?** The extension updates itself once no chat is busy. If it stays on the old version, reload it once in `chrome://extensions`. On macOS, the app asks once for your login password so the new version can open its saved keys: choose **Always Allow**.
+
 ## [2.1.33] — Reuse a saved summary, and see why a message waits
 
 When Compact & Resume stops after ChatGPT already wrote its summary, you can now open the new chat with that summary instead of starting over. A message that waits to be sent now says why, and with Background chats on, the background window shows the chat you selected in the app. Open ChatGPT chats use much less CPU while idle, and several long-run and Windows problems are fixed.
