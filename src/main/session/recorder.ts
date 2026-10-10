@@ -2601,7 +2601,8 @@ export async function recordHandoff(
   sessionId: string,
   handoffId: string,
   chars: number,
-  reason: string
+  reason: string,
+  continuation?: string
 ): Promise<void> {
   await appendEvent(sessionId, {
     time: Date.now(),
@@ -2609,7 +2610,8 @@ export async function recordHandoff(
     kind: 'handoff',
     handoffId,
     chars,
-    reason
+    reason,
+    ...(continuation ? { continuation } : {})
   });
   notifyChanged(sessionId);
 }
@@ -2627,11 +2629,12 @@ export async function ensureHandoffRecorded(
   sessionId: string,
   handoffId: string,
   chars: number,
-  reason: string
+  reason: string,
+  continuation?: string
 ): Promise<boolean> {
   const existing = await readEvents(sessionId, { kinds: ['handoff'] });
   if (existing.some((event) => event.kind === 'handoff' && event.handoffId === handoffId)) return false;
-  await recordHandoff(sessionId, handoffId, chars, reason);
+  await recordHandoff(sessionId, handoffId, chars, reason, continuation);
   return true;
 }
 
