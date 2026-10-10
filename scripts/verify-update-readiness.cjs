@@ -84,9 +84,13 @@ app.whenReady().then(async () => {
       await pause(600); // DOM delivery precedes offscreen compositor publication.
       await shot('manual-'+lang+'-narrow.png');
     }
-    // A long event history must keep a usable scroll viewport below the status card.
+    // Activity keeps main's fixed page and lets the event feed use the remaining height.
     win.setContentSize(700,600); await pause(200);
-    assert.ok(await js(`document.getElementById('fullFeed').clientHeight>=100`),'Long event history has a usable viewport even with incomplete status');
+    assert.equal(await js(`(()=>{const p=document.querySelector('[data-panel="activity"]');return p.scrollHeight<=p.clientHeight+1})()`),true,'Long history does not add page scrolling');
+    const expandedFeedHeight = await js(`document.getElementById('fullFeed').clientHeight`);
+    await js(`document.querySelector('#updateReadinessDetails > summary').click()`);
+    assert.ok(await js(`document.getElementById('fullFeed').clientHeight`) > expandedFeedHeight,'Collapsing details returns height to the event feed');
+    assert.ok(await js(`document.getElementById('fullFeed').scrollHeight>document.getElementById('fullFeed').clientHeight`),'The event feed owns long-history scrolling');
     assert.equal(await js(`(()=>{const cards=[...document.querySelector('.activity-content').children].map(e=>e.getBoundingClientRect());return cards.some((r,i)=>i>0&&r.top<cards[i-1].bottom-1)})()`),false,'Short Activity page does not overlap its cards');
     await shot('manual-events-narrow.png');
     // The completed compact card must also retain its action at short heights.

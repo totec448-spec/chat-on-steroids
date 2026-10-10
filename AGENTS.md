@@ -4031,9 +4031,10 @@ there is no known stale/manual/failed refresh. This is operational evidence, nev
 claim. `kernel.dispatch` captures `beginPluginToolCall` before work and confirms only a non-error
 outer provider result; HTTP ingress excludes self-tests and tunnel probes, and a changed schema,
 reconnect or changed tunnel invalidates a late result. Completed status collapses its details
-while keeping Update all accessible; a focused action is not hidden on a state push. The event
-card retains a 300px minimum height; title and status tracks keep their content height so the
-Activity page scrolls in short windows without cards overlapping.
+while keeping Update all accessible; a focused action is not hidden on a state push. Activity
+keeps the existing fixed-height page and event-feed scrolling: the event card uses the remaining
+height without an added minimum or page scroll. In a short window, the status details scroll
+inside their card; collapsing them returns height to the event feed.
 Review setup only opens Setup; displaying this card starts no work.
 `update:all` / preload `updateAll()` is explicit consent to check/stage, apply a supported app
 update via normal shutdown, and refresh published connectors once. `update-all.ts` joins
