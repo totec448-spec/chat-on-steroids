@@ -3924,10 +3924,18 @@ Refused calls classify the current admission fact: a name absent from every reta
 unknown/stale/wrong-connector; an exact exposure conflict or schema-limit issue is not exposed;
 only a uniquely known disabled integration/tool is disabled. Sign-in, authentication in progress,
 server error, residual unavailability and shutdown keep their separate diagnoses. Connector refresh
-cannot repair those states. Retained declarations and exposure issues explain refusal only; they
-never route a call, select a conflicting owner, start sign-in or reconnect. Every pre-dispatch
-refusal records `tool_rejected` and says the requested tool call was not dispatched. An admitted
-upstream error remains `tool_execution_error`; its arbitrary text cannot redefine admission.
+cannot repair those states. When that absent name is an exact member of `SURFACES.core.tools` and
+Plugins does not also declare it (shared `exec` stays generic), the same `UNKNOWN_TOOL` refusal
+names this installation's Core connector from `surfaceDefinition('core').connectorName` and tells
+the caller to discover or select that connector. Static membership identifies ownership only: the
+text does not report Core as enabled or connected, and it does not treat an earlier launch as
+already run. Case-mismatched names and every other unclaimed name keep the generic unknown-tool
+wording. A retained external declaration, including a tool literally named `exec_command`, still
+uses its conflict, disabled, authentication, startup or shutdown diagnosis and is not redirected.
+Retained declarations and exposure issues explain refusal only; they never route a call, select a
+conflicting owner, start sign-in or reconnect. Every pre-dispatch refusal records `tool_rejected`
+and says the requested tool call was not dispatched. An admitted upstream error remains
+`tool_execution_error`; its arbitrary text cannot redefine admission.
 Refresh observations allow the registrar's one additional code-mode tool. Legacy 64-tool
 snapshots (plus optional code mode) can enroll only as an exact declaration subset of the
 current Plugins publication; refresh completion still requires the complete current catalog.
