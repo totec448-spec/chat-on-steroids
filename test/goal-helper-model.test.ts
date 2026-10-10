@@ -1,11 +1,12 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
+  catalogState: 'ready' as string,
   models: [] as Array<{ id: string; label: string; efforts: string[]; aliases?: string[] }>,
   goal: { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' } as Record<string, unknown>
 }));
 const refreshForUnoffered = vi.hoisted(() => vi.fn());
-vi.mock('../src/main/chat-models.js', async original => ({ ...(await original<object>()), getChatModels: () => ({ state: 'ready', models: state.models }), refreshForUnoffered }));
+vi.mock('../src/main/chat-models.js', async original => ({ ...(await original<object>()), getChatModels: () => ({ state: state.catalogState, models: state.models }), refreshForUnoffered }));
 vi.mock('../src/main/config.js', async original => {
   const real = await original<typeof import('../src/main/config.js')>();
   return { ...real, getConfig: () => ({ ...real.defaultConfig(), goal: { ...real.defaultConfig().goal, ...state.goal } }) };
@@ -19,7 +20,21 @@ beforeEach(() => {
     { id: 'gpt-5-5-thinking', label: '5.5', efforts: ['medium', 'high'] }
   ];
   state.goal = { helperModel: 'gpt-5.6-sol', helperReasoning: 'high' };
+  state.catalogState = 'ready';
   refreshForUnoffered.mockClear();
+});
+
+it("uses ChatGPT's current selection when the account shows no readable model picker (#1282)", () => {
+  // Free plan: discovery ends 'unavailable' with no models, and an exact helper model can never be
+  // confirmed, so every Goal follow-up failed with "Requested model or reasoning could not be confirmed".
+  state.models = [];
+  state.catalogState = 'unavailable';
+  expect(goalHelperSelection()).toEqual({ model: null, reasoningEffort: null });
+  // Before discovery has answered, the saved helper settings still apply.
+  for (const pending of ['unknown', 'pending']) {
+    state.catalogState = pending;
+    expect(goalHelperSelection()).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  }
 });
 
 it('keeps a saved helper model and reasoning the account offers', () => {

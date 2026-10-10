@@ -1852,7 +1852,18 @@ export function goalHelperSelection(): { model: string | null; reasoningEffort: 
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
-  const models = getChatModels().models;
+  const catalog = getChatModels();
+  const models = catalog.models;
+  // No readable picker at all (seen on Free plans, #1282): no model can ever be confirmed, so an
+  // exact helper model failed every Goal and Loop decision. Use ChatGPT's current selection, as
+  // for a model the account does not offer; a catalog that has not loaded yet keeps the setting.
+  if (!models.length && catalog.state === 'unavailable') {
+    if (helperFallbackLogged !== 'no-picker') {
+      helperFallbackLogged = 'no-picker';
+      logInfo("goal: this ChatGPT account shows no readable model picker; the helper uses ChatGPT's current selection");
+    }
+    return { model: null, reasoningEffort: null };
+  }
   if (!models.length) return { model, reasoningEffort };
   const notes: string[] = [];
   // A saved display label resolves to its unique observed family — the same rule the
