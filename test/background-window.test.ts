@@ -9,6 +9,7 @@ function harness(initial: Tab[], cached?: number) {
   const tabs = new Map(initial.map(tab => [tab.id, { ...tab }]));
   const windows = new Map([...new Set(initial.map(tab => tab.windowId))].map(id => [id, { id }]));
   const stored: Record<string, unknown> = cached === undefined ? {} : { chatBackgroundWindow: cached };
+  const local: Record<string, unknown> = {};
   let next = 100;
   const create = vi.fn(async (options: { url: string; windowId: number }) => {
     const tab = { id: next++, windowId: options.windowId, url: options.url };
@@ -24,14 +25,21 @@ function harness(initial: Tab[], cached?: number) {
   });
   const windowUpdate = vi.fn(async (id: number) => ({ id }));
   const api = vm.runInNewContext(`${code}\n({ createChatTab, reconcileBackgroundWindow })`, {
-    URL, URLSearchParams, Promise, cleanConversationId: (value: unknown) => typeof value === 'string' ? value : null,
+    URL, URLSearchParams, Promise, isChatGptUrl: (value: string) => /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(value), cleanConversationId: (value: unknown) => typeof value === 'string' ? value : null,
     conversationForTab: (tab: Tab) => new URL(tab.url).pathname.match(/^\/c\/(.+)$/)?.[1] ?? null,
     chrome: {
-      storage: { session: {
-        get: async () => ({ ...stored }),
-        set: async (values: object) => { Object.assign(stored, values); },
-        remove: async (key: string) => { delete stored[key]; }
-      } },
+      storage: {
+        session: {
+          get: async () => ({ ...stored }),
+          set: async (values: object) => { Object.assign(stored, values); },
+          remove: async (key: string) => { delete stored[key]; }
+        },
+        local: {
+          get: async () => ({ ...local }),
+          set: async (values: object) => { Object.assign(local, values); },
+          remove: async (key: string) => { delete local[key]; }
+        }
+      },
       tabs: { query: async () => [...tabs.values()].map(tab => ({ ...tab })), create, move, get },
       windows: { create: windowCreate, update: windowUpdate, get: async (id: number) => {
         if (!windows.has(id)) throw new Error('Window closed'); return windows.get(id);

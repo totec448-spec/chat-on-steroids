@@ -455,6 +455,12 @@ class FakeStorageArea {
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     this.data = next;
   }
+
+  async remove(keys: string[] | string): Promise<void> {
+    const next = { ...this.data };
+    for (const key of Array.isArray(keys) ? keys : [keys]) delete next[key];
+    this.data = next;
+  }
 }
 
 interface WorkerHarness {
@@ -472,6 +478,7 @@ interface WorkerHarness {
   navigateTab(tabId: number, url: string): Promise<void>;
   /** Fires the extension install/update lifecycle event. */
   installed(reason?: string): Promise<void>;
+  startup(): Promise<void>;
   /** Fires the periodic maintenance alarm this worker schedules for itself. */
   fireAlarm(name?: string): Promise<void>;
   /** Registers the browser document that owns subsequent tab-scoped messages. */
@@ -524,6 +531,7 @@ function loadWorker(options: {
   const tabCreatedListeners: Array<(tab: { id?: number; url?: string; pendingUrl?: string }) => void> = [];
   const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }, tab?: Record<string, unknown>) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
+  const startupListeners: Array<() => void> = [];
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
   const knownTabs = new Map<
     number,
@@ -580,7 +588,7 @@ function loadWorker(options: {
           installedListeners.push(fn);
         }
       },
-      onStartup: event()
+      onStartup: { addListener(fn: () => void) { startupListeners.push(fn); } }
     },
     windows: { update: windowsUpdate, get: options.windowsGet ?? (async () => ({ focused: true })) },
     scripting: {
@@ -658,6 +666,10 @@ function loadWorker(options: {
     async fireAlarm(name = 'clf-bridge-drain') {
       for (const fn of alarmListeners) fn({ name });
       for (let turn = 0; turn < 12; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+    async startup() {
+      for (const fn of startupListeners) fn();
+      for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     },
     async installed(reason = 'update') {
       for (const fn of installedListeners) fn({ reason });
@@ -1928,6 +1940,49 @@ describe('active agent tab discard protection', () => {
       expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
       expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${TARGET}`, active: true });
     }
+  });
+
+  it.each([
+    ['adopts its mirrored window after an extension reload', true],
+    ['refuses a mirrored window that also holds a non-ChatGPT tab', false]
+  ])('keeps the Background chats window across an extension reload: %s', async (_name, onlyChatGpt) => {
+    const BACKGROUND = 9;
+    const TARGET = 'dddddddd-eeee-4fff-8aaa-777777777777';
+    const session = new FakeStorageArea();
+    const local = new FakeStorageArea({ ...paired, chatBackgroundWindowMirror: BACKGROUND });
+    const tabs = [
+      { id: 11, windowId: BACKGROUND, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete', active: true },
+      { id: 12, windowId: BACKGROUND, url: `https://chatgpt.com/c/${TARGET}`, status: 'complete', active: false },
+      ...(onlyChatGpt ? [] : [{ id: 13, windowId: BACKGROUND, url: 'https://example.com/', status: 'complete', active: false }])
+    ];
+    let handed = false;
+    const worker = loadWorker({
+      local, session,
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') { const follow = handed ? undefined : TARGET; handed = true; return response(200, { ok: true, repairs: [], ...(follow ? { follow } : {}) }); }
+        return response(404, {});
+      }),
+      tabsQuery: async () => tabs,
+      windowsGet: async (windowId: number) => ({ id: windowId, type: 'normal', focused: false, state: 'minimized', tabs } as { focused?: boolean })
+    });
+    await worker.fireAlarm();
+    if (onlyChatGpt) {
+      await vi.waitFor(() => expect(worker.tabsUpdate).toHaveBeenCalledWith(12, { active: true }));
+      expect((await session.get('chatBackgroundWindow')).chatBackgroundWindow).toBe(BACKGROUND);
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(worker.tabsUpdate.mock.calls.filter(([, change]) => (change as { active?: boolean }).active === true)).toEqual([]);
+      expect((await local.get('chatBackgroundWindowMirror')).chatBackgroundWindowMirror).toBeUndefined();
+    }
+  });
+
+  it('forgets the mirrored Background chats window when the browser starts', async () => {
+    const local = new FakeStorageArea({ ...paired, chatBackgroundWindowMirror: 9 });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch: vi.fn(async () => response(404, {})) });
+    await worker.startup();
+    expect((await local.get('chatBackgroundWindowMirror')).chatBackgroundWindowMirror).toBeUndefined();
   });
 
   it.each([
