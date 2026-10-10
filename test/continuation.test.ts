@@ -169,6 +169,10 @@ describe('reopening from a saved summary (#1215)', () => {
     const second = (await getSession(sessionId))!.lastHandoffId!;
     expect(second).not.toBe(handoffId);
     expect(await handoffCount(sessionId)).toBe(2);
+    // Each timeline handoff names its own run, so the reopened row can show its summary.
+    const handoffs = (await store.readEvents(sessionId, { kinds: ['handoff'] })).map((event) =>
+      event.kind === 'handoff' ? [event.handoffId, event.continuation] : []);
+    expect(handoffs).toEqual([[handoffId, token], [second, reopened!.token]]);
     const claim = await claimContinuationNow(reopened!.token, 'page-b');
     expect(claim?.summary.trim().startsWith(SAMPLE_BRIEF.trim().slice(0, 60))).toBe(true);
     expect(await commitContinuation(reopened!.token, CHAT_B)).toBe(true);

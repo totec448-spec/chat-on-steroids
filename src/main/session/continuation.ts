@@ -1149,7 +1149,8 @@ async function capture(
         entry.sessionId,
         entry.handoff.id,
         entry.handoff.text.length,
-        'compact and resume'
+        'compact and resume',
+        entry.token
       );
     } catch (err) {
       // The WAL already committed this handoff. A retry is another chance to repair the
@@ -1184,7 +1185,7 @@ async function capture(
     // This closes the old inverse ordering where a rejected WAL transition had already made
     // its handoff discoverable and the retry produced a second handoff.
     try {
-      await recordHandoff(entry.sessionId, handoff.id, handoff.text.length, 'compact and resume');
+      await recordHandoff(entry.sessionId, handoff.id, handoff.text.length, 'compact and resume', entry.token);
     } catch (err) {
       // The continuation is already durable and can safely proceed. Recovery has the handoff
       // id in that WAL and repairs this presentation/discovery event idempotently on restart.
@@ -1724,7 +1725,8 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
           entry.sessionId,
           entry.handoff.id,
           entry.handoff.text.length,
-          'compact and resume'
+          'compact and resume',
+          entry.token
         );
       } catch (err) {
         // A missing timeline event is recoverable presentation metadata. The continuation WAL

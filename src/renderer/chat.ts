@@ -3371,6 +3371,12 @@ function timelineItems(source: SessionEvent[]): TimelineItem[] {
       if (open === block) open = null;
       continue;
     }
+    // A run reopened from a saved summary has no brief request of its own; its handoff
+    // names the run, so it belongs to that row rather than standing alone (#1215).
+    if (event.kind === 'handoff' && event.continuation) {
+      blockFor(event.continuation, event).handoff = event;
+      continue;
+    }
     if (open) {
       if (event.kind === 'handoff') {
         open.handoff = event;
