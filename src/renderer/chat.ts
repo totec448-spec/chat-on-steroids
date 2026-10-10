@@ -146,7 +146,8 @@ let sessions: SessionSummary[] = [];
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
-let sessionPageLoading = false;
+let sessionPageLoading: Promise<boolean> | null = null;
+const loadingProjects = new Set<string>();
 /** True after the user has explicitly paged beyond the newest page. */
 let loadedOlderSessions = false;
 let activeId: string | null = null;
@@ -871,13 +872,13 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   void refreshInputQueue();
 }
 
-async function loadMoreSessions(): Promise<void> {
-  if (sessionPageLoading || !sessionPageCursor || sessions.length >= sessionTotal) return;
-  sessionPageLoading = true;
+async function loadMoreSessions(): Promise<boolean> {
+  if (sessionPageLoading) return sessionPageLoading;
+  if (!sessionPageCursor || sessions.length >= sessionTotal) return false;
   const cursor = sessionPageCursor;
-  try {
+  sessionPageLoading = (async () => {
     const page = await run(api.listSessions({ cursor, limit: SESSION_PAGE_SIZE }));
-    if (!page) return;
+    if (!page) return false;
     mergeSessionRows(page.sessions);
     loadedOlderSessions = true;
     sessionTotal = page.total;
@@ -886,9 +887,22 @@ async function loadMoreSessions(): Promise<void> {
     trustedChats = new Set(page.trusted ?? []);
     for (const entry of page.pressure) pressure.set(entry.id, entry);
     paintSessions();
-  } finally {
-    sessionPageLoading = false;
-  }
+    return !page.nextCursor || page.nextCursor.id !== cursor.id || page.nextCursor.updatedAt !== cursor.updatedAt;
+  })().finally(() => { sessionPageLoading = null; });
+  return sessionPageLoading;
+}
+
+async function loadEmptyProject(id: string): Promise<void> {
+  if (loadingProjects.has(id)) return;
+  loadingProjects.add(id);
+  try {
+    // Use the existing bounded global cursor; workers alone do not reveal a task.
+    while (expandedProjects.has(id) && projectGroup(id) === id && !sessions.some(entry =>
+      projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' &&
+      (entry.conversationId || entry.origin?.kind === 'desktop'))) {
+      if (!await loadMoreSessions()) break;
+    }
+  } finally { loadingProjects.delete(id); }
 }
 
 function maybePageSessions(): void {
@@ -1005,6 +1019,7 @@ function paintSessions(): void {
       const open = !expandedProjects.has(id);
       if (open) expandedProjects.add(id); else expandedProjects.delete(id);
       section.open = open;
+      if (open) void loadEmptyProject(id);
     });
     if (project) {
       // One button for the project's actions, as in ChatGPT; a right click on the row opens the same menu.

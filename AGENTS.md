@@ -841,6 +841,11 @@ escapes, live revocation during an await, and preserving an unrelated user's new
 **Intent:** a chat consistently works in its selected local folder, and workers/resumed chats
 retain that choice. Sidebar organization must not destroy work or grant access.
 
+Expanding a project with no loaded main chat requests older session pages through the existing
+bounded global cursor. Concurrent scroll/project requests share the same page read. Demand stops
+on the first displayable main chat, collapse, read failure, no cursor progress or history exhaustion;
+worker-only pages do not satisfy it. It never selects a chat or changes the composer.
+
 `projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
 Adding uses the native folder selection/approved-root flow, resolves the real directory and
 deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and

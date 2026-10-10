@@ -41,7 +41,11 @@ app.whenReady().then(async () => {
       estimatedTokens:0,contextTokens:0,lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:null,activeTurnId:null,agents:[],origin:null}));
     const ok=data=>Promise.resolve({ok:true,data});
     window.api = new Proxy({ getState:()=>ok(state),getLog:()=>ok([]),
-      listProjects:()=>ok(projects),listSessions:()=>ok({sessions:rows,total:22,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      listProjects:()=>ok(projects),listSessions:options=>{
+        const older = new URL(location.href).searchParams.has('older');
+        const page = older && options?.cursor ? [{...rows[0],id:'older-task',title:'Earlier project chat',projectId:'second-project',updatedAt:1}] : rows;
+        return ok({sessions:page,total:older?23:22,nextCursor:older&&!options?.cursor?{updatedAt:79,id:'task-21'}:null,activeId:null,pressure:[],blocked:[]});
+      },
       setProjectColor:(id,color)=>{const value=projects.find(row=>row.id===id);if(!value)return Promise.resolve({ok:false,error:'Project not found'});if(color)value.color=color;else delete value.color;return ok({...value})},
       getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]}),
@@ -296,6 +300,16 @@ app.whenReady().then(async () => {
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group").length === 2'));i++) await new Promise(r=>setTimeout(r,25));
     assert.deepEqual(await js(projectOrder),['second-project','demo-project']);
     await screenshot('project-order-restored.png');
+    await win.loadURL(server.resolvedUrls.local[0]+'fixture.html?reset=1&older=1');
+    for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group").length === 2'));i++) await new Promise(r=>setTimeout(r,25));
+    assert.equal(await js(`document.querySelector('[data-id="older-task"]')===null`),true);
+    await screenshot('older-project-before.png');
+    await js(`document.querySelector('[data-project-id="second-project"] summary').click()`);
+    for(let i=0;i<100 && await js(`document.querySelector('[data-id="older-task"]')===null`);i++) await new Promise(r=>setTimeout(r,25));
+    assert.equal(await js(`document.querySelector('[data-project-id="second-project"]').open`),true);
+    assert.equal(await js(`document.querySelector('[data-id="older-task"]').textContent.includes('Earlier project chat')`),true);
+    assert.equal(await js(`document.querySelector('.sess.is-sel')===null`),true);
+    await screenshot('older-project-after.png');
     console.log(JSON.stringify({projectDisclosure:{initiallyCollapsed:true,pointer:true,space:true,enter:true},geometry,drag:moved,projectOrder:{pointer:true,keyboard:true,restored:true},showMore:13,collapse:true,profileLayout:compactProfiles,longProfile,output}));
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error=>{console.error(error);app.exit(1)});
