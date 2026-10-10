@@ -2099,5 +2099,16 @@
   "Replaced by your new instruction before delivery.": "Remplacé par votre nouvelle instruction avant la remise.",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Attente de la confirmation de remise arrêtée. Le message a peut-être déjà été envoyé ; il ne sera pas renvoyé.",
   "Waiting for the browser extension to connect": "En attente de la connexion de l'extension du navigateur",
-  "Waiting for the running tool call to finish": "En attente de la fin de l'appel d'outil en cours"
+  "Waiting for the running tool call to finish": "En attente de la fin de l'appel d'outil en cours",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "Réutiliser un résumé enregistré, voir pourquoi un message attend, et une fenêtre d'arrière-plan qui vous suit.",
+  "Reuse a saved summary": "Réutiliser un résumé enregistré",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "Si Compacter et continuer s'arrête après que ChatGPT a écrit son résumé, ouvrez le nouveau chat avec ce résumé au lieu de tout recommencer.",
+  "See why a message waits": "Voir pourquoi un message attend",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "Un message en file d'attente indique quand il attend l'extension du navigateur ou la fin d'un appel d'outil en cours.",
+  "The background window follows you": "La fenêtre d'arrière-plan vous suit",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "Avec Chats en arrière-plan, la fenêtre d'arrière-plan affiche le chat que vous sélectionnez dans l'app.",
+  "Calmer when ChatGPT is busy": "Plus calme quand ChatGPT est occupé",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Quand ChatGPT limite le chargement de l'historique, la récupération attend le temps demandé au lieu de recharger encore.",
+  "Lighter on your computer": "Plus léger pour votre ordinateur",
+  "Open ChatGPT chats use much less CPU while they wait.": "Les chats ChatGPT ouverts utilisent beaucoup moins de CPU pendant qu'ils attendent."
 }

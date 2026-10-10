@@ -14,6 +14,16 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.33': {
+    lead: () => t('Reuse a saved summary, see why a message waits, and a background window that follows you.'),
+    highlights: [
+      { icon: 'i-steps', title: () => t('Reuse a saved summary'), text: () => t('If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.') },
+      { icon: 'i-clock', title: () => t('See why a message waits'), text: () => t('A queued message says when it is waiting for the browser extension or for a running tool call.') },
+      { icon: 'i-browser', title: () => t('The background window follows you'), text: () => t('With Background chats on, the chat you select in the app is the one its background window shows.') },
+      { icon: 'i-retry', title: () => t('Calmer when ChatGPT is busy'), text: () => t('When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.') },
+      { icon: 'i-bolt', title: () => t('Lighter on your computer'), text: () => t('Open ChatGPT chats use much less CPU while they wait.') }
+    ]
+  },
   '2.1.32': {
     lead: () => t('Messages that reach the running answer, the choices ChatGPT asks you about, and a Stop that sticks.'),
     highlights: [

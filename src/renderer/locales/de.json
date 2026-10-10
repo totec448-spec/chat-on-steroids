@@ -2099,5 +2099,16 @@
   "Replaced by your new instruction before delivery.": "Vor der Zustellung durch deine neue Anweisung ersetzt.",
   "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Das Warten auf die Zustellbestätigung wurde beendet. Die Nachricht wurde möglicherweise schon gesendet; sie wird nicht erneut gesendet.",
   "Waiting for the browser extension to connect": "Warte auf die Verbindung der Browser-Erweiterung",
-  "Waiting for the running tool call to finish": "Warte, bis der laufende Tool-Aufruf fertig ist"
+  "Waiting for the running tool call to finish": "Warte, bis der laufende Tool-Aufruf fertig ist",
+  "Reuse a saved summary, see why a message waits, and a background window that follows you.": "Eine gespeicherte Zusammenfassung wiederverwenden, sehen, warum eine Nachricht wartet, und ein Hintergrundfenster, das mitgeht.",
+  "Reuse a saved summary": "Gespeicherte Zusammenfassung wiederverwenden",
+  "If Compact & Resume stops after ChatGPT wrote its summary, open the new chat with that summary instead of starting over.": "Wenn Komprimieren & Fortsetzen stoppt, nachdem ChatGPT die Zusammenfassung geschrieben hat, öffne den neuen Chat mit dieser Zusammenfassung, statt neu anzufangen.",
+  "See why a message waits": "Sehen, warum eine Nachricht wartet",
+  "A queued message says when it is waiting for the browser extension or for a running tool call.": "Eine eingereihte Nachricht sagt, wenn sie auf die Browser-Erweiterung oder einen laufenden Tool-Aufruf wartet.",
+  "The background window follows you": "Das Hintergrundfenster geht mit",
+  "With Background chats on, the chat you select in the app is the one its background window shows.": "Mit Chats im Hintergrund zeigt das Hintergrundfenster den Chat, den du in der App auswählst.",
+  "Calmer when ChatGPT is busy": "Gelassener, wenn ChatGPT ausgelastet ist",
+  "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Wenn ChatGPT das Laden des Verlaufs bremst, wartet die Wiederherstellung so lange wie verlangt, statt erneut zu laden.",
+  "Lighter on your computer": "Schonender für deinen Computer",
+  "Open ChatGPT chats use much less CPU while they wait.": "Offene ChatGPT-Chats brauchen im Leerlauf viel weniger CPU."
 }
