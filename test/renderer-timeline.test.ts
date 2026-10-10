@@ -231,6 +231,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       setSessionAutomation: (id: string, action: string) => { live.controlCalls.push({ id, action }); live.automation = action; return ok({}); },
       compactSession: (id: string) => { live.controlCalls.push({ id, action: 'compact' }); live.compacting = true; return ok({}); },
       cancelSessionCompaction: (id: string) => { live.controlCalls.push({ id, action: 'cancel' }); live.compacting = false; return ok({}); },
+      resumeFromHandoff: (id: string, handoffId: string) => { live.controlCalls.push({ id, action: `resume:${handoffId}` }); return ok({}); },
       getLog: () => ok([]),
       getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
       onStateChanged: () => () => undefined,
@@ -2427,6 +2428,62 @@ it('says why a compaction died when the app abandoned it', async () => {
   expect(timeline.querySelectorAll('.ev-note')).toHaveLength(0);
   card.toggleAttribute('open', true);
   expect(card.textContent).toContain('abandoned');
+});
+
+it('offers to open a new chat with the summary an abandoned compaction already saved (#1215)', async () => {
+  const [request, start, brief, end, handoff] = compaction(2);
+  const abandoned = { seq: 9, time: T0 + 9000, source: 'app', kind: 'note', continuation: TOKEN,
+    message: text('Compact & Resume abandoned — the new chat could not be opened') } as SessionEvent;
+  const { w, live } = await boot([request!, start!, brief!, end!, handoff!, abandoned]);
+  const card = w.document.querySelector<HTMLDetailsElement>('details.compaction')!;
+  expect(card.className).toContain('tone-bad');
+  const reuse = card.querySelector<HTMLButtonElement>('.compaction-reuse')!;
+  expect(reuse.textContent).toBe('Open a new chat with this summary');
+  reuse.click();
+  await vi.waitFor(() => expect(live.controlCalls).toContainEqual(
+    expect.objectContaining({ action: `resume:${(handoff as Extract<SessionEvent, { kind: 'handoff' }>).handoffId}` })));
+});
+
+it('offers no summary reuse when the abandoned run never saved a summary', async () => {
+  const [request, start, brief, end] = compaction(2);
+  const abandoned = { seq: 9, time: T0 + 9000, source: 'app', kind: 'note', continuation: TOKEN,
+    message: text('Compact & Resume abandoned — the summary was not written') } as SessionEvent;
+  const { w } = await boot([request!, start!, brief!, end!, abandoned]);
+  expect(w.document.querySelector('details.compaction')).not.toBeNull();
+  expect(w.document.querySelector('.compaction-reuse')).toBeNull();
+});
+
+it('takes the summary reuse off an abandoned run once a later Compact & Resume started (#1215)', async () => {
+  const [request, start, brief, end, handoff] = compaction(2);
+  const abandoned = { seq: 9, time: T0 + 9000, source: 'app', kind: 'note', continuation: TOKEN,
+    message: text('Compact & Resume abandoned — cancelled') } as SessionEvent;
+  const later = { seq: 10, time: T0 + 10000, source: 'extension', kind: 'user_message', messageId: 'm-later-bootstrap',
+    message: text('[[CLF-RESUME:tok_fedcba9876543210]] Continue from this brief: keep the loop running.') } as SessionEvent;
+  const { w } = await boot([request!, start!, brief!, end!, handoff!, abandoned, later]);
+  expect(w.document.querySelectorAll('details.compaction')).toHaveLength(2);
+  expect(w.document.querySelector('.compaction-reuse')).toBeNull();
+});
+
+it('puts a reopened run\'s saved summary in its own row (#1215)', async () => {
+  const [request, start, brief, end, handoff] = compaction(2);
+  const abandoned = { seq: 9, time: T0 + 9000, source: 'app', kind: 'note', continuation: TOKEN,
+    message: text('Compact & Resume abandoned — cancelled') } as SessionEvent;
+  const again = { seq: 10, time: T0 + 10000, source: 'app', kind: 'handoff', handoffId: 'h-2', chars: 26_333,
+    reason: 'compact and resume', continuation: 'tok_fedcba9876543210' } as SessionEvent;
+  const bootstrap = { seq: 11, time: T0 + 11000, source: 'extension', kind: 'user_message', messageId: 'm-again',
+    message: text('[[CLF-RESUME:tok_fedcba9876543210]] Continue from this brief: keep the loop running.') } as SessionEvent;
+  const { w } = await boot([request!, start!, brief!, end!, handoff!, abandoned, again, bootstrap]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect([...timeline.children].map((row) => row.className)).toEqual(['ev ev-compaction', 'ev ev-compaction']);
+  const rows = [...timeline.querySelectorAll('details.compaction')];
+  expect(rows[1]!.querySelector('summary .state')!.textContent).toContain('26k characters');
+});
+
+it('offers no summary reuse once the new chat opened', async () => {
+  const [request, start, brief, end, handoff, resume] = compaction(2);
+  const { w } = await boot([request!, start!, brief!, end!, handoff!, resume!]);
+  expect(w.document.querySelector('details.compaction')).not.toBeNull();
+  expect(w.document.querySelector('.compaction-reuse')).toBeNull();
 });
 
 it('retains the open compaction disclosure and brief request while the summary streams and completes', async () => {

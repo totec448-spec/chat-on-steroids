@@ -211,6 +211,7 @@ import {
   dispatchContinuationSourceSendNow,
   normalizeProjectId,
   openContinuationNow,
+  reopenWithHandoffNow,
   releaseContinuationDestinationSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
@@ -2035,6 +2036,16 @@ export async function compactSession(sessionId: string): Promise<SessionControls
     queueBrowserRecovery(opened.from, sessionId,
       `compaction:${opened.token}:${compactionPhaseOf(opened)}:manual`, 'compaction');
   }
+  return sessionControlsFor(sessionId);
+}
+/** Compact & Resume again from the summary an abandoned run already captured (#1215). */
+export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
+  await controlledConversation(sessionId);
+  const opened = await reopenWithHandoffNow(sessionId, handoffId);
+  if (!opened) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
+  queueResumeCommand(sessionId, opened.token);
+  await deliver();
+  changed();
   return sessionControlsFor(sessionId);
 }
 export async function cancelSessionCompaction(sessionId: string): Promise<SessionControlsView> {

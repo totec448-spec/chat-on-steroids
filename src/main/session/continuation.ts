@@ -66,7 +66,7 @@ import {
 import { clearChatWorkspace, moveChatWorkspace, workspaceForChat } from '../workspace.js';
 import { clearGoalObjective, clearGoalSwitch, goalObjectiveFor, goalSwitchFor, moveGoalObjective, moveGoalSwitch, retireGoalDraftsFor } from '../goal.js';
 import { writeDurableNow, writeDurableSoon } from '../durable.js';
-import { handoffMatchesContinuation, prepareHandoff, resumeBootstrapMatches } from './handoff.js';
+import { handoffContinuationId, handoffMatchesContinuation, prepareHandoff, resumeBootstrapMatches } from './handoff.js';
 import { ensureHandoffRecorded, recordHandoff, recordNote, rebindConversation } from './recorder.js';
 import { endResumeClaim, noteResumeClaim, noteResumeDispatch, resetResumeGate } from './resume-gate.js';
 import {
@@ -1075,6 +1075,51 @@ export async function attachSummary(token: string, text: string): Promise<Handof
   );
 }
 
+/** The plan notice prepareHandoff appends; a reused brief gets the current one instead. */
+const PLAN_NOTICE_HEAD = '\n\nSaved task plan at handoff (reported progress, not verification evidence):\n';
+
+/**
+ * Opens a new Compact & Resume from the summary an abandoned one already captured (#1215).
+ *
+ * The summary was written by ChatGPT for this session's current chat, so no new compaction
+ * prompt goes there: the source send is recorded as sent, which is what produced that summary.
+ * The brief then goes through {@link attachSummary} as a fresh handoff bound to this
+ * continuation, so its provenance, recording and restart recovery are the ordinary ones, and
+ * the replacement chat is claimed and committed exactly as after any capture. Refused (null)
+ * unless it is the session's latest handoff, written in its current chat, with nothing open.
+ */
+export async function reopenWithHandoffNow(sessionId: string, handoffId: string): Promise<ContinuationView | null> {
+  sweep();
+  const session = await getSession(sessionId);
+  if (!session?.conversationId || session.lastHandoffId !== handoffId) return null;
+  if ([...byToken.values()].some((entry) => entry.sessionId === sessionId && isOpen(entry))) return null;
+  const saved = await readHandoff(sessionId, handoffId);
+  if (!saved || (saved.provenance && saved.provenance.sourceConversationId !== session.conversationId)) return null;
+  const cut = saved.text.lastIndexOf(PLAN_NOTICE_HEAD);
+  const brief = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
+  if (!brief) return null;
+  // Chat B belongs beside chat A: reuse the Project the abandoned run carried, when it is still known.
+  const prior = saved.provenance?.continuationId
+    ? [...byToken.values()].find((entry) => handoffContinuationId(entry.token) === saved.provenance?.continuationId)
+    : undefined;
+  const opened = await openContinuationNow(sessionId, session.conversationId, false, prior?.project ?? null);
+  const entry = byToken.get(opened.token);
+  if (!entry || opened.state !== 'awaiting-summary') return null;
+  const marked = await withCheckpointLock(entry.token, async () => {
+    if (!isOpen(entry) || entry.state !== 'awaiting-summary' || entry.sourceSend.state !== 'not-attempted') return false;
+    await transitionNow(entry, (current) => ({ ...current, sourceSend: { state: 'sent', messageId: null } }));
+    return true;
+  });
+  if (!marked) return null;
+  const handoff = await attachSummary(entry.token, brief);
+  if (!handoff) {
+    await abortContinuationNow(entry.token, 'the saved summary could not be stored again');
+    return null;
+  }
+  logInfo(`continuation ${entry.token.slice(0, 8)} reopened from handoff ${handoffId} as ${handoff.id}`);
+  return view(entry);
+}
+
 /**
  * The one path a brief becomes this continuation's.
  *
@@ -1104,7 +1149,8 @@ async function capture(
         entry.sessionId,
         entry.handoff.id,
         entry.handoff.text.length,
-        'compact and resume'
+        'compact and resume',
+        entry.token
       );
     } catch (err) {
       // The WAL already committed this handoff. A retry is another chance to repair the
@@ -1139,7 +1185,7 @@ async function capture(
     // This closes the old inverse ordering where a rejected WAL transition had already made
     // its handoff discoverable and the retry produced a second handoff.
     try {
-      await recordHandoff(entry.sessionId, handoff.id, handoff.text.length, 'compact and resume');
+      await recordHandoff(entry.sessionId, handoff.id, handoff.text.length, 'compact and resume', entry.token);
     } catch (err) {
       // The continuation is already durable and can safely proceed. Recovery has the handoff
       // id in that WAL and repairs this presentation/discovery event idempotently on restart.
@@ -1679,7 +1725,8 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
           entry.sessionId,
           entry.handoff.id,
           entry.handoff.text.length,
-          'compact and resume'
+          'compact and resume',
+          entry.token
         );
       } catch (err) {
         // A missing timeline event is recoverable presentation metadata. The continuation WAL

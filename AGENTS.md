@@ -2887,6 +2887,18 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    its browser document only with fresh safe-close proof. B's first answer belongs to the
    exact resumed input, not to an old final from A.
 
+**Reopening from a saved summary (#1215).** A run abandoned after step 3 keeps its handoff on
+disk. `sessions:resumeFromHandoff` (preload `resumeFromHandoff(id, handoffId)`, bridge
+`resumeFromSavedSummary`) starts a new run from it through `reopenWithHandoffNow`: only when that
+handoff is still the session's `lastHandoffId`, no continuation is open, and its provenance
+source is the session's current chat. The new run is an ordinary transaction: it reserves A
+again with the abandoned run's project, records the source request as already sent (nothing is
+asked of ChatGPT), and `attachSummary` writes a fresh handoff with the same text bound to the
+new token. Claim, commit, restart recovery and provenance then work unchanged; a failed attach
+aborts the new run. Timeline `handoff` events carry an optional `continuation` token so the
+reopened run's row owns its handoff; the reuse button is shown only on the newest Compact &
+Resume row.
+
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
 blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
