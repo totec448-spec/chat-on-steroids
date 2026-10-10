@@ -3435,7 +3435,7 @@ function compactionState(block: CompactionBlock): { text: string; tone: Compacti
   return { text: t("Summary requested — waiting for ChatGPT…"), tone: 'wait' };
 }
 
-function compactionRow(block: CompactionBlock, previous?: HTMLElement): HTMLElement {
+function compactionRow(block: CompactionBlock, previous?: HTMLElement, latest = true): HTMLElement {
   const key = `compaction:${block.token}`;
   const state = compactionState(block);
 
@@ -3493,9 +3493,9 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement): HTMLElem
   for (const note of block.notes) raw.append(el('p', 'raw-facts', `${clockTime(note.time)} — ${note.message.text}`));
   // An abandoned run that already saved ChatGPT's summary can open the new chat with it,
   // without asking ChatGPT to write it again (#1215). The app refuses a summary that is no
-  // longer the chat's latest, so an old row's button cannot resurrect a stale handoff.
+  // longer the chat's latest, so only the newest Compact & Resume row offers it.
   const abandoned = block.notes.some((note) => ABANDONED_NOTE.test(note.message.text));
-  if (abandoned && block.handoff && !block.resume && selectedId) {
+  if (latest && abandoned && block.handoff && !block.resume && selectedId) {
     const sessionId = selectedId, handoffId = block.handoff.handoffId;
     const reuse = el('button', 'btn compaction-reuse', () => t("Open a new chat with this summary")) as HTMLButtonElement;
     reuse.type = 'button';
@@ -3914,7 +3914,9 @@ function paintDetail(followBottom = historyBefore === null): void {
   const anchors = answerAnchors(events);
   const workedSeconds = exchangeDurations(events);
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
-  for (const item of timelineItems(shown)) {
+  const items = timelineItems(shown);
+  const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
+  for (const item of items) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
@@ -3925,7 +3927,8 @@ function paintDetail(followBottom = historyBefore === null): void {
       anchors.get(item.event.turnId) === item.event.seq ? item.event.turnId : null;
     const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '') +
-      (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '');
+      (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
+      (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '');
     keep.add(key);
     const cached = rowCache.get(key);
     const workerIds = JSON.stringify(item.kind === 'event' ? participatingWorkers(item.event, workers).map(worker => worker.id) : []);
@@ -3940,7 +3943,7 @@ function paintDetail(followBottom = historyBefore === null): void {
       timelineRows.push(cached.row);
       continue;
     }
-    const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row) : eventRow(item.event);
+    const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction) : eventRow(item.event);
     if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn));
     row.dataset.timelineKey = key;
     row.dataset.workerSessions = workerIds;
