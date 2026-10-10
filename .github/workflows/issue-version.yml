@@ -1,0 +1,34 @@
+name: Issue version
+
+# Bug reports need the exact app version ("latest" changes with every release). A report without a
+# version number is closed once with a note on where to find it, and reopens by itself when the
+# reporter edits the number in. Maintainers' issues, feature requests and reports a maintainer
+# reopened are left alone.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-version-${{ github.event.issue.number }}
+
+jobs:
+  check:
+    if: github.repository == 'totec448-spec/chat-on-steroids'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Check the app version
+        run: node scripts/issue-version.mjs
