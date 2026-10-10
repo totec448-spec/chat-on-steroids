@@ -1048,6 +1048,9 @@ describe('2025-era clients', () => {
       'read-only=off; plans=off; workers=off.'
     );
     expect(instructions).not.toContain(approved);
+    // Compactness must not come at the cost of changing safe tool-call handling.
+    expect(instructions).toContain('Never replay successful patches or commands.');
+    expect(instructions).toContain('identity, session_id and output-limit errors are not Read-only.');
     expect(instructions.length).toBeLessThan(18_000);
   });
 
