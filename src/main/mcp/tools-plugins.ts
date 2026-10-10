@@ -25,7 +25,8 @@ export function registerPluginTools(server: McpServer, setupProfileId: string | 
   const codeMode = canAddCodeMode(tools);
   const declaration = codeModeDeclaration();
   const runCode = codeModeHandler(() => tools.map(tool => ({ name: tool.name, description: tool.description ?? '' })),
-    (name, args, parent) => dispatch(name, args, parent.caller.transportKey, parent.caller.requestId, 'plugins', () => runPluginTool(name, args), parent));
+    (name, args, parent) => dispatch(name, args, parent.caller.transportKey, parent.caller.requestId, 'plugins', () => runPluginTool(name, args), parent),
+    { surface: 'plugins' });
   if (codeMode) tools.push({ name: 'exec', title: declaration.title, description: declaration.description,
     inputSchema: toolSchemaJson(codeModeSchema) as (typeof tools)[number]['inputSchema'], annotations: declaration.annotations });
   server.server.setRequestHandler('tools/list', async () => ({ tools }));

@@ -579,6 +579,11 @@ QuickJS runs in a disposable Node Worker with no ambient Node, filesystem or net
 Children reuse the same registrar, validation, handler and dispatcher, inherit exact caller proof
 and recheck live permissions/roots. Each child records fresh evidence; only the outer response
 owns input, agent inbox and automatic terminal-result delivery. Finish signals remain direct.
+A script that calls `tools.<name>` for a name this surface does not offer (a feature check such
+as `typeof tools.x` does not count) gets one extra `UNKNOWN_TOOL_NAMES` text item at the end of
+its result. It names the connector that owns the tool and, when two connectors share a Secure
+Tunnel ID, says that ChatGPT can then send a script to the wrong connector (#1287). It changes
+neither `isError` nor what the script ran.
 
 Only explicitly emitted text/images enter the result, except Windows Desktop's `sky.get_window_state`
 adapter automatically forwards its native MCP image blocks. Its returned value contains only

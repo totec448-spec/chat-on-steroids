@@ -14,7 +14,7 @@ export const CODE_MODE_LIMITS = Object.freeze({
 export const codeModeSchema = z.object({ code: z.string().min(1).max(CODE_MODE_LIMITS.codeChars)
   .describe('Raw JavaScript source with top-level await. Emit results with text(...) or image(...).') }).strict();
 export type CodeModeTool = { name: string; description: string };
-export type CodeModeOptions = { windowsDesktop?: boolean };
+export type CodeModeOptions = { windowsDesktop?: boolean; surface?: import('./surfaces.js').SurfaceId };
 const requireRuntime = createRequire(typeof __filename === 'string' ? __filename : import.meta.url);
 let activeRuns = 0;
 
