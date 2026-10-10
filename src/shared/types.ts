@@ -446,6 +446,11 @@ export interface ConnectionStatus {
   /** The tunnel's own view of itself, or null when no tunnel is running. */
   health: TunnelHealth | null;
   /**
+   * Epoch ms until which a message for an existing chat is held while a new tunnel-client takes
+   * over that chat's route (#1220), or null when nothing is held.
+   */
+  routeSettlingUntil?: number | null;
+  /**
    * One entry per model-facing connector, in setup order.
    *
    * This app publishes more than one MCP server — a required coding connector and an
@@ -731,6 +736,8 @@ export interface AppState {
    * local contract only; they are not evidence that ChatGPT has refreshed its cached tools.
    */
   connectorSchemas: Partial<Record<SurfaceId, string>>;
+  /** Per surface, the declaration ChatGPT confirmed after a plugin refresh (or found already current). */
+  confirmedConnectorSchemas?: Partial<Record<SurfaceId, string>>;
   platform: PlatformInfo;
   /** Only packaged Windows builds may change the login item. */
   loginStartupAvailable?: boolean;

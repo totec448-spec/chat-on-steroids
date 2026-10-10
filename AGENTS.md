@@ -3767,12 +3767,16 @@ production renderer in isolated Electron with color, queue/push, theme, reset, r
 layout checks. It does not operate the installed app or a provider conversation.
 
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
-in ChatGPT. Its X stores only the acknowledged running `state.update.current` version in
-`cos.plugins.refreshReminder.dismissedVersion`; downloading a newer version does not rearm
-it. No acknowledgement shows the reminder, including the first version with this feature.
-It survives restart until dismissed, returns for a different running version and is hidden
-in Settings. It stacks with update/extension notices and never marks an actual connector
-refresh complete or starts a browser action.
+in ChatGPT. It compares `AppState.connectorSchemas` (the declaration fingerprints the local
+MCP server publishes per surface) with the ones acknowledged in
+`cos.plugins.refreshReminder.acknowledgedSchemas`. The first schema seen per surface is a
+silent baseline; a different one shows the reminder until its X is clicked.
+`AppState.confirmedConnectorSchemas` carries, per surface, the schema ChatGPT confirmed after a
+refresh click or found already current (`confirmedPluginSchemas()`, an in-memory copy of
+`completedSchemaId` from `state/plugin-refresh.json`, kept current on every read and write); a current schema confirmed there counts as acknowledged, so
+the reminder disappears once automatic plugin refresh lands. The reminder is hidden in
+Settings, stacks with update/extension notices and never marks a refresh complete or starts a
+browser action.
 
 ### Project Files workspace
 
@@ -3986,6 +3990,18 @@ opens the app on click. A skipped or failed notice is not retried; notification 
 tunnel state or recovery. No raw tunnel detail or secret identifier enters the notice.
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
+
+For a few seconds after a new OpenAI tunnel-client process connects (app start, update, or a
+client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
+process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
+and a reconnect of the same process after an outage changes nothing). `tunnel/route-settle.ts`
+holds such messages for `ROUTE_SETTLE_MS` (12 s) after each new process's first connected report:
+`/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
+conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
+lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
+waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
+the app, back to back, so the takeover can occasionally outlast the hold). `test/tunnel-route-settle.test.ts`, the
+`tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
 `/v1/health` (which also lists the routes this build serves), `/v1/status` and the read routes
