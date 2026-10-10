@@ -73,6 +73,10 @@ function github(options: {
   body?: string;
   checksums?: string;
   fail?: 'release' | 'sums' | 'asset';
+  /** The API's status, for a check refused by GitHub's per-address quota (#1253). */
+  apiStatus?: number;
+  /** Where the public `/releases/latest` page lands, or a failing status. */
+  page?: string | number;
 } = {}) {
   const version = options.version ?? NEXT;
   const body = options.body ?? 'installer bytes';
@@ -83,8 +87,15 @@ function github(options: {
     const name = url.split('/').pop()!;
     asked.push(name);
     if (url.includes('api.github.com')) {
+      if (options.apiStatus) return new Response('{"message":"API rate limit exceeded"}', { status: options.apiStatus });
       if (options.fail === 'release') return new Response('nope', { status: 503 });
       return new Response(JSON.stringify({ tag_name: `v${version}` }), { status: 200 });
+    }
+    if (url === 'https://github.com/totec448-spec/chat-on-steroids/releases/latest') {
+      if (typeof options.page === 'number') return new Response(null, { status: options.page });
+      const landed = new Response(null, { status: 200 });
+      Object.defineProperty(landed, 'url', { value: options.page ?? `https://github.com/totec448-spec/chat-on-steroids/releases/tag/v${version}` });
+      return landed;
     }
     if (name === 'SHA256SUMS.txt') {
       if (options.fail === 'sums') return new Response('nope', { status: 404 });
@@ -334,6 +345,31 @@ describe('one pass at a time, and one more next time the app opens', () => {
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());
     expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+  });
+
+  it('finds the release from the public page when GitHub\'s API refuses the check (#1253)', async () => {
+    for (const status of [403, 429]) {
+      resetUpdateForTests();
+      github({ apiStatus: status });
+      await asPlatform('win32', undefined, () => checkForUpdates());
+      expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    }
+  });
+
+  it('trusts the release page only when it lands on a version tag on github.com', async () => {
+    for (const page of ['https://evil.example/totec448-spec/chat-on-steroids/releases/tag/v9.9.9',
+      'https://github.com/totec448-spec/chat-on-steroids/releases', 404]) {
+      resetUpdateForTests();
+      github({ apiStatus: 403, page });
+      await asPlatform('win32', undefined, () => checkForUpdates());
+      expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
+    }
+    // Other API failures are not quota refusals and keep their own error.
+    resetUpdateForTests();
+    const { fetch } = github({ fail: 'release' });
+    await checkForUpdates();
+    expect(updateStatus().error).toContain('503');
+    expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
   });
 
   it('retries the next time the app opens after a download that stopped', async () => {
