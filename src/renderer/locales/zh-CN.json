@@ -2097,5 +2097,7 @@
   "Not sent: ChatGPT did not accept the message.": "未发送：ChatGPT 没有接受这条消息。",
   "Not sent: the browser did not pick up this message within 60 seconds.": "未发送：浏览器在 60 秒内没有接收这条消息。",
   "Replaced by your new instruction before delivery.": "送达前已被你的新指令替换。",
-  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "已停止等待送达确认。这条消息可能已经发送；不会重新发送。"
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "已停止等待送达确认。这条消息可能已经发送；不会重新发送。",
+  "Waiting for the browser extension to connect": "正在等待浏览器扩展连接",
+  "Waiting for the running tool call to finish": "正在等待运行中的工具调用完成"
 }

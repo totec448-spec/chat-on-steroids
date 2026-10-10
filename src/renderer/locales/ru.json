@@ -2097,5 +2097,7 @@
   "Not sent: ChatGPT did not accept the message.": "Не отправлено: ChatGPT не принял сообщение.",
   "Not sent: the browser did not pick up this message within 60 seconds.": "Не отправлено: браузер не забрал это сообщение в течение 60 секунд.",
   "Replaced by your new instruction before delivery.": "Заменено вашей новой инструкцией до доставки.",
-  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Ожидание подтверждения доставки прекращено. Сообщение, возможно, уже отправлено; повторно оно отправлено не будет."
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Ожидание подтверждения доставки прекращено. Сообщение, возможно, уже отправлено; повторно оно отправлено не будет.",
+  "Waiting for the browser extension to connect": "Ожидание подключения расширения браузера",
+  "Waiting for the running tool call to finish": "Ожидание завершения текущего вызова инструмента"
 }

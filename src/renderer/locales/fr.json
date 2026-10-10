@@ -2097,5 +2097,7 @@
   "Not sent: ChatGPT did not accept the message.": "Non envoyé : ChatGPT n'a pas accepté le message.",
   "Not sent: the browser did not pick up this message within 60 seconds.": "Non envoyé : le navigateur n'a pas pris ce message en charge dans les 60 secondes.",
   "Replaced by your new instruction before delivery.": "Remplacé par votre nouvelle instruction avant la remise.",
-  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Attente de la confirmation de remise arrêtée. Le message a peut-être déjà été envoyé ; il ne sera pas renvoyé."
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Attente de la confirmation de remise arrêtée. Le message a peut-être déjà été envoyé ; il ne sera pas renvoyé.",
+  "Waiting for the browser extension to connect": "En attente de la connexion de l'extension du navigateur",
+  "Waiting for the running tool call to finish": "En attente de la fin de l'appel d'outil en cours"
 }

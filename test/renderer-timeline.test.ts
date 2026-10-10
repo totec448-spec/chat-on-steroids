@@ -1049,6 +1049,41 @@ it.each([false, true])('keeps retained image previews at the canonical row acros
   expect(w.document.querySelector('#inputQueue')!.textContent).not.toContain(row.text);
 });
 
+it('says why a queued message waits: no extension, or a running tool call', async () => {
+  const asked = Date.now() - 12_000;
+  const { w, live, append } = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-now', message: text('Run the tests') }
+  ]);
+  const api = (w as any).api;
+  const chat = await import('../src/renderer/chat.js');
+  const state = (await api.getState()).data;
+  const present = (on: boolean) => chat.chatApply({ ...state, bridge: { ...state.bridge, present: on } });
+  const queued: InputEntry = { id: 'queued-one', sessionId: summary(live.events).id, state: 'queued', owner: 'page', text: 'After the tests',
+    mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a' };
+  const status = () => w.document.querySelector('#inputQueue .pending-message')!.textContent ?? '';
+  live.inputs.push(queued);
+  // No extension connected: nothing can leave yet.
+  present(false); await append([]);
+  expect(status()).toContain('Waiting for the browser extension to connect');
+  expect(w.document.querySelector('#inputQueue .pending-message')!.classList.contains('is-waiting')).toBe(true);
+  // Connected, with one of this chat's tool calls running: the message waits for it (#1231).
+  api.runningTools = () => Promise.resolve({ ok: true, data: [{ title: 'Running npm test', kind: 'run', since: Date.now() - 5_000 }] });
+  present(true); await append([]); await append([]);
+  expect(status()).toContain('Waiting for the running tool call to finish');
+  // A mid-turn send does not wait for calls, so it claims no such reason.
+  live.inputs[0] = { ...queued, directTurn: { id: 'held-turn', startedAt: asked } };
+  await append([]); await append([]);
+  expect(status()).not.toContain('Waiting for the running tool call');
+  // The call ended: back to the plain clock, with Queued as its label.
+  live.inputs[0] = queued;
+  api.runningTools = () => Promise.resolve({ ok: true, data: [] });
+  await append([]); await append([]);
+  expect(status()).not.toContain('Waiting for');
+  expect(w.document.querySelector('#inputQueue .pending-message-status')!.getAttribute('aria-label')).toBe('Queued');
+  expect(w.document.querySelector('#inputQueue .pending-message')!.classList.contains('is-waiting')).toBe(false);
+});
+
 it.each([false, true])('hands a delivered bubble to exact native history without a blank or duplicate (historyFirst=%s)', async historyFirst => {
   const { w, live, append } = await boot([]);
   const row: InputEntry = { id: 'delivery-one', sessionId: summary([]).id, state: 'browser', owner: 'page', text: 'Follow-up once',

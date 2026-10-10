@@ -2097,5 +2097,7 @@
   "Not sent: ChatGPT did not accept the message.": "Chưa gửi: ChatGPT không nhận tin nhắn.",
   "Not sent: the browser did not pick up this message within 60 seconds.": "Chưa gửi: trình duyệt không nhận tin nhắn này trong vòng 60 giây.",
   "Replaced by your new instruction before delivery.": "Đã được thay bằng chỉ dẫn mới của bạn trước khi gửi.",
-  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Đã ngừng chờ xác nhận gửi. Tin nhắn có thể đã được gửi; sẽ không gửi lại."
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Đã ngừng chờ xác nhận gửi. Tin nhắn có thể đã được gửi; sẽ không gửi lại.",
+  "Waiting for the browser extension to connect": "Đang chờ tiện ích trình duyệt kết nối",
+  "Waiting for the running tool call to finish": "Đang chờ lệnh gọi công cụ đang chạy hoàn tất"
 }
