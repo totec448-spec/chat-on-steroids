@@ -2464,6 +2464,21 @@ it('takes the summary reuse off an abandoned run once a later Compact & Resume s
   expect(w.document.querySelector('.compaction-reuse')).toBeNull();
 });
 
+it('puts a reopened run\'s saved summary in its own row (#1215)', async () => {
+  const [request, start, brief, end, handoff] = compaction(2);
+  const abandoned = { seq: 9, time: T0 + 9000, source: 'app', kind: 'note', continuation: TOKEN,
+    message: text('Compact & Resume abandoned — cancelled') } as SessionEvent;
+  const again = { seq: 10, time: T0 + 10000, source: 'app', kind: 'handoff', handoffId: 'h-2', chars: 26_333,
+    reason: 'compact and resume', continuation: 'tok_fedcba9876543210' } as SessionEvent;
+  const bootstrap = { seq: 11, time: T0 + 11000, source: 'extension', kind: 'user_message', messageId: 'm-again',
+    message: text('[[CLF-RESUME:tok_fedcba9876543210]] Continue from this brief: keep the loop running.') } as SessionEvent;
+  const { w } = await boot([request!, start!, brief!, end!, handoff!, abandoned, again, bootstrap]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect([...timeline.children].map((row) => row.className)).toEqual(['ev ev-compaction', 'ev ev-compaction']);
+  const rows = [...timeline.querySelectorAll('details.compaction')];
+  expect(rows[1]!.querySelector('summary .state')!.textContent).toContain('26k characters');
+});
+
 it('offers no summary reuse once the new chat opened', async () => {
   const [request, start, brief, end, handoff, resume] = compaction(2);
   const { w } = await boot([request!, start!, brief!, end!, handoff!, resume!]);

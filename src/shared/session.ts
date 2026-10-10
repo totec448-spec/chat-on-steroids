@@ -515,6 +515,8 @@ export type SessionEvent =
       chars: number;
       /** What triggered it: manual compaction, resume, or an automatic suggestion. */
       reason: string;
+      /** The Compact & Resume run that saved it, so its timeline row can claim it (#1215). */
+      continuation?: string;
     });
 
 export type SessionEventKind = SessionEvent['kind'];
