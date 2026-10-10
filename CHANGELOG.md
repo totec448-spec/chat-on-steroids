@@ -9,6 +9,41 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.33] — Reuse a saved summary, and see why a message waits
+
+When Compact & Resume stops after ChatGPT already wrote its summary, you can now open the new chat with that summary instead of starting over. A message that waits to be sent now says why, and with Background chats on, the background window shows the chat you selected in the app. Open ChatGPT chats use much less CPU while idle, and several long-run and Windows problems are fixed.
+
+### ✨ Highlights
+
+- **Reuse a saved summary.** If Compact & Resume stops after ChatGPT wrote its summary (you cancelled it, or the new chat couldn't open), its row in the timeline offers **Open a new chat with this summary**. The new chat gets the same summary; ChatGPT doesn't have to write it again.
+- **See why a message waits.** A queued message now says when it is waiting for the browser extension to connect, or for a tool call in that chat to finish, instead of showing only a clock.
+- **The background window follows you.** With **Background chats** on, selecting a chat in the app makes its tab the one shown in the background window. Chrome doesn't come to the front.
+- **Calmer when ChatGPT is busy.** When ChatGPT limits how fast chat history can be loaded, automatic recovery waits as long as ChatGPT asks instead of reloading again and again.
+- **Lighter on your computer.** Open ChatGPT chats use much less CPU while they wait.
+
+### 🛠 Fixed
+
+- **A message ChatGPT didn't take** when you sent it just as an answer was ending is now sent once more, instead of being left in ChatGPT's message box.
+- **Windows: quitting the app** with a terminal panel open, or right after closing one, could crash it. It now quits cleanly.
+- **Windows: the installer** now says when it can't update an existing installation because of folder permissions, and what to do, instead of closing without a word.
+- **macOS: quitting** while the login-password prompt for the app's saved keys is still open works again.
+- **Local plugins** get more time for their first start, so a slow first start on Windows no longer leaves them in an error state.
+- **The update check** also works on networks where GitHub's API refuses it.
+- **"Skipped 1 unreadable recent event line(s)"** is reported once instead of several times a second. It means one line of a chat's history was cut off (for example when the app was stopped while writing); only that line is skipped.
+- **A Core tool called through the Plugins connector** now gets a refusal that names your Core connector, so ChatGPT can pick the right one.
+- **Saving a chat as Markdown** no longer cuts an emoji in half in the file name.
+- **Delivery errors** under a message are shown in the language of the app.
+
+### ⚠️ Known issue
+
+- **A tool call that ChatGPT had already sent when the app restarts** can take about two minutes to arrive, until ChatGPT retries it. New calls after a restart arrive normally (in about 15–20 seconds, measured 8 of 8 on Windows) ([#1220](https://github.com/totec448-spec/chat-on-steroids/issues/1220)).
+
+### 💛 Thank you
+
+To **@lavalava45** for honoring ChatGPT's rate limits during recovery, to **@Inmerson** for the quieter unreadable-line warning, the emoji-safe file names and tighter Windows connector instructions, and to **@mvanhorn** for naming the right connector in Plugins refusals.
+
+**Updating?** The extension updates itself once no chat is busy. If it stays on the old version, reload it once in `chrome://extensions`. On macOS, the app asks once for your login password so the new version can open its saved keys: choose **Always Allow**.
+
 ## [2.1.32] — Messages that reach the running answer, and a Stop that sticks
 
 A message you send while ChatGPT is working now reaches the model: it goes into the running answer as a real ChatGPT message, even while a command runs. When ChatGPT asks you to pick an option, the timeline shows the question and its choices. Stop ends a turn for good, and a few long-run problems from 2.1.31 are fixed.
