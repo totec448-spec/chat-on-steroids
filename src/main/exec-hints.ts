@@ -1601,8 +1601,13 @@ export function execRecoveryHints(
   return hints;
 }
 
+/** The advisory notes of an exec result, one `Note:` line each; empty when there are none. */
+export function execNotesText(notes: readonly string[]): string {
+  return notes.map((note) => `Note: ${note}`).join('\n');
+}
+
 /** Appends advisory notes to an exec result without disturbing the parity-formatted body. */
 export function withExecNotes(responseText: string, notes: readonly string[]): string {
   if (notes.length === 0) return responseText;
-  return `${responseText}\n\n${notes.map((note) => `Note: ${note}`).join('\n')}`;
+  return `${responseText}\n\n${execNotesText(notes)}`;
 }
