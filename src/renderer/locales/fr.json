@@ -2088,5 +2088,14 @@
   "Retry window ended": "Fenêtre de nouvelle tentative terminée",
   "Open a new chat with this summary": "Ouvrir un nouveau chat avec ce résumé",
   "Opening a new chat with the saved summary": "Ouverture d'un nouveau chat avec le résumé enregistré",
-  "This summary can no longer be used. Start Compact & Resume again.": "Ce résumé n'est plus utilisable. Relancez Compacter et continuer."
+  "This summary can no longer be used. Start Compact & Resume again.": "Ce résumé n'est plus utilisable. Relancez Compacter et continuer.",
+  "Automatic Continue cancelled by new activity.": "Reprise automatique annulée par une nouvelle activité.",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "Message de suivi automatique annulé, car son tour actif ou un réglage a changé.",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "Message de suivi automatique annulé par les réglages. Une entrée déjà proposée a pu atteindre ChatGPT.",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "Annulé localement ; la remise a été confirmée plus tard dans ChatGPT.",
+  "Not injected: the selected turn ended before an eligible tool call.": "Non injecté : le tour sélectionné s'est terminé avant un appel d'outil adapté.",
+  "Not sent: ChatGPT did not accept the message.": "Non envoyé : ChatGPT n'a pas accepté le message.",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "Non envoyé : le navigateur n'a pas pris ce message en charge dans les 60 secondes.",
+  "Replaced by your new instruction before delivery.": "Remplacé par votre nouvelle instruction avant la remise.",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Attente de la confirmation de remise arrêtée. Le message a peut-être déjà été envoyé ; il ne sera pas renvoyé."
 }

@@ -2088,5 +2088,14 @@
   "Retry window ended": "重试等待时间已结束",
   "Open a new chat with this summary": "用这份摘要打开新对话",
   "Opening a new chat with the saved summary": "正在用已保存的摘要打开新对话",
-  "This summary can no longer be used. Start Compact & Resume again.": "这份摘要已无法使用。请重新开始压缩并继续。"
+  "This summary can no longer be used. Start Compact & Resume again.": "这份摘要已无法使用。请重新开始压缩并继续。",
+  "Automatic Continue cancelled by new activity.": "因有新活动，已取消自动继续。",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "由于正在进行的轮次或设置已更改，已取消自动后续消息。",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "已根据设置取消自动后续消息。已经提交的输入可能已到达 ChatGPT。",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "已在本地取消；之后在 ChatGPT 中确认已送达。",
+  "Not injected: the selected turn ended before an eligible tool call.": "未插入：所选轮次在合适的工具调用之前就结束了。",
+  "Not sent: ChatGPT did not accept the message.": "未发送：ChatGPT 没有接受这条消息。",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "未发送：浏览器在 60 秒内没有接收这条消息。",
+  "Replaced by your new instruction before delivery.": "送达前已被你的新指令替换。",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "已停止等待送达确认。这条消息可能已经发送；不会重新发送。"
 }

@@ -2088,5 +2088,14 @@
   "Retry window ended": "再試行待機期間が終了しました",
   "Open a new chat with this summary": "この要約で新しいチャットを開く",
   "Opening a new chat with the saved summary": "保存した要約で新しいチャットを開いています",
-  "This summary can no longer be used. Start Compact & Resume again.": "この要約はもう使えません。もう一度「圧縮して再開」を実行してください。"
+  "This summary can no longer be used. Start Compact & Resume again.": "この要約はもう使えません。もう一度「圧縮して再開」を実行してください。",
+  "Automatic Continue cancelled by new activity.": "新しいアクティビティにより自動続行を取り消しました。",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "実行中のターンまたは設定が変わったため、自動フォローアップを取り消しました。",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "設定により自動フォローアップを取り消しました。すでに渡した入力は ChatGPT に届いている可能性があります。",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "ローカルで取り消しましたが、その後 ChatGPT で配信が確認されました。",
+  "Not injected: the selected turn ended before an eligible tool call.": "挿入されませんでした: 選択したターンが対象のツール呼び出しの前に終了しました。",
+  "Not sent: ChatGPT did not accept the message.": "送信されませんでした: ChatGPT がメッセージを受け付けませんでした。",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "送信されませんでした: ブラウザーが 60 秒以内にこのメッセージを受け取りませんでした。",
+  "Replaced by your new instruction before delivery.": "配信前に新しい指示で置き換えられました。",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "配信確認の待機を終了しました。メッセージはすでに送信されている可能性があるため、再送信しません。"
 }
