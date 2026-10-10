@@ -1342,6 +1342,12 @@ unproven, the page reports the fixed reason `Native Send receipt was not confirm
 input slot. `failBrowserInput` then retires the authorized row as the same uncertain send the
 outbox expiry produces (cancelled, never resent, a late exact receipt still confirms it), openings
 and Continue included, so later messages in that chat are claimable without a reload (#821).
+The one exception is proof of non-delivery: if, after that wait, ChatGPT still holds exactly the
+submitted text in its composer and shows no newer user row, the page clears that exact draft and
+reports `Native Send did not take the message.` instead. `failBrowserInput` then requeues a manual
+message once (`notTakenRetries`); a second refusal, or any opening, Continue, helper decision or
+temporary planner, ends as failed (`Not sent: ChatGPT did not accept the message.`). Seen when a
+message for the running turn was clicked in the second that turn ended.
 
 Confirmed terminal input receipts stop owning history retries after their exact local session
 directory is positively absent under an available history root. The outbox durably retires them

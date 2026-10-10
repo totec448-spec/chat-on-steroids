@@ -94,6 +94,8 @@ const entrySchema = inputArgs.extend({
   pickupFailedAt: z.number().optional(),
   /** One automatic retry is permitted for an exact, never-authorized browser pickup. */
   pickupRetryCount: z.number().int().nonnegative().optional(),
+  /** Times a Send the page proved untaken (its exact text still in the composer) was requeued. */
+  notTakenRetries: z.number().int().nonnegative().optional(),
   /** Browser reload budget for this exact queued input; survives app restart. */
   pickupRecovery: z.object({ attempts: z.number().int().min(0).max(BROWSER_PICKUP_MAX_ATTEMPTS),
     nextAt: z.number().int().positive().optional(), stoppedAt: z.number().int().positive().optional() }).optional(),
@@ -134,6 +136,9 @@ const UNCONFIRMED_SEND = 'Stopped waiting for delivery confirmation. The message
  * opening read back with `&#x20;` for spaces). The same code in extension/content.js.
  */
 const RECEIPT_UNCONFIRMED = 'Native Send receipt was not confirmed.';
+/** The page clicked Send, yet its exact text stayed in the composer and no new user row appeared. */
+const SEND_NOT_TAKEN = 'Native Send did not take the message.';
+const NOT_TAKEN_FAILED = 'Not sent: ChatGPT did not accept the message.';
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -1820,6 +1825,24 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
       await commit(current.map(row => sameDelivery(entry, row) ? { ...row, state: 'cancelled', error: UNCONFIRMED_SEND } : row));
       decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + UNCONFIRMED_SEND));
       decisionWaiters.delete(id);
+      return true;
+    }
+    // Unlike an unconfirmed receipt, this is proof the click did not deliver: ChatGPT left the
+    // exact text in its composer and showed no new user message, and the page has cleared that
+    // draft. Seen when a message for the running turn was clicked in the second the turn ended.
+    // One requeue sends it again; a second refusal is reported instead of retried forever.
+    if (entry.sendAuthorizedAt !== undefined && error === SEND_NOT_TAKEN) {
+      const retry = (entry.notTakenRetries ?? 0) === 0 && manualInput(entry) && !entry.recovery && !entry.opening &&
+        entry.purpose !== 'decision' && !entry.lifetime;
+      logWarn(`input ${entry.id}: ChatGPT did not take the clicked Send; ${retry ? 'queued once more' : 'reported as not sent'}`);
+      await commit(current.map(row => sameDelivery(entry, row) ? retry
+        ? { ...row, state: 'queued', owner: null, offeredAt: undefined, sendAuthorizedAt: undefined, requiresAuthorization: undefined,
+          deliveryText: undefined, error: undefined, notTakenRetries: (row.notTakenRetries ?? 0) + 1 }
+        : { ...row, state: 'failed', error: NOT_TAKEN_FAILED } : row));
+      if (!retry) {
+        decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + NOT_TAKEN_FAILED));
+        decisionWaiters.delete(id);
+      }
       return true;
     }
     if (entry.recovery && entry.requiresAuthorization === true && entry.sendAuthorizedAt === undefined) {
