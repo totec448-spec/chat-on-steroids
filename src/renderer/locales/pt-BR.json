@@ -1282,6 +1282,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "Remover permanentemente cerca de 1 GB das imagens registradas localmente mais antigas? O texto do chat e os arquivos originais serão mantidos.",
   "Freed {0} MB. {1} GB of image storage is now available.": "Foram liberados {0} MB. Agora há {1} GB de espaço disponível para imagens.",
   "Waiting for the next tool call": "Aguardando a próxima chamada de ferramenta",
+  "Sending in a moment…": "Enviando em instantes…",
   "Image cleanup failed. No further cleanup was requested.": "Não foi possível limpar as imagens. Nenhuma outra limpeza foi solicitada.",
   "Collapse a folder before expanding more folders.": "Feche uma pasta antes de expandir outras.",
   "Save or discard an existing project draft before editing another project.": "Salve ou descarte o rascunho do projeto atual antes de editar outro projeto.",
