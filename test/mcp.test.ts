@@ -247,6 +247,13 @@ let outside: string;
 let endpoint: McpEndpoint;
 let ctx: ToolContext;
 
+/**
+ * Characters of Core server instructions, measured with everything switched on. There is no
+ * provider limit behind it; it keeps the text read at the start of every chat from growing
+ * unnoticed, so raise it only together with a deliberate addition.
+ */
+const CORE_INSTRUCTIONS_BUDGET = 21_500;
+
 function withCaps(overrides: Partial<Capabilities>): Capabilities {
   return { ...DEFAULT_CAPABILITIES, ...overrides };
 }
@@ -1056,7 +1063,14 @@ describe('2025-era clients', () => {
     // duplicating it here used to add exactly 80 characters on 5.1-only hosts.
     expect(instructions).toBe(serverInstructions(ctx, 'core', process.platform));
     expect(instructions).toContain(skillCatalogInstructions());
-    expect(instructions.length).toBeLessThan(18_000);
+    expect(instructions.length).toBeLessThan(CORE_INSTRUCTIONS_BUDGET);
+    // The budget counts what a real install sends: every capability, plans, workers and the
+    // finish tool on (a fresh install's defaults), for each platform from every CI host.
+    // Windows carries the most shell guidance; this test's partial context once hid it crossing.
+    const everything = { ...ctx, caps: allCaps(), readOnly: false, sessionTools: true, agentTools: true, exposedFinishTool: true };
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      expect(serverInstructions(everything, 'core', platform).length, platform).toBeLessThan(CORE_INSTRUCTIONS_BUDGET);
+    }
     if (LAUNCHES_WINDOWS_POWERSHELL_5) {
       expect(instructions).not.toContain('This is Windows PowerShell 5.1, without && or ||.');
       expect(EXEC_COMMAND_CMD_DESCRIPTION).toContain('This shell is Windows PowerShell 5.1, which has no && or ||');
@@ -1065,11 +1079,11 @@ describe('2025-era clients', () => {
 
   it('keeps full Skills metadata in the platform-native instructions budget', () => {
     const catalog = skillCatalogInstructions();
-    const extraCatalog = `${catalog}\n${'- test Skill metadata '.repeat(150)}`;
+    const extraCatalog = `${catalog}\n${'- test Skill metadata '.repeat(250)}`;
     const native = serverInstructions(ctx, 'core', process.platform, catalog);
     const expanded = serverInstructions(ctx, 'core', process.platform, extraCatalog);
     expect(expanded.length - native.length).toBe(extraCatalog.length - catalog.length);
-    expect(expanded.length).toBeGreaterThan(18_000);
+    expect(expanded.length).toBeGreaterThan(CORE_INSTRUCTIONS_BUDGET);
   });
 
   it('points at the other connector rather than pretending the capability does not exist', async () => {
