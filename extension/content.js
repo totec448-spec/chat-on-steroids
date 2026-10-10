@@ -12844,7 +12844,18 @@
         // Send was clicked, but no row proved it. Say so instead of keeping the claim open: the
         // app retires it as an uncertain send, never a replay, and this document takes the next
         // input. The reason is a fixed code the app recognises (see failBrowserInput).
-        if (sendAttempted && !receipt) return fail('Native Send receipt was not confirmed.');
+        if (sendAttempted && !receipt) {
+          // Proof that the click did not deliver: ChatGPT left this exact text in its composer and
+          // showed no new user message. Clearing that exact draft lets the app send it once more;
+          // anything less certain stays an unconfirmed send that is never replayed (#821).
+          if (onTarget() && sendText(CLF_DOM.composer()?.textContent) === submittedText &&
+              CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === previousUserId) {
+            let cleared = false;
+            try { cleared = await draft.clear(); } catch { /* An unclearable draft is no proof. */ }
+            if (cleared) return fail('Native Send did not take the message.');
+          }
+          return fail('Native Send receipt was not confirmed.');
+        }
         return false;
       }
       if (!receipt || !sendingTarget()) return false;
