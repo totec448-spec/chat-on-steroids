@@ -110,6 +110,38 @@ const evidence = (patch: Partial<ReturnType<typeof emptyEvidence>> = {}) => ({ .
 // ------------------------------------------------------------------- store
 
 describe('session store', () => {
+  it('reports the same unreadable recent event only once until the journal recovers or worsens (#1269)', async () => {
+    const session = await createSession({ title: 'damaged recent journal', conversationId: 'recent-warning-test' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'turn_start', turnId: 'known-good' });
+    await flushSessions();
+    const file = path.join(sessionsRoot(), session.id, 'events.jsonl');
+    const good = await fs.readFile(file, 'utf8');
+    const warnings = () => getLog().filter(entry => entry.message.includes(`session ${session.id}: skipped`) &&
+      entry.message.includes('unreadable recent event line(s)'));
+
+    await fs.appendFile(file, '{unreadable one}\n');
+    expect(await readRecentEvents(session.id, 10)).toHaveLength(1);
+    expect(await readRecentEvents(session.id, 10)).toHaveLength(1);
+    expect(warnings()).toHaveLength(1);
+
+    // A second damaged line is new information, not a reason to suppress all warnings.
+    await fs.appendFile(file, '{unreadable two}\n');
+    expect(await readRecentEvents(session.id, 10)).toHaveLength(1);
+    expect(warnings()).toHaveLength(2);
+
+    // Once the journal is readable, a later new corruption must be reported again.
+    await fs.writeFile(file, good);
+    expect(await readRecentEvents(session.id, 10)).toHaveLength(1);
+    await fs.appendFile(file, '{unreadable again}\n');
+    expect(await readRecentEvents(session.id, 10)).toHaveLength(1);
+    expect(warnings()).toHaveLength(3);
+    // Ordinary new activity must not turn one old malformed line into new warnings.
+    await fs.appendFile(file, `${JSON.stringify({ seq: 2, time: 101, source: 'extension',
+      kind: 'turn_end', turnId: 'known-good', outcome: 'completed' })}\n`);
+    expect(await readRecentEvents(session.id, 10)).toHaveLength(2);
+    expect(warnings()).toHaveLength(3);
+  });
+
   it('keeps an exact tool edit review after later edits, but never invents one for failed or oversized calls', async () => {
     const conversationId = 'conv-exact-edit-review';
     const sessionId = await sessionForConversation(conversationId);
