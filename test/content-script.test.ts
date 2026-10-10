@@ -14154,6 +14154,39 @@ describe('the Compact & resume control', () => {
     expect(compacts.some(message => message.cancel)).toBe(false);
   });
 
+  it("replaces an earlier attempt's own unsent handoff request instead of refusing it as a user draft", async () => {
+    // Measured 2026-10-10: a cancelled attempt left "[[CLF-HANDOFF:<old>]]…" in the box, ChatGPT
+    // restored it on every load, and the next Compact & resume was refused as "a draft is already
+    // in ChatGPT".
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),
+      compact: (message) => ({
+        ok: true,
+        data: message.sourceAttempt ? { allowed: true, checkpoint: { state: 'attempted-unresolved', messageId: null } }
+          : message.sourceDispatch ? { armed: true }
+          : message.sourceLost ? { aborted: true }
+          : {
+              started: true,
+              token: 'manual-after-residue',
+              prompt: '[[CLF-HANDOFF:manual-after-residue]]\n\nwrite the brief',
+              job: { sessionId: 's1', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+            }
+      })
+    });
+    live.hook.injectControl();
+    // The same instruction under the earlier attempt's marker; an edited one stays the person's
+    // draft ("preserves a stale COS handoff draft including user edits"). ChatGPT's editor keeps
+    // paragraphs as elements, so its text runs the marker straight into the instruction.
+    live.document.querySelector('#prompt-textarea')!.textContent = '[[CLF-HANDOFF:5WSsl9TgeKgVVLCILXp8cQ]]write the brief';
+
+    await live.hook.startCompact();
+
+    const compacts = live.sent.filter((message) => message.type === 'compact');
+    expect(compacts.some(message => typeof message.sourceError === 'string' && /A draft is already/.test(message.sourceError))).toBe(false);
+    expect(compacts.some(message => message.sourceDispatch === true)).toBe(true);
+    expect(composerText(live.document)).not.toContain('5WSsl9TgeKgVVLCILXp8cQ');
+  });
+
   it('durably retires an automatic ticket blocked by a persistent user draft without changing the draft', async () => {
     const automaticJob = {
       sessionId: 's-auto-page-error',
@@ -16163,6 +16196,28 @@ describe('the fresh chat the app opened', () => {
     await settle(400);
     expect(proof).toMatchObject({ safe: mode === 'empty', conversationId: null });
     expect(await live.runtimeMessage({ type: 'clf-tab-close-check', conversationId: null,
+      failedCommand: { id: 'foreign-command', client: 'foreign-client' } })).toMatchObject({ safe: false });
+  });
+
+  it('proves a failed Project-entry source tab safe to retire, and only for its own command', async () => {
+    const source = '6aca5f65-65a0-83e9-990e-b7cc899edb50';
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    let proof: any;
+    live = await harness(`https://chatgpt.com/c/${source}?clf=cmd-entry-failed&clf_project=1#clf=cmd-entry-failed&clf_project=1`, {
+      redeem: () => redeemed,
+      ack: async message => {
+        proof = await live!.runtimeMessage({ type: 'clf-tab-close-check', conversationId: source,
+          failedCommand: { id: message.id, client: message.client } });
+        return { ok: true };
+      }
+    });
+    (live.window as any).CLF_DOM.enterProject = async () => false;
+    release({ ok: true, command: { id: 'cmd-entry-failed', type: 'resume', text: 'the brief', agent: null,
+      projectEntry: { id: 'g-p-11111111222233334444555555555555', sourceConversationId: source } } });
+    await settle(400);
+    expect(proof).toMatchObject({ safe: true, conversationId: source });
+    expect(await live.runtimeMessage({ type: 'clf-tab-close-check', conversationId: source,
       failedCommand: { id: 'foreign-command', client: 'foreign-client' } })).toMatchObject({ safe: false });
   });
 
@@ -22540,6 +22595,18 @@ describe('ordinary Continue native recovery', () => {
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.recoveryVeto)).toEqual(scenario === 'authorization'
       ? [] : [expect.objectContaining({ id, conversationId: chat, recoveryVeto: 'page-final' })]);
   });
+  it("does not hold a repair for this app's own unsent handoff request left in the box (2026-10-10)", async () => {
+    // A refused handoff left its request in the box; holding every later repair for it left the
+    // next Compact & resume waiting with nothing on screen. Its attempt replaces it, or refuses visibly.
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    composer.textContent = '[[CLF-HANDOFF:IRpyIega8lPGQZNCPaB0tQ]]Chat On Steroids is compacting this conversation';
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).not.toMatchObject({ why: 'draft' });
+    composer.textContent = 'Chat On Steroids is compacting this conversation';
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
+  });
+
   it('names why a repair is held: an unsent draft in the message box, then nothing once it is cleared', async () => {
     live = await harness(`https://chatgpt.com/c/${chat}`);
     await settle();
@@ -22719,4 +22786,64 @@ it.each([false, true])('opens the first turn of a prompt sent with an app mentio
   await live.hook.flush();
   expect(emitted(live.sent, 'user_message')).toHaveLength(1);
   expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+});
+
+/**
+ * #1291 review: the undelivered-click release is the one path that can send a handoff twice, so
+ * its proof is read only from a settled page and twice. A transcript that hydrates in steps must
+ * never be read as "ChatGPT never received it".
+ */
+describe('releasing a handoff click ChatGPT never received (page)', () => {
+  const token = '0123456789abcdef0123456789abcdef';
+  const job = (stage = 'handoff-pending') => ({ sessionId: 's1', stage, automatic: false, busy: true, handoffId: null, error: null, token,
+    sourceSend: { state: 'dispatched-unresolved', messageId: null, before: 'm-before', dispatchedAt: 1_700_000_000_000 - 20_000 } });
+  let armed = false;
+  async function start(before: (document: Document) => void = () => undefined) {
+    const releases: Array<Record<string, any>> = [];
+    // The ticket arrives with the first explicit pull, after each test has shaped the page.
+    armed = false;
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: armed ? job() : null } }),
+      compact: message => {
+        if (message.sourceUndelivered) { releases.push(message); return { ok: true, data: { released: true, job: job('done') } }; }
+        return { ok: true, data: {} };
+      }
+    }, before);
+    return releases;
+  }
+  const drain = async () => { for (let i = 0; i < 6; i++) { await settle(); await new Promise(resolve => setTimeout(resolve, 0)); } };
+
+  it('releases once from a settled page that shows the pre-click question as newest twice', async () => {
+    const releases = await start(document => { userTurn(document, 'before', 'Keep going', { sent: false }); });
+    armed = true;
+    await live!.hook.pullActivity();
+    await drain();
+    expect(releases).toEqual([expect.objectContaining({ token, sourceUndelivered: true, newestUserMessage: 'm-before' })]);
+  });
+
+  it('does not release when the handoff turn appears between the two reads', async () => {
+    const releases = await start(document => { userTurn(document, 'before', 'Keep going', { sent: false }); });
+    const scheduled = live!.window.setTimeout;
+    live!.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === 3_000) userTurn(live!.document, 'handoff', '[[CLF-HANDOFF:0123456789abcdef0123456789abcdef]]write the brief', { sent: false });
+      return scheduled(fn, ms);
+    }) as typeof scheduled;
+    armed = true;
+    await live!.hook.pullActivity();
+    await drain();
+    expect(releases).toEqual([]);
+  });
+
+  it('does not release from a transcript that hydrates empty and then shows the handoff turn', async () => {
+    const releases = await start();
+    armed = true;
+    const pull = live!.hook.pullActivity();
+    await settle();
+    // Empty while hydrating: no proof yet. Then the full transcript, with the handoff ChatGPT holds.
+    userTurn(live!.document, 'before', 'Keep going', { sent: false });
+    userTurn(live!.document, 'handoff', '[[CLF-HANDOFF:0123456789abcdef0123456789abcdef]]write the brief', { sent: false });
+    await pull;
+    await drain();
+    expect(releases).toEqual([]);
+  });
 });

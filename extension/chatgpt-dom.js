@@ -3136,6 +3136,8 @@ var CLF_DOM = (() => {
    */
   const PROJECT_SOURCE_READY_MS = 60_000;
   const PROJECT_TRANSITION_MS = 12_000;
+  /** Clicks again after ChatGPT's own route rewrite drops the first one; two rewrites are seen. */
+  const PROJECT_RECLICKS = 2;
 
   /**
    * Enter a Project through its source chat's native link. Cold /project loads can error.
@@ -3148,12 +3150,24 @@ var CLF_DOM = (() => {
       reportFailure('invalid-entry');
       return false;
     }
+    // The exact same-origin Project-home target is the native entry. ChatGPT has moved this
+    // control across several shells: its folder icon lost a test id in early October, then the
+    // link itself moved outside both <header> and [role="banner"]. Do not bind navigation to
+    // either wrapper. Instead reject quoted/transcript links and hidden kept pages, then require
+    // one visible provider link to this exact Project. Ambiguity still fails closed.
+    const projectLinks = () => [...document.querySelectorAll('a[href]')].filter(link =>
+      !link.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(link) &&
+      new URL(link.href, location.href).origin === location.origin &&
+      projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
     return new Promise(resolve => {
       let clicked = false, done = false, lastObservation = 'source-not-ready';
+      // Where the source chat was when the link was clicked, and how many times its own route
+      // rewrite has since taken that click away.
+      let clickedPath = '', reclicks = 0;
       const interrupt = event => { if (event.isTrusted) finish(false, 'user-interrupted'); };
       const finish = (result, reason = 'unknown') => {
         if (done) return;
-        done = true; observer.disconnect(); clearTimeout(timer);
+        done = true; observer.disconnect(); clearTimeout(timer); clearInterval(routeWatch);
         document.removeEventListener('pointerdown', interrupt, true);
         document.removeEventListener('keydown', interrupt, true);
         if (!result) reportFailure(reason);
@@ -3182,6 +3196,22 @@ var CLF_DOM = (() => {
           return;
         }
         if (clicked) {
+          // A replacement tab opens the source at /c/<id>, and ChatGPT then rewrites that route
+          // twice (/g/<project>/c/<id>, then the same with the Project's name). A click that lands
+          // between the two is taken by the router and then dropped by its own second rewrite: the
+          // tab stays on the source chat and the entry timed out (measured 2026-10-10, 8 of 14
+          // Compact & resume attempts in a Project). The source route changing under the click is
+          // that drop, so the same single link is clicked again.
+          if (location.pathname !== clickedPath && reclicks < PROJECT_RECLICKS) {
+            const links = projectLinks();
+            if (links.length === 1) {
+              reclicks++;
+              clickedPath = location.pathname;
+              lastObservation = 'source-route-rewritten';
+              links[0].click();
+              return check();
+            }
+          }
           lastObservation = 'source-route';
           return;
         }
@@ -3194,20 +3224,13 @@ var CLF_DOM = (() => {
           lastObservation = 'source-not-ready';
           return;
         }
-        // The exact same-origin Project-home target is the native entry. ChatGPT has moved this
-        // control across several shells: its folder icon lost a test id in early October, then the
-        // link itself moved outside both <header> and [role="banner"]. Do not bind navigation to
-        // either wrapper. Instead reject quoted/transcript links and hidden kept pages, then require
-        // one visible provider link to this exact Project. Ambiguity still fails closed.
-        const links = [...document.querySelectorAll('a[href]')].filter(link =>
-          !link.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(link) &&
-          new URL(link.href, location.href).origin === location.origin &&
-          projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
+        const links = projectLinks();
         if (links.length !== 1) {
           lastObservation = 'candidate-count-' + links.length;
           return;
         }
         clicked = true;
+        clickedPath = location.pathname;
         lastObservation = 'source-route';
         // Loading the source and following its link are separate page transitions.
         // Reuse the same deadline timer; source loading must not consume the budget
@@ -3222,6 +3245,8 @@ var CLF_DOM = (() => {
       };
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+      // A route rewrite through history.replaceState changes no DOM by itself.
+      const routeWatch = setInterval(check, 250);
       let timer = setTimeout(
         () => finish(false, 'source-ready-timeout:last=' + lastObservation),
         PROJECT_SOURCE_READY_MS
