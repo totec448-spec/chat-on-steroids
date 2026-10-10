@@ -22,9 +22,12 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
+import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../src/main/codex/tool-specs.js';
+import { skillCatalogInstructions } from '../src/main/skills.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
 import { friendlyError } from '../src/main/mcp/kernel.js';
+import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { SURFACE_LIST, surfaceDefinition, type SurfaceId } from '../src/main/mcp/surfaces.js';
 import {
   createSession,
@@ -1048,7 +1051,25 @@ describe('2025-era clients', () => {
       'read-only=off; plans=off; workers=off.'
     );
     expect(instructions).not.toContain(approved);
+    // Budget the actual native-platform payload, including the full Skills catalogue.
+    // PowerShell 5.1 syntax guidance is already present in exec_command's own schema:
+    // duplicating it here used to add exactly 80 characters on 5.1-only hosts.
+    expect(instructions).toBe(serverInstructions(ctx, 'core', process.platform));
+    expect(instructions).toContain(skillCatalogInstructions());
     expect(instructions.length).toBeLessThan(18_000);
+    if (LAUNCHES_WINDOWS_POWERSHELL_5) {
+      expect(instructions).not.toContain('This is Windows PowerShell 5.1, without && or ||.');
+      expect(EXEC_COMMAND_CMD_DESCRIPTION).toContain('This shell is Windows PowerShell 5.1, which has no && or ||');
+    }
+  });
+
+  it('keeps full Skills metadata in the platform-native instructions budget', () => {
+    const catalog = skillCatalogInstructions();
+    const extraCatalog = `${catalog}\n${'- test Skill metadata '.repeat(150)}`;
+    const native = serverInstructions(ctx, 'core', process.platform, catalog);
+    const expanded = serverInstructions(ctx, 'core', process.platform, extraCatalog);
+    expect(expanded.length - native.length).toBe(extraCatalog.length - catalog.length);
+    expect(expanded.length).toBeGreaterThan(18_000);
   });
 
   it('points at the other connector rather than pretending the capability does not exist', async () => {
