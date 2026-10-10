@@ -2110,5 +2110,14 @@
   "Calmer when ChatGPT is busy": "Спокойнее, когда ChatGPT занят",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Когда ChatGPT ограничивает загрузку истории, восстановление ждёт столько, сколько он просит, а не перезагружает снова.",
   "Lighter on your computer": "Легче для компьютера",
-  "Open ChatGPT chats use much less CPU while they wait.": "Открытые чаты ChatGPT в ожидании используют гораздо меньше CPU."
+  "Open ChatGPT chats use much less CPU while they wait.": "Открытые чаты ChatGPT в ожидании используют гораздо меньше CPU.",
+  "Goal on every plan, a background window that stays, and clearer hints for ChatGPT.": "Цель на любом тарифе, фоновое окно, которое остаётся, и более понятные подсказки для ChatGPT.",
+  "Goal on every plan": "Цель на любом тарифе",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "На тарифах без выбора модели, например Free, продолжения Цели и Цикла используют текущую модель чата, а не завершаются ошибкой.",
+  "A background window that stays": "Фоновое окно, которое остаётся",
+  "Background chats keep using the same window after the extension updates or reloads.": "После обновления или перезагрузки расширения фоновые чаты продолжают использовать то же окно.",
+  "Clearer connector hints": "Понятнее, где нужный коннектор",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "Когда ChatGPT вызывает инструмент, которого нет у его коннектора, результат называет коннектор, у которого он есть.",
+  "Fewer repeated commands": "Меньше повторных команд",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Если ChatGPT снова запускает команду, которая ещё выполняется в этом чате, результат указывает на уже запущенную."
 }

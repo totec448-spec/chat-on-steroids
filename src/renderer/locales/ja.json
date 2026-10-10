@@ -2110,5 +2110,14 @@
   "Calmer when ChatGPT is busy": "ChatGPT が混雑しても落ち着いて",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT が履歴の読み込みを制限したとき、再読み込みを繰り返さず、求められた時間だけ待って復旧します。",
   "Lighter on your computer": "パソコンに優しく",
-  "Open ChatGPT chats use much less CPU while they wait.": "開いている ChatGPT のチャットが待機中に使う CPU が大幅に減りました。"
+  "Open ChatGPT chats use much less CPU while they wait.": "開いている ChatGPT のチャットが待機中に使う CPU が大幅に減りました。",
+  "Goal on every plan, a background window that stays, and clearer hints for ChatGPT.": "すべてのプランでゴール、残り続けるバックグラウンドウィンドウ、ChatGPT へのより明確なヒント。",
+  "Goal on every plan": "すべてのプランでゴール",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "Free などモデル選択のないプランでも、ゴールとループのフォローアップは失敗せず、チャットの現在のモデルを使います。",
+  "A background window that stays": "残り続けるバックグラウンドウィンドウ",
+  "Background chats keep using the same window after the extension updates or reloads.": "拡張機能の更新や再読み込みの後も、バックグラウンドのチャットは同じウィンドウを使い続けます。",
+  "Clearer connector hints": "コネクターについての明確なヒント",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "ChatGPT がそのコネクターにないツールを呼ぶと、結果にそのツールを持つコネクターが表示されます。",
+  "Fewer repeated commands": "コマンドの重複が減少",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "同じチャットでまだ実行中のコマンドを ChatGPT がもう一度始めると、結果が実行中のものを案内します。"
 }
