@@ -2709,6 +2709,20 @@ async function runImageExports(jobs) {
   }
 }
 
+/** Switch the selected tab only inside the app-owned background window; never focus Chrome. */
+async function selectBackgroundChatTab(raw) {
+  const id = cleanConversationId(raw);
+  if (!id) return;
+  const window = await storedBackgroundWindow();
+  if (!window) return;
+  const tabs = await chrome.tabs.query({ windowId: window.id, url: CHATGPT_TAB_URLS });
+  const [tab] = tabs.filter(candidate => conversationForTab(candidate) === id).sort((a, b) => a.id - b.id);
+  if (!Number.isInteger(tab?.id)) return;
+  const current = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!current || current.windowId !== window.id || current.pendingUrl || conversationForTab(current) !== id) return;
+  await chrome.tabs.update(tab.id, { active: true });
+}
+
 async function revealChats(ids) {
   if (!Array.isArray(ids)) return;
   for (const raw of ids.slice(0, 5)) {
@@ -2775,6 +2789,9 @@ async function maintainOnce() {
   let observedTabs = [];
   try { observedTabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { /* Status/recovery still runs; no unobserved tab is pruned. */ }
   const openConversations = [...new Set(observedTabs.map(conversationForTab).filter(Boolean))];
+  const backgroundWindow = await storedBackgroundWindow().catch(() => null);
+  const backgroundConversations = backgroundWindow ? [...new Set(observedTabs
+    .filter(tab => tab.windowId === backgroundWindow.id).map(conversationForTab).filter(Boolean))] : [];
   // Observe login in an existing regular-profile page; extension pairing alone is not login.
   const loginTab = observedTabs.find(tab => !tab.incognito && !tab.discarded && !tab.frozen && tab.status !== 'loading' &&
     typeof tab.id === 'number' && typeof tabDocuments[String(tab.id)] === 'string' && signInStage(tab.url) === 'done');
@@ -2794,7 +2811,7 @@ async function maintainOnce() {
     .filter((tab) => tab && (tab.discarded === true || tab.frozen === true))
     .map(conversationForTab)
     .filter(Boolean))];
-  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, stalledConversations, canReveal: true, canExportImages: true,
+  const reply = await call('/status', { method: 'POST', body: JSON.stringify({ openConversations, backgroundConversations, stalledConversations, canReveal: true, canExportImages: true,
     chatGptSignedIn: chatGptSignedInState,
     ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
@@ -2804,6 +2821,7 @@ async function maintainOnce() {
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
+  if (reply.data.background === true) void selectBackgroundChatTab(reply.data.selectBackgroundChat).catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
   const renderingWanted = tab => {

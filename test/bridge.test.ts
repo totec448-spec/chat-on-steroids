@@ -83,6 +83,7 @@ const {
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   revealChatInBrowser,
+  selectBackgroundChatTab,
   startBridge,
   stopBridge,
   sweepStaleSwarm,
@@ -518,6 +519,29 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  it('delivers sidebar selection only to a companion with the chat in its background window (#1249)', async () => {
+    await pair();
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const browser = randomUUID().replaceAll('-', '');
+    const previous = getConfig().ui.backgroundChats;
+    getConfig().ui.backgroundChats = true;
+    try {
+      selectBackgroundChatTab(id);
+      const status = (backgroundConversations: string[]) => request('POST', '/status', {
+        browser, body: { openConversations: [id], backgroundConversations }
+      });
+      expect((await status([])).body.selectBackgroundChat).toBeUndefined();
+      expect((await status([id])).body.selectBackgroundChat).toBe(id);
+      expect((await status([id])).body.selectBackgroundChat).toBeNull();
+      selectBackgroundChatTab(id);
+      getConfig().ui.backgroundChats = false;
+      expect((await status([id])).body.selectBackgroundChat).toBeUndefined();
+    } finally {
+      getConfig().ui.backgroundChats = previous;
+      selectBackgroundChatTab(null);
+    }
+  });
+
   it('bounds authenticated companion diagnostics and clears them with the bridge lifecycle', async () => {
     const body = { capturedAt: Date.now(), status: { connected: true, paired: true, appVersion: 'v'.repeat(200) },
       preferences: { overwrite: true, durations: false }, transcript: 'must not be forwarded',

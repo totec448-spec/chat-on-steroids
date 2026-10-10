@@ -2356,6 +2356,15 @@ authorized, its shared layout policy bounds it to 45% of the work area and 800×
 minimizes it. User-selected foreground actions retain their own intent. Window geometry,
 process absence, tab election and provider hydration are different decisions.
 
+When the renderer selects a recorded session, it may request that the extension select the
+existing ChatGPT tab **inside its app-owned background window**, without focusing or restoring
+the browser. The IPC validates the session's current conversation binding; the bridge hands
+the latest one-shot selection only to a companion reporting that conversation inside its
+background window. The extension rechecks the tab immediately before `tabs.update(active)`;
+no tab is created, moved or navigated, and `windows.update` is never called. Disabling
+Background chats or selecting New Chat cancels a pending selection. This is separate from
+explicit “Open in ChatGPT”, which intentionally reveals/focuses the browser.
+
 ### Overwrite and recovery presentation
 
 Overwrite preserves native ChatGPT answer DOM, Markdown, code, citations and action controls.

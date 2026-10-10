@@ -958,6 +958,39 @@ describe('popup-only ChatGPT session transfer', () => {
   });
 });
 
+it('selects an existing chat tab in the owned background window without foregrounding Chrome (#1249)', async () => {
+  const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const other = '11111111-2222-4333-8444-555555555555';
+  const tabs = [
+    { id: 17, windowId: 7, url: `https://chatgpt.com/c/${chat}` },
+    { id: 18, windowId: 7, url: `https://chatgpt.com/c/${other}` },
+    { id: 19, windowId: 9, url: `https://chatgpt.com/c/${chat}` }
+  ];
+  const select = vi.fn(async () => undefined);
+  const foreground = vi.fn();
+  const create = vi.fn();
+  const start = backgroundSource.indexOf('async function selectBackgroundChatTab(');
+  const finish = backgroundSource.indexOf('\nasync function revealChats(', start);
+  expect(start).toBeGreaterThan(0);
+  expect(finish).toBeGreaterThan(start);
+  const code = backgroundSource.slice(start, finish);
+  const choose = vm.runInNewContext(`${code}\nselectBackgroundChatTab`, {
+    storedBackgroundWindow: async () => ({ id: 7, state: 'minimized' }),
+    cleanConversationId: (id: unknown) => typeof id === 'string' ? id : null,
+    conversationForTab: (tab: { url: string }) => tab.url.split('/c/')[1] ?? null,
+    chrome: { tabs: { query: async () => tabs, get: async (id: number) => tabs.find(tab => tab.id === id), update: select, create },
+      windows: { update: foreground } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  }) as (id: string) => Promise<void>;
+  await choose(chat);
+  expect(select).toHaveBeenCalledExactlyOnceWith(17, { active: true });
+  tabs[0]!.url = 'https://example.com/';
+  await choose(chat);
+  expect(select).toHaveBeenCalledTimes(1);
+  expect(foreground).not.toHaveBeenCalled();
+  expect(create).not.toHaveBeenCalled();
+});
+
 function journalOf(session: FakeStorageArea): any[] {
   const value = session.data.journal;
   return Array.isArray(value) ? value : [];

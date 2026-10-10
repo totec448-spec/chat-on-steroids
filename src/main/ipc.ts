@@ -94,6 +94,7 @@ import {
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
+  selectBackgroundChatTab,
   pendingCommands,
   onBridgeChange,
   startBridge,
@@ -559,6 +560,7 @@ export async function openSessionChat(id: string): Promise<void> {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  let sidebarSelectionRequest = 0;
   registerWorkspaceTerminalIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
@@ -687,6 +689,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (browserExtensionRequired(next)) await startBridge();
     else await stopBridge();
     if (before.ui.chatBrowser !== next.ui.chatBrowser) await syncCosBrowser();
+    if (before.ui.backgroundChats !== next.ui.backgroundChats) selectBackgroundChatTab(null);
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
@@ -1361,6 +1364,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:openChat', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     await openSessionChat(id);
+    return true;
+  });
+
+  handle('sessions:selectBackgroundTab', async (payload) => {
+    const { id } = z.object({ id: sessionIdArg.shape.id.nullable() }).parse(payload);
+    const request = ++sidebarSelectionRequest;
+    const conversationId = id ? (await getSession(id))?.conversationId ?? null : null;
+    // A slow session lookup cannot supersede the user's later sidebar selection.
+    if (request === sidebarSelectionRequest) {
+      selectBackgroundChatTab(conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId) ? conversationId : null);
+    }
     return true;
   });
 

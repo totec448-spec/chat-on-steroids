@@ -672,6 +672,22 @@ function openingHeldElsewhere(inputId: string, browser: string | null): boolean 
 /** The chats each browser reported open in its last maintenance pass. */
 const browserChats = new Map<string, ReadonlySet<string>>();
 
+/** The renderer's latest sidebar selection, handed once to the browser that already holds it. */
+let pendingBackgroundTabSelection: string | null = null;
+
+export function selectBackgroundChatTab(conversationId: string | null): void {
+  pendingBackgroundTabSelection = getConfig().ui.backgroundChats === true ? conversationId : null;
+  if (pendingBackgroundTabSelection) wakeBrowserWork();
+}
+
+function takeBackgroundTabSelection(openChats: ReadonlySet<string>): string | null {
+  if (getConfig().ui.backgroundChats !== true) pendingBackgroundTabSelection = null;
+  const id = pendingBackgroundTabSelection;
+  if (!id || !openChats.has(id)) return null;
+  pendingBackgroundTabSelection = null;
+  return id;
+}
+
 /** The browsers that reported this chat open and are still polling. */
 function chatHolders(conversationId: string): string[] {
   const now = Date.now();
@@ -2406,13 +2422,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     let openConversations: string[] = [];
     let stalledConversations: string[] = [];
     let revealRequested = false;
+    let backgroundConversations: string[] = [];
     let imageExportRequested = false;
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown; canExportImages?: unknown; chatGptSignedIn?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; backgroundConversations?: unknown; updateHold?: unknown; canReveal?: unknown; canExportImages?: unknown; chatGptSignedIn?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
       openConversations = body.openConversations as string[];
+      if (body.backgroundConversations !== undefined &&
+          (!Array.isArray(body.backgroundConversations) || body.backgroundConversations.length > 10_000 ||
+            body.backgroundConversations.some(id => !conversationId(id) || !openConversations.includes(id)))) {
+        return json(res, 400, { error: 'invalid_background_conversations' }, origin);
+      }
+      backgroundConversations = (body.backgroundConversations ?? []) as string[];
       if (body.stalledConversations !== undefined &&
           (!Array.isArray(body.stalledConversations) || body.stalledConversations.length > 10_000 || body.stalledConversations.some(id => !conversationId(id)))) {
         return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
@@ -2497,6 +2520,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         revival,
         revivals,
         placement: pendingBrowserPlacement(null, browser),
+        ...(req.method === 'POST' && backgroundConversations.length && getConfig().ui.backgroundChats === true
+          ? { selectBackgroundChat: takeBackgroundTabSelection(new Set(backgroundConversations)) } : {}),
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
@@ -10699,6 +10724,7 @@ export function workerBriefForTests(agent: string, task: string): string {
 }
 
 export function resetBridgeForTests(): void {
+  pendingBackgroundTabSelection = null;
   resetApprovalWaits();
   clearCompanionDiagnostics();
   for (const command of commands) if (command.timer) clearTimeout(command.timer);

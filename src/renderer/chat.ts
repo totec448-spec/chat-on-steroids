@@ -5898,6 +5898,7 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  if (ownerChanged) void api.selectBackgroundTab(id).catch(() => undefined);
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
@@ -5938,6 +5939,7 @@ function selectNewChat(projectId: string | null = null): void {
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  void api.selectBackgroundTab(null).catch(() => undefined);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
