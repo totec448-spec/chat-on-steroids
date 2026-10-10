@@ -19,6 +19,14 @@ import { logWarn } from '../logger.js';
 import { SURFACES, surfaceDefinition } from '../mcp/surfaces.js';
 
 /**
+ * How long a local (stdio) plugin may take to start and answer MCP initialize. A Python server's
+ * first start after install compiles its bytecode, and on Windows antivirus scans every new file:
+ * 20 s was not always enough (Unity on a hosted Windows runner, 2026-10-10), and a timed-out start
+ * leaves the plugin in an error state until the user restarts it. Starts run in the background.
+ */
+export const STDIO_START_TIMEOUT_MS = 60_000;
+
+/**
  * Removes a plugin's folder. On Windows a server's process tree can keep its folder locked for a
  * few seconds after it was killed, and a single attempt then fails with EBUSY. Node retries
  * EBUSY/EPERM/ENOTEMPTY with a linear back-off: 10 retries of 200 ms add up to about 11 s.
@@ -725,7 +733,7 @@ export class PluginManager {
           maxBufferSize: 16 * 1024 * 1024,
         });
         this.connecting.set(client, transport);
-        await client.connect(transport, { timeout: 20000 });
+        await client.connect(transport, { timeout: STDIO_START_TIMEOUT_MS });
       }
       const tools = await this.discover(client);
       signal.throwIfAborted();
