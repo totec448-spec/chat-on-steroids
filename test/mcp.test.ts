@@ -3166,6 +3166,9 @@ describe('exec_command and write_stdin', () => {
     expect(result.body.result?.structuredContent).toMatchObject({ exit_code: 2 });
     expect(textOf(result)).toContain('export const name');
     expect(textOf(result)).toContain('Batch: command 1 exited 2; the other command exited 0.');
+    // ChatGPT shows the model the structured result, so the notes have to be there too.
+    expect(result.body.result?.structuredContent?.supplemental_context).toContain('Note: Batch: command 1 exited 2; the other command exited 0.');
+    expect(result.body.result?.structuredContent?.output).not.toContain('Batch: command 1 exited');
     expect(textOf(result)).toContain('incomplete');
     expect(textOf(result)).not.toContain('not a failed search');
   });
@@ -3967,6 +3970,21 @@ describe('exec sessions belong to the chat that opened them', () => {
       expect(started[3]).not.toBe(started[0]);
       expect(textOf(retry)).toContain(`still running from earlier in this chat as session ${started[0]} `);
       expect(textOf(retry)).toContain(`write_stdin(session_id=${started[0]}, chars="")`);
+      // The structured result is what ChatGPT gives the model; the note must be in it.
+      expect(retry.body.result?.structuredContent?.supplemental_context)
+        .toContain(`still running from earlier in this chat as session ${started[0]} `);
+      expect(first.body.result?.structuredContent).not.toHaveProperty('supplemental_context');
+
+      // Delivery's own appendix (here the reminder about an unpolled session) joins the handler's
+      // note in that field instead of replacing it.
+      backdateExecAttendanceForTests(started[0]!, UNATTENDED_EXEC_NOTICE_MS + 60_000);
+      expect(prove('wfr_duplicate_again', 'conv-duplicate')).toBe('stored');
+      const again = await asChat('wfr_duplicate_again', 'exec_command', { cmd, workdir: '/workspace', yield_time_ms: 250 });
+      started.push(sessionOf(again));
+      const context = String(again.body.result?.structuredContent?.supplemental_context ?? '');
+      expect(context).toContain('still running from earlier in this chat');
+      expect(context).toContain(`Background session ${started[0]} has been running unpolled`);
+      expect(context.indexOf('still running from earlier')).toBeLessThan(context.indexOf(`Background session ${started[0]}`));
     } finally {
       for (const id of started) if (Number.isInteger(id)) await unifiedExecManager.terminateProcess(id);
     }
