@@ -67,3 +67,26 @@ it('translates every recommended skill description in every catalog', () => {
     expect(RECOMMENDED_SKILLS.filter(skill => !Object.hasOwn(catalog, skill.description)).map(skill => skill.id), locale).toEqual([]);
   }
 });
+
+it('translates every delivery error a queued message can show', () => {
+  // The timeline shows an input row's `error` through t(); these texts live in the main process,
+  // so the renderer source scan above never sees them. Internal page-to-app reason codes and
+  // markers never reach the timeline as written.
+  const internal = new Set([
+    'Native Send did not take the message.',
+    'Native Send receipt was not confirmed.',
+    'User authorized a new helper',
+    'session-input',
+    '\\n--- New instructions from the user ---\\n'
+  ]);
+  const source = readFileSync('src/main/session/input.ts', 'utf8');
+  const texts = new Set<string>();
+  for (const match of source.matchAll(/error:\s*'([^']{12,240})'/g)) texts.add(match[1]!);
+  for (const match of source.matchAll(/const [A-Z_]+ = '([^']{12,240})'/g)) texts.add(match[1]!);
+  const shown = [...texts].filter(text => !internal.has(text));
+  expect(shown.length).toBeGreaterThanOrEqual(9);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect(shown.filter(text => !Object.hasOwn(catalog, text)), locale).toEqual([]);
+  }
+});

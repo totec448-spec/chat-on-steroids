@@ -2085,5 +2085,14 @@
   "ChatGPT history temporarily rate-limited": "ChatGPT 기록이 일시적으로 요청 제한됨",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "대화 기록 속도 제한 대기 중에는 자동 복구가 일시 중지됩니다. 일찍 새로고침하면 제한 시간이 늘어날 수 있습니다.",
   "Retry check in {0}": "{0} 후 다시 확인",
-  "Retry window ended": "재시도 대기 시간이 끝났습니다"
+  "Retry window ended": "재시도 대기 시간이 끝났습니다",
+  "Automatic Continue cancelled by new activity.": "새 활동 때문에 자동 계속을 취소했습니다.",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "실행 중인 턴이나 설정이 바뀌어 자동 후속 메시지를 취소했습니다.",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "설정에 따라 자동 후속 메시지를 취소했습니다. 이미 전달된 입력은 ChatGPT에 도착했을 수 있습니다.",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "로컬에서 취소했지만, 나중에 ChatGPT에서 전달이 확인되었습니다.",
+  "Not injected: the selected turn ended before an eligible tool call.": "삽입되지 않음: 선택한 턴이 적합한 도구 호출 전에 끝났습니다.",
+  "Not sent: ChatGPT did not accept the message.": "보내지 않음: ChatGPT가 메시지를 받지 않았습니다.",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "보내지 않음: 브라우저가 60초 안에 이 메시지를 가져가지 않았습니다.",
+  "Replaced by your new instruction before delivery.": "전달 전에 새 지시로 대체되었습니다.",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "전달 확인 대기를 멈췄습니다. 메시지가 이미 전송되었을 수 있으므로 다시 보내지 않습니다."
 }
