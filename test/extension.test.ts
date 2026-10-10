@@ -565,7 +565,6 @@ function loadWorker(options: {
     documentNumbers.set(tabId, 0);
     return created;
   };
-  const event = () => ({ addListener: () => undefined });
   const chrome = {
     cookies: options.cookies,
     permissions: options.permissions,
