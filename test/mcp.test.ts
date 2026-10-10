@@ -22,6 +22,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
+import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../src/main/codex/tool-specs.js';
 import { skillCatalogInstructions } from '../src/main/skills.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
@@ -1050,32 +1051,25 @@ describe('2025-era clients', () => {
       'read-only=off; plans=off; workers=off.'
     );
     expect(instructions).not.toContain(approved);
-    // The same fixture differs between Windows and macOS by the extra PowerShell
-    // guidance (340 characters), not by installed Skills or a user preference.
-    // Compare the actual HTTP payload to this host's rendered instructions, then
-    // normalize only the platform-specific wording to the macOS baseline. Keep the
-    // full Skills catalogue and user instructions inside the length budget.
-    const catalog = skillCatalogInstructions();
-    const native = serverInstructions(ctx, 'core', process.platform, catalog);
-    const macOS = serverInstructions(ctx, 'core', 'darwin', catalog);
-    expect(instructions).toBe(native);
-    expect(instructions).toContain(catalog);
-    const platformDelta = native.length - macOS.length;
-    expect(instructions.length - platformDelta).toBeLessThan(18_000);
+    // Budget the actual native-platform payload, including the full Skills catalogue.
+    // PowerShell 5.1 syntax guidance is already present in exec_command's own schema:
+    // duplicating it here used to add exactly 80 characters on 5.1-only hosts.
+    expect(instructions).toBe(serverInstructions(ctx, 'core', process.platform));
+    expect(instructions).toContain(skillCatalogInstructions());
+    expect(instructions.length).toBeLessThan(18_000);
+    if (LAUNCHES_WINDOWS_POWERSHELL_5) {
+      expect(instructions).not.toContain('This is Windows PowerShell 5.1, without && or ||.');
+      expect(EXEC_COMMAND_CMD_DESCRIPTION).toContain('This shell is Windows PowerShell 5.1, which has no && or ||');
+    }
   });
 
-  it('normalizes only platform text and continues counting full Skills metadata', () => {
+  it('keeps full Skills metadata in the platform-native instructions budget', () => {
     const catalog = skillCatalogInstructions();
     const extraCatalog = `${catalog}\n${'- test Skill metadata '.repeat(150)}`;
-    const macOS = serverInstructions(ctx, 'core', 'darwin', catalog);
-    const windows = serverInstructions(ctx, 'core', 'win32', catalog);
-    const expandedMacOS = serverInstructions(ctx, 'core', 'darwin', extraCatalog);
-    const expandedWindows = serverInstructions(ctx, 'core', 'win32', extraCatalog);
-    // Adding Skills metadata does not change the OS-specific delta or disappear
-    // from the normalized budget, even when it takes that budget over the cap.
-    expect(expandedWindows.length - expandedMacOS.length).toBe(windows.length - macOS.length);
-    expect(expandedMacOS.length - macOS.length).toBe(extraCatalog.length - catalog.length);
-    expect(expandedMacOS.length).toBeGreaterThan(18_000);
+    const native = serverInstructions(ctx, 'core', process.platform, catalog);
+    const expanded = serverInstructions(ctx, 'core', process.platform, extraCatalog);
+    expect(expanded.length - native.length).toBe(extraCatalog.length - catalog.length);
+    expect(expanded.length).toBeGreaterThan(18_000);
   });
 
   it('points at the other connector rather than pretending the capability does not exist', async () => {
