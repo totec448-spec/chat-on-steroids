@@ -2085,5 +2085,14 @@
   "ChatGPT history temporarily rate-limited": "ChatGPT 歷史記錄暫時受到速率限制",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "因對話歷史存取限流而等待期間，自動復原將暫停。提前重新載入可能延長限制。",
   "Retry check in {0}": "{0} 後重新檢查",
-  "Retry window ended": "重試等待時間已結束"
+  "Retry window ended": "重試等待時間已結束",
+  "Automatic Continue cancelled by new activity.": "因有新活動，已取消自動繼續。",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "由於進行中的回合或設定已變更，已取消自動後續訊息。",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "已依設定取消自動後續訊息。已提交的輸入可能已送達 ChatGPT。",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "已在本機取消；之後在 ChatGPT 中確認已送達。",
+  "Not injected: the selected turn ended before an eligible tool call.": "未插入：所選回合在合適的工具呼叫之前就結束了。",
+  "Not sent: ChatGPT did not accept the message.": "未傳送：ChatGPT 沒有接受這則訊息。",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "未傳送：瀏覽器沒有在 60 秒內接收這則訊息。",
+  "Replaced by your new instruction before delivery.": "送達前已被你的新指示取代。",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "已停止等待送達確認。這則訊息可能已經傳送；不會重新傳送。"
 }
