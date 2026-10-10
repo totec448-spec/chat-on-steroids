@@ -61,7 +61,8 @@ import {
   forgetExecOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecAttended,
-  noteExecOwner
+  noteExecOwner,
+  runningIdenticalExec
 } from '../codex/ownership.js';
 import {
   UnifiedExecError,
@@ -904,6 +905,18 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               return fail(
                   `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this session. ` +
                   `Their output follows in tool responses; read it before retrying. Explicit write_stdin is also available for IDs ${sessionIds}. No child was spawned.`
+              );
+            }
+
+            // Read before this launch registers, so the new copy never names itself.
+            const identical = runningIdenticalExec(owner, commandDetail, dir.virtual);
+            if (identical.length) {
+              const ids = identical.map((row) => row.processId).join(', ');
+              const ageS = Math.max(0, Math.round((Date.now() - identical[0]!.startedAt) / 1000));
+              commandNotes.push(
+                `The same command in this folder is still running from earlier in this chat as session${identical.length > 1 ? 's' : ''} ${ids} ` +
+                  `(started ${ageS} s ago); this call started another copy. If this was a retry of a lost answer, ` +
+                  `read the running one with write_stdin(session_id=${identical[0]!.processId}, chars="") instead of starting more.`
               );
             }
 
