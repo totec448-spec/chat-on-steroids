@@ -1306,6 +1306,7 @@
   "Permanently remove about 1 GB of the oldest local recorded images? Chat text and original files will stay.": "Kaydedilen en eski yerel görsellerin yaklaşık 1 GB'ı kalıcı olarak kaldırılsın mı? Sohbet metinleri ve özgün dosyalar korunacak.",
   "Freed {0} MB. {1} GB of image storage is now available.": "{0} MB alan açıldı. Artık {1} GB görsel depolama alanı kullanılabilir.",
   "Waiting for the next tool call": "Sonraki araç çağrısı bekleniyor",
+  "Sending in a moment…": "Birazdan gönderilecek…",
   "Image cleanup failed. No further cleanup was requested.": "Görsel temizleme başarısız oldu. Başka temizleme istenmedi.",
   "Collapse a folder before expanding more folders.": "Daha fazla klasör açmadan önce açık klasörlerden birini daraltın.",
   "Save or discard an existing project draft before editing another project.": "Başka bir projeyi düzenlemeden önce mevcut proje taslaklarından birini kaydedin veya atın.",
