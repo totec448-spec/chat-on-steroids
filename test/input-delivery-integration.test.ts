@@ -485,6 +485,26 @@ it('still holds an ordinary queued message for a chat while one of its calls is 
   });
 });
 
+it('holds a message for an existing chat until a new tunnel-client has taken over its route (#1220)', async () => {
+  const { noteTunnelClientConnected, resetRouteSettleForTests, ROUTE_SETTLE_MS } = await import('../src/main/tunnel/route-settle.js');
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Message right after a tunnel restart', conversationId });
+    const existing = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    const fresh = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+    noteTunnelClientConnected();
+    const held = await post('/status', { openConversations: [conversationId] });
+    expect(held.body.inputs.map((row: { id: string }) => row.id)).toEqual([fresh.id]);
+    expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    now += ROUTE_SETTLE_MS;
+    const released = await post('/status', { openConversations: [conversationId] });
+    expect(released.body.inputs.map((row: { id: string }) => row.id)).toContain(existing.id);
+    expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: existing.id });
+  } finally { clock.mockRestore(); resetRouteSettleForTests(); }
+});
+
 // A running GPT-5.6 turn takes an immediate message directly (above); these cover the boundary.
 it.each([
   { mode: 'after-turn', earlyEnd: false }, { mode: 'finish', earlyEnd: false },
