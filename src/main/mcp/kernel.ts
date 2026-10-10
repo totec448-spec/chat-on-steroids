@@ -1130,7 +1130,11 @@ async function dispatchTracked(
     const supplemental = delivered.content.slice(baseResult.content.length)
       .filter((part): part is Extract<ToolContent, { type: 'text' }> => part.type === 'text')
       .map(part => part.text).join('\n');
-    if (supplemental) delivered = { ...delivered, structuredContent: { ...delivered.structuredContent, supplemental_context: supplemental } };
+    // A handler may already have put its own app context there (exec_command's notes); keep it
+    // ahead of what delivery appended rather than replacing it.
+    const own = delivered.structuredContent['supplemental_context'];
+    const merged = [typeof own === 'string' ? own : '', supplemental].filter(Boolean).join('\n');
+    if (supplemental) delivered = { ...delivered, structuredContent: { ...delivered.structuredContent, supplemental_context: merged } };
   }
   const recorderStartedAt = Date.now();
   // Event duration includes identity/handler/delivery work. Recorder and local HTTP finish
