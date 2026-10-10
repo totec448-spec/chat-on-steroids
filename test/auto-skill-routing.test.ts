@@ -55,6 +55,17 @@ it('freezes one literal unambiguous metadata match into the durable input owner'
   expect(row.autoSkills![0]!.revision).toMatch(/^[0-9a-f]{64}$/);
 });
 
+it('routes one distinctive task description while preserving durable prompt injection', async () => {
+  await install('sql-profiling', 'Query Profiling', 'Inspect slow SQL queries and database query plans to identify bottlenecks.');
+  await install('release-notes', 'Release Notes', 'Write plain release notes from merged changes.');
+  await enableAutoRouting();
+  const row = await enqueueInput(request('Inspect these slow SQL queries and database query plans.'));
+  expect(routedIds(row)).toEqual(['sql-profiling']);
+  const prompt = await prepareSessionPrompt(row.text, row);
+  expect(prompt).toContain('FULL_SQL_PROFILING_BODY');
+  expect(prompt).not.toContain('FULL_RELEASE_NOTES_BODY');
+  expect(userPromptText(prompt)).toBe(row.text);
+});
 it('freezes an explicit none when a literal name is ambiguous or no exact name is present', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await install('source-review', 'Code Review', 'Review another source change for correctness and maintainability.');
