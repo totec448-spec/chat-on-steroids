@@ -3933,6 +3933,44 @@ describe('exec sessions belong to the chat that opened them', () => {
       await unifiedExecManager.terminateProcess(sessionId);
     }
   });
+
+  it('names a still-running identical command from the same chat, and still starts the new one', async () => {
+    expect(prove('wfr_duplicate_first', 'conv-duplicate')).toBe('stored');
+    expect(prove('wfr_duplicate_retry', 'conv-duplicate')).toBe('stored');
+    expect(prove('wfr_duplicate_stranger', 'conv-duplicate-stranger')).toBe('stored');
+    const cmd = IS_WINDOWS ? 'Start-Sleep -Seconds 30' : 'sleep 30';
+    const sessionOf = (result: Awaited<ReturnType<typeof asChat>>) =>
+      Number(textOf(result).match(/Process running with session ID (\d+)/)?.[1]);
+    const started: number[] = [];
+    try {
+      const first = await asChat('wfr_duplicate_first', 'exec_command', { cmd, workdir: '/workspace', yield_time_ms: 250 });
+      started.push(sessionOf(first));
+      expect(Number.isInteger(started[0]), textOf(first)).toBe(true);
+      expect(textOf(first)).not.toContain('still running from earlier');
+
+      // Another chat running the same command is its own business.
+      const stranger = await asChat('wfr_duplicate_stranger', 'exec_command', { cmd, workdir: '/workspace', yield_time_ms: 250 });
+      started.push(sessionOf(stranger));
+      expect(textOf(stranger)).not.toContain('still running from earlier');
+
+      // A different folder is a different command.
+      await fs.mkdir(path.join(approved, 'elsewhere'), { recursive: true });
+      const elsewhere = await asChat('wfr_duplicate_retry', 'exec_command', { cmd, workdir: '/workspace/elsewhere', yield_time_ms: 250 });
+      started.push(sessionOf(elsewhere));
+      expect(textOf(elsewhere)).not.toContain('still running from earlier');
+
+      // The retry in the same chat and folder is not refused: running twice can be deliberate.
+      const retry = await asChat('wfr_duplicate_retry', 'exec_command', { cmd, workdir: '/workspace', yield_time_ms: 250 });
+      started.push(sessionOf(retry));
+      expect(failed(retry), textOf(retry)).toBe(false);
+      expect(Number.isInteger(started[3]), textOf(retry)).toBe(true);
+      expect(started[3]).not.toBe(started[0]);
+      expect(textOf(retry)).toContain(`still running from earlier in this chat as session ${started[0]} `);
+      expect(textOf(retry)).toContain(`write_stdin(session_id=${started[0]}, chars="")`);
+    } finally {
+      for (const id of started) if (Number.isInteger(id)) await unifiedExecManager.terminateProcess(id);
+    }
+  });
 });
 
 describe('the outcome a shell command is recorded with', () => {
