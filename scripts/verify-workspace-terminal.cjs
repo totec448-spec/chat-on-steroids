@@ -28,6 +28,10 @@ const sh = WINDOWS ? {
 const output = path.join(root, 'outputs/terminal-acceptance');
 fs.mkdirSync(output, { recursive: true });
 app.setPath('userData', path.join(output, 'runtime'));
+// Without a listener, destroying the only window quits Electron at once, before the cleanup below
+// can wait for the shell the check closed last. Its ConPTY exit then lands while Node tears down,
+// which aborts the process with 0xC0000409 on Windows (3 in 30 runs on a test VM, 2026-10-10).
+app.on('window-all-closed', () => {});
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const { buildSync } = require('esbuild');
