@@ -2085,5 +2085,14 @@
   "ChatGPT history temporarily rate-limited": "История ChatGPT временно ограничена",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Автоматическое восстановление приостановлено на время ограничения доступа к истории чата. Преждевременная перезагрузка может продлить ограничение.",
   "Retry check in {0}": "Повторная проверка через {0}",
-  "Retry window ended": "Интервал ожидания завершён"
+  "Retry window ended": "Интервал ожидания завершён",
+  "Automatic Continue cancelled by new activity.": "Автоматическое продолжение отменено из-за новой активности.",
+  "Automatic follow-up cancelled because its active turn or setting changed.": "Автоматическое продолжение отменено: изменился активный ход или настройка.",
+  "Automatic follow-up cancelled by settings. Already offered input may have reached ChatGPT.": "Автоматическое продолжение отменено настройками. Уже переданный ввод мог дойти до ChatGPT.",
+  "Cancelled locally; delivery was later confirmed in ChatGPT.": "Отменено локально; доставка позже подтвердилась в ChatGPT.",
+  "Not injected: the selected turn ended before an eligible tool call.": "Не вставлено: выбранный ход завершился до подходящего вызова инструмента.",
+  "Not sent: ChatGPT did not accept the message.": "Не отправлено: ChatGPT не принял сообщение.",
+  "Not sent: the browser did not pick up this message within 60 seconds.": "Не отправлено: браузер не забрал это сообщение в течение 60 секунд.",
+  "Replaced by your new instruction before delivery.": "Заменено вашей новой инструкцией до доставки.",
+  "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.": "Ожидание подтверждения доставки прекращено. Сообщение, возможно, уже отправлено; повторно оно отправлено не будет."
 }
