@@ -2453,6 +2453,17 @@ it('offers no summary reuse when the abandoned run never saved a summary', async
   expect(w.document.querySelector('.compaction-reuse')).toBeNull();
 });
 
+it('takes the summary reuse off an abandoned run once a later Compact & Resume started (#1215)', async () => {
+  const [request, start, brief, end, handoff] = compaction(2);
+  const abandoned = { seq: 9, time: T0 + 9000, source: 'app', kind: 'note', continuation: TOKEN,
+    message: text('Compact & Resume abandoned — cancelled') } as SessionEvent;
+  const later = { seq: 10, time: T0 + 10000, source: 'extension', kind: 'user_message', messageId: 'm-later-bootstrap',
+    message: text('[[CLF-RESUME:tok_fedcba9876543210]] Continue from this brief: keep the loop running.') } as SessionEvent;
+  const { w } = await boot([request!, start!, brief!, end!, handoff!, abandoned, later]);
+  expect(w.document.querySelectorAll('details.compaction')).toHaveLength(2);
+  expect(w.document.querySelector('.compaction-reuse')).toBeNull();
+});
+
 it('offers no summary reuse once the new chat opened', async () => {
   const [request, start, brief, end, handoff, resume] = compaction(2);
   const { w } = await boot([request!, start!, brief!, end!, handoff!, resume!]);
