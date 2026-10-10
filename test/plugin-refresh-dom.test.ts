@@ -155,6 +155,30 @@ it('finds installed rows on the plugins settings page', () => {
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(1);
   expect(api.pluginInstalledButtons('Chat On Steroids')).toBeNull();
 });
+it('discovers native installed links by their exact connector name across languages', () => {
+  settingsPage('/settings/plugins-settings');
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = '<h1>プラグイン</h1><a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Chat On Steroids Core</span><span>説明</span></a><span>すべてを許可</span>';
+  const api = (dom.window as any).CLF_DOM;
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([main.querySelector('a')]);
+  expect(api.pluginInstalledButtons('Chat On Steroids')).toBeNull();
+  main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><span>Chat On Steroids Core</span></a>');
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(2);
+});
+it('ignores hidden, catalog, external and unrelated links when discovering installed connectors', () => {
+  settingsPage('/settings/plugins-settings');
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = [
+    '<a hidden href="/settings/plugins-settings/plugin_asdk_app_hidden"><span>Chat On Steroids Core</span></a>',
+    '<a href="/plugins/plugin_asdk_app_catalog"><span>Chat On Steroids Core</span></a>',
+    '<a href="https://example.com/settings/plugins-settings/plugin_asdk_app_external"><span>Chat On Steroids Core</span></a>',
+    '<a href="/settings/plugins-settings/plugin_connector_unrelated"><span>Chat On Steroids Core</span></a>',
+    '<section data-testid="conversation-turn-1"><a href="/settings/plugins-settings/plugin_asdk_app_quoted"><span>Chat On Steroids Core</span></a></section>',
+    '<div class="clf-stage"><a href="/settings/plugins-settings/plugin_asdk_app_own"><span>Chat On Steroids Core</span></a></div>',
+  ].join('');
+  dom.window.document.body.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_outside"><span>Chat On Steroids Core</span></a>');
+  expect((dom.window as any).CLF_DOM.pluginInstalledButtons('Chat On Steroids Core')).toBeNull();
+});
 it('reads the page description when the model description is empty, and prefers a set one', async () => {
   const { api, connector } = settingsPage();
   expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tools[0].description).toBe(tool.description);

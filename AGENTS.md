@@ -4023,7 +4023,8 @@ tools or raw errors leave the owner through this projection. Activity's Update s
 combines it with the updater, bridge and connection owners. All checks pass only after a
 successful release check with no newer app, a live paired extension at the running version,
 and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
-exact current schema. Optional off connectors do not block completion; unknown schema or historical
+exact current schema. Optional off connectors or ones with no advertised tools do not block
+completion, matching Update all's requested surfaces. Core always remains required. Unknown schema or historical
 connection proof alone never establish full verification. Successful external tool calls under the same live publication
 and tunnel may instead establish **Ready to use; full connector schema not verified** when
 there is no known stale/manual/failed refresh. This is operational evidence, never a full-schema
@@ -4051,6 +4052,10 @@ that placeholder once. Rechecking an ambiguous/manual/completed row sets `observ
 without clicking Refresh. The owner refuses mutating claims even when legacy repair clears
 an impossible click receipt. A mismatch ends the observation; an explicit new check can inspect a
 manually recreated app by its unique connector name and current tunnel rather than a retired app ID.
+Installed discovery on `/settings/plugins-settings` accepts visible native buttons and same-origin
+links to exact `plugin_asdk_app_*` management routes inside the page's `main`. The connector name
+must match its own leaf; catalog, external, transcript, extension and hidden-page links do not count.
+Multiple matching rows remain ambiguous and grant no Refresh authority.
 The version fields allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
 the new build's schema once, but a later same-build schema change gets no borrowed authority.
 Startup resumes accepted refresh work even with auto-connect off, without another install.

@@ -35,7 +35,7 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
   for (const surface of surfaces) {
     const refresh = next.connectorRefresh?.[surface.id];
     const sameSchema = !!next.connectorSchemas?.[surface.id] && refresh?.schemaId === next.connectorSchemas[surface.id];
-    const off = surface.optional && surface.state === 'off';
+    const off = surface.optional && (surface.state === 'off' || surface.tools.length === 0);
     const connected = surface.state === 'live' && status.state === 'connected';
     const verified = connected && surface.lastRequestAt != null && sameSchema && refresh?.state === 'current';
     const functional = connected && sameSchema && refresh?.responding === true;
