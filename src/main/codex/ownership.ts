@@ -204,6 +204,25 @@ export function runningExecProcesses(sessionId: string): RunningExecProcess[] {
     .map(({ processId, incarnation, command, startedAt, tty }) => ({ processId, incarnation, command, startedAt, tty }));
 }
 
+/**
+ * Live processes this caller opened with exactly this command text in exactly this folder.
+ *
+ * A retry after a lost tool answer starts the same long command again while the first copy is
+ * still running (#1199). Callers only use this for a note; it never refuses a launch, because
+ * running a command twice on purpose is legitimate.
+ */
+export function runningIdenticalExec(
+  principal: string | null | undefined,
+  command: string,
+  displayCwd: string
+): Array<{ processId: number; startedAt: number }> {
+  if (!principal) return [];
+  const owned = processIdsOwnedBy(principal);
+  return unifiedExecManager.listProcesses()
+    .filter(process => owned.has(process.processId) && process.command === command && process.cwd === displayCwd)
+    .map(({ processId, startedAt }) => ({ processId, startedAt }));
+}
+
 /** Stop one live exec process only when it belongs to the supplied durable local session. */
 export async function stopExecProcess(sessionId: string, processId: number, incarnation: number): Promise<boolean> {
   if (!processIdsOwnedBy(sessionId).has(processId)) return false;
