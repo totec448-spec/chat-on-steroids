@@ -5928,6 +5928,8 @@ function selectSession(id: string): void {
   if (ownerChanged) {
     paintDetail(false);
     paintHandoff();
+    // With Background chats on, the chat's tab becomes the selected one in that window (#1249).
+    void api.followSessionTab?.(id)?.catch(() => undefined);
   }
   void loadDetail();
   void refreshInputQueue();
