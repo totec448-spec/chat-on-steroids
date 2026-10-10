@@ -153,7 +153,17 @@ export interface ContinuationSendCheckpoint {
   state: ContinuationSendState;
   /** ChatGPT's stable server-authored user-message id, once the marked prompt is visible. */
   messageId: string | null;
+  /**
+   * Source only, from the dispatch: the chat's newest user message just before the click, and
+   * when the click was armed. A later document that still shows that same message as the newest
+   * proves the click never reached ChatGPT (see releaseUndeliveredSourceDispatchNow).
+   */
+  before?: string | null;
+  dispatchedAt?: number;
 }
+
+/** How long after the armed click a document may prove that ChatGPT never received it. */
+export const SOURCE_UNDELIVERED_AFTER_MS = 15_000;
 
 export interface ContinuationDestinationCheckpoint extends ContinuationSendCheckpoint {
   /** Chat B, learned from the page that contains the marked bootstrap message. */
@@ -868,16 +878,49 @@ export async function beginContinuationSourceSendNow(
  * have reached ChatGPT — the click happens first and acceptance is observed seconds later — so
  * this app never offers the prompt again. The transaction ends at ChatGPT's marker or a cancel.
  */
-export async function dispatchContinuationSourceSendNow(token: string): Promise<boolean> {
+export async function dispatchContinuationSourceSendNow(token: string, before?: string | null): Promise<boolean> {
   return withCheckpointLock(token, async () => {
     const entry = byToken.get(token);
     if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return false;
     if (entry.sourceSend.state !== 'attempted-unresolved') return false;
     await transitionNow(entry, (current) => ({
       ...current,
-      sourceSend: { state: 'dispatched-unresolved', messageId: null }
+      sourceSend: {
+        state: 'dispatched-unresolved', messageId: null,
+        before: typeof before === 'string' && before ? before.slice(0, 200) : null,
+        dispatchedAt: Date.now()
+      }
     }));
     return true;
+  });
+}
+
+/**
+ * Hands an armed source Send back when ChatGPT provably never received it.
+ *
+ * The dispatch fence is never replayed on doubt, and its only ends were ChatGPT's marker or a
+ * cancel. A click that never reached ChatGPT has no marker, so the handoff waited forever with
+ * nothing on screen (measured 2026-10-10: a manual Compact & resume stayed `awaiting-summary` across
+ * an app restart and three pickups). The proof is ChatGPT's own history: a document loaded after
+ * the click, once ChatGPT is idle, shows the marked prompt as the newest user message if it was
+ * accepted. Still showing the very message that was newest before the click means it was not,
+ * so the fence returns to `attempted-unresolved` and the next Send is the first one.
+ */
+export async function releaseUndeliveredSourceDispatchNow(
+  token: string, newestUserMessage: string | null, documentSince: number
+): Promise<ContinuationSendCheckpoint | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return null;
+    const send = entry.sourceSend;
+    if (send.state !== 'dispatched-unresolved' || typeof send.before !== 'string' || !send.before ||
+        typeof send.dispatchedAt !== 'number' || newestUserMessage !== send.before ||
+        !(documentSince > send.dispatchedAt) || Date.now() - send.dispatchedAt < SOURCE_UNDELIVERED_AFTER_MS) return null;
+    await transitionNow(entry, (current) => ({
+      ...current,
+      sourceSend: { state: 'attempted-unresolved', messageId: null }
+    }));
+    return { ...entry.sourceSend };
   });
 }
 
@@ -1673,7 +1716,10 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
           ? {
               state: raw.sourceSend.state as ContinuationSendState,
               messageId:
-                typeof raw.sourceSend.messageId === 'string' ? raw.sourceSend.messageId.slice(0, 200) : null
+                typeof raw.sourceSend.messageId === 'string' ? raw.sourceSend.messageId.slice(0, 200) : null,
+              ...(raw.sourceSend.state === 'dispatched-unresolved' && typeof raw.sourceSend.before === 'string' &&
+                Number.isFinite(raw.sourceSend.dispatchedAt)
+                ? { before: raw.sourceSend.before.slice(0, 200), dispatchedAt: Number(raw.sourceSend.dispatchedAt) } : {})
             }
           : {
               // The retired `armed` flag was raised around the click, not before it, so it
