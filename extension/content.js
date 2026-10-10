@@ -6123,7 +6123,7 @@
         head.replaceChildren(...[...members[members.length - 1].querySelector('summary').childNodes].map(node => node.cloneNode(true)));
         head.dataset.clfSignature = signature;
       }
-      head.title = t('content_tool_calls_count', '$1 tool calls', members.length);
+      setAttr(head, 'title', t('content_tool_calls_count', '$1 tool calls', members.length));
       reconcileStreamChildren(group.lastElementChild, members);
       children.push(group); i = end;
     }

@@ -4535,14 +4535,16 @@ describe('the app-owned chronological stream', () => {
     // an idle chat took ~60 such writes a second (measured 2026-10-09).
     const owner = 'idle-owner';
     const rows = [{ seq: 1, time: 100, kind: 'turn_start', turnId: owner },
-      { seq: 2, time: 110, kind: 'tool_call', turnId: owner, callId: 'idle-call', tool: 'read', summary: { title: 'Read file' } },
-      { seq: 3, time: 200, kind: 'assistant_message', turnId: owner, messageId: 'idle-final', text: 'Done', final: true }];
+      // Three calls in a row form a tool group, whose header carries a count title.
+      ...[0, 1, 2].map(i => ({ seq: 2 + i, time: 110 + i, kind: 'tool_call', turnId: owner, callId: `idle-call-${i}`, tool: 'read', summary: { title: `Read file ${i}` } })),
+      { seq: 5, time: 200, kind: 'assistant_message', turnId: owner, messageId: 'idle-final', text: 'Done', final: true }];
     live = await harness(undefined, { activity: () => ({ ok: true, data: { entries: [], resetActivity: true, stream: rows } }) });
     renderingOn(); const section = assistantTurn(live.document, 'idle-page', []);
     await bindRenderedFiberTurns([{ section, turn: { turnId: 'idle-page', messages: [{ messageId: 'idle-final',
       rawMessageId: 'idle-final', stable: true, rawText: 'Done', renderedHtml: '<p>Done</p>' }] } }]);
     await live.hook.pullActivity(); live.hook.renderStreams();
     expect(section.querySelectorAll('.clf-stream')).not.toHaveLength(0);
+    expect(section.querySelector('.clf-stream-group-head')).not.toBeNull();
     const records: MutationRecord[] = [];
     const observer = new (live.document.defaultView as unknown as { MutationObserver: typeof MutationObserver }).MutationObserver(list => records.push(...list));
     observer.observe(live.document.documentElement, { subtree: true, attributes: true, childList: true, characterData: true });
