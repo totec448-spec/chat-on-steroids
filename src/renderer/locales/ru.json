@@ -2085,5 +2085,8 @@
   "ChatGPT history temporarily rate-limited": "История ChatGPT временно ограничена",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Автоматическое восстановление приостановлено на время ограничения доступа к истории чата. Преждевременная перезагрузка может продлить ограничение.",
   "Retry check in {0}": "Повторная проверка через {0}",
-  "Retry window ended": "Интервал ожидания завершён"
+  "Retry window ended": "Интервал ожидания завершён",
+  "Open a new chat with this summary": "Открыть новый чат с этим резюме",
+  "Opening a new chat with the saved summary": "Открывается новый чат с сохранённым резюме",
+  "This summary can no longer be used. Start Compact & Resume again.": "Это резюме больше нельзя использовать. Запустите «Сжать и продолжить» заново."
 }

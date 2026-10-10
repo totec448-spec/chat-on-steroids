@@ -2085,5 +2085,8 @@
   "ChatGPT history temporarily rate-limited": "ChatGPT の履歴が一時的にレート制限されています",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "履歴へのアクセス制限による待機中は自動復旧を一時停止します。早く再読み込みすると制限が長引く可能性があります。",
   "Retry check in {0}": "{0} 後に再確認",
-  "Retry window ended": "再試行待機期間が終了しました"
+  "Retry window ended": "再試行待機期間が終了しました",
+  "Open a new chat with this summary": "この要約で新しいチャットを開く",
+  "Opening a new chat with the saved summary": "保存した要約で新しいチャットを開いています",
+  "This summary can no longer be used. Start Compact & Resume again.": "この要約はもう使えません。もう一度「圧縮して再開」を実行してください。"
 }

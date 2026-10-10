@@ -3491,6 +3491,21 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement): HTMLElem
     );
   }
   for (const note of block.notes) raw.append(el('p', 'raw-facts', `${clockTime(note.time)} — ${note.message.text}`));
+  // An abandoned run that already saved ChatGPT's summary can open the new chat with it,
+  // without asking ChatGPT to write it again (#1215). The app refuses a summary that is no
+  // longer the chat's latest, so an old row's button cannot resurrect a stale handoff.
+  const abandoned = block.notes.some((note) => ABANDONED_NOTE.test(note.message.text));
+  if (abandoned && block.handoff && !block.resume && selectedId) {
+    const sessionId = selectedId, handoffId = block.handoff.handoffId;
+    const reuse = el('button', 'btn compaction-reuse', () => t("Open a new chat with this summary")) as HTMLButtonElement;
+    reuse.type = 'button';
+    reuse.addEventListener('click', () => void (async () => {
+      reuse.disabled = true;
+      try { if (await run(api.resumeFromHandoff(sessionId, handoffId))) toast(t("Opening a new chat with the saved summary")); }
+      finally { if (reuse.isConnected) reuse.disabled = false; }
+    })());
+    raw.append(reuse);
+  }
   const oldRaw = box.querySelector<HTMLElement>('.raw');
   if (oldRaw) {
     // Streaming changes only the affected section. Keep the disclosure, focus and

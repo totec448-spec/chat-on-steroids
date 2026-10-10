@@ -2085,5 +2085,8 @@
   "ChatGPT history temporarily rate-limited": "Lịch sử ChatGPT tạm thời bị giới hạn tần suất",
   "Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.": "Khôi phục tự động tạm dừng trong thời gian chờ do giới hạn truy cập lịch sử. Tải lại quá sớm có thể kéo dài giới hạn.",
   "Retry check in {0}": "Kiểm tra lại sau {0}",
-  "Retry window ended": "Đã hết thời gian chờ thử lại"
+  "Retry window ended": "Đã hết thời gian chờ thử lại",
+  "Open a new chat with this summary": "Mở cuộc trò chuyện mới với bản tóm tắt này",
+  "Opening a new chat with the saved summary": "Đang mở cuộc trò chuyện mới với bản tóm tắt đã lưu",
+  "This summary can no longer be used. Start Compact & Resume again.": "Không thể dùng bản tóm tắt này nữa. Hãy chạy lại Compact & Resume."
 }
