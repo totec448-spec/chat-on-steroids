@@ -2703,6 +2703,13 @@ var CLF_DOM = (() => {
     return changed;
   }
   const connectorApps = () => ownApps.map(app => ({ ...app }));
+  /** The proven apps of the surface that a configured connector name belongs to (renames keep the id). */
+  function provenAppsFor(connectorName) {
+    const at = connectorNames().indexOf(connectorName);
+    if (at < 0) return [];
+    const surface = ['core', 'desktop', 'plugins'][at];
+    return ownApps.filter(app => app.surface === surface);
+  }
   /** This install's three names, or the plain ones while the app has not said. */
   const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
   /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
@@ -2723,7 +2730,7 @@ var CLF_DOM = (() => {
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
-    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
+    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
@@ -2732,14 +2739,26 @@ var CLF_DOM = (() => {
       tools: snapshot.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), refresh: buttons[0] || null,
       tunnelId: typeof snapshot.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot.tunnelId) ? snapshot.tunnelId : null, settled: snapshot.settled === true } : null;
   }
+  /**
+   * Whether a plugin settings page shows this connector: by a proven app id when one exists (a
+   * same-named app with another id is somebody else's), otherwise by the configured name as before.
+   */
+  function ownSnapshot(snapshot, connectorName) {
+    const proven = provenAppsFor(connectorName);
+    return proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName;
+  }
   function pluginInstalledButtons(connectorName) {
+    // The installed list shows only names. A renamed connector shows its proven current name; the
+    // page opened from the row is then checked by app id (ownSnapshot), so a name match is no proof.
+    const names = [connectorName, ...provenAppsFor(connectorName).map(app => app.name).filter(Boolean)];
+    const named = node => names.includes(text(node));
     return safe(() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
         if (!main) return null;
         const rows = [...main.querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
-          [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+          [...button.querySelectorAll('*')].some(node => !node.children.length && named(node)));
         return rows.length ? rows : null;
       }
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
@@ -2750,7 +2769,7 @@ var CLF_DOM = (() => {
       const rows = [...panels[0].querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
         button.querySelector('[data-testid="plugin-icon-wrapper"]'));
       if (!rows.length) return null;
-      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && named(node)));
     }, null);
   }
   function pluginManagementIdle() {
