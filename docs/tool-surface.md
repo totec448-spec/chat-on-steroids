@@ -6,16 +6,17 @@ authoritative; `src/main/mcp/surfaces.ts`, `src/main/mcp/tools-core.ts`,
 
 ## Connectors
 
-Chat On Steroids publishes Core on Windows, macOS and Linux. Windows and macOS additionally publish
-the optional Desktop connector. They are separate discovery and permission boundaries and use
-separate secret tokenized local paths.
+Chat On Steroids publishes three connectors. They are separate discovery and permission boundaries
+and use separate secret tokenized local paths. Each one also offers `exec`, a JavaScript runtime that
+composes that connector's own tools.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `update_plan`, `agents` |
-| **Chat On Steroids Desktop** | **Windows/macOS:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, generated images, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `save_image`, `exec_command`, `write_stdin`, `update_plan`, `agents`, `session_finish`, `exec` |
+| **Chat On Steroids Desktop** | Browser tabs through the companion (all platforms); screen, windows, mouse/keyboard and clipboard (Windows/macOS) | `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_navigate`, `browser_action`, `browser_evaluate`, `browser_console`, `browser_network`; Windows: `list_windows`, `get_window`, `list_apps`, `get_window_state`, `launch_app`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, `activate_window`, `read_clipboard`, `write_clipboard`; macOS: `observe`, `computer`; `exec` |
+| **Chat On Steroids Plugins** | External MCP tools the user enabled in Settings | Each enabled tool under its own schema, plus `exec` |
 
-The Desktop connector is optional on Windows/macOS. Core is the main connector everywhere.
+Core is the main connector everywhere; Desktop and Plugins are optional.
 
 On a fresh current config, Core permissions are enabled, along with
 session recording and multi-agent mode; read-only mode is off. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
@@ -23,10 +24,11 @@ Desktop permissions off at runtime while preserving stored choices for a config 
 Windows or macOS. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
 
-With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `exec_command`,
-`write_stdin`, `update_plan`, and `agents`.
+With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `save_image`,
+`exec_command`, `write_stdin`, `update_plan`, `agents` and `exec`. `session_finish` appears while
+Session finish is on.
 `find` is the search fallback for a snapshot where search is enabled and command execution is
-unavailable. Tool exposure is monotonic within a running connector instance, so a permission
+unavailable; `find` and the `exec_command`/`write_stdin` pair are never exposed together. Tool exposure is monotonic within a running connector instance, so a permission
 changed mid-conversation can leave a previously exposed name listed; its handler still enforces
 the current permission.
 
@@ -50,6 +52,12 @@ is gated by the read capability. Image transport and decode checks remain bounde
 
 Search fallback used when search is enabled and command execution was unavailable when the
 surface snapshot was built. It covers filename/glob and text search without granting a shell.
+
+### `save_image`
+
+Saves the original file of an image ChatGPT generated in the calling chat into a new file in an
+approved folder. It never replaces an existing file, and the chat must be open in the browser with
+the image on its page. `nth` counts back from the newest generated image.
 
 ### `apply_patch`
 
@@ -96,7 +104,7 @@ Codex's collection-window behaviour so one interactive response is gathered whol
 
 ### `update_plan`
 
-Available while recording is enabled. Replaces the exact caller’s displayed progress plan; it does
+Always available (recording is always on). Replaces the exact caller’s displayed progress plan; it does
 not execute queued work. Local history continues recording messages and real tool results for the
 app transcript and continuation. There is no model-facing recording search/read tool.
 
@@ -143,9 +151,32 @@ There is no model-supplied agent credential or `agent_key`. Worker/prime identit
 the ChatGPT conversation using extension evidence; control calls fail closed when that identity
 cannot be proven.
 
+### `exec`
+
+Runs a short JavaScript program that calls this connector's own tools by name, in parallel where
+they cannot conflict, and emits only what it passes to `text(...)` or `image(...)`. It has no Node,
+filesystem, network or imports, keeps no state between calls and is bounded (64k source characters,
+32 calls, 40k emitted text bytes, 4 images). `session_finish` and `agents action=finish` must be
+called directly. Each connector has its own `exec`, limited to its own tools.
+
 ## Desktop tools
 
-This section exists on Windows and macOS. Linux does not advertise or execute these schemas.
+### Browser tools (all platforms)
+
+`browser_tabs` lists and opens tabs in the user's existing Chrome, Edge or Brave through the
+companion extension and attaches or releases them. `browser_snapshot` reads a tab's DOM without
+attaching, including protected ChatGPT tabs. An attached tab also accepts `browser_screenshot`,
+`browser_navigate`, `browser_action` (click, hover, fill, type, select, key, scroll, drag and
+dialogs), `browser_evaluate`, `browser_console` and `browser_network`. Input works in the
+background without moving the OS cursor or bringing the browser to the front.
+
+### Native desktop tools (Windows and macOS)
+
+Linux does not advertise or execute these schemas. Windows publishes one tool per operation:
+`list_windows`, `get_window`, `list_apps` and `get_window_state` read, and `launch_app`, `click`,
+`press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action` and
+`activate_window` act; `read_clipboard` and `write_clipboard` follow the clipboard permissions.
+macOS publishes `observe` and `computer`, described below.
 
 ### `observe`
 
@@ -174,7 +205,7 @@ can keep observation available while disabling state-changing desktop actions.
 ## Permission and discovery invariants
 
 - A tool call is checked against current permissions even if its schema was exposed earlier.
-- Core and Desktop do not forward or alias each other's tools.
+- Core, Desktop and Plugins do not forward or alias each other's tools; each `exec` reaches only its own connector's tools.
 - A connector token for one surface does not authorize the other surface.
 - Read-only mode removes effective file-write, command, control and clipboard-write permissions
   without pretending the underlying configuration was changed.
