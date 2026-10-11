@@ -320,9 +320,10 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp', 'backgroundPlacement']);
   port = typeof stored.port === 'number' ? stored.port : null;
   connectorNames = cleanConnectorNames(stored.connectorNames);
+  setBackgroundPlacement(stored.backgroundPlacement);
   ownCoreApp = cleanOwnCoreApp(stored.ownCoreApp);
   // Tells this browser apart from another one paired with the same app, so a new chat is opened
   // and sent in one browser only. Random, local, and never tied to the profile or the user.
@@ -1861,6 +1862,30 @@ async function noteTabConversation(source, value) {
  */
 let backgroundWindowFlight = null;
 let backgroundWindowBounds = { width: 800, height: 600 };
+/**
+ * Where background tabs go (#128): the app's own minimized window, or a collapsed tab group in the
+ * user's last-focused window. The app publishes it in `/status`; it is kept in local storage so a
+ * wake that arrives before this worker's first status pass already places tabs the chosen way.
+ * Anything but 'group', including an app that does not send it, means the window.
+ */
+let backgroundPlacement = 'window';
+function setBackgroundPlacement(value) {
+  const next = value === 'group' ? 'group' : 'window';
+  const changed = next !== backgroundPlacement;
+  backgroundPlacement = next;
+  return changed;
+}
+async function rememberBackgroundPlacement(value) {
+  if (!setBackgroundPlacement(value)) return;
+  try { await chrome.storage.local.set({ backgroundPlacement }); } catch { /* Kept in memory for this worker. */ }
+}
+/** Group mode needs the setting and the browser's tab-group API; anything else uses the window. */
+function groupsAvailable() {
+  return backgroundPlacement === 'group' && typeof chrome.tabs?.group === 'function' &&
+    typeof chrome.tabGroups?.get === 'function' && typeof chrome.tabGroups?.update === 'function' &&
+    typeof chrome.tabGroups?.query === 'function' && typeof chrome.windows?.getLastFocused === 'function' &&
+    typeof chrome.windows?.getAll === 'function';
+}
 /** One serialized owner for window adoption, consolidation and new tab placement. */
 function inBackgroundWindow(work) {
   const flight = (backgroundWindowFlight || Promise.resolve()).catch(() => undefined).then(work);
@@ -2766,6 +2791,8 @@ async function revealChats(ids) {
  * without a tab there, or a tab in the user's own windows, is left as it is.
  */
 async function followChat(raw) {
+  // #128: in tab-group mode a selection in the app never changes the user's window.
+  if (backgroundPlacement === 'group') return;
   const conversationId = cleanConversationId(raw);
   if (!conversationId) return;
   const window = await storedBackgroundWindow();
@@ -2848,6 +2875,7 @@ async function maintainOnce() {
     ...(extensionUpdateHold ? { updateHold: extensionUpdateHold } : {}) }) });
   if (intent !== connectionEpoch || !token || disconnected) return;
   if (!reply.ok || !reply.data) { await activeTabs?.revoke(); return; }
+  await rememberBackgroundPlacement(reply.data.backgroundPlacement);
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);

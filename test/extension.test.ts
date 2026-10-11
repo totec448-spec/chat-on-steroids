@@ -7,7 +7,7 @@
  * restart/durability rules are exercised without needing a Chrome process in CI.
  */
 
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -1982,6 +1982,60 @@ describe('active agent tab discard protection', () => {
     const worker = loadWorker({ local, session: new FakeStorageArea(), fetch: vi.fn(async () => response(404, {})) });
     await worker.startup();
     expect((await local.get('chatBackgroundWindowMirror')).chatBackgroundWindowMirror).toBeUndefined();
+  });
+
+  it('requests the tabGroups permission without an install warning', () => {
+    const manifest = JSON.parse(readFileSync('extension/manifest.json', 'utf8'));
+    expect(manifest.permissions).toContain('tabGroups');
+  });
+
+  it('restores the background placement before the first status pass', () => {
+    const source = readFileSync('extension/background.js', 'utf8');
+    const start = source.indexOf('async function loadOnce');
+    const loadOnce = source.slice(start, source.indexOf('\n}\n', start));
+    expect(loadOnce).toContain("'backgroundPlacement'");
+    expect(loadOnce).toContain('setBackgroundPlacement(stored.backgroundPlacement)');
+  });
+
+  it.each([
+    ['group', 'group'],
+    ['window', 'window'],
+    [undefined, 'window'],
+    ['sidebar', 'window']
+  ])('remembers the background placement %s from /status as %s', async (sent, kept) => {
+    const local = new FakeStorageArea({ ...paired, backgroundPlacement: sent === 'window' ? 'group' : 'window' });
+    const worker = loadWorker({
+      local, session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, { ok: true, repairs: [], ...(sent === undefined ? {} : { backgroundPlacement: sent }) });
+        return response(404, {});
+      })
+    });
+    await worker.fireAlarm();
+    await vi.waitFor(async () => expect((await local.get('backgroundPlacement')).backgroundPlacement).toBe(kept));
+  });
+
+  it('does not follow a selection in tab-group mode', async () => {
+    const BACKGROUND = 9;
+    const TARGET = 'dddddddd-eeee-4fff-8aaa-777777777777';
+    const tabs = [{ id: 12, windowId: BACKGROUND, url: `https://chatgpt.com/c/${TARGET}`, status: 'complete', active: false }];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ ...paired, backgroundPlacement: 'group' }),
+      session: new FakeStorageArea({ chatBackgroundWindow: BACKGROUND }),
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, { ok: true, repairs: [], backgroundPlacement: 'group', follow: TARGET });
+        return response(404, {});
+      }),
+      tabsQuery: async () => tabs,
+      windowsGet: async (windowId: number) => ({ id: windowId, type: 'normal', focused: false, tabs } as { focused?: boolean })
+    });
+    await worker.fireAlarm();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(worker.tabsUpdate.mock.calls.filter(([, change]) => (change as { active?: boolean }).active === true)).toEqual([]);
   });
 
   it.each([
