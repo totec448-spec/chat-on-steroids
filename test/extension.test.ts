@@ -2399,6 +2399,34 @@ describe('worker settings authority', () => {
     expect(posted[2]).not.toHaveProperty('token');
   });
 
+  it('carries the pre-click message with the dispatch and the proof that a click never reached ChatGPT', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { ok: true });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => ({ id: 44, url: `https://chatgpt.com/c/${CHAT}` }) });
+    await worker.registerTab(44);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 44);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true, before: 'm-before' }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceUndelivered: true, newestUserMessage: 'm-before', documentSince: 1_791_650_000_000 }, 44);
+    // The document time only qualifies the message it reports; alone it carries nothing.
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceUndelivered: true, documentSince: 1_791_650_000_000 }, 44);
+
+    expect(posted[0]).toMatchObject({ token, sourceDispatch: true, before: 'm-before' });
+    expect(posted[1]).toMatchObject({ token, sourceUndelivered: true, newestUserMessage: 'm-before', documentSince: 1_791_650_000_000 });
+    expect(posted[2]).toMatchObject({ token, sourceUndelivered: true });
+    expect(posted[2]).not.toHaveProperty('documentSince');
+  });
+
   it.each(['new-chat', 'other-chat', 'pending-navigation'])('checks the current Chrome route for compaction after %s', async scenario => {
     const currentUrl = scenario === 'other-chat' ? 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
       : `https://chatgpt.com/g/g-p-abcdef1234567890abcdef1234567890/c/${CHAT}`;

@@ -1454,12 +1454,17 @@ async function retireFailedCommandTab(entry) {
   if (!ownsDocument(source)) return;
   try {
     const tab = await chrome.tabs.get(source.tab);
-    if (!tab || tab.pinned || tab.pendingUrl || conversationFromUrl(tab.url) || !ownsDocument(source)) return;
+    if (!tab || tab.pinned || tab.pendingUrl || !ownsDocument(source)) return;
+    // The only chat a failed command's tab may show is the source the app opened to follow its
+    // Project link (?clf=<id>&clf_project=1); a failed Project entry left that tab open every time.
+    const conversation = conversationFromUrl(tab.url) || null;
+    const marked = new URL(tab.url);
+    if (conversation && !(marked.searchParams.get('clf') === entry.id && marked.searchParams.get('clf_project') === '1')) return;
     const url = tab.url;
-    const proof = await tabReply(source.tab, { type: 'clf-tab-close-check', conversationId: null,
+    const proof = await tabReply(source.tab, { type: 'clf-tab-close-check', conversationId: conversation,
       failedCommand: { id: entry.id, client: entry.client } }, { documentId: source.documentId });
     const latest = await chrome.tabs.get(source.tab);
-    if (proof?.safe === true && proof.conversationId === null && proof.navigationEpoch === source.navigationEpoch &&
+    if (proof?.safe === true && proof.conversationId === conversation && proof.navigationEpoch === source.navigationEpoch &&
         latest && !latest.pinned && !latest.pendingUrl && latest.url === url && ownsDocument(source)) await chrome.tabs.remove(source.tab);
   } catch { /* A busy, edited, replaced or unreadable page stays open. */ }
 }
@@ -3374,16 +3379,18 @@ const tabOperationQueues = new Map();
 const COMPACT_CHECKPOINT_FLAGS = [
   'sourceAttempt',
   'sourceDispatch',
+  'sourceUndelivered',
   'sourceLost',
   'destinationAttempt',
   'destinationDispatch',
   'destinationLost'
 ];
-const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId', 'sourceError'];
+const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId', 'sourceError', 'before', 'newestUserMessage'];
 // Not a checkpoint of its own: it qualifies `sourceMessageId` by saying how far that exact
 // marked response has grown. Sent only alongside the field it describes, so a bare count can
-// never move a deadline by itself.
-const COMPACT_CHECKPOINT_COUNTS = { sourceProgress: 'sourceMessageId' };
+// never move a deadline by itself. `documentSince` likewise only qualifies the newest message a
+// document reports for `sourceUndelivered`.
+const COMPACT_CHECKPOINT_COUNTS = { sourceProgress: 'sourceMessageId', documentSince: 'newestUserMessage' };
 
 function compactCheckpointFields(message) {
   if (!message || typeof message.token !== 'string') return {};
