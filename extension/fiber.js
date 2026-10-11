@@ -154,18 +154,80 @@
     return name === PLAIN_APPS[2] || SUFFIXED_APP.exec(typeof name === 'string' ? name : '')?.[1] === 'Plugins';
   }
 
-  /** Whether an `invoked_resource.app_name` names one of this app's own connectors. */
-  function ourApp(name) {
-    if (typeof name !== 'string') return false;
-    for (let at = 0; at < OUR_APPS.length; at++) if (OUR_APPS[at] === name) return true;
-    return false;
+  /**
+   * This install's proven connector apps ({ surface, appId, linkId, name }), from the app's
+   * status (connector-identity.ts). ChatGPT keeps an app's `asdk_app_…` and `link_…` ids when the
+   * user renames it (measured 2026-10-11), so a renamed connector is still recognized by them.
+   */
+  const APP_ID = /^asdk_app_[A-Za-z0-9_-]{1,160}$/, LINK_ID = /^link_[A-Za-z0-9_-]{1,160}$/;
+  const SURFACES = ['core', 'desktop', 'plugins'];
+  let OUR_APP_IDS = [];
+  function adoptAppIds(list) {
+    if (!Array.isArray(list)) return;
+    const next = [];
+    for (let at = 0; at < list.length && next.length < 12; at++) {
+      const app = list[at];
+      if (!app || typeof app.appId !== 'string' || !APP_ID.test(app.appId) || !SURFACES.includes(app.surface)) continue;
+      next.push({ surface: app.surface, appId: app.appId,
+        linkId: typeof app.linkId === 'string' && LINK_ID.test(app.linkId) ? app.linkId : null,
+        name: typeof app.name === 'string' && app.name ? app.name : null });
+    }
+    OUR_APP_IDS = next;
   }
-
+  /** `/asdk_app_…/link_…/tool` → the app id, or null. */
+  function appIdOf(resource) {
+    if (typeof resource !== 'string' || resource.charCodeAt(0) !== 47) return null;
+    const end = resource.indexOf('/', 1), id = resource.slice(1, end > 0 ? end : undefined);
+    return APP_ID.test(id) ? id : null;
+  }
+  /** `/<name or app id>/link_…/tool` → the link id, or null. */
+  function linkIdOf(path) {
+    if (typeof path !== 'string' || path.charCodeAt(0) !== 47) return null;
+    const parts = path.split('/');
+    return parts.length >= 4 && LINK_ID.test(parts[2]) ? parts[2] : null;
+  }
+  /** Which surface a configured or proven name belongs to, or null. */
+  function surfaceOfName(name) {
+    for (let at = 0; at < 3; at++) if (OUR_APPS[at] === name) return SURFACES[at];
+    for (let at = 0; at < OUR_APP_IDS.length; at++) if (OUR_APP_IDS[at].name === name) return OUR_APP_IDS[at].surface;
+    return null;
+  }
+  /**
+   * A name is ours, exactly as before, unless its surface already has a proven app and this row
+   * names a different one: then a same-named app is somebody else's.
+   */
+  function ownByName(name, appId, linkId) {
+    if (typeof name !== 'string') return false;
+    for (let at = 0; at < LEGACY_APPS.length; at++) if (LEGACY_APPS[at] === name) return true;
+    const surface = surfaceOfName(name);
+    if (!surface) return false;
+    const known = OUR_APP_IDS.filter(app => app.surface === surface);
+    if (!known.length) return true;
+    if (appId) return known.some(app => app.appId === appId);
+    if (linkId) return known.some(app => app.linkId === linkId);
+    return true;
+  }
+  /** Whether a result row (`invoked_resource`) belongs to one of this app's own connectors. */
+  function ownResult(result) {
+    if (!result) return false;
+    const appId = appIdOf(result.resource);
+    if (appId && OUR_APP_IDS.some(app => app.appId === appId)) return true;
+    return ownByName(result.app, appId, linkIdOf(result.resource));
+  }
   /** Whether a request path — `/<connector>/link_…/<tool>` — is one of ours. */
-  function ourPath(path) {
+  function ownRequestPath(path) {
     if (typeof path !== 'string' || path.charCodeAt(0) !== 47) return false;
+    const linkId = linkIdOf(path);
+    if (linkId && OUR_APP_IDS.some(app => app.linkId === linkId)) return true;
     const end = path.indexOf('/', 1);
-    return end > 1 && ourApp(path.slice(1, end));
+    return end > 1 && ownByName(path.slice(1, end), null, linkId);
+  }
+  /** Names `mcp-tool-call` steps may carry for ours: configured and proven (spaces may be `_`). */
+  function ownServerName(name) {
+    if (typeof name !== 'string') return null;
+    const names = [...OUR_APPS];
+    for (let at = 0; at < OUR_APP_IDS.length; at++) if (OUR_APP_IDS[at].name) names.push(OUR_APP_IDS[at].name);
+    return names.find(app => name === app || name === app.replaceAll(' ', '_')) || null;
   }
   /**
    * The tool path at the very front of a request payload.
@@ -1324,6 +1386,24 @@
   }
 
   /** The connector a result came back through, and whether it came back at all. */
+  /**
+   * Every connector result row's identity in these messages, ours or not: request id, app id,
+   * link id and the name ChatGPT shows. The app learns its own connectors from these, but only
+   * for request ids it served itself (connector-identity.ts). No arguments or result bytes.
+   */
+  function sightingsOf(messages) {
+    const out = [];
+    if (!Array.isArray(messages)) return out;
+    for (let at = 0; at < messages.length && out.length < 50; at++) {
+      const message = messages[at];
+      if (!message || message.author?.role !== 'tool' || message.author.name !== 'api_tool.call_tool') continue;
+      const result = resultOf(message), requestId = str(message.metadata?.request_id), appId = appIdOf(result?.resource);
+      if (!requestId || !appId) continue;
+      out.push({ requestId, appId, linkId: linkIdOf(result.resource), appName: result.app });
+    }
+    return out;
+  }
+
   function resultOf(message) {
     if (!message || typeof message !== 'object') return null;
     const meta = message.metadata;
@@ -1348,7 +1428,7 @@
     }
     for (const message of messages || []) {
       const result = resultOf(message);
-      if (!result || !ourApp(result.app)) continue;
+      if (!result || !ownResult(result)) continue;
       const visited = new Set();
       let id = str(message.metadata?.parent_id), parentId = null;
       while (id && visited.size < MAX_CALLS && !visited.has(id)) {
@@ -1375,7 +1455,7 @@
     const result = resultOf(message);
     const messageId = str(message.id), requestId = str(message.metadata?.request_id);
     const tool = result && toolName(result.resource);
-    if (!result || !ourApp(result.app) || !messageId || !requestId || !tool) return null;
+    if (!result || !ownResult(result) || !messageId || !requestId || !tool) return null;
     return { ...result, messageId, requestId, tool, createTime: num(message.create_time) };
   }
   /** Exact number of this app's own invocations represented by the whole turn, or null. */
@@ -1395,12 +1475,12 @@
     for (let at = 0; at < messages.length; at++) {
       const message = messages[at];
       const request = requestOf(message);
-      if (request && ourPath(request.path)) {
+      if (request && ownRequestPath(request.path)) {
         remember(request.messageId);
       }
 
       const result = resultOf(message);
-      if (result && ourApp(result.app)) {
+      if (result && ownResult(result)) {
         remember(resultParents.get(message) || completedCallOf(message)?.messageId);
       }
     }
@@ -1457,7 +1537,7 @@
     // Never borrow a neighbor's result to complete that request or a still-running group.
     if (request && !result && group.isCompletionRequestInProgress === false && messages.length === 2 &&
         messages[0].status === 'finished_successfully' && messages[1].status === 'finished_successfully' &&
-        !conflictingRequestScope(messages[0], messages[1]) && ourPath(request.path)) {
+        !conflictingRequestScope(messages[0], messages[1]) && ownRequestPath(request.path)) {
       const displayed = completedCallOf(messages[1]);
       if (displayed && displayed.requestId === request.requestId && identify(request, displayed) === displayed.tool) completed = displayed;
     }
@@ -1465,7 +1545,7 @@
       resource: completed.resource, messageId: completed.messageId, turnId: str(group.turnId),
       conversationId: str(group.clientThreadId) || str(group.conversationId), createTime: completed.createTime,
       hidden: int(own.call(group, 'collapsedSameToolCallCount') ? group.collapsedSameToolCallCount : null),
-      localCount, answered: true };
+      localCount, answered: true, own: ownResult(completed) };
     if (!request) return null;
 
     /**
@@ -1493,7 +1573,9 @@
       // Turn-wide cardinality only. No request arguments or message bodies cross worlds.
       localCount,
       /** Whether the page has shown a result for the representative call yet. */
-      answered: result !== null
+      answered: result !== null,
+      /** Whether this row is one of this install's connectors (app id, link, then name). */
+      own: result ? ownResult(result) : ownRequestPath(request.path)
     };
   }
 
@@ -1591,7 +1673,7 @@
     for (let at = 0; at < messages.length && answered.size < MAX_CALLS; at++) {
       const message = messages[at];
       const result = resultOf(message);
-      if (!result || !ourApp(result.app)) continue;
+      if (!result || !ownResult(result)) continue;
       const parent = resultParents.get(message);
       if (parent) answered.add(parent);
     }
@@ -1600,7 +1682,7 @@
     for (let at = 0; at < messages.length && out.length < MAX_CALLS; at++) {
       const request = requestOf(messages[at]);
       const completed = request ? null : completedCallOf(messages[at]);
-      if ((!request || !ourPath(request.path)) && !completed) continue;
+      if ((!request || !ownRequestPath(request.path)) && !completed) continue;
       const tool = completed ? completed.tool : toolName(request.path);
       const id = completed ? completed.messageId : request.messageId;
       if (!tool || !id) continue;
@@ -1721,7 +1803,7 @@
         const app = invocation ? str(invocation.server) : null;
         const tool = invocation ? toolName(str(invocation.tool)) : null;
         const id = str(item.callId);
-        if (!app || !ourApp(app) || !tool || !id) continue;
+        if (!app || !ownServerName(app) || !tool || !id) continue;
         if (seen.has(id)) duplicated.add(id);
         seen.add(id);
         out.push({
@@ -1856,7 +1938,7 @@
       const message = messageAt(id);
       if (message?.author?.role === 'assistant' && message.recipient === 'functions.exec') invocationIds.add(id);
     }
-    const serverName = name => OUR_APPS.find(app => name === app || name === app.replaceAll(' ', '_'));
+    const serverName = name => ownServerName(name);
     for (const call of shell.calls) {
       const reference = shell.callSources.get(call.messageId);
       if (!reference?.id || !selected.has(reference.id) || sourceCounts.get(reference.id) !== 1) continue;
@@ -2030,8 +2112,7 @@
             const recap = budgetedText(visibleText(step.content), budget, MAX_TRACE_RECAP);
             if (recap) out.push({ kind: 'recap', text: recap });
           }
-        } else if (step?.type === 'mcp-tool-call' && OUR_APPS.some(app =>
-            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) {
+        } else if (step?.type === 'mcp-tool-call' && ownServerName(step.invocation?.server)) {
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (id && tool) out.push({ kind: 'call', id, tool, done: step.completed === true });
         } else if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
@@ -2104,8 +2185,7 @@
             executionIds.push(id);
             continue;
           }
-          if (step?.type !== 'mcp-tool-call' || !OUR_APPS.some(app =>
-            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) continue;
+          if (step?.type !== 'mcp-tool-call' || !ownServerName(step.invocation?.server)) continue;
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (!id || !tool) continue;
           if (!remember(id) || calls.length >= MAX_CALLS) return null;
@@ -2267,6 +2347,7 @@
           calls,
           codeModeCalls,
           requests,
+          sightings: sightingsOf(metadata),
           messages: renderedMessages,
           activities,
           thoughtNotifications: nativeActivities.notifications,
@@ -2804,6 +2885,7 @@
     const nonce = typeof data.nonce === 'string' ? data.nonce.slice(0, 64) : '';
     if (!nonce) return;
     adoptAppNames(data.apps);
+    adoptAppIds(data.appIds);
     const previousPaths = currentPaths;
     currentPaths = new WeakMap();
     try {
