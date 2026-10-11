@@ -1087,6 +1087,59 @@ describe('active agent tab discard projection', () => {
   });
 });
 
+describe('a message sent into a running answer (#1301)', () => {
+  const conversationId = 'f0f01301-1111-4111-8111-111111111111';
+  const post = (events: unknown[]) => request('POST', '/events', { body: { conversationId, events } });
+
+  it('keeps the end of a turn the user\'s message continued, and only that', async () => {
+    const { readEvents } = await import('../src/main/session/store.js');
+    await pair();
+    const at = Date.now();
+    const opened = await post([
+      { kind: 'user_message', time: at, text: 'Run six commands', messageId: 'q-1301' },
+      { kind: 'turn_start', time: at + 1, turnId: 'g-1301-0-1' },
+      { kind: 'turn_end', time: at + 2, turnId: 'g-1301-0-1', outcome: 'interrupted', continued: true },
+      { kind: 'user_message', time: at + 2, text: 'Also add STEERED', messageId: 'steer-1301' },
+      { kind: 'turn_start', time: at + 3, turnId: 'g-1301-0-2' },
+      { kind: 'turn_end', time: at + 4, turnId: 'g-1301-0-2', outcome: 'completed', continued: 'yes' }
+    ]);
+    const ends = (await readEvents(opened.body.sessionId as string, { from: 0, limit: 100 })).filter(event => event.kind === 'turn_end');
+    expect(ends.map(event => [event.turnId, (event as { continued?: boolean }).continued])).toEqual([
+      ['g-1301-0-1', true], ['g-1301-0-2', undefined]
+    ]);
+  });
+
+  it('files an outline only under the turn its opening message belongs to', async () => {
+    const { readTurnTraces } = await import('../src/main/session/store.js');
+    await pair();
+    const at = Date.now();
+    const opened = await post([
+      { kind: 'user_message', time: at, text: 'Run six commands', messageId: 'q-1301-b' },
+      { kind: 'turn_start', time: at + 1, turnId: 'g-1301b-0-1' },
+      { kind: 'turn_end', time: at + 2, turnId: 'g-1301b-0-1', outcome: 'interrupted', continued: true },
+      { kind: 'user_message', time: at + 2, text: 'Also add STEERED', messageId: 'steer-1301-b' },
+      { kind: 'turn_start', time: at + 3, turnId: 'g-1301b-0-2' }
+    ]);
+    const sessionId = opened.body.sessionId as string;
+    const before = [{ kind: 'call', id: 'call-1', tool: 'exec_command', done: true }];
+    const after = [{ kind: 'say', text: 'Steering note received.', done: true }, { kind: 'call', id: 'call-3', tool: 'exec_command', done: true }];
+    await post([
+      { kind: 'turn_trace', time: at + 5, turnId: 'g-1301b-0-1', question: 'q-1301-b', trace: before },
+      { kind: 'turn_trace', time: at + 6, turnId: 'g-1301b-0-2', question: 'steer-1301-b', trace: after }
+    ]);
+    await vi.waitFor(async () => expect(await readTurnTraces(sessionId, ['g-1301b-0-1', 'g-1301b-0-2'])).toEqual({
+      'g-1301b-0-1': before, 'g-1301b-0-2': after }));
+    // The moment the page switches turns, the newer answer must not overwrite the earlier turn's outline.
+    await post([{ kind: 'turn_trace', time: at + 7, turnId: 'g-1301b-0-1', question: 'steer-1301-b', trace: after }]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect((await readTurnTraces(sessionId, ['g-1301b-0-1']))['g-1301b-0-1']).toEqual(before);
+    // A page that cannot name the question still files it, as before.
+    const updated = [...before, { kind: 'recap', text: 'Ran the first command' }];
+    await post([{ kind: 'turn_trace', time: at + 8, turnId: 'g-1301b-0-1', trace: updated }]);
+    await vi.waitFor(async () => expect((await readTurnTraces(sessionId, ['g-1301b-0-1']))['g-1301b-0-1']).toEqual(updated));
+  });
+});
+
 describe('a turn\'s round outline (#942)', () => {
   it('stores the newest outline of a turn beside its log, never as an event', async () => {
     const { readTurnTraces, readEvents } = await import('../src/main/session/store.js');

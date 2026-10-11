@@ -45,6 +45,8 @@ export interface Chronological {
   turnId?: string | null;
   /** ChatGPT's own terminal flag for the one message that ended a turn. See `closing()`. */
   final?: boolean;
+  /** On a turn end: the response went on into the next turn (#1301). */
+  continued?: boolean;
   state?: string;
 }
 
@@ -53,6 +55,8 @@ export type TimelineTurns = Record<string, {
   questionId?: string;
   /** Another document observed the same exact request while this response was open. */
   responseTurnId?: string;
+  /** Ended by a message the user sent into the running answer; the response went on (#1301). */
+  continued?: true;
 }>;
 
 export interface TurnIdentity {
@@ -95,6 +99,35 @@ export function overlappingRequestTurns(
   return earlier.endOrigin === undefined || later.origin < earlier.endOrigin;
 }
 
+/**
+ * The turn a request continued into after its first turn ended (#1301).
+ *
+ * ChatGPT keeps one request id across a message the user sends while it works, and the page
+ * ends the local turn at that message. A call that *started* after that turn ended cannot be
+ * part of it; it belongs to the turn that began at or after that end. A late result of a call
+ * that started before the end stays where it was. Undefined when the request did not continue.
+ */
+export function continuedRequestTurn(
+  turns: TimelineTurns | undefined, held: string, later: string | null | undefined, startedAt: number
+): string | undefined {
+  if (!turns || !later) return undefined;
+  const ended = turns[responseTurnId(turns, held)];
+  const next = turns[responseTurnId(turns, later)];
+  if (!ended || !next || responseTurnId(turns, held) === responseTurnId(turns, later)) return undefined;
+  if (ended.continued !== true || ended.endTime === undefined || !(startedAt > ended.endTime) || next.time < ended.endTime || startedAt < next.time) return undefined;
+  return responseTurnId(turns, later);
+}
+
+/** The turn that was open when something started: the latest one begun by then and not yet ended. */
+export function turnOpenAt(turns: TimelineTurns | undefined, at: number): string | undefined {
+  let found: string | undefined;
+  for (const [id, turn] of Object.entries(turns ?? {})) {
+    if (turn.time > at || (turn.endTime !== undefined && at > turn.endTime)) continue;
+    if (!found || turns![found]!.time < turn.time) found = id;
+  }
+  return found ? responseTurnId(turns, found) : undefined;
+}
+
 /** Store-owned, rebuildable identity projection. Raw events and MCP attribution stay intact. */
 export function applyTurnIdentity(identity: TurnIdentity, event: Chronological): void {
   const origin = positionOf(event);
@@ -109,7 +142,8 @@ export function applyTurnIdentity(identity: TurnIdentity, event: Chronological):
   } else if (event.turnId && event.kind === 'turn_end' && turns[event.turnId]) {
     const start = turns[event.turnId]!;
     identity.timelineTurns = turns = { ...turns, [event.turnId]: { ...start,
-      endTime: Math.max(start.endTime ?? 0, event.time), endOrigin: Math.min(start.endOrigin ?? Infinity, origin) } };
+      endTime: Math.max(start.endTime ?? 0, event.time), endOrigin: Math.min(start.endOrigin ?? Infinity, origin),
+      ...(event.continued === true || start.continued ? { continued: true as const } : {}) } };
   }
   if (event.kind !== 'tool_call' || event.source !== 'mcp' || !event.turnId ||
       event.call?.attribution !== 'request_id' || !event.call.requestId || !event.call.conversationId) return;
@@ -117,6 +151,20 @@ export function applyTurnIdentity(identity: TurnIdentity, event: Chronological):
   const requests = identity.requestTurns ?? {};
   const held = recordedRequestTurn(requests, requestId, conversationId);
   let owner = responseTurnId(turns, event.turnId);
+  if (held && responseTurnId(turns, held.turnId) !== owner &&
+      continuedRequestTurn(turns, held.turnId, owner, event.time) === owner) {
+    // The request continued into a newer turn (#1301): later calls of it belong there.
+    identity.requestTurns = { ...requests, [requestId]: { turnId: owner, conversationId, origin } };
+    return;
+  }
+  const heldTurn = held ? turns[responseTurnId(turns, held.turnId)] : undefined;
+  if (held && heldTurn && responseTurnId(turns, held.turnId) !== owner &&
+      continuedRequestTurn(turns, owner, held.turnId, Number.MAX_SAFE_INTEGER) === responseTurnId(turns, held.turnId) &&
+      event.time <= (turns[owner]?.endTime ?? -Infinity)) {
+    // A late result of a call that ran before the request continued keeps its own turn and
+    // leaves the request with the newer one.
+    return;
+  }
   if (held && responseTurnId(turns, held.turnId) !== owner) {
     if (!overlappingRequestTurns(turns, held.turnId, owner, requests, requestId)) {
       identity.requestTurns = { ...requests, [requestId]: null };
