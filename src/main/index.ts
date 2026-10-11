@@ -64,6 +64,7 @@ import {
   type SwarmSnapshot
 } from './agents.js';
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
+import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
@@ -413,6 +414,7 @@ void app.whenReady().then(async () => {
   initDurableStore(userData);
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
+  await loadConnectorIdentity();
   if (windowActivation.isDisabled()) return;
   initControlApiPath(userData);
   initUvRuntime(userData);

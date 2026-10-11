@@ -2687,6 +2687,29 @@ var CLF_DOM = (() => {
     ownConnectors = list;
     return true;
   }
+  /** This install's proven connector apps ({ surface, appId, linkId, name }), from the app's status. */
+  let ownApps = [];
+  function setConnectorApps(value) {
+    const list = [];
+    for (const surface of ['core', 'desktop', 'plugins']) {
+      for (const app of (value && Array.isArray(value[surface]) ? value[surface] : []).slice(0, 4)) {
+        if (!app || typeof app.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(app.appId)) continue;
+        list.push({ surface, appId: app.appId, linkId: typeof app.linkId === 'string' ? app.linkId : null,
+          name: typeof app.name === 'string' ? app.name : null });
+      }
+    }
+    const changed = JSON.stringify(list) !== JSON.stringify(ownApps);
+    ownApps = list;
+    return changed;
+  }
+  const connectorApps = () => ownApps.map(app => ({ ...app }));
+  /** The proven apps of the surface that a configured connector name belongs to (renames keep the id). */
+  function provenAppsFor(connectorName) {
+    const at = connectorNames().indexOf(connectorName);
+    if (at < 0) return [];
+    const surface = ['core', 'desktop', 'plugins'][at];
+    return ownApps.filter(app => app.surface === surface);
+  }
   /** This install's three names, or the plain ones while the app has not said. */
   const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
   /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
@@ -2703,11 +2726,11 @@ var CLF_DOM = (() => {
         if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames() }, location.origin);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
-    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
+    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
@@ -2716,7 +2739,19 @@ var CLF_DOM = (() => {
       tools: snapshot.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), refresh: buttons[0] || null,
       tunnelId: typeof snapshot.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot.tunnelId) ? snapshot.tunnelId : null, settled: snapshot.settled === true } : null;
   }
+  /**
+   * Whether a plugin settings page shows this connector: by a proven app id when one exists (a
+   * same-named app with another id is somebody else's), otherwise by the configured name as before.
+   */
+  function ownSnapshot(snapshot, connectorName) {
+    const proven = provenAppsFor(connectorName);
+    return proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName;
+  }
   function pluginInstalledButtons(connectorName) {
+    // The installed list shows only names. A renamed connector shows its proven current name; the
+    // page opened from the row is then checked by app id (ownSnapshot), so a name match is no proof.
+    const names = [connectorName, ...provenAppsFor(connectorName).map(app => app.name).filter(Boolean)];
+    const named = node => names.includes(text(node));
     return safe(() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
@@ -2730,7 +2765,7 @@ var CLF_DOM = (() => {
             const url = new URL(button.href, location.href);
             if (url.origin !== location.origin || !/^\/settings\/plugins-settings\/plugin_asdk_app_[a-zA-Z0-9_-]+$/.test(url.pathname) || url.hash) return false;
           }
-          return [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName);
+          return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
         });
         return rows.length ? rows : null;
       }
@@ -2742,7 +2777,7 @@ var CLF_DOM = (() => {
       const rows = [...panels[0].querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
         button.querySelector('[data-testid="plugin-icon-wrapper"]'));
       if (!rows.length) return null;
-      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && named(node)));
     }, null);
   }
   function pluginManagementIdle() {
@@ -2835,7 +2870,7 @@ var CLF_DOM = (() => {
       };
       const timer = setTimeout(() => finish(null), 1500);
       window.addEventListener('message', receive);
-      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames() }, location.origin);
+      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
     });
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
@@ -3313,6 +3348,8 @@ var CLF_DOM = (() => {
     composerAttachmentNames,
     pluginRefreshView,
     setConnectorNames,
+    setConnectorApps,
+    connectorApps,
     connectorNames,
     pluginInstalledButtons,
     pluginManagementIdle,

@@ -470,6 +470,8 @@ export interface SurfaceStatus {
   id: SurfaceId;
   /** Exactly what the user should name the connector in ChatGPT. */
   connectorName: string;
+  /** What ChatGPT shows for it once a served call proved a different name (a rename); null otherwise. */
+  chatgptName?: string | null;
   /** Exactly what the user should paste as its description. */
   description: string;
   /** One line in the app's own voice, for the setup card. */

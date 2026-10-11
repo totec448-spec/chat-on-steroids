@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
-import { connectorName } from '../shared/connector-names.js';
+import { liveConnectorName } from './mcp/surfaces.js';
 import { workerBrief } from '../shared/worker-brief.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
@@ -1241,7 +1241,7 @@ export function agentForFinishCaller(caller: Caller): string | null {
  * tool" reported to the other computer's Core (seen live, 2026-10-04: refused there as "no run").
  */
 export function ownCoreHint(): string {
-  return getConfig().connectorSuffix ? ` of ${connectorName('core', getConfig().connectorSuffix)}` : '';
+  return getConfig().connectorSuffix ? ` of ${liveConnectorName('core')}` : '';
 }
 
 function requireMember(caller: Caller): Agent {
@@ -1252,7 +1252,7 @@ function requireMember(caller: Caller): Agent {
   if (!run && runs.size > 0) throw new AgentsBusyError();
   if (!run) {
     throw new AgentError(
-      `No sub-agent run is active in ${connectorName('core', getConfig().connectorSuffix)}. ` +
+      `No sub-agent run is active in ${liveConnectorName('core')}. ` +
         'The chat that calls agents action=spawn becomes the prime agent of a new run.'
     );
   }

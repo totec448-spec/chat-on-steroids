@@ -962,26 +962,40 @@
   function reportCorePlugin() {
     // What this page itself lists is the evidence; a remembered sighting is not a new report.
     const core = pageCoreMention();
-    const report = core ? core.path : corePluginList && ownNamesKnown && !coreCandidates.some(entry => entry.name === CLF_DOM.connectorNames()[0]) ? 'missing' : null;
+    const report = core ? core.path : corePluginList && ownNamesKnown && !ownCoreCandidate() ? 'missing' : null;
     if (!report || report === reportedCorePlugin) return;
     reportedCorePlugin = report;
     const message = report === 'missing' ? { type: 'core_plugin', missing: true } : { type: 'core_plugin', appId: report.slice('app://'.length) };
     void ask(message).catch(() => { reportedCorePlugin = null; });
   }
-  /** This install's Core app as the page lists it, or null when it is missing or ambiguous. */
+  /** This install's proven Core apps (`app://asdk_app_…`), from the app's status; may be empty. */
+  function provenCorePaths() {
+    return CLF_DOM.connectorApps().filter(app => app.surface === 'core').map(app => `app://${app.appId}`);
+  }
+  /**
+   * This install's Core in the page's app list: a proven app id first (it survives a rename in
+   * ChatGPT), else the configured name. Once a Core app is proven, a same-named app with another
+   * id is somebody else's.
+   */
+  function ownCoreCandidate() {
+    const proven = provenCorePaths();
+    const byId = coreCandidates.find(entry => entry.path && proven.includes(entry.path));
+    if (byId) return byId;
+    const own = CLF_DOM.connectorNames()[0];
+    const byName = coreCandidates.find(entry => entry.name === own);
+    return byName && (!proven.length || (byName.path && proven.includes(byName.path))) ? byName : null;
+  }
   /** This install's Core app as this page itself lists it, or null when missing or ambiguous. */
   function pageCoreMention() {
-    const own = CLF_DOM.connectorNames()[0];
-    const match = coreCandidates.find(entry => entry.name === own);
+    const match = ownCoreCandidate();
     return match?.path ? { path: match.path, name: match.name } : null;
   }
   function currentCoreMention() {
-    const own = CLF_DOM.connectorNames()[0];
-    const match = coreCandidates.find(entry => entry.name === own);
-    if (match) return pageCoreMention();
+    if (ownCoreCandidate()) return pageCoreMention();
     // A fresh tab can send before its own plugin list arrives; then this browser's last sighting of
     // this install's Core stands in. Never once this page's complete list says the Core is missing.
-    if (corePluginList || !knownOwnCore || knownOwnCore.name !== own) return null;
+    const own = CLF_DOM.connectorNames()[0];
+    if (corePluginList || !knownOwnCore || (knownOwnCore.name !== own && !provenCorePaths().includes(knownOwnCore.path))) return null;
     return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
   /**
@@ -3616,6 +3630,7 @@
    * whole turn, so without this the same request would be re-sent on every poll.
    */
   const callsReported = new Map();
+  const sightingsReported = new Set();
   /** Exact request ids the app has ACKed as owned by a concrete conversation. */
   const requestOwnersConfirmed = new Map();
   const pendingStreamOrigins = new Map();
@@ -3692,7 +3707,9 @@
       createTime: typeof raw.createTime === 'number' && Number.isFinite(raw.createTime) ? raw.createTime : null,
       hidden,
       localCount,
-      answered: raw.answered === true
+      answered: raw.answered === true,
+      // fiber.js's ownership verdict (app id, link, then name); absent from older frames.
+      ...(typeof raw.own === 'boolean' ? { own: raw.own } : {})
     };
   }
 
@@ -3764,6 +3781,17 @@
         messageId: cap(entry.messageId, 200) || null,
         createTime: typeof entry.createTime === 'number' && isFinite(entry.createTime) ? entry.createTime : null
       });
+    }
+
+    // Connector identity sightings: ids only, never payloads. The app trusts none of them on its
+    // own; only a request id it served teaches it anything (connector-identity.ts).
+    const sightings = [];
+    for (const entry of (Array.isArray(raw.sightings) ? raw.sightings : []).slice(0, 50)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const appId = cap(entry.appId, 200);
+      const requestId = cap(entry.requestId, 100);
+      if (!requestId || !appId || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(appId)) continue;
+      sightings.push({ requestId, appId, linkId: cap(entry.linkId, 200) || null, appName: cap(entry.appName, 200) || null });
     }
 
     const messages = [];
@@ -3913,7 +3941,7 @@
     }
     const trace = turnTraceOf(raw.trace);
     if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
-        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !trace) {
+        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !trace && sightings.length === 0) {
       return null;
     }
     return {
@@ -3926,6 +3954,7 @@
       calls: kept,
       codeModeCalls,
       requests,
+      sightings,
       messages: keptMessages,
       activities: keptActivities,
       thoughtNotifications: keptThoughtNotifications,
@@ -4210,7 +4239,7 @@
       window.addEventListener('message', onMessage);
       setTimeout(() => finish(null), FIBER_TIMEOUT_MS);
       try {
-        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames() }, location.origin);
+        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames(), appIds: CLF_DOM.connectorApps() }, location.origin);
       } catch {
         finish(null);
       }
@@ -4664,6 +4693,14 @@
     }
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
+      // Every connector result row's ids, ours or not, once per request id. The app learns only
+      // from request ids it served itself, so a foreign row teaches nothing.
+      const newSightings = (turn.sightings || []).filter(sighting => !sightingsReported.has(sighting.requestId));
+      if (newSightings.length) {
+        if (sightingsReported.size > 2000) sightingsReported.clear();
+        for (const sighting of newSightings) sightingsReported.add(sighting.requestId);
+        emit({ kind: 'app_sightings', apps: newSightings });
+      }
       const pageConversation = concreteConversation(turn.conversationId);
       const provisionalOwnedTurn = turn.requestOwnerRequired || Boolean(
         turn === ownedPageTurn &&
@@ -6274,6 +6311,7 @@
 
   function ourConnectorSeen(seen) {
     if (!seen) return false;
+    if (typeof seen.own === 'boolean') return seen.own;
     if (ourConnectorApp(seen.app)) return true;
     if (typeof seen.path !== 'string' || !seen.path.startsWith('/')) return false;
     const end = seen.path.indexOf('/', 1);
@@ -11137,6 +11175,7 @@
     knownOwnCore = known && typeof known.appId === 'string' && /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(known.appId) &&
       typeof known.name === 'string' ? { path: `app://${known.appId}`, name: known.name } : null;
     if (reply?.connectorNames && CLF_DOM.setConnectorNames(reply.connectorNames)) { ownNamesKnown = true; reportCorePlugin(); }
+    if (reply?.connectorApps && CLF_DOM.setConnectorApps(reply.connectorApps)) reportCorePlugin();
     if (reply) {
       status = {
         connected: reply.connected === true,

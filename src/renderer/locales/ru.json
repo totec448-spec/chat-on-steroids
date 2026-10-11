@@ -2176,5 +2176,6 @@
   "Your settings are kept. Manual steps appear in the status list.": "Ваши настройки сохраняются. Ручные действия указаны в списке состояний.",
   "Update all could not finish: {0}": "Не удалось завершить Обновить всё: {0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Завершите текущие задачи и полностью закройте Chat On Steroids. Замените приложение в /Applications и откройте обновлённую версию из этой папки.",
-  "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Выберите «Проверить настройку», чтобы проверить разрешения macOS. Затем полностью закройте приложение и откройте его снова."
+  "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Выберите «Проверить настройку», чтобы проверить разрешения macOS. Затем полностью закройте приложение и откройте его снова.",
+  "In ChatGPT: {0}": "В ChatGPT: {0}"
 }

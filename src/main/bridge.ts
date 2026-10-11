@@ -3,6 +3,7 @@ import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-tr
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
 import { notePluginInstalled, notePluginMissing } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
+import { connectorApps, conversationCreatedAt, noteAppSightings, type AppSighting } from './connector-identity.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
@@ -1330,7 +1331,9 @@ const OBSERVATION_KINDS = new Set([
   'chat_error',
   // Not stored as transcript content. These request records populate the exact
   // requestId -> conversationId correlation registry.
-  'tool_evidence'
+  'tool_evidence',
+  // Connector identity proof (connector-identity.ts); never transcript content.
+  'app_sightings'
 ]);
 const OUTCOMES = new Set(['completed', 'failed', 'stopped', 'interrupted', 'stalled', 'unknown']);
 const MAX_OBSERVATIONS = 200;
@@ -1439,6 +1442,20 @@ function parseObservations(input: unknown): ChatObservation[] {
       kind: kind as ChatObservation['kind'],
       time: time > now + 60_000 || time < earliestChatGpt ? now : time
     };
+    if (kind === 'app_sightings') {
+      const apps: AppSighting[] = [];
+      for (const rawApp of Array.isArray(item['apps']) ? item['apps'].slice(0, 200) : []) {
+        const app = rawApp && typeof rawApp === 'object' ? rawApp as Record<string, unknown> : null;
+        const requestId = typeof app?.['requestId'] === 'string' ? app['requestId'].slice(0, 100) : '';
+        const appId = typeof app?.['appId'] === 'string' ? app['appId'].slice(0, 200) : '';
+        if (!requestId || !appId) continue;
+        apps.push({ requestId, appId, linkId: typeof app?.['linkId'] === 'string' ? app['linkId'].slice(0, 200) : null,
+          appName: typeof app?.['appName'] === 'string' ? app['appName'].slice(0, 200) : null });
+      }
+      observation.apps = apps;
+      out.push(observation);
+      continue;
+    }
     if (item['authoredTime'] === true) observation.authoredTime = true;
     if ((kind === 'assistant_message' || kind === 'user_message') && typeof item['authoredAt'] === 'number' &&
         Number.isFinite(item['authoredAt']) && item['authoredAt'] >= earliestChatGpt && item['authoredAt'] <= now + 60_000) {
@@ -2501,6 +2518,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         modelCatalogRequest: pendingChatModelRequest(),
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
+        // Apps proven to be this install's connectors, so a renamed connector is still recognized.
+        connectorApps: Object.fromEntries(Object.entries(connectorApps()).map(([surface, apps]) =>
+          [surface, apps.map(({ appId, linkId, name }) => ({ appId, linkId, name }))])),
         pluginRefreshRequests: (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
@@ -2779,7 +2799,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // This reports attachment only. The recorder below owns actual work and replay deduplication.
     const revived = noteAgentAlive(id, 'page');
     if (revived?.report) await recordAgentMessage(revived.report, 'sent', id);
-    const observations = parseObservations(body['events']);
+    const parsed = parseObservations(body['events']);
+    // App sightings only teach connector identity (proof: a request this app served). They are
+    // never transcript content and on their own must not create or touch a session.
+    const sightings = parsed.flatMap(item => item.kind === 'app_sightings' ? item.apps ?? [] : []);
+    // A chat keeps the app name it began with, so the name from the newest chat wins (connector-identity.ts).
+    if (sightings.length && noteAppSightings(sightings, Date.now(), conversationCreatedAt(id) ?? Date.now())) {
+      const apps = connectorApps();
+      logInfo(`connector identity learned: ${(['core', 'desktop', 'plugins'] as const).map(s => `${s}=${apps[s][0]?.appId ?? '-'}`).join(' ')}`);
+      changed();
+    }
+    const observations = parsed.filter(item => item.kind !== 'app_sightings');
+    if (!observations.length && parsed.length) return json(res, 200, { ok: true, stored: 0 }, origin);
     observationWritesInFlight += 1;
     let committed: { sessionId: string | null; stored: number; wake: boolean } | undefined;
     try {

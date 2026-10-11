@@ -80,6 +80,7 @@ import {
   swarmRunning
 } from '../agents.js';
 import type { SurfaceId } from './surfaces.js';
+import { noteServedRequest } from '../connector-identity.js';
 import {
   currentCall,
   emptyEvidence,
@@ -697,6 +698,8 @@ async function dispatchTracked(
   // question the setup screen has to answer honestly.
   surfaceToolCallAt.set(surface, Date.now());
   noteConnectorUse(surface, 'tool');
+  // Proof for connector identity: this exact request reached this surface's own endpoint.
+  if (!nested) noteServedRequest(requestId, surface);
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
   const allowUnattributed = context.allowUnattributed === true;

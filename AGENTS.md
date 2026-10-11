@@ -4117,6 +4117,23 @@ tunnel keeps it across restarts because ChatGPT's plugin names the tunnel id, no
 run hands tunnel-client its own local URL, per-start token included. ChatGPT's complete plugins
 list (`mode=plugins`) without this install's Core takes the proof back (POST `/core-plugin`
 `{ missing: true }`); other lists without Core say nothing.
+Connector identity (`connector-identity.ts`): ChatGPT keeps a connector's `asdk_app_…`/`link_…`
+ids across a rename. The kernel notes each served request id per surface (memory only, 4096,
+24 h); the page reports `app_sightings` (request id, app id, link id, app name from result rows);
+only a served request id teaches that surface's app (at most 4 per surface, durable). `/status`
+publishes `connectorApps`. Model-facing text uses `liveConnectorName` (proven name, else the
+configured one); protected-resource `resource_name` and the Setup card's Name row stay on
+`configuredConnectorName`. `SurfaceStatus.chatgptName` carries a proven different name for the
+card's "In ChatGPT: …" line.
+A chat keeps the app name it began with, so a learned name changes only to one seen in a chat
+created no earlier (`conversationCreatedAt`: ChatGPT conversation ids start with the creation second
+in hex); shell turns also find this turn's result rows by request id across the native mapping.
+Page side: fiber.js decides ownership once (`ownResult`, `ownRequestPath`, `ownServerName`):
+proven app id, then proven link, then the configured/proven name, except that a name match on a
+surface with a proven app but a different id is foreign. Rows carry `own`; content.js trusts it.
+Turns carry `sightings` for every connector's result rows, emitted once per request id as
+`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, installed-row names) and the
+Plugins catalog limit use proven ids first.
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
 waking browser work; ordinary status polling and a closed helper do not grant another attempt.
