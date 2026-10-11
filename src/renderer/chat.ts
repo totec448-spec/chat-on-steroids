@@ -38,6 +38,7 @@ import { answerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
+import type { DictationEvent } from '../shared/dictation.js';
 import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
@@ -306,7 +307,7 @@ function composerDraftOwner(): ComposerDraftOwner { return { key: draftKey(), ge
 function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
   return owner.key === draftKey() && owner.generation === composerDraftGeneration;
 }
-function replaceComposerDraft(): void { composerDraftGeneration++; skillPicker?.close(); }
+function replaceComposerDraft(): void { retireDictation(); composerDraftGeneration++; skillPicker?.close(); }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
@@ -343,6 +344,266 @@ function rememberDraft(): void {
   });
 }
 let skillPicker: ReturnType<typeof initSkills> | undefined;
+
+// The native microphone/permission/recognizer belongs to main. Renderer only projects
+// transcription events into the currently owned composer draft, never into a submit action.
+type DictationBridge = {
+  dictationSupported?: boolean;
+  startDictation?: () => Promise<unknown> | unknown;
+  stopDictation?: () => Promise<unknown> | unknown;
+  onDictationEvent?: (listener: (event: DictationEvent) => void) => (() => void) | void;
+};
+type DictationSession = {
+  owner: ComposerDraftOwner;
+  start: number;
+  end: number;
+  rendered: string;
+  committed: string;
+  stopping: boolean;
+};
+const dictationBridge: DictationBridge = api;
+let dictation: DictationSession | null = null;
+// The native process stops asynchronously. Block a new start until it actually exits,
+// including when navigation retires the text owner before the stop event arrives.
+let dictationRetiring = false;
+let dictationPhase: 'idle' | 'starting' | 'listening' | 'stopping' | 'error' = 'idle';
+let dictationNotice = '';
+let writingDictation = false;
+let dictationStopGuard: number | null = null;
+
+function clearDictationStopGuard(): void {
+  if (dictationStopGuard === null) return;
+  window.clearTimeout(dictationStopGuard);
+  dictationStopGuard = null;
+}
+
+function guardDictationStop(): void {
+  clearDictationStopGuard();
+  // Main normally sends status:stopped, but a native launch failure can exit
+  // before that event. Never leave the microphone button disabled forever.
+  dictationStopGuard = window.setTimeout(() => {
+    dictationStopGuard = null;
+    if (dictation?.stopping) {
+      dictation = null;
+      dictationPhase = 'error';
+      dictationNotice = 'Dictation did not stop normally. Please try again.';
+    } else if (dictationRetiring) {
+      dictationRetiring = false;
+      if (dictationPhase !== 'error') { dictationPhase = 'idle'; dictationNotice = ''; }
+    } else return;
+    paintDictation();
+  }, 5_500);
+}
+
+function paintDictation(): void {
+  const button = $<HTMLButtonElement>('dictationButton');
+  const status = $('dictationStatus');
+  const available = dictationBridge.dictationSupported === true &&
+    typeof dictationBridge.startDictation === 'function' &&
+    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+  button.hidden = !available;
+  const active = dictationPhase === 'starting' || dictationPhase === 'listening' || dictationPhase === 'stopping';
+  const label = !available ? 'Dictation unavailable' : dictationPhase === 'starting' ? 'Cancel dictation' :
+    dictationPhase === 'listening' ? 'Stop dictation' : dictationPhase === 'stopping' ? 'Stopping dictation' :
+      dictationPhase === 'error' ? 'Retry dictation' : 'Start dictation';
+  button.disabled = !available || dictationRetiring || dictationPhase === 'stopping';
+  button.dataset.state = dictationPhase;
+  button.setAttribute('aria-pressed', String(active));
+  button.setAttribute('aria-label', t(label));
+  button.title = t(label);
+  // Native Windows errors remain verbatim; known UI labels/statuses use the
+  // existing locale catalog with English fallback until translations are merged.
+  status.textContent = dictationNotice ? t(dictationNotice) : '';
+  status.hidden = !dictationNotice;
+}
+
+function dictationMessage(error: unknown): string {
+  if (error instanceof Error) return error.message.slice(0, 240);
+  if (typeof error === 'string') return error.slice(0, 240);
+  return 'Dictation could not start. Check microphone access and try again.';
+}
+
+function dictationReplyError(reply: unknown): string | null {
+  if (reply === false) return 'Microphone dictation is unavailable.';
+  if (reply && typeof reply === 'object' && 'ok' in reply && reply.ok === false)
+    return 'error' in reply && typeof reply.error === 'string' ? reply.error : 'Microphone dictation is unavailable.';
+  return null;
+}
+
+function completedDictation(session: DictationSession, message = ''): void {
+  if (dictation !== session) return;
+  clearDictationStopGuard();
+  dictation = null;
+  dictationPhase = 'idle';
+  dictationNotice = message;
+  paintDictation();
+}
+
+function stopDictationBestEffort(): void {
+  try { void Promise.resolve(dictationBridge.stopDictation?.()).catch(() => undefined); }
+  catch { /* The renderer is unloading or its native bridge is no longer available. */ }
+}
+
+function retireDictation(): void {
+  const session = dictation;
+  if (!session) return;
+  // Invalidating first is important: late IPC results must never write in a new chat.
+  dictation = null;
+  dictationRetiring = true;
+  dictationPhase = 'stopping';
+  dictationNotice = 'Stopping dictation…';
+  guardDictationStop();
+  paintDictation();
+  if (!session.stopping) stopDictationBestEffort();
+}
+
+function dictatedText(session: DictationSession, text: string): void {
+  if (dictation !== session || !ownsComposerDraft(session.owner)) { retireDictation(); return; }
+  const input = $<HTMLTextAreaElement>('chatInput');
+  if (input.value.slice(session.start, session.end) !== session.rendered) {
+    // Someone edited the draft during recording. Their text takes precedence.
+    retireDictation();
+    return;
+  }
+  const next = text.slice(0, 32_000);
+  writingDictation = true;
+  try {
+    input.setRangeText(next, session.start, session.end, 'end');
+    session.end = session.start + next.length;
+    session.rendered = next;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  } finally { writingDictation = false; }
+}
+
+function joinedDictation(previous: string, next: string): string {
+  if (!previous || !next) return previous + next;
+  if (/^[,.!?;:\u3002\uff0c]/u.test(next) || /\s$/u.test(previous) || /^\s/u.test(next)) return previous + next;
+  return `${previous} ${next}`;
+}
+
+function onDictationEvent(event: DictationEvent): void {
+  const session = dictation;
+  if (!session && dictationRetiring && event?.type === 'status' && event.status === 'stopped') {
+    clearDictationStopGuard();
+    dictationRetiring = false;
+    if (dictationPhase !== 'error') { dictationPhase = 'idle'; dictationNotice = ''; }
+    paintDictation();
+    return;
+  }
+  if (!session || !ownsComposerDraft(session.owner) || !event || typeof event !== 'object') return;
+  if (event.type === 'partial' && typeof event.text === 'string') {
+    dictatedText(session, joinedDictation(session.committed, event.text));
+  } else if (event.type === 'final' && typeof event.text === 'string') {
+    // Accept both cumulative final transcripts and segment-by-segment final chunks.
+    const chunk = event.text;
+    const previous = session.committed;
+    session.committed = chunk === previous || previous && chunk.startsWith(previous) ? chunk :
+      previous.endsWith(chunk) ? previous : joinedDictation(previous, chunk);
+    dictatedText(session, session.committed);
+  } else if (event.type === 'error') {
+    dictation = null;
+    dictationRetiring = true;
+    dictationPhase = 'error';
+    dictationNotice = (event.message || 'Microphone dictation stopped.').slice(0, 240);
+    guardDictationStop();
+    paintDictation();
+    stopDictationBestEffort();
+  } else if (event.type === 'status') {
+    const status = event.status?.toLowerCase() ?? '';
+    if (['stopped', 'idle', 'ended', 'complete'].includes(status)) { completedDictation(session, 'Dictation stopped.'); return; }
+    if (!session.stopping) {
+      dictationPhase = ['starting', 'initializing', 'requesting'].includes(status) ? 'starting' : 'listening';
+      dictationNotice = dictationPhase === 'starting' ? 'Preparing microphone…' : 'Listening…';
+      paintDictation();
+    }
+  }
+}
+
+async function toggleDictation(): Promise<void> {
+  if (dictation) {
+    const session = dictation;
+    if (session.stopping) return;
+    session.stopping = true;
+    dictationPhase = 'stopping';
+    dictationNotice = 'Finishing dictation…';
+    guardDictationStop();
+    paintDictation();
+    try {
+      const reply = await dictationBridge.stopDictation?.();
+      const error = dictationReplyError(reply);
+      if (error) throw new Error(error);
+      // The IPC stop acknowledgement only signals the stop REQUEST. The backend
+      // may still deliver its last final chunk before the `status: stopped` event.
+      // Keep this session alive until that terminal event, without allowing a restart.
+    }
+    catch (error) {
+      if (dictation === session) {
+        clearDictationStopGuard();
+        dictation = null;
+        dictationPhase = 'error';
+        dictationNotice = dictationMessage(error);
+        paintDictation();
+      }
+    }
+    return;
+  }
+  if (dictationRetiring || dictationBridge.dictationSupported !== true ||
+    !dictationBridge.startDictation || !dictationBridge.stopDictation || !dictationBridge.onDictationEvent) return;
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const session: DictationSession = {
+    owner: composerDraftOwner(), start: input.selectionStart, end: input.selectionEnd,
+    rendered: input.value.slice(input.selectionStart, input.selectionEnd), committed: '', stopping: false
+  };
+  dictation = session;
+  dictationPhase = 'starting';
+  dictationNotice = 'Preparing microphone…';
+  paintDictation();
+  try {
+    const result = await dictationBridge.startDictation();
+    const error = dictationReplyError(result);
+    if (error) throw new Error(error);
+    if (dictation !== session && dictationRetiring) {
+      // Cancelling during native startup may race process creation; reinforce stop.
+      stopDictationBestEffort();
+      return;
+    }
+    if (dictation === session && !session.stopping) {
+      // `start` returns before Windows SpeechRecognitionEngine is listening.
+      // Only its asynchronous `status: listening` event sets the live state.
+      dictationPhase = 'starting';
+      dictationNotice = 'Preparing microphone…';
+      paintDictation();
+    }
+  } catch (error) {
+    if (dictation === session) {
+      dictation = null;
+      dictationPhase = 'error';
+      dictationNotice = dictationMessage(error);
+      paintDictation();
+    }
+  }
+}
+
+export function initComposerDictation(): void {
+  paintDictation();
+  $<HTMLButtonElement>('dictationButton').addEventListener('click', () => { void toggleDictation(); });
+  $('chatInput').addEventListener('input', () => { if (!writingDictation && dictation) retireDictation(); });
+  $('chatInput').addEventListener('keydown', event => {
+    if (event.key === 'Escape' && dictation) { event.preventDefault(); retireDictation(); }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) retireDictation(); });
+  let unsubscribe: (() => void) | void;
+  try { unsubscribe = dictationBridge.onDictationEvent?.(onDictationEvent); }
+  catch (error) {
+    dictationPhase = 'error';
+    dictationNotice = dictationMessage(error);
+    paintDictation();
+  }
+  window.addEventListener('beforeunload', () => {
+    retireDictation();
+    if (typeof unsubscribe === 'function') unsubscribe();
+  }, { once: true });
+}
 function restoreDraft(): void {
   skillPicker?.close();
   cancelGoalRequest();
@@ -5977,6 +6238,7 @@ export function openChatView(name: string): void {
 
 function showView(name: string): void {
   const pane = $('chatBody');
+  if (name === 'settings') retireDictation();
   const leavingTimeline = timelineShown() && name !== 'timeline';
   if (leavingTimeline) timelineScrollTop = pane.scrollTop;
   $('composer').hidden = name === 'settings';
@@ -6073,6 +6335,7 @@ export function initChat(next: Deps): void {
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(projectGroup(entry.projectId) ?? '', pinnedChat(entry)) }))
   ], paintSessions);
   deps = next;
+  initComposerDictation();
   const stopComposerHeightMotion = installComposerHeightMotion($('composer'));
   const stopComposerDockMotion = installComposerDockMotion($('composerDock'));
   window.addEventListener('beforeunload', () => {
@@ -6533,6 +6796,8 @@ export function initChat(next: Deps): void {
   });
   $('composer').addEventListener('submit', (event) => {
     event.preventDefault();
+    // Explicit user submission ends dictation; no transcript event can rewrite a new draft.
+    retireDictation();
     const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
     if (currentPreparedPlan()) void sendPreparedPlan();
     else if (taskPlans.has(draftKey())) {
