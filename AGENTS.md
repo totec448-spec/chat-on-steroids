@@ -877,6 +877,13 @@ Explicit session project binding takes precedence at kernel entry. Workers inher
 exact prime's project/workspace. Different primes may each own `worker-1` in different folders.
 With `multiAgent.autoWorktrees` enabled, eligible new Git-project workers receive an approved
 isolated worktree and branch tied to the broker's exact allocation run and worker identity.
+The worker's first bootstrap must name its **allocated worktree**, not the Prime's checkout,
+as the default working directory; source-project AGENTS/Skill instructions may still be read
+from the selected Prime project, but that source folder is never the managed worker's cwd.
+An unfiled chat with no local workspace may still spawn ordinary workers without worktrees.
+An isolated worktree starts at a committed Git base: never imply the Prime's dirty/uncommitted
+files are present in that checkout. Unrelated unavailable approved roots must not invalidate
+the valid root that owns a worker; the actual owning root must remain available and approved.
 Existing isolated workers keep their workspace even if the setting is later disabled. Startup
 restores marker-verified leases only after the broker snapshot and before worker execution.
 Missing, corrupt or conflicting marker/identity evidence must fail closed rather than silently

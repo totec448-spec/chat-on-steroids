@@ -103,6 +103,79 @@ describe('automatic worker Git worktrees', () => {
     await finalizeWorkerWorkspace({ lease: first, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
   });
 
+  it('allocates, validates and restores the owning root while an unrelated approved root is unavailable', async () => {
+    const offlineRoot = { name: 'offline', path: path.join(temp, 'disconnected-drive') };
+    roots.push(offlineRoot);
+    await write(path.join(repo, 'file.txt'), 'user source edit\n');
+
+    const lease = await allocate();
+    expect(lease.newlyCreated).toBe(true);
+    expect(lease.approvedRoot).toEqual({ name: 'approved', path: approved });
+    await expect(validateWorkerWorkspaceLease(lease, roots)).resolves.toMatchObject({
+      ownershipToken: lease.ownershipToken
+    });
+    expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })?.ownershipToken).toBe(lease.ownershipToken);
+    expect(await fs.readFile(path.join(repo, 'file.txt'), 'utf8')).toBe('user source edit\n');
+    expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+
+    resetWorkerWorktreeRegistryForTests();
+    const restored = await restoreManagedWorktrees(roots);
+    expect(restored.rejected).toEqual([]);
+    expect(restored.restored).toHaveLength(1);
+    await expect(validateWorkerWorkspaceLease(restored.restored[0]!, roots)).resolves.toMatchObject({
+      ownershipToken: lease.ownershipToken
+    });
+    await finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+    expect(await fs.readFile(path.join(repo, 'file.txt'), 'utf8')).toBe('user source edit\n');
+  });
+
+  it('fails closed if the owning approved root goes offline while another approved root remains available', async () => {
+    const otherRoot = path.join(temp, 'unrelated-approved');
+    await fs.mkdir(otherRoot);
+    roots.push({ name: 'other', path: otherRoot });
+    const lease = await allocate();
+    const markerPath = path.join(path.dirname(lease.worktreePath), 'owner.json');
+    const moved = path.join(temp, 'temporarily-offline');
+    const branchHead = git(repo, ['rev-parse', lease.branchRef]);
+
+    await fs.rename(approved, moved);
+    await expect(validateWorkerWorkspaceLease(lease, roots)).rejects.toMatchObject({ code: 'WORKTREE_ROOT_CHANGED' });
+    expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })).toBeNull();
+    expect(await fs.readFile(path.join(moved, 'repo', 'file.txt'), 'utf8')).toBe('base\n');
+    expect(await fs.readFile(path.join(moved, path.relative(approved, markerPath)), 'utf8')).toContain(lease.ownershipToken);
+    expect(git(path.join(moved, 'repo'), ['rev-parse', lease.branchRef])).toBe(branchHead);
+
+    await fs.rename(moved, approved);
+    await finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+  });
+
+  it('does not inherit a lease through an overlapping root after its original root approval is revoked', async () => {
+    const lease = await allocate();
+    const broaderRoot: Root = { name: 'broader', path: temp };
+    await expect(validateWorkerWorkspaceLease(lease, [broaderRoot])).rejects.toMatchObject({
+      code: 'WORKTREE_ROOT_CHANGED'
+    });
+    expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })).toBeNull();
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+    await finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+  });
+
+  it('does not inherit an owned lease through a new symlink alias to the same approved directory', async () => {
+    const lease = await allocate();
+    const alias = path.join(temp, 'alternate-approved-path');
+    await fs.symlink(approved, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const remappedRoots: Root[] = [{ name: 'approved', path: alias }];
+    await expect(validateWorkerWorkspaceLease(lease, remappedRoots)).rejects.toMatchObject({
+      code: 'WORKTREE_ROOT_CHANGED'
+    });
+    expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })).toBeNull();
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+    await fs.unlink(alias);
+    await finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+  });
+
   it('gives only the initiating caller cleanup ownership when two allocations join one flight', async () => {
     const [created, joined] = await Promise.all([allocate(), allocate()]);
     expect(created.newlyCreated).toBe(true);

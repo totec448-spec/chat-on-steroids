@@ -184,10 +184,17 @@ async function rootsOf(approvedRoots: readonly Root[]): Promise<ResolvedRoot[]> 
   const result: ResolvedRoot[] = [];
   for (const root of approvedRoots) {
     if (!root.name || /[\\/]/.test(root.name)) throw new WorkerWorktreeError('WORKTREE_ROOT_INVALID', 'approved root has an invalid virtual name');
+    // An unrelated approved folder may be offline (for example a disconnected drive).
+    // Only existing, resolved roots may authorize an allocation or an owned lease.
+    // The selected source and lease's original owning root are checked below.
     try { result.push({ root: { ...root }, real: await realDirectory(root.path) }); }
     catch (error) {
-      if (error instanceof WorkerWorktreeError) throw error;
-      throw new WorkerWorktreeError('WORKTREE_ROOT_INVALID', `approved root ${root.name} is unavailable`);
+      if (error instanceof WorkerWorktreeError) {
+        if (error.code === 'WORKTREE_PATH_INVALID') continue;
+        throw error;
+      }
+      if (typeof (error as NodeJS.ErrnoException)?.code === 'string') continue;
+      throw new WorkerWorktreeError('WORKTREE_ROOT_INVALID', `approved root ${root.name} cannot be resolved`);
     }
   }
   if (!result.length) throw new WorkerWorktreeError('WORKTREE_ROOT_REQUIRED', 'no approved root can own a worker worktree');
@@ -565,6 +572,7 @@ export async function validateWorkerWorkspaceLease(
   try {
     const roots = await rootsOf(approvedRoots);
     const owningRoot = roots.find(root => root.root.name === lease.approvedRoot.name &&
+      path.resolve(root.root.path) === path.resolve(lease.approvedRoot.path) &&
       path.resolve(root.real) === path.resolve(lease.approvedRoot.path));
     if (!owningRoot || !isContained(owningRoot.real, lease.worktreePath)) {
       throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'worker worktree no longer belongs to a current approved root');

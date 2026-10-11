@@ -35,7 +35,7 @@ import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
 import { currentWorkspace, primeWorkspace, setWorkspaceFor } from '../workspace.js';
 import { getSessionProject } from '../projects.js';
-import { allocWorkerWorkspace, type WorkerWorktreeLease } from '../worktrees/index.js';
+import { allocWorkerWorkspace, WorkerWorktreeError, type WorkerWorktreeLease } from '../worktrees/index.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -1373,6 +1373,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // existing workers in `created`, but must never reallocate their checkouts.
           const allocated: WorkerWorktreeLease[] = [];
           const isolationNotes: string[] = [];
+          let sourceDirty = false;
+          let allocationAttempted = false;
           try {
             if (staged.newlyStaged && getConfig().multiAgent.autoWorktrees === true) {
               // A selected Local Project is durable even before this prime has made its first
@@ -1380,12 +1382,16 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               const sessionId = currentCall()?.caller.sessionId;
               const source = (sessionId ? await getSessionProject(sessionId) : null) ??
                 primeWorkspace(currentCaller().conversationId) ?? currentWorkspace();
-              if (!source) throw new Error('WORKTREE_SOURCE_REQUIRED: select a workspace before enabling automatic worker isolation.');
-              if (isGitRepository(source.real)) {
+              // Unfiled chats without any selected/learned folder can still delegate ordinary
+              // work. Once a source exists, a Git checkout must pass strict isolation checks.
+              if (!source) {
+                isolationNotes.push('No workspace is selected; workers were spawned without isolated Git worktrees.');
+              } else if (isGitRepository(source.real)) {
                 if (reg.ctx.readOnly || !reg.caps.command || !reg.caps.create || !reg.caps.edit) {
                   throw new Error('WORKTREE_PERMISSION_REQUIRED: worker isolation requires Command, Create and Edit, with Read-only disabled.');
                 }
                 for (const agentId of staged.newlyStagedWorkerIds) {
+                  allocationAttempted = true;
                   const lease = await allocWorkerWorkspace({
                     runId: staged.runId,
                     agentId,
@@ -1393,6 +1399,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                     approvedRoots: getConfig().roots
                   });
                   if (lease.newlyCreated) allocated.push(lease);
+                  sourceDirty ||= lease.sourceDirty;
                   markStagedWorkerWorktree(staged.runId, agentId);
                   setWorkspaceFor(`agent:${staged.runId}:${agentId}`, lease.workspace);
                 }
@@ -1400,6 +1407,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
                 }
                 isolationNotes.push(`${staged.newlyStagedWorkerIds.length} newly staged worker(s) received isolated Git worktrees.`);
+                if (sourceDirty) {
+                  isolationNotes.push('Warning: the source checkout has uncommitted changes. Workers start from the committed Git base revision, so those uncommitted changes were not copied into their worktrees.');
+                }
               } else {
                 isolationNotes.push('The selected workspace is not a Git repository; no worktrees were allocated.');
               }
@@ -1416,8 +1426,16 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             // In particular, a retry must not take another user's branch or remove its files.
             if (allocated.length) {
               const retained = allocated.map(lease => lease.worktreePath).join(', ');
-              logWarn(`multi-agent: spawn failed; ${allocated.length} unaccepted managed worktree(s) retained for safe inspection: ${retained}`);
-              throw new Error(`${error instanceof Error ? error.message : String(error)} WORKTREE_ROLLBACK_RETAINED: unaccepted Git checkouts were kept to protect any user files: ${retained}`);
+              logWarn(`multi-agent: spawn failed (${error instanceof Error ? error.message : String(error)}); ${allocated.length} unaccepted managed worktree(s) retained for safe inspection: ${retained}`);
+              throw new Error(`WORKTREE_ROLLBACK_RETAINED: ${allocated.length} unaccepted Git checkout(s) were kept to protect user files. Inspect the local app logs for their locations and the allocation error.`);
+            }
+            if (allocationAttempted) {
+              // Even the first failed allocation can include a native path in a Git or
+              // filesystem error (for example an unsafe managed parent directory).
+              // Only a trusted worktree error code crosses the model-facing boundary.
+              logWarn(`multi-agent: worker allocation failed: ${error instanceof Error ? error.message : String(error)}`);
+              const code = error instanceof WorkerWorktreeError ? error.code : 'WORKTREE_ALLOCATION_FAILED';
+              throw new Error(`${code}: isolated Git checkout allocation failed; see local app logs for details. The worker spawn was rolled back.`);
             }
             throw error;
           }

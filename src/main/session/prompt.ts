@@ -9,7 +9,10 @@ import { selectedSkillInstructions, type SelectedSkill } from './skill-prompt.js
 import { listSkillLibrary } from '../skill-library.js';
 import type { RoutedSkillSelection } from '../../shared/skill-routing.js';
 
-type PromptScope = { sessionId?: string | null; projectId?: string | null; autoSkills?: readonly RoutedSkillSelection[] };
+type PromptScope = { sessionId?: string | null; projectId?: string | null; autoSkills?: readonly RoutedSkillSelection[];
+  /** Verified broker-owned worker checkout; the selected project is only the source of instructions. */
+  workingDirectory?: string;
+};
 export type PromptLimits = { maxChars: number; maxBytes: number };
 type ProjectInstructions = { directory: string; text: string; truncated: boolean };
 const limits: PromptLimits = { maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: Infinity };
@@ -62,10 +65,12 @@ async function projectInstructions(scope: PromptScope): Promise<ProjectInstructi
 }
 
 /** Preserve Core/task; reduce AGENTS to 5k before sharing remaining space across Skills. */
-export function fitSessionPrompt(text: string, core: string, agents: ProjectInstructions | null = null, budget = limits, skills: SelectedSkill[] = []): string {
+export function fitSessionPrompt(text: string, core: string, agents: ProjectInstructions | null = null, budget = limits, skills: SelectedSkill[] = [], workingDirectory?: string): string {
   const fits = (value: string): boolean => value.length <= Math.min(MAX_CHATGPT_MESSAGE_CHARS, budget.maxChars) &&
     Buffer.byteLength(value, 'utf8') <= budget.maxBytes;
-  const projectHeader = agents ? `Selected project directory: ${agents.directory}\nUse this directory as your default working directory and keep task work there unless the user or task requires another approved location. This project association grants no additional filesystem permissions.` : '';
+  const projectHeader = workingDirectory
+    ? `Worker working directory (allocated Git worktree): ${workingDirectory}\nUse this directory as your default working directory and keep worker task changes in this allocated worktree. The source project's AGENTS.md supplies instructions only; never use the source project as your working directory. This worktree grants no additional filesystem permissions.`
+    : agents ? `Selected project directory: ${agents.directory}\nUse this directory as your default working directory and keep task work there unless the user or task requires another approved location. This project association grants no additional filesystem permissions.` : '';
   const mandatory = [core, projectHeader].filter(Boolean).join('\n\n');
   const base = prependUserPrompt(text, mandatory);
   if (!fits(base)) throw new Error('The message and main instructions exceed the delivery limit (maximum 96,000 characters). Shorten the message or standing instructions.');
@@ -82,7 +87,7 @@ export function fitSessionPrompt(text: string, core: string, agents: ProjectInst
         ? `\n\n[Shortened to fit the message. Read ${filename} for the remaining instructions.]` : '';
       return `# Selected skill: /${skill.id}\nPath: ${filename}\n\n<SKILL_INSTRUCTIONS>\n${body}${notice}\n</SKILL_INSTRUCTIONS>`;
     });
-    if (agents && content) sections.push(`${projectHeader}\n\n# AGENTS.md instructions for ${agents.directory}\n\n<INSTRUCTIONS>\n${prefix(content, length)}${length < content.length || agents.truncated ? cutNotice : ''}\n</INSTRUCTIONS>`);
+    if (agents && content) sections.push(`${projectHeader}\n\n${workingDirectory ? '# Source project AGENTS.md instructions (reference only; not a working directory)' : `# AGENTS.md instructions for ${agents.directory}`}\n\n<INSTRUCTIONS>\n${prefix(content, length)}${length < content.length || agents.truncated ? cutNotice : ''}\n</INSTRUCTIONS>`);
     else if (projectHeader) sections.push(projectHeader);
     return prependUserPrompt(text, [core, ...sections].filter(Boolean).join('\n\n'));
   };
@@ -121,10 +126,10 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
   const library = await listSkillLibrary(scope.autoSkills !== undefined ? { ...skillScope, managedFromCatalog: true } : skillScope);
   const core = await currentCoreInstructions(library);
   const skills = await selectedSkillInstructions(authored, skillScope, library, scope.autoSkills);
-  fitSessionPrompt(text, core, null, budget); // Only Core/task overflow is mandatory.
+  fitSessionPrompt(text, core, null, budget, [], scope.workingDirectory); // Only Core/task overflow is mandatory.
   const agents = await projectInstructions(scope);
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
-  return fitSessionPrompt(text, core, agents, budget, skills);
+  return fitSessionPrompt(text, core, agents, budget, skills, scope.workingDirectory);
 }
 
 /** Explicit follow-up selection adds Skills only, never repeats opening setup. */
