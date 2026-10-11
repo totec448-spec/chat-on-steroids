@@ -29,7 +29,7 @@ vi.mock('electron', () => ({
     encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
     decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
-  app: { on: vi.fn(), getPath: (_name: string) => '', getLocale: () => 'en-US', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
+  app: { on: vi.fn(), once: vi.fn(), getPath: (_name: string) => '', getLocale: () => 'en-US', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
