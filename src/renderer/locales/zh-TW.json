@@ -472,7 +472,7 @@
   "Automatic plugin refresh": "自動重新整理外掛",
   "Browser only": "僅瀏覽器",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "不為自動重新整理外掛或聊天恢復開啟分頁。主動新增聊天、啟動子代理和重新載入模型仍然有效。",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "應用程式建立的閒置分頁會在兩分鐘後關閉。超過子代理數量上限時，休眠的子代理分頁可能提前關閉。正在工作的回合和未傳送的草稿會保留。",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "應用程式建立的閒置分頁會在五分鐘後關閉，已完成的在兩分鐘後關閉。超過子代理數量上限時，休眠的子代理分頁可能提前關閉。正在工作的回合和未傳送的草稿會保留。",
   "Overwrite ChatGPT tool rows": "替換 ChatGPT 工具行",
   "Show recorded local activity in the ChatGPT page.": "在 ChatGPT 頁面中顯示已記錄的本機活動。",
   "Show durations in ChatGPT": "在 ChatGPT 中顯示耗時",

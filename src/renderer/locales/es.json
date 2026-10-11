@@ -283,7 +283,7 @@
   "Automatic plugin refresh": "Actualización automática de complementos",
   "Browser only": "Solo navegador",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "No abrir pestañas para actualizar complementos automáticamente ni recuperar chats. La creación manual de chats, los subagentes y Recargar modelos siguen funcionando.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Las pestañas inactivas creadas por la aplicación se cierran después de dos minutos. Las pestañas de subagentes en reposo pueden cerrarse antes si se supera el límite de subagentes. Los turnos activos y los borradores sin enviar permanecen abiertos.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Las pestañas inactivas creadas por la aplicación se cierran después de cinco minutos; las terminadas, después de dos. Las pestañas de subagentes en reposo pueden cerrarse antes si se supera el límite de subagentes. Los turnos activos y los borradores sin enviar permanecen abiertos.",
   "Overwrite ChatGPT tool rows": "Reemplazar las filas de herramientas de ChatGPT",
   "Show recorded local activity in the ChatGPT page.": "Mostrar la actividad local registrada en la página de ChatGPT.",
   "Show durations in ChatGPT": "Mostrar duraciones en ChatGPT",
