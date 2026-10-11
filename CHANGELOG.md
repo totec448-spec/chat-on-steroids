@@ -11,7 +11,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.34] — Goal on every plan, and a background window that stays
 
-Goal and Loop now work on ChatGPT plans that don't show a model picker, such as the Free plan. The Background chats window survives extension updates, and ChatGPT gets clearer hints when it calls a tool on the wrong connector or starts a command that is already running.
+Goal and Loop now work on ChatGPT plans that don't show a model picker, such as the Free plan, and Compact & Resume works reliably inside ChatGPT Projects. The Background chats window survives extension updates, and ChatGPT gets clearer hints when it calls a tool on the wrong connector or starts a command that is already running.
 
 ### ✨ Highlights
 
@@ -22,11 +22,12 @@ Goal and Loop now work on ChatGPT plans that don't show a model picker, such as 
 
 ### 🛠 Fixed
 
+- **Compact & Resume in a ChatGPT Project** often stopped before the new chat opened (8 of 14 times in testing), because ChatGPT changes a Project chat's address while it loads. It now completes, and the new chat stays in the same Project. A handoff request ChatGPT never received is sent once more instead of waiting forever, an earlier attempt's request left in the message box no longer blocks the next try, and a tab opened for a failed attempt is closed again.
 - **ChatGPT now sees the notes on command results.** The hints that come with a command's result, such as which command in a batch failed, that a non-zero exit is an expected answer (for example a search with no matches), or how to recover from a common mistake, were only in a part of the result ChatGPT doesn't show the model. They now reach it.
 
 ### 💛 Thank you
 
-To **@rishabhpunnackadan-ux** for the detailed reports behind the clearer connector hint and the repeated-command note.
+To **@Haz4rdovisk** for the native-Project test run and the Compact & Resume fixes it led to, and to **@rishabhpunnackadan-ux** for the detailed reports behind the clearer connector hint and the repeated-command note.
 
 **Updating?** The extension updates itself once no chat is busy. If it stays on the old version, reload it once in `chrome://extensions`. On macOS, the app asks once for your login password so the new version can open its saved keys: choose **Always Allow**.
 
