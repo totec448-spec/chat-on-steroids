@@ -3624,7 +3624,20 @@ read after a reload sends its outline too, which is how recaps that arrived late
 The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
 `sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
 beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
-(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. A DIL reply whose
+(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows.
+
+A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
+of its own but keeps the answer's one MCP request id across it. The page ends the local turn there
+and sends `turn_end` with `continued: true` when a message steered it (Stop stayed) or replaced it
+while it was unfinished (no answer yet; Stop can already be gone at that tick). A turn that ended
+with its answer is never marked. Past a `continued` end, a call of that request that *started*
+after the end is filed under the turn that began then, and the request's ownership moves there
+(`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);
+a late result of a call that started before the end stays with the earlier turn (`turnOpenAt`).
+Each shell turn descriptor names the user message that opened it (`question`, fiber.js
+`shellQuestion`); content.js sends it with `turn_trace`, and `writeTurnTrace` refuses an outline
+whose question differs from the turn's recorded question (`timelineTurns[turnId].questionId`), so
+the moment the page switches turns cannot file the newer answer's outline under the earlier turn. A DIL reply whose
 `content` is only `::chatgpt-content-reference{…}` naming itself is read as the `fallbackMarkdown`
 of that one `dil` reference (`shellItemText`), so its recorded text is the reply rather than the
 directive. In that Markdown the timeline shows an `entity` widget as its name in bold and drops
