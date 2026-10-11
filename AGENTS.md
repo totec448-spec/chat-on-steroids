@@ -210,6 +210,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
+| Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
 
 Keep evidence levels separate in all reports: **source → tests → build → package → installed
 payload → live browser/device/provider behavior**. Passing one level does not prove the next.
@@ -2342,7 +2343,8 @@ Selecting a chat in the app (`sessions:followTab`, preload `followSessionTab`) w
 chats on hands its conversation to the same extensions as `follow`: only the newest selection,
 only to a browser that already has the chat open, and it lapses after 10 s. The extension makes
 that tab the selected one in its Background chats window. That never focuses the window, opens a
-tab or touches the user's own windows (#1249).
+tab or touches the user's own windows (#1249). With `backgroundPlacement: 'group'` the app sends no
+follow and the extension ignores one (#128).
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
@@ -2363,6 +2365,15 @@ its fiber-stamped `<img>` already loaded and answers `{ data: base64 }` or `{ er
 app requires a decodable PNG, JPEG or WebP of at most 25 MB, writes a `.part` file beside the
 destination and hard-links it into place, so an existing name is never replaced, and answers the
 tool within 60 s. No URL, cookie or credential leaves the page.
+
+In tab-group mode (#128) the extension keeps the group's id in `chrome.storage.session`
+(`chatBackgroundGroup`) and mirrors it to local storage (`chatBackgroundGroupMirror`); a mirrored id is
+trusted only while the group still carries the title "Chat On Steroids", and `onStartup` drops the
+mirror. After a browser restart only an exactly titled group in a normal window whose every tab the
+app owns is adopted again. Group mode's reconcile never moves or regroups tabs. Only a group the app
+just created is collapsed, and every grouped tab is created inactive. A group that vanishes during
+placement is retried once, then the tab moves to the minimized window. When the last app tab closes,
+Chrome deletes the group and its auto-saved copy. Browsers without `chrome.tabGroups` use the window.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
