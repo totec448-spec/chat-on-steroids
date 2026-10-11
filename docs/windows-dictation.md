@@ -42,7 +42,7 @@ On a Windows machine with a prepared speech WAV, the optional
 recognition events against synthetic audio without using the microphone.
 It is an explicit smoke test; it does not run as part of CI.
 
-On Windows, `node scripts/smoke-dictation-parent-windows.cjs` checks the
+On Windows, `node scripts/fixtures/smoke-dictation-parent-windows.cjs` checks the
 actual PowerShell parent-liveness loop by killing a synthetic parent process.
 The recognizer setup is replaced with a no-microphone fixture, so
 this check never opens the audio device. The same smoke check runs under

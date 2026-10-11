@@ -1,5 +1,5 @@
 // Windows smoke test for the real PowerShell PID-watcher loop, without any microphone.
-// Run: node scripts/smoke-dictation-parent-windows.cjs
+// Run: node scripts/fixtures/smoke-dictation-parent-windows.cjs
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -10,7 +10,7 @@ if (process.platform !== 'win32') {
   process.exit(0);
 }
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'src/main/dictation.ts'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src/main/dictation.ts'), 'utf8');
 const embedded = source.match(/const SCRIPT = (\[[\s\S]*?\])\.join\('\\r\\n'\)/);
 if (!embedded) throw new Error('Could not locate the production recognizer script');
 const original = vm.runInNewContext(embedded[1], Object.create(null)).join('\r\n');
