@@ -2140,5 +2140,9 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT가 같은 채팅에서 아직 실행 중인 명령을 다시 시작하면, 결과가 실행 중인 명령을 알려 줍니다.",
   "Compact & Resume in Projects": "프로젝트에서 압축 후 계속",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT 프로젝트 안의 채팅을 새 채팅으로 옮기는 작업이 이제 끝까지 완료되고, 새 채팅도 그 프로젝트에 남습니다.",
-  "In ChatGPT: {0}": "ChatGPT에서: {0}"
+  "In ChatGPT: {0}": "ChatGPT에서: {0}",
+  "This chat was deleted in ChatGPT. Start a new chat to continue.": "이 채팅은 ChatGPT에서 삭제되었습니다. 계속하려면 새 채팅을 시작하세요.",
+  "Chat deleted in ChatGPT": "ChatGPT에서 삭제된 채팅",
+  "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT에 이 채팅이 더 이상 없으므로 더는 보낼 수 없습니다.",
+  "Start a new chat to continue. This history stays in the app.": "계속하려면 새 채팅을 시작하세요. 이 기록은 앱에 남아 있습니다."
 }
