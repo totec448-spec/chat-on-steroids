@@ -2017,7 +2017,10 @@ async function moveToBackgroundWindow(tab) {
 /** Reconstruct ownership from the app's existing tab policy after extension reload or
  * OS browser startup. A cached window id alone never survives a browser restart. */
 async function reconcileBackgroundWindow(policy) {
-  if (policy.background !== true) return;
+  const grouped = groupsAvailable();
+  // Helper tabs (model catalog, successor chats) are background even with Background chats off,
+  // so group mode re-finds its group either way. Window mode keeps today's gate.
+  if (policy.background !== true && !grouped) return;
   const managed = new Set((Array.isArray(policy.managedConversations) ? policy.managedConversations : []).map(cleanConversationId).filter(Boolean));
   const inputIds = new Set((Array.isArray(policy.inputs) ? policy.inputs : []).map(input => input?.id).filter(id => typeof id === 'string'));
   const owns = tab => {
@@ -2032,6 +2035,9 @@ async function reconcileBackgroundWindow(policy) {
       return (inputId && inputIds.has(inputId)) || catalogHelper;
     } catch { return false; }
   };
+  // #128: group mode never moves tabs. Tabs the user dragged out stay out, and nothing is pulled
+  // into or out of the user's own window; only the group itself is re-found.
+  if (grouped) return inBackgroundWindow(() => adoptBackgroundGroup(owns));
   return inBackgroundWindow(async () => {
     let window = await storedBackgroundWindow();
     const tabs = await chrome.tabs.query({});
@@ -2060,6 +2066,24 @@ async function reconcileBackgroundWindow(policy) {
     }
     return true;
   });
+}
+/** Re-finds the app's group after an extension reload or a browser restart that restored it. */
+async function adoptBackgroundGroup(owns) {
+  if (await storedBackgroundGroup()) return true;
+  let groups = [];
+  try { groups = await chrome.tabGroups.query({ title: BACKGROUND_GROUP_TITLE }); } catch { return false; }
+  const tabs = await chrome.tabs.query({});
+  // Chrome matches the title as a pattern; only the exact title counts, and the oldest group wins.
+  for (const group of (Array.isArray(groups) ? groups : []).filter(group => group?.title === BACKGROUND_GROUP_TITLE).sort((a, b) => a.id - b.id)) {
+    const members = tabs.filter(tab => tab.groupId === group.id);
+    // Any tab the app does not own makes it the user's group.
+    if (!members.length || members.some(tab => tab.incognito === true || !owns(tab))) continue;
+    const window = await chrome.windows.get(group.windowId).catch(() => null);
+    if (window?.type !== 'normal' || window.incognito === true) continue;
+    await rememberBackgroundGroup(group.id);
+    return true;
+  }
+  return false;
 }
 /** Only app-owned windows are sized; no tab placement changes window focus/state. */
 async function createChatTab(url, background = false, active = !background) {
@@ -5153,6 +5177,8 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
   chrome.runtime.onStartup.addListener(() => {
     // A new browser session numbers its windows afresh; an old background window id means nothing.
     void chrome.storage.local.remove(BACKGROUND_WINDOW_MIRROR).catch(() => undefined);
+    // Tab-group ids are per browser session too (#128).
+    void chrome.storage.local.remove(BACKGROUND_GROUP_MIRROR).catch(() => undefined);
     void load()
       .then(() => drainCommandAcks())
       .then(() => drain())

@@ -1984,6 +1984,13 @@ describe('active agent tab discard protection', () => {
     expect((await local.get('chatBackgroundWindowMirror')).chatBackgroundWindowMirror).toBeUndefined();
   });
 
+  it('forgets the mirrored tab group when the browser starts', async () => {
+    const local = new FakeStorageArea({ ...paired, chatBackgroundGroupMirror: 50 });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch: vi.fn(async () => response(404, {})) });
+    await worker.startup();
+    expect((await local.get('chatBackgroundGroupMirror')).chatBackgroundGroupMirror).toBeUndefined();
+  });
+
   it('requests the tabGroups permission without an install warning', () => {
     const manifest = JSON.parse(readFileSync('extension/manifest.json', 'utf8'));
     expect(manifest.permissions).toContain('tabGroups');
