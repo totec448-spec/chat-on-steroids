@@ -1345,6 +1345,7 @@
    * leaves the group or the mode changes; the browser drops it with the document.
    */
   let keepAwakeRelease = null;
+  let keepAwakeRegistration = null;
   function setKeepAwake(on) {
     const locks = globalThis.navigator && globalThis.navigator.locks;
     if (on && !keepAwakeRelease && locks && typeof locks.request === 'function') {
@@ -1369,15 +1370,16 @@
     // any observation or mutation. This is what lets the worker retain a terminal tombstone
     // across external navigation and still admit the genuinely new page, without accepting
     // delayed IPC from the dead one merely because both share a numeric tab id.
-    if (!documentReady) {
-      documentReady = sendToWorker({ type: 'register_document', navigationEpoch: epoch }).then((registered) => {
-        // A tab the app placed in its own tab group starts awake: Chrome pauses tabs in a
-        // collapsed group within seconds, often before the worker's next pass could say so (#128).
-        if (registered && registered.ok === true && registered.keepAwake === true) setKeepAwake(true);
-        return registered;
-      });
+    if (!documentReady) documentReady = sendToWorker({ type: 'register_document', navigationEpoch: epoch });
+    const registration = documentReady;
+    const registered = await registration;
+    // A tab the app placed in its own tab group starts awake: Chrome pauses tabs in a collapsed
+    // group within seconds, often before the worker's next pass could say so (#128). Once per
+    // registration, so a later `clf-keep-awake` off is never undone by a cached reply.
+    if (registered && registered.keepAwake === true && keepAwakeRegistration !== registration) {
+      keepAwakeRegistration = registration;
+      setKeepAwake(true);
     }
-    const registered = await documentReady;
     if (!registered || registered.ok !== true) {
       // A sleeping/reloading service worker is transient. Keep the document unregistered
       // (and therefore fail closed) for this call, but let the next observer tick retry.
