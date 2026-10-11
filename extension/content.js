@@ -13062,6 +13062,10 @@
       if (before === expected) {
         return (await ask({ type: 'plugin_refresh', action: 'current', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId }))?.data?.ok === true && stillCurrent();
       }
+      if (request.observeOnly) {
+        await fail(t('content_connector_settings_unverified', 'Exact connector settings could not be verified'));
+        return false;
+      }
       if (!view.refresh || view.refresh.disabled) {
         const error = t(
           'content_connector_schema_no_refresh',

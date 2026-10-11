@@ -2722,8 +2722,16 @@ var CLF_DOM = (() => {
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
         if (!main) return null;
-        const rows = [...main.querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
-          [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+        // Measured 2026-10-11: installed rows became links to exact management pages.
+        // Catalog and external links cannot identify an installed connector.
+        const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
+          if (button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
+          if (button.tagName === 'A') {
+            const url = new URL(button.href, location.href);
+            if (url.origin !== location.origin || !/^\/settings\/plugins-settings\/plugin_asdk_app_[a-zA-Z0-9_-]+$/.test(url.pathname) || url.hash) return false;
+          }
+          return [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName);
+        });
         return rows.length ? rows : null;
       }
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&

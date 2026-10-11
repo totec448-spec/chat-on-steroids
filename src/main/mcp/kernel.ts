@@ -1,5 +1,6 @@
 import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
 import { noteConnectorUse } from '../connector-proof.js';
+import { beginPluginToolCall } from '../plugin-refresh.js';
 import { pluginManager } from '../plugins/manager.js';
 import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 /**
@@ -25,7 +26,7 @@ import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-compu
 
 import { rawPromises as fs } from '../rawfs.js';
 import { randomUUID } from 'node:crypto';
-import { beginToolTiming, inboundRequestId, inboundPublication } from './inbound.js';
+import { beginToolTiming, inboundRequestId, inboundPublication, inboundProviderRequest } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Capabilities, Root } from '../../shared/types.js';
@@ -650,12 +651,14 @@ export async function dispatch(
   };
   // Every call runs through here, so the proof is installed before any call can be running.
   setRequestOwner(requestOwner);
+  const confirmUse = !parent && inboundProviderRequest() ? beginPluginToolCall(surface) : null;
   try {
     const result = await trackMcpRequest(() =>
       trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent))
     );
     // In-process callers have no socket; resolving their outer invocation publishes it.
     if (!parent && !inboundPublication()) context.publication!.completedAt = Date.now();
+    if (!result.isError) confirmUse?.();
     return result;
   } catch (error) {
     if (!parent) context.publication!.failed = true;

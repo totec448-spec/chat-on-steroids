@@ -9,8 +9,8 @@
  *
  * So: write to a temp file, rename over the target (atomic on NTFS), and coalesce
  * bursts on a short timer so a chatty broker does not rewrite the file per message.
- * A parse failure returns null rather than throwing — a corrupt state file must cost
- * the pending work, never the app's ability to start.
+ * Reads normally return null on corruption so the app can start. Authority ledgers
+ * can require strict reads: unreadable state must not become a fresh grant.
  */
 
 import { promises as fs } from 'node:fs';
@@ -21,6 +21,13 @@ const WRITE_DELAY_MS = 300;
 const RETRY_MAX_MS = 5_000;
 
 let root = '';
+let revision = 0;
+const revisions = new Map<string, number>();
+/** Process-local invalidation for projections owned by a named ledger. */
+export function durableRevision(name: string): number {
+  if (!revisions.has(name)) revisions.set(name, revision);
+  return revisions.get(name)!;
+}
 interface PendingWrite {
   generation: number;
   value: unknown;
@@ -37,6 +44,7 @@ let nextGeneration = 1;
 
 export function initDurableStore(userDataDir: string): void {
   root = path.join(userDataDir, 'state');
+  revisions.clear(); revision++;
 }
 
 function fileFor(name: string): string {
@@ -44,13 +52,20 @@ function fileFor(name: string): string {
   return path.join(root, `${name}.json`);
 }
 
-export async function readDurable<T>(name: string): Promise<T | null> {
+export async function readDurable<T>(name: string, options: { strict?: boolean } = {}): Promise<T | null> {
   if (!root) return null;
   try {
     const raw = await fs.readFile(fileFor(name), 'utf8');
-    return JSON.parse(raw) as T;
+    const value = JSON.parse(raw) as T;
+    // writeDurableNow(null) removes the file; an on-disk null is not that reset receipt.
+    if (options.strict && value === null) throw new Error('Invalid null state');
+    return value;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
+    if (options.strict && code !== 'ENOENT') {
+      // JSON parser diagnostics can contain stored content. Keep the public error generic.
+      throw new Error(`Could not read ${name} state`);
+    }
     if (code && code !== 'ENOENT') {
       logWarn(`could not read ${name} state: ${(err as Error).message}`);
     }
@@ -127,6 +142,7 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
 
   // A newer generation may have arrived while this one was on disk. Completing the older
   // write is still useful, but it must never erase the newer pending snapshot.
+  revisions.set(name, ++revision);
   if (pending.get(name)?.generation === slot.generation) {
     pending.delete(name);
     retryAttempts.delete(name);
@@ -200,6 +216,7 @@ export async function flushDurable(): Promise<void> {
 
 /** Test seam: drops queued writes without touching disk. */
 export function resetDurableForTests(): void {
+  revisions.clear(); revision++;
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
   pending.clear();

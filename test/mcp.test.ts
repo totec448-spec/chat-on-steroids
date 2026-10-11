@@ -26,6 +26,7 @@ import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../
 import { skillCatalogInstructions } from '../src/main/skills.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
+import { publishPluginSurface, pluginRefreshStatuses, resetPluginRefreshForTests } from '../src/main/plugin-refresh.js';
 import { friendlyError } from '../src/main/mcp/kernel.js';
 import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { SURFACE_LIST, surfaceDefinition, type SurfaceId } from '../src/main/mcp/surfaces.js';
@@ -434,6 +435,19 @@ describe('endpoint hardening', () => {
 
     await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/src/app.ts'] } });
     expect(lastToolCallAt()).not.toBeNull();
+  });
+
+  it('counts only successful provider calls as current-publication working evidence', async () => {
+    resetPluginRefreshForTests();
+    publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', [{ name: 'read', description: 'Read', inputSchema: { type: 'object' } }]);
+    try {
+      await rawPost(endpoint.urls.core, JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } } }), selfTestHeaders());
+      expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+      await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/missing-file'] } });
+      expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+      await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } });
+      expect((await pluginRefreshStatuses()).core).toMatchObject({ responding: true });
+    } finally { resetPluginRefreshForTests(); }
   });
 
   it('counts a request to either surface as ChatGPT reaching this PC', async () => {

@@ -2280,6 +2280,178 @@ it('says nothing about being current until the check has actually answered', asy
 /**
  * A staged update is not "up to date", and it is not a failure either.
  */
+it('reports update readiness only from checked versions and current connector evidence', async () => {
+  const { window: w, state, push } = await mountChat();
+  const ready = structuredClone(state);
+  ready.update.checkedAt = Date.now();
+  ready.bridge = { ...ready.bridge, paired: true, present: true, extensionVersion: ready.update.current };
+  ready.status = { ...ready.status, state: 'connected', surfaces: [{ id: 'core', connectorName: 'Chat On Steroids Core', optional: false,
+    available: true, state: 'live', detail: '', description: 'Core connector', cardSummary: 'Files and terminal', localUrl: null, publicUrl: null,
+    lastRequestAt: Date.now(), lastToolCallAt: null, tools: ['read'] }] };
+  ready.connectorSchemas = { core: 'schema-a' };
+  ready.connectorRefresh = { core: { schemaId: 'schema-a', state: 'current' } };
+  const summary = () => w.document.getElementById('updateReadinessSummary')!;
+  push(ready);
+  expect(summary()?.dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(ready.update.current);
+  expect(w.document.querySelector('[data-update-part="extension"]')!.textContent).toContain(ready.update.current);
+
+  const notReady = [
+    (s: any) => { s.update.checkedAt = null; },
+    (s: any) => { s.update.stage = 'failed'; },
+    (s: any) => { s.update.latest = '2.0.3'; s.update.stage = 'ready'; },
+    (s: any) => { s.bridge.present = false; },
+    (s: any) => { s.bridge.paired = false; },
+    (s: any) => { s.bridge.extensionVersion = null; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.1'; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.3'; },
+    (s: any) => { s.status.state = 'offline'; },
+    (s: any) => { s.status.surfaces[0].state = 'error'; },
+    (s: any) => { s.status.surfaces[0].lastRequestAt = null; s.status.surfaces[0].proof = { requestAt: Date.now() }; },
+    (s: any) => { s.connectorRefresh = {}; },
+    (s: any) => { s.connectorRefresh.core.schemaId = 'old-schema'; },
+    (s: any) => { s.connectorRefresh.core.state = 'refreshing'; },
+    (s: any) => { s.status.surfaces = []; }
+  ];
+  for (const change of notReady) {
+    const next = structuredClone(ready); change(next); push(next);
+    expect(summary().dataset.ready).toBe('false');
+    expect(summary().textContent).not.toBe('All checks passed');
+  }
+  const working = structuredClone(ready);
+  working.connectorRefresh = { core: { schemaId: 'schema-a', state: 'unknown', responding: true } };
+  push(working);
+  expect(summary().dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('Ready to use; full connector schema not verified');
+  expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(false);
+  push(ready);
+  const optionalOff = structuredClone(ready);
+  optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
+  push(optionalOff);
+  expect(summary().dataset.ready).toBe('true');
+  const emptyPlugins = structuredClone(ready);
+  emptyPlugins.status.surfaces.push({ ...ready.status.surfaces[0], id: 'plugins', connectorName: 'Plugins', optional: true, tools: [], lastRequestAt: null } as any);
+  emptyPlugins.connectorSchemas.plugins = 'empty-schema';
+  emptyPlugins.connectorRefresh.plugins = { schemaId: 'empty-schema', state: 'pending' };
+  push(emptyPlugins);
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.classList.contains('is-skipped')).toBe(true);
+  const enabledPlugins = structuredClone(emptyPlugins);
+  enabledPlugins.status.surfaces.at(-1)!.tools = ['plugin_tool'];
+  push(enabledPlugins);
+  expect(summary().dataset.ready).toBe('false');
+  const emptyCore = structuredClone(ready);
+  emptyCore.status.surfaces[0].tools = [];
+  emptyCore.connectorRefresh = {};
+  push(emptyCore);
+  expect(summary().dataset.ready).toBe('false');
+  push(ready);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(summary().textContent).toBe('すべての確認が完了しました');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain('最新版です');
+  setLanguage('en');
+});
+
+it('keeps update readiness actions stable and does not start update or connection work on pushes', async () => {
+  const installUpdate = vi.fn(), connect = vi.fn(), refreshUpdate = vi.fn(), updateAll = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { installUpdate, connect, refreshUpdate, updateAll });
+  const button = w.document.getElementById('updateReviewSetup') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  button.focus(); push(structuredClone(state));
+  expect(w.document.activeElement).toBe(button);
+  expect(installUpdate).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(refreshUpdate).not.toHaveBeenCalled();
+  expect(updateAll).not.toHaveBeenCalled();
+  button.click();
+  expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
+});
+
+it('shows update failure causes and next steps without using stale connector diagnostics', async () => {
+  const { window: w, state, push } = await mountChat();
+  const next = structuredClone(state) as any;
+  const core = { id: 'core', connectorName: 'Core', description: 'Core', cardSummary: 'Files and terminal',
+    optional: false, available: true, state: 'live', detail: '', tools: ['read'], localUrl: null,
+    publicUrl: null, lastRequestAt: null, lastToolCallAt: null };
+  next.update = { ...next.update, stage: 'failed', error: 'GitHub returned 503' };
+  next.bridge = { ...next.bridge, running: true, paired: true, present: false, extensionVersion: '0.0.1' };
+  next.status = { ...next.status, state: 'offline', detail: 'Network unavailable',
+    surfaces: [{ ...core, state: 'error', detail: 'Network unavailable' }] };
+  const row = (id: string) => w.document.querySelector(`[data-update-part="${id}"]`)!.textContent!;
+  push(next);
+  expect(row('app')).toContain('GitHub returned 503');
+  expect(row('app')).toContain('current app');
+  expect(row('extension')).toContain('active chats');
+  expect(row('core')).toContain('Network unavailable');
+  expect(row('core')).toContain('Review setup');
+  next.status.surfaces = []; push(next);
+  expect(row('core')).toContain('Network unavailable');
+  expect(w.document.querySelector('[data-update-part="core"]')!.classList.contains('is-bad')).toBe(true);
+  next.status.detail = ''; push(next);
+  expect(row('core')).toContain('Review setup');
+  next.status.surfaces = [{ ...core }];
+  next.status.state = 'connected'; next.status.surfaces[0].state = 'live';
+  next.connectorSchemas = { core: 'current' };
+  next.connectorRefresh = { core: { schemaId: 'current', state: 'failed', failure: 'inspection' } };
+  push(next);
+  expect(row('core')).toContain('Could not inspect');
+  expect(row('core')).toContain('tool list');
+  next.connectorRefresh.core.failure = 'confirmation'; push(next);
+  expect(row('core')).toContain('Could not confirm');
+  next.connectorRefresh.core.schemaId = 'old'; push(next);
+  expect(row('core')).not.toContain('Could not confirm');
+  next.connectorRefresh.core = { schemaId: 'current', state: 'manual' }; push(next);
+  expect(row('core')).toContain('Refresh or recreate');
+  expect(row('core')).toContain('Update all to recheck');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(row('core')).toContain('更新または作り直し');
+  expect(row('core')).toContain('まとめて更新');
+  setLanguage('en');
+});
+
+it.each(['reply', 'transport'])('keeps an Update all %s failure visible across pushes until explicit retry', async kind => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn().mockImplementationOnce(() => kind === 'reply'
+    ? Promise.resolve({ ok: false, error: 'Network unavailable' }) : Promise.reject(new Error('Network unavailable')))
+    .mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  button.click();
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  const error = w.document.getElementById('updateAllError')!;
+  expect(error.hidden).toBe(false);
+  expect(error.textContent).toContain('Network unavailable');
+  expect(error.textContent).toContain('Update all to retry');
+  push(structuredClone(state));
+  expect(error.hidden).toBe(false);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  button.click();
+  expect(error.hidden).toBe(true);
+  resolve({ ok: true, data: 'checking-connectors' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(error.hidden).toBe(true);
+});
+
+it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('The app may restart');
+  button.click(); button.click(); push(structuredClone(state));
+  expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
+  resolve({ ok: false, error: 'Network unavailable' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(button.textContent).toBe('Update all');
+  button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
+  resolve({ ok: true, data: 'manual' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(w.document.body.textContent).toContain('Download opened. Install the app to continue');
+});
+
 it('reports a staged update in the Activity line and the header bar', async () => {
   const mounted = await mountChat();
   const staged = structuredClone(mounted.state) as any;

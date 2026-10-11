@@ -7,7 +7,7 @@ const source = readFileSync(new URL('../extension/content.js', import.meta.url),
 const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
 const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const tools = [{ name: 'read', description: 'Read current.', inputSchema: { type: 'object' } }];
-function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuringClaim?: boolean; refreshAvailable?: boolean; href?: string } = {}) {
+function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuringClaim?: boolean; refreshAvailable?: boolean; href?: string; observeOnly?: boolean } = {}) {
   let refreshed = false;
   const click = vi.fn(() => { refreshed = true; });
   const href = options.href ?? `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`;
@@ -23,7 +23,7 @@ function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuring
   });
   context.ask = ask;
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  return { click, ask, run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools }) };
+  return { click, ask, run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools, observeOnly: options.observeOnly }) };
 }
 it('claims before exactly one click and completes only a newly observed matching schema', async () => {
   const h = workflow();
@@ -85,6 +85,12 @@ it('records an already current schema when the workspace exposes no Refresh cont
   expect(await h.run()).toBe(true);
   expect(h.click).not.toHaveBeenCalled();
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['current']);
+});
+it.each([false, true])('observes declarations without authorizing Refresh (already current=%s)', async unchanged => {
+  const h = workflow({ unchanged, observeOnly: true });
+  expect(await h.run()).toBe(unchanged);
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual([unchanged ? 'current' : 'fail']);
 });
 it('stops automatic retry when a changed schema has no Refresh control', async () => {
   const h = workflow({ refreshAvailable: false });

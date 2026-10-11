@@ -1796,6 +1796,27 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await post('/plugin-refresh', { ...claim, action: 'complete', tools })).body.ok).toBe(true);
     plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
   });
+  it('delivers an explicit Update all refresh over the bridge while the automatic preference remains off', async () => {
+    const config = { ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } };
+    await saveConfig(config);
+    const plugin = await import('../src/main/plugin-refresh.js');
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
+    await writeDurableNow('plugin-refresh', []);
+    const tools = [{ name: 'read', description: 'Current', inputSchema: { type: 'object', properties: {} } }];
+    plugin.publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', tools);
+    await plugin.requestPluginRefreshes(APP_VERSION);
+    const pending = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
+    expect(pending).toHaveLength(1);
+    expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toHaveLength(1);
+    const claim = { action: 'claim', id: pending[0].id, appId: 'asdk_app_explicit_update', connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0], description: 'Old' }] };
+    expect((await post('/plugin-refresh', claim)).body.ok).toBe(true);
+    expect((await post('/plugin-refresh', { ...claim, action: 'complete', tools })).body.ok).toBe(true);
+    expect(getConfig().ui.autoRefreshPlugins).toBe(false);
+    expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
+    plugin.publishPluginSurface('desktop', 'Desktop', 'test', '', tools);
+    expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests.map((row: any) => row.surface)).toEqual(['core']);
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
+  });
   it('accepts a manual plugin-refresh terminal state and removes it from browser pickup', async () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
     const { publishPluginSurface, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests } = await import('../src/main/plugin-refresh.js');
@@ -1843,7 +1864,7 @@ describe('IPC input delivery and Goal control integration', () => {
     pushed.mockClear();
     expect((await post('/models', { nonce, models })).body.ok).toBe(true);
     expect((await handlers.get('chatModels:get')!(null, {})).data.models).toEqual(models);
-    expect(pushed).toHaveBeenCalledWith('state:changed', expect.anything());
+    await vi.waitFor(() => expect(pushed).toHaveBeenCalledWith('state:changed', expect.anything()));
     expect((await post('/models', { nonce, models })).status).toBe(409);
   });
   it('releases only the expected actual turn through IPC', async () => {

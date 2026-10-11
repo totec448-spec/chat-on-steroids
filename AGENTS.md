@@ -175,7 +175,8 @@ service-worker lifetime, and local session vs frontend id are recurring sources 
 guarantee. `writeDurableNow()` is the required barrier before an acknowledged control transition
 or browser side effect. Per-file queues allow independent writes; cross-file semantic ordering
 must be explicit in the caller. Missing/corrupt auxiliary state logs and reads as null so the app
-can start; restore may only reconstruct facts from independent durable proof.
+can start; authority ledgers can opt into strict reads, where only a missing file is empty
+and unreadable data throws a generic error. Restore may only reconstruct facts from independent durable proof.
 
 ## 3. Intent, current source and evidence
 
@@ -4012,6 +4013,67 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+`pluginRefreshStatuses()` projects the existing ledger without creating debt, repairing rows or
+waking the browser. Its parsed rows are cached against `durableRevision('plugin-refresh')`;
+owner commits replace the cached snapshot; another committed write to that ledger or a new
+store invalidates the disk read. `confirmedPluginSchemas()` projects these same committed rows
+for Setup, without a second confirmation cache or repair-on-read. Both projections exclude
+other tunnels and unverified earlier unstable-connection runs. Malformed JSON or unreadable
+refresh state cannot be replaced with fresh click authority. Failed reads stay cached for
+state pushes; an explicit check/Restart retries the read, allowing restored evidence to recover.
+The live publication must also belong to the configured tunnel before status, browser hints or
+refresh receipts can use it; a newly published tunnel starts its full grace even with unchanged tools. Projections
+read committed evidence without joining the refresh mutation queue. `AppState.connectorRefresh`
+carries only each currently published surface's
+schema fingerprint, `unknown/current/pending/refreshing/manual/failed` state and optional
+`responding` boolean and a failed phase (`inspection` or `confirmation`); no app IDs,
+tools or raw refresh errors leave the owner through this projection. The phase applies only
+to failed evidence for the current publication and is never borrowed from an older schema.
+Activity shows existing updater/connection errors and the safe refresh phase with the next
+explicit action. An Update all failure, including rejected IPC, remains visible across state
+pushes until the user retries; a new check clears that operation error, not connector evidence.
+Activity's Update status card
+combines it with the updater, bridge and connection owners. All checks pass only after a
+successful release check with no newer app, a live paired extension at the running version,
+and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
+exact current schema. Optional off connectors or ones with no advertised tools do not block
+completion, matching Update all's requested surfaces. Core always remains required. Unknown schema or historical
+connection proof alone never establish full verification. Successful external tool calls under the same live publication
+and tunnel may instead establish **Ready to use; full connector schema not verified** when
+there is no known stale/manual/failed refresh. This is operational evidence, never a full-schema
+claim. `kernel.dispatch` captures `beginPluginToolCall` before work and confirms only a non-error
+outer provider result; HTTP ingress excludes self-tests and tunnel probes, and a changed schema,
+reconnect or changed tunnel invalidates a late result. Completed status collapses its details
+while keeping Update all accessible; a focused action is not hidden on a state push. Activity
+keeps the existing fixed-height page and event-feed scrolling: the event card uses the remaining
+height without an added minimum or page scroll. In a short window, the status details scroll
+inside their card; collapsing them returns height to the event feed.
+Review setup only opens Setup; displaying this card starts no work.
+`update:all` / preload `updateAll()` is explicit consent to check/stage, apply a supported app
+update via normal shutdown, and refresh published connectors once. `update-all.ts` joins
+concurrent presses and commits refresh intent before quitting or opening a manual download. An app update skips the
+old build's bridge/tunnel connection; the next build connects for the saved refresh request.
+It never changes config or
+secrets. macOS/DEB retain their manual download path, and ambiguous/manual provider refreshes
+stay manual. Its receipt (`restarting/manual/checking-connectors`) is not completion evidence.
+The existing refresh rows record paired `requestedVersion/requestedFromVersion` fields,
+`tunnelKey` connection scope, optional `verifiedRun` for unstable connections, and a read-only
+`observe` request. Unscoped legacy or other-profile proof cannot mark the current tunnel verified.
+Explicit requests retain placeholder rows for configured surfaces whose connection failed before
+publication, so the requested target is not lost on quit. The first target publication adopts
+that placeholder once. Rechecking an ambiguous/manual/completed row sets `observe` and hands out
+`PluginRefreshRequest.observeOnly`: the extension may confirm complete matching declarations
+without clicking Refresh. The owner refuses mutating claims even when legacy repair clears
+an impossible click receipt. A mismatch ends the observation; an explicit new check can inspect a
+manually recreated app by its unique connector name and current tunnel rather than a retired app ID.
+Installed discovery on `/settings/plugins-settings` accepts visible native buttons and same-origin
+links to exact `plugin_asdk_app_*` management routes inside the page's `main`. The connector name
+must match its own leaf; catalog, external, transcript, extension and hidden-page links do not count.
+Multiple matching rows remain ambiguous and grant no Refresh authority.
+The version fields allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
+the new build's schema once, but a later same-build schema change gets no borrowed authority.
+Startup resumes accepted refresh work even with auto-connect off, without another install.
+Extension replacement/reload stays with the existing build-stamp and idle-check owners.
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
@@ -4486,6 +4548,8 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
+`markInstallOnQuit(expectedVersion)` also fences a grouped update against a staged release
+changed while connection/refresh intent was being committed.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
 assembles installers, the Chromium extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
