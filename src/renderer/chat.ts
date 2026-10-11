@@ -172,7 +172,17 @@ const removingProject = new Set<string>();
 /** A project's menu: its color (a submenu) and taking it off the sidebar. A new chat has its own button on the row. */
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
+  const link = projects.find(row => row.id === id)?.chatgpt;
   return [
+    // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
+    ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
+      action: 'chatgpt-retry', icon: 'i-retry', disabled: retryingChatgptProject.has(id),
+      label: () => t('Retry ChatGPT Project'),
+      title: () => link.state === 'uncertain'
+        ? t('ChatGPT may already have created it; retrying can leave a second Project')
+        : t('Create this project in ChatGPT again'),
+      run: () => void retryChatgptProject(id)
+    } satisfies RowMenuItem] : []),
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
       submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
@@ -186,6 +196,32 @@ function projectMenuItems(id: string): RowMenuItem[] {
       run: () => void removeProjectFromSidebar(id)
     }
   ];
+}
+
+const retryingChatgptProject = new Set<string>();
+async function retryChatgptProject(id: string): Promise<void> {
+  if (retryingChatgptProject.has(id)) return;
+  retryingChatgptProject.add(id);
+  try {
+    const updated = await run(api.retryChatgptProject(id));
+    if (!updated) return;
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+    void refreshInputQueue();
+  } finally { retryingChatgptProject.delete(id); }
+}
+
+/**
+ * Why a new chat of this project is still waiting, while its native ChatGPT Project is being
+ * created or could not be; null once it exists or for a project without one.
+ */
+function chatgptProjectWait(entry: InputEntry): 'chatgpt-project' | 'chatgpt-project-failed' | null {
+  if (!entry.projectId) return null;
+  if (entry.sessionId && sessions.find(session => session.id === entry.sessionId)?.conversationId) return null;
+  const link = projects.find(row => row.id === entry.projectId)?.chatgpt;
+  if (!link || link.state === 'linked') return null;
+  return link.state === 'failed' || link.state === 'uncertain' ? 'chatgpt-project-failed' : 'chatgpt-project';
 }
 
 async function saveProjectColor(id: string, choice: ProjectColor | null): Promise<void> {
@@ -5265,7 +5301,9 @@ function applyRouteSettling(until: number): void {
   if (until > Date.now()) routeSettleTimer = window.setTimeout(() => void refreshInputQueue(), until - Date.now() + 50);
 }
 function routeHeld(entry: InputEntry): boolean {
-  return entry.state === 'queued' && !entry.error && !!entry.sessionId && Date.now() < routeSettlingUntil;
+  // The app holds only messages for a chat that already exists; a new chat goes at once.
+  return entry.state === 'queued' && !entry.error && !!entry.sessionId && Date.now() < routeSettlingUntil &&
+    !!sessions.find(session => session.id === entry.sessionId)?.conversationId;
 }
 /** Whether the browser extension is connected; messages only leave through it. */
 let bridgePresent = true;
@@ -5275,9 +5313,11 @@ let bridgePresent = true;
  * ChatGPT would otherwise keep that call's result (#1231). Mid-turn sends do not wait for calls,
  * and an after-turn message also waits for the answer to end, so neither claims this reason.
  */
-function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | null {
+function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (!bridgePresent) return 'extension';
+  const project = chatgptProjectWait(entry);
+  if (project) return project;
   if (entry.mode === 'auto' && entry.sessionId && entry.sessionId === runningToolsFor && runningTools.length > 0 && !entry.directTurn) return 'tool-call';
   return null;
 }
@@ -5426,7 +5466,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }

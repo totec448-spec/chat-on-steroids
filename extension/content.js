@@ -12698,8 +12698,15 @@
     }
     if (message.directTurn && (!target || ((generating || CLF_DOM.generating()) &&
         (!sourceUser || sourceTurn !== message.directTurn.id)))) return false;
-    const ownsFreshPage = () => !target && onTarget() && location.pathname === '/' &&
-      new URL(location.href).searchParams.get('cos-input') === message.id && !CLF_DOM.turns().length;
+    // A new chat of a project with a native ChatGPT Project is typed only on that Project's own
+    // page, never at the root; ChatGPT may rewrite that route, so its marker can be in the hash.
+    const project = typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : null;
+    const freshMarker = () => {
+      const url = new URL(location.href);
+      return url.searchParams.get('cos-input') === message.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === message.id;
+    };
+    const ownsFreshPage = () => !target && onTarget() && (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
+      (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length;
     if (!target && !ownsFreshPage()) return false;
     desktopInputBusy = true;
     let decision = null;
@@ -12739,7 +12746,8 @@
         return false; // No claim, insertion or Send: queued input survives recovery.
       }
       if (!composer || !onTarget() || (!message.directTurn && ((!silencePickup && generating) || CLF_DOM.generating())) || !CLF_DOM.composerVisible()) return false;
-      const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true });
+      const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
+        ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });
       const input = reply?.data?.input;
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
       if (!input) return false;
@@ -13054,6 +13062,58 @@
     return (url.pathname === '/' && /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.hash)?.[1]) ||
       (!url.hash && /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname)?.[1]) || null;
   }
+  /**
+   * Creates a new CoS project's native ChatGPT Project through ChatGPT's own dialog (#1176).
+   *
+   * Only the helper the app opened for this exact request does it: ChatGPT's home with its marker.
+   * Before the click that creates the Project nothing can exist remotely, so any failure is a plain
+   * failure. The app records `arm` before that click; from there a missing id makes the request
+   * uncertain in the app, never retried on its own. The id is taken only from the new Project's own
+   * page, which ChatGPT opens by itself after creating it.
+   */
+  let projectCreateBusy = false;
+  async function createChatgptProject(request) {
+    if (projectCreateBusy || !request || !/^[a-f0-9-]{36}$/i.test(String(request.id)) || typeof request.name !== 'string' || !request.name) return false;
+    const marked = () => alive && location.pathname === '/' && new URL(location.href).searchParams.get('cos-project-create') === request.id;
+    if (!marked()) return false;
+    projectCreateBusy = true;
+    const report = (action, extra = {}) => ask({ type: 'project_create', action, id: request.id, ...extra });
+    const fail = async error => { await report('fail', { error }); return false; };
+    try {
+      // Claimed first, so that any failure from here is the app's `failed`, shown with Retry,
+      // rather than a request offered to this page again on every pass.
+      if ((await report('claim'))?.data?.ok !== true || !marked()) return false;
+      let revealed = false;
+      const control = await waitPageView(() => CLF_DOM.projectCreateControl() ||
+        (!revealed && (revealed = CLF_DOM.revealSidebar()) && null), marked, 20_000, 250);
+      if (!control) return fail('ChatGPT did not show its New project control');
+      control.click();
+      // A click can be lost while the page is still settling (1 of 13 live, 2026-10-10). Nothing is
+      // armed yet, so one more click on the same native control is safe.
+      let form = await waitPageView(() => CLF_DOM.projectCreateForm(), marked, 8_000, 250);
+      if (!form && marked() && CLF_DOM.projectCreateControl()) {
+        CLF_DOM.projectCreateControl().click();
+        form = await waitPageView(() => CLF_DOM.projectCreateForm(), marked, 8_000, 250);
+      }
+      if (!form) return fail('ChatGPT did not open its Create project dialog');
+      if (!CLF_DOM.fillProjectName(form.input, request.name)) return fail('The Project name could not be entered');
+      const ready = await waitPageView(() => { const now = CLF_DOM.projectCreateForm(); return now && !now.submit.disabled && now.input.value === request.name ? now : null; }, marked, 5_000, 250);
+      if (!ready) return fail('ChatGPT did not accept the Project name');
+      // The Projects ChatGPT already lists: the new one's id must not be among them, so another
+      // Project's page reached some other way can never be taken for it.
+      const existing = new Set(CLF_DOM.projectIdsShown());
+      if ((await report('arm'))?.data?.ok !== true || !marked()) return fail('The app did not confirm the Project creation');
+      ready.submit.click();
+      // ChatGPT opens the new Project's page itself; that route is the only proof of its id.
+      const id = await waitPageView(() => { const shown = CLF_DOM.projectHomeId(); return shown && !existing.has(shown) ? shown : null; },
+        () => alive, 20_000, 250);
+      if (!id) return fail('ChatGPT did not open the new Project');
+      return (await report('done', { chatgptId: id }))?.data?.ok === true;
+    } finally {
+      projectCreateBusy = false;
+    }
+  }
+
   async function refreshManagedPlugin(request) {
     if (pluginRefreshBusy || !request || !/^[a-f0-9-]{36}$/i.test(request.id) || !ownsPluginRefreshPage(request.id)) return false;
     pluginRefreshBusy = true;
@@ -13303,6 +13363,18 @@
       }
       if (message.type === 'clf-plugin-refresh-state') {
         sendResponse({ safe: !pluginRefreshBusy && ownsPluginRefreshPage(message.id) && CLF_DOM.pluginManagementIdle() }); return false;
+      }
+      if (message.type === 'clf-project-create') {
+        void createChatgptProject(message.request).then(ok => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));
+        return true;
+      }
+      if (message.type === 'clf-project-create-state') {
+        // The helper may close once it holds nothing of the person's: no chat, no draft, no work.
+        const box = CLF_DOM.composer();
+        sendResponse({ safe: !projectCreateBusy && !CLF_DOM.conversationId() && !CLF_DOM.generating() &&
+          !(box && (box.textContent || '').trim()) && !CLF_DOM.hasComposerAttachments() &&
+          (location.pathname === '/' || !!CLF_DOM.projectHomeId()) });
+        return false;
       }
       if (message.type === 'clf-model-catalog-state') {
         const reason = modelCatalogBusy ? 'inspection_busy' : catalogPageBlocker();

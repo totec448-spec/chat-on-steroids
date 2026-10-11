@@ -15503,3 +15503,55 @@ describe('worker brief on a computer with its own connector names', () => {
     } finally { await saveConfig(previous); }
   });
 });
+
+/** #1176: a new CoS project's native ChatGPT Project, and its new chats only in that Project. */
+describe('native ChatGPT Project for a new CoS project', () => {
+  const nativeId = `g-p-${'c'.repeat(32)}`;
+  async function newProject(name: string) {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject } = await import('../src/main/projects.js');
+    const folder = path.join(dir, name);
+    await fs.mkdir(folder, { recursive: true });
+    await saveConfig({ ...suiteConfig, roots: [{ name: 'project', path: folder }] });
+    return addProject(folder);
+  }
+
+  it('lets only the page that claimed and armed it report the Project id', async () => {
+    await pair();
+    const project = await newProject('native-route');
+    const id = (project.chatgpt as { requestId: string }).requestId;
+    const create = (body: Record<string, unknown>) => request('POST', '/project-create', { body: { id, ...body } });
+    const pending = async () => ((await request('POST', '/status', { body: { openConversations: [] } })).body.projectCreateRequests as Array<{ id: string }>)
+      .filter(row => row.id === id);
+    expect(await pending()).toEqual([expect.objectContaining({ id, projectId: project.id, state: 'requested' })]);
+    expect((await create({ action: 'claim', client: 'doc-a' })).body.ok).toBe(true);
+    expect((await create({ action: 'arm', client: 'doc-b' })).body.ok).toBe(false);
+    expect((await create({ action: 'arm', client: 'doc-a' })).body.ok).toBe(true);
+    expect((await create({ action: 'done', client: 'doc-b', chatgptId: nativeId })).body.ok).toBe(false);
+    expect((await create({ action: 'done', client: 'doc-a', chatgptId: nativeId })).body.ok).toBe(true);
+    expect(await pending()).toEqual([]);
+  });
+
+  it("claims a new chat of a linked project only from that Project's page, never from the root", async () => {
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const project = await newProject('native-claim');
+    const id = (project.chatgpt as { requestId: string }).requestId;
+    const row = await input.enqueueInput({ id: randomUUID(), projectId: project.id, sessionId: null, text: 'Start here', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+    const claim = (body: Record<string, unknown>) => request('POST', '/input/claim', { body: { id: row.id, owner: '9:page:0', conversationId: null, ...body } });
+    // Not yet created: no page may take it, wherever it is.
+    expect((await claim({ project: nativeId })).body.input).toBeNull();
+    await request('POST', '/project-create', { body: { id, action: 'claim', client: 'doc' } });
+    await request('POST', '/project-create', { body: { id, action: 'arm', client: 'doc' } });
+    await request('POST', '/project-create', { body: { id, action: 'done', client: 'doc', chatgptId: nativeId } });
+    const offered = ((await request('POST', '/status', { body: { openConversations: [] } })).body.inputs as Array<{ id: string; project?: string }>)
+      .find(entry => entry.id === row.id);
+    expect(offered).toMatchObject({ project: nativeId });
+    expect((await claim({})).body.input).toBeNull();
+    expect((await claim({ project: `g-p-${'d'.repeat(32)}` })).body.input).toBeNull();
+    expect((await claim({ project: nativeId })).body.input).toMatchObject({ id: row.id });
+  });
+});
