@@ -25,13 +25,25 @@ retires its current dictation. Delayed recognition events cannot overwrite a
 different draft. The button is hidden on macOS and Linux, where this native
 Windows recognizer is unavailable.
 
+Clicking Stop briefly allows pending recognized words to be delivered before
+the recognizer closes. Quitting the app instead kills its PowerShell child
+immediately. The child also checks the original app process ID once per second
+and exits if the app crashes or is forcibly terminated, releasing the audio
+device without relying on a graceful shutdown.
+
 To exercise the protocol, run:
 
 ```sh
-npx vitest run test/dictation.test.ts test/renderer-dictation.test.ts
+npx vitest run test/dictation.test.ts test/dictation-lifecycle.test.ts test/renderer-dictation.test.ts
 ```
 
 On a Windows machine with a prepared speech WAV, the optional
 `node scripts/smoke-dictation-windows.cjs <path-to-wav>` checks the native
 recognition events against synthetic audio without using the microphone.
 It is an explicit smoke test; it does not run as part of CI.
+
+On Windows, `node scripts/smoke-dictation-parent-windows.cjs` checks the
+actual PowerShell parent-liveness loop by killing a synthetic parent process.
+The recognizer setup is replaced with a no-microphone fixture, so
+this check never opens the audio device. The same smoke check runs under
+`test/dictation-lifecycle.test.ts` on Windows.
