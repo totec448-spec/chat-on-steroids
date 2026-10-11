@@ -1903,7 +1903,7 @@
   }
   /** #318 identified the history cache. Both sources project only explicitly named
    * messages. Typed public items own presentation; cache text cannot supply a final. */
-  function shellRequestMetadata(fiber, queries, shell, conversation) {
+  function shellRequestMetadata(fiber, queries, shell, conversation, sightings = []) {
     if (conversation.conflict) return [];
     const entry = shell.entry;
     const ids = entry.turn.messageIds;
@@ -1970,6 +1970,8 @@
       if (typeof id !== 'string' || !id || id.length > MAX_TEXT || !own.call(mapping, id)) continue;
       const node = Object.getOwnPropertyDescriptor(mapping, id)?.value, message = node?.message;
       if (node?.id !== id || message?.id !== id) continue;
+      // The stripped entries below carry no app identity; read it here, ids only (sightingsOf).
+      for (const sighting of sightingsOf([message])) if (sightings.length < 50) sightings.push(sighting);
       const request = str(message.metadata?.request_id), cached = data?.mapping?.[id]?.message;
       if (live && cached?.id === id && request && cached.metadata?.request_id && cached.metadata.request_id !== request) return [];
       const publicMessage = selected.has(id) && message.author?.role === 'assistant' && !hiddenMessage(message) &&
@@ -2306,7 +2308,8 @@
         const calls = legacyCalls.length ? legacyCalls : group.search ? viewCallsOf(fiber) : legacyCalls;
         const queries = shell ? shellQueries(fiber) : [];
         const conversation = shell ? shellConversation(queries, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
-        const metadata = shell ? shellRequestMetadata(fiber, queries, shell, conversation) : messages;
+        const shellSightings = [];
+        const metadata = shell ? shellRequestMetadata(fiber, queries, shell, conversation, shellSightings) : messages;
         const requests = requestIdsOf(metadata);
         if (shell) for (const call of calls) {
           const invocation = metadata.find(message => message.id === call.messageId);
@@ -2351,7 +2354,7 @@
           calls,
           codeModeCalls,
           requests,
-          sightings: sightingsOf(metadata),
+          sightings: shell ? shellSightings : sightingsOf(metadata),
           messages: renderedMessages,
           activities,
           thoughtNotifications: nativeActivities.notifications,

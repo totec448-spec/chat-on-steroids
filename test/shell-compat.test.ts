@@ -1561,3 +1561,16 @@ it('reads a translated Extra High lane as xhigh, as the English label does', asy
   lanes[2]!.labels.effort = 'Extra High';
   expect((await f.ask('clf-picker-ask')).picker.choices[2].effort).toBe('xhigh');
 });
+
+// Measured live 2026-10-11 (VM 141): ChatGPT's shell turns reach the app with stripped request
+// metadata, so app sightings must come from the shell's own mapping, or no connector is ever proven.
+it('reports app sightings for shell turns from the native mapping', async () => {
+  const f = fixture();
+  const { mapping, resultId } = pairedShellCall(f);
+  // ChatGPT stamps the result with its invocation's request id (live data); OTHER is the fixture's.
+  mapping[resultId].message.metadata.request_id = OTHER;
+  mapping[resultId].message.metadata.invoked_resource.resource_uri = '/asdk_app_x1/link_x/read';
+  const turn = (await f.ask()).turns[0];
+  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat On Steroids Core' }]);
+  expect(JSON.stringify(turn)).not.toContain('PRIVATE_TOOL_RESULT');
+});
