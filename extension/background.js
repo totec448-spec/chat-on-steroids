@@ -1364,7 +1364,10 @@ async function redeemCommand(id, client, conversationId = null, projectEntry = f
     retryable: result.status === 0 || result.status === 429 || result.status >= 500
   };
   const command = result.data && result.data.command ? result.data.command : null;
-  return { ok: true, command };
+  // A tab the app opened runs its command before its first status reply. Without this install's
+  // names it would take the plain "Chat On Steroids Core" for its own, which on a computer with a
+  // suffix is the other computer's, and mention that Core in the bootstrap.
+  return { ok: true, command, ...(command ? { identity: { connectorNames, connectorApps, ownCoreApp } } : {}) };
 }
 
 function commandAckPayload(id, status, error, conversationId, agent, client, turnId, detail) {
