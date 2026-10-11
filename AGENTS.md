@@ -4105,6 +4105,10 @@ list (`mode=plugins`) without this install's Core takes the proof back (POST `/c
 Connector identity (`connector-identity.ts`): ChatGPT keeps a connector's `asdk_app_…`/`link_…`
 ids across a rename. The kernel notes each served request id per surface (memory only, 4096,
 24 h); the page reports `app_sightings` (request id, app id, link id, app name from result rows);
+a first turn of a new chat can show no tool rows to the page (#1305), so usage.js also reads the
+tool result message in the response stream (`invoked_resource.resource_uri` of an
+`api_tool.call_tool` result with its `request_id`) and posts `cos-app-sighting`, which content.js
+forwards as the same `app_sightings`, once per request id, only for the chat the tab shows;
 only a served request id teaches that surface's app (at most 4 per surface, durable). `/status`
 publishes `connectorApps`. Model-facing text uses `liveConnectorName` (proven name, else the
 configured one); protected-resource `resource_name` and the Setup card's Name row stay on
