@@ -580,6 +580,11 @@ QuickJS runs in a disposable Node Worker with no ambient Node, filesystem or net
 Children reuse the same registrar, validation, handler and dispatcher, inherit exact caller proof
 and recheck live permissions/roots. Each child records fresh evidence; only the outer response
 owns input, agent inbox and automatic terminal-result delivery. Finish signals remain direct.
+A script that calls `tools.<name>` for a name this surface does not offer (a feature check such
+as `typeof tools.x` does not count) gets one extra `UNKNOWN_TOOL_NAMES` text item at the end of
+its result. It names the connector that owns the tool and, when two connectors share a Secure
+Tunnel ID, says that ChatGPT can then send a script to the wrong connector (#1287). It changes
+neither `isError` nor what the script ran.
 
 Only explicitly emitted text/images enter the result, except Windows Desktop's `sky.get_window_state`
 adapter automatically forwards its native MCP image blocks. Its returned value contains only
@@ -929,7 +934,10 @@ Every successful launch also returns a session id when it finishes immediately. 
 structured results keep `session_id` for running work and use `completed_session_id` for
 finished work, so existing polling loops still stop. Either id is the `write_stdin` input.
 On every OS, structured `output_replayed` marks a retained reread and `benign_exit` marks a
-proven expected non-zero result; raw exit codes remain intact.
+proven expected non-zero result; raw exit codes remain intact. ChatGPT gives the model the
+structured result rather than the text, so `exec_command`'s advisory `Note:` lines (batch
+exit codes, benign exits, recovery hints, a still-running identical command) are also carried
+in structured `supplemental_context`; delivery appends its own app context there after them.
 nonempty input to a completed process is refused and never restarts work. The same manager
 retains the latest 64 completed results for this app lifetime, with 256 KiB of raw head/tail
 output each (and delimiter-free batch presentation). Completed rereads have no unread debt,

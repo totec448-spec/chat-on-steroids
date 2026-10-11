@@ -1862,11 +1862,39 @@ function inBackgroundWindow(work) {
   backgroundWindowFlight = flight;
   return flight.finally(() => { if (backgroundWindowFlight === flight) backgroundWindowFlight = null; });
 }
+/**
+ * The app's Background chats window. Session storage loses it whenever the extension reloads,
+ * which every self-update does, so it is mirrored to local storage. Window ids are only valid
+ * for one browser session: onStartup drops the mirror, and the mirror is adopted only while
+ * that window still holds nothing but ChatGPT tabs, never one of the user's own windows.
+ */
+const BACKGROUND_WINDOW_MIRROR = 'chatBackgroundWindowMirror';
+async function rememberBackgroundWindow(id) {
+  await chrome.storage.session.set({ chatBackgroundWindow: id });
+  await chrome.storage.local.set({ [BACKGROUND_WINDOW_MIRROR]: id });
+}
+async function forgetBackgroundWindow() {
+  await chrome.storage.session.remove('chatBackgroundWindow');
+  await chrome.storage.local.remove(BACKGROUND_WINDOW_MIRROR);
+}
 async function storedBackgroundWindow() {
-  const { chatBackgroundWindow: id } = await chrome.storage.session.get('chatBackgroundWindow');
+  const { chatBackgroundWindow: current } = await chrome.storage.session.get('chatBackgroundWindow');
+  const mirrored = Number.isInteger(current) ? null : (await chrome.storage.local.get(BACKGROUND_WINDOW_MIRROR))[BACKGROUND_WINDOW_MIRROR];
+  const id = Number.isInteger(current) ? current : mirrored;
   if (!Number.isInteger(id)) return null;
-  try { return await chrome.windows.get(id); }
-  catch { await chrome.storage.session.remove('chatBackgroundWindow'); return null; }
+  try {
+    const window = await chrome.windows.get(id, { populate: !Number.isInteger(current) });
+    if (!Number.isInteger(current)) {
+      const tabs = Array.isArray(window?.tabs) ? window.tabs : [];
+      if (window?.type !== 'normal' || !tabs.length || tabs.some(tab => !isChatGptUrl(tab.pendingUrl || tab.url || ''))) {
+        await chrome.storage.local.remove(BACKGROUND_WINDOW_MIRROR);
+        return null;
+      }
+      await chrome.storage.session.set({ chatBackgroundWindow: id });
+    }
+    return window;
+  }
+  catch { await forgetBackgroundWindow(); return null; }
 }
 /** Reconstruct ownership from the app's existing tab policy after extension reload or
  * OS browser startup. A cached window id alone never survives a browser restart. */
@@ -1897,7 +1925,7 @@ async function reconcileBackgroundWindow(policy) {
       for (const id of ids) {
         if (tabs.some(tab => tab.windowId === id && !owns(tab))) continue;
         try { window = await chrome.windows.get(id); } catch { continue; }
-        await chrome.storage.session.set({ chatBackgroundWindow: id });
+        await rememberBackgroundWindow(id);
         break;
       }
     }
@@ -1927,7 +1955,7 @@ async function createChatTab(url, background = false, active = !background) {
     // unfocused restore size first, then minimize only this newly owned window.
     const window = await chrome.windows.create({ url, type: 'normal', ...backgroundWindowBounds, focused: false });
     if (!Number.isInteger(window?.id) || !window.tabs?.[0]) throw new Error('background_window_not_ready');
-    await chrome.storage.session.set({ chatBackgroundWindow: window.id });
+    await rememberBackgroundWindow(window.id);
     await chrome.windows.update(window.id, { state: 'minimized', focused: false });
     return window.tabs[0];
   });
@@ -4995,6 +5023,8 @@ chrome.runtime.onInstalled.addListener(() => {
 
 if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 'function') {
   chrome.runtime.onStartup.addListener(() => {
+    // A new browser session numbers its windows afresh; an old background window id means nothing.
+    void chrome.storage.local.remove(BACKGROUND_WINDOW_MIRROR).catch(() => undefined);
     void load()
       .then(() => drainCommandAcks())
       .then(() => drain())

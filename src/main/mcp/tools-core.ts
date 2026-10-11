@@ -61,7 +61,8 @@ import {
   forgetExecOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecAttended,
-  noteExecOwner
+  noteExecOwner,
+  runningIdenticalExec
 } from '../codex/ownership.js';
 import {
   UnifiedExecError,
@@ -102,6 +103,7 @@ import {
   normalizePowerShellOperators,
   normalizeShellCommand,
   repairPowerShellQuoting,
+  execNotesText,
   withExecNotes
 } from '../exec-hints.js';
 import { childEnv } from '../exec.js';
@@ -907,6 +909,18 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               );
             }
 
+            // Read before this launch registers, so the new copy never names itself.
+            const identical = runningIdenticalExec(owner, commandDetail, dir.virtual);
+            if (identical.length) {
+              const ids = identical.map((row) => row.processId).join(', ');
+              const ageS = Math.max(0, Math.round((Date.now() - identical[0]!.startedAt) / 1000));
+              commandNotes.push(
+                `The same command in this folder is still running from earlier in this chat as session${identical.length > 1 ? 's' : ''} ${ids} ` +
+                  `(started ${ageS} s ago); this call started another copy. If this was a retry of a lost answer, ` +
+                  `read the running one with write_stdin(session_id=${identical[0]!.processId}, chars="") instead of starting more.`
+              );
+            }
+
             const processId = unifiedExecManager.allocateProcessId();
             // Process ids are deliberately small/reusable, while chat ownership lives in a
             // separate registry. Clear any stale row at the allocation boundary so a recycled
@@ -1014,9 +1028,16 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                   ? execRecoveryHints(rawCommands[0] ?? '', responseText, shell.shellType)
                   : [])
             ];
+            // ChatGPT gives the model this tool's structuredContent, not its text, so notes that
+            // only follow the text never reached it (a live retry asked to quote the repeated-
+            // command note quoted nothing, 2026-10-10). They travel in `supplemental_context`,
+            // the schema's field for app context that is not process output.
             return {
               content: [{ type: 'text' as const, text: withExecNotes(responseText, notes) }],
-              structuredContent: execCommandStructuredOutput(output)
+              structuredContent: {
+                ...execCommandStructuredOutput(output),
+                ...(notes.length > 0 ? { supplemental_context: execNotesText(notes) } : {})
+              }
             };
           } catch (error) {
             const detail = error instanceof UnifiedExecError ? error.debug() : friendlyError(error);

@@ -24,19 +24,15 @@ When Compact & Resume stops after ChatGPT already wrote its summary, you can now
 ### 🛠 Fixed
 
 - **A message ChatGPT didn't take** when you sent it just as an answer was ending is now sent once more, instead of being left in ChatGPT's message box.
-- **Windows: quitting the app** with a terminal panel open, or right after closing one, could crash it. It now quits cleanly.
+- **Windows: quitting the app** with a terminal panel open, or right after closing one, could crash it. The app now waits for the terminal to close first.
 - **Windows: the installer** now says when it can't update an existing installation because of folder permissions, and what to do, instead of closing without a word.
-- **macOS: quitting** while the login-password prompt for the app's saved keys is still open works again.
+- **macOS: quitting** now works while the login-password prompt for the app's saved keys is still open.
 - **Local plugins** get more time for their first start, so a slow first start on Windows no longer leaves them in an error state.
 - **The update check** also works on networks where GitHub's API refuses it.
 - **"Skipped 1 unreadable recent event line(s)"** is reported once instead of several times a second. It means one line of a chat's history was cut off (for example when the app was stopped while writing); only that line is skipped.
 - **A Core tool called through the Plugins connector** now gets a refusal that names your Core connector, so ChatGPT can pick the right one.
 - **Saving a chat as Markdown** no longer cuts an emoji in half in the file name.
 - **Delivery errors** under a message are shown in the language of the app.
-
-### ⚠️ Known issue
-
-- **A tool call that ChatGPT had already sent when the app restarts** can take about two minutes to arrive, until ChatGPT retries it. New calls after a restart arrive normally (in about 15–20 seconds, measured 8 of 8 on Windows) ([#1220](https://github.com/totec448-spec/chat-on-steroids/issues/1220)).
 
 ### 💛 Thank you
 

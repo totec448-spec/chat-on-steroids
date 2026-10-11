@@ -58,7 +58,7 @@ export function buildServer(ctx: ToolContext, surface: SurfaceId, observe?: (con
     if (surface === 'core') registerCoreTools(nested);
     else registerDesktopTools(nested);
     return nested.invokeNested(name, args, parent);
-  }, { windowsDesktop: surface === 'desktop' && process.platform === 'win32' });
+  }, { windowsDesktop: surface === 'desktop' && process.platform === 'win32', surface });
 
   // Cheap self-check on a property the tests assert and the design depends on: a surface
   // may register fewer tools than it declares — permissions decide that — but it may never
