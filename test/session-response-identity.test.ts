@@ -66,6 +66,84 @@ async function split(options: { newQuestion?: boolean; newRequest?: boolean; end
   return { id, at, clock };
 }
 
+describe('a message sent into a running answer (#1301)', () => {
+  // Measured 2026-10-11: ChatGPT keeps one request id across a message the user sends while it
+  // works. The page ends the local turn at that message and opens the next one; every call after
+  // the message belongs to the next turn, even though it reuses the earlier request id.
+  async function steered(continued = true) {
+    const at = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(at);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: at, messageId: 'native-question', text: 'Run six commands.' },
+      { kind: 'turn_start', time: at + 1, turnId: first }
+    ]);
+    const id = opened.sessionId!;
+    clock.mockReturnValue(at + 10);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'exec_command', args: {},
+      content: [{ type: 'text', text: 'step-1' }], outcome: 'ok', durationMs: 1, startedAt: at + 10 });
+    clock.mockReturnValue(at + 20);
+    await recordChatObservations(chat, [
+      { kind: 'turn_end', time: at + 20, turnId: first, outcome: 'interrupted', ...(continued ? { continued: true } : {}) },
+      { kind: 'user_message', time: at + 20, messageId: 'steering-message', text: 'Also add the word STEERED.' },
+      { kind: 'turn_start', time: at + 20, turnId: second }
+    ]);
+    clock.mockReturnValue(at + 30);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'exec_command', args: {},
+      content: [{ type: 'text', text: 'step-3' }], outcome: 'ok', durationMs: 1, startedAt: at + 30 });
+    clock.mockReturnValue(at + 40);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'exec_command', args: {},
+      content: [{ type: 'text', text: 'step-4' }], outcome: 'ok', durationMs: 1, startedAt: at + 40 });
+    return { id, at, clock };
+  }
+  const resultOf = (event: any) => JSON.stringify(event.call?.content ?? event.call?.result ?? event.call);
+
+  it('files calls made after the message under the turn it opened', async () => {
+    const { id } = await steered();
+    const calls = (await readEvents(id)).filter(event => event.kind === 'tool_call');
+    expect(calls.map(call => [resultOf(call).match(/step-\d/)?.[0], call.turnId])).toEqual([
+      ['step-1', first], ['step-3', second], ['step-4', second]
+    ]);
+    expect((await getSession(id))?.requestTurns?.[requestId]).toMatchObject({ turnId: second });
+  });
+
+  it('keeps every call of a request with its turn when that turn simply ended', async () => {
+    const { id } = await steered(false);
+    const calls = (await readEvents(id)).filter(event => event.kind === 'tool_call');
+    expect(calls.every(call => call.turnId === first)).toBe(true);
+  });
+
+  it('rebuilds the same ownership from the log after a restart', async () => {
+    const { id, at, clock } = await steered();
+    clock.mockReturnValue(at + 50);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'exec_command', args: {},
+      content: [{ type: 'text', text: 'step-2' }], outcome: 'ok', durationMs: 1, startedAt: at + 15 });
+    await flushSessions();
+    const metaPath = path.join(sessionsRoot(), id, 'meta.json');
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    delete meta.requestTurns; delete meta.timelineTurns; delete meta.nativeQuestion;
+    await fs.writeFile(metaPath, JSON.stringify(meta));
+    resetRecorderForTests(); resetSessionStoreForTests();
+    expect((await getSession(id))?.requestTurns?.[requestId]).toMatchObject({ turnId: second });
+  });
+
+  it('keeps a late result of a call that started before the message with the earlier turn', async () => {
+    const { id, at, clock } = await steered();
+    clock.mockReturnValue(at + 50);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'exec_command', args: {},
+      content: [{ type: 'text', text: 'step-2' }], outcome: 'ok', durationMs: 1, startedAt: at + 15 });
+    const late = (await readEvents(id)).find(event => event.kind === 'tool_call' && /step-2/.test(resultOf(event)))!;
+    expect(late.turnId).toBe(first);
+  });
+
+  it('reads the calls in the order they ran, with the message between them', async () => {
+    const { id } = await steered();
+    const activity = (await readActivityEvents(id, 0)).events
+      .filter(event => event.kind === 'tool_call' || (event.kind === 'user_message' && event.messageId === 'steering-message'))
+      .map(event => event.kind === 'user_message' ? 'message' : resultOf(event).match(/step-\d/)?.[0]);
+    expect(activity).toEqual(['step-1', 'message', 'step-3', 'step-4']);
+  });
+});
+
 describe('one native response observed in two documents', () => {
   it.each([false, true])('keeps its final after every call and settles both local fragments (legacy rebuild %s)', async rebuild => {
     const { id } = await split();
