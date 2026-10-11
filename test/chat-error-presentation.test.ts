@@ -113,3 +113,10 @@ it('only an exact completed boundary supersedes the error guidance', () => {
   expect(chatErrorPresentation(failed, [failed, { ...end, turnId: 'turn-b' }]).resolved).toBe(false);
   expect(chatErrorPresentation(failed, [failed, { ...reopened, turnId: 'turn-b' }]).next).not.toContain('Work continued');
 });
+
+it('names a chat deleted in ChatGPT and points to a new chat instead of a retry or reload', () => {
+  const deleted = error('This chat was deleted in ChatGPT. Start a new chat to continue.', { recoverable: false });
+  expect(chatErrorPresentation(deleted)).toEqual({ title: 'Chat deleted in ChatGPT',
+    message: 'ChatGPT no longer has this chat, so nothing more can be sent to it.',
+    next: 'Start a new chat to continue. This history stays in the app.', resolved: false, reloaded: false });
+});

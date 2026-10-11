@@ -2140,5 +2140,9 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Если ChatGPT снова запускает команду, которая ещё выполняется в этом чате, результат указывает на уже запущенную.",
   "Compact & Resume in Projects": "«Сжать и продолжить» в Проектах",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Перенос чата из Проекта ChatGPT в новый чат теперь доходит до конца, и новый чат остаётся в том же Проекте.",
-  "In ChatGPT: {0}": "В ChatGPT: {0}"
+  "In ChatGPT: {0}": "В ChatGPT: {0}",
+  "This chat was deleted in ChatGPT. Start a new chat to continue.": "Этот чат удалён в ChatGPT. Чтобы продолжить, начните новый чат.",
+  "Chat deleted in ChatGPT": "Чат удалён в ChatGPT",
+  "ChatGPT no longer has this chat, so nothing more can be sent to it.": "В ChatGPT больше нет этого чата, поэтому в него ничего нельзя отправить.",
+  "Start a new chat to continue. This history stays in the app.": "Чтобы продолжить, начните новый чат. Эта история останется в приложении."
 }
