@@ -72,6 +72,67 @@ export interface WorkerFinalizeResult {
   changes: string[];
 }
 
+export type WorkerCleanupBlocker =
+  | 'tracked-changes'
+  | 'untracked-files'
+  | 'ignored-files'
+  | 'unintegrated-commits'
+  | 'status-truncated';
+
+/**
+ * A read-only snapshot for the broker to offer explicit cleanup at a worker lifecycle
+ * boundary. A clean offer is NOT permission to delete: ignored files may be written
+ * after inspection, and Git worktree remove can delete those files without --force.
+ */
+export interface WorkerCleanupInspection {
+  worktreePath: string;
+  branch: string;
+  branchRef: string;
+  baseOid: string;
+  headOid: string;
+  sourceHeadOid: string;
+  hasWorkerCommits: boolean;
+  branchIntegratedIntoSource: boolean;
+  trackedChanges: string[];
+  untrackedFiles: string[];
+  ignoredFiles: string[];
+  changesTruncated: boolean;
+  blockers: WorkerCleanupBlocker[];
+  canOfferRemoval: boolean;
+}
+
+/** Supplied ONLY by the durable worker broker, never synthesized from a disk marker. */
+export interface WorkerCleanupOfferIdentity {
+  runId: string;
+  agentId: string;
+  createdAt: number;
+  reason: string;
+  ownershipToken?: string;
+}
+
+/** Safe for UI projection: no native filesystem path or untracked filename. */
+export interface WorkerCleanupOfferPreview {
+  runId: string;
+  agentId: string;
+  createdAt: number;
+  reason: string;
+  /** Virtual root path, safe to project to the renderer. */
+  workspace: string;
+  branch: string;
+  dirty: boolean;
+  ignoredFiles: boolean;
+  uniqueCommits: boolean;
+  changes: string[];
+  blockers: WorkerCleanupBlocker[];
+  canOfferRemoval: boolean;
+  hasWorkerCommits: boolean;
+  branchIntegratedIntoSource: boolean;
+  trackedChangesCount: number;
+  untrackedFilesCount: number;
+  ignoredFilesCount: number;
+  changesTruncated: boolean;
+}
+
 export class WorkerWorktreeError extends Error {
   constructor(public readonly code: string, message: string) {
     super(`${code}: ${message}`);
@@ -230,7 +291,13 @@ function safeRef(value: string): string {
   return value;
 }
 
-async function statusOf(cwd: string, includeIgnored = false): Promise<WorkerWorktreeStatus> {
+interface DetailedWorkerWorktreeStatus extends WorkerWorktreeStatus {
+  trackedChanges: string[];
+  untrackedFiles: string[];
+  ignoredFiles: string[];
+}
+
+async function statusOf(cwd: string, includeIgnored = false): Promise<DetailedWorkerWorktreeStatus> {
   const [head, status] = await Promise.all([
     runGit(cwd, ['rev-parse', '--verify', 'HEAD^{commit}'], 256),
     runGit(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=all', ...(includeIgnored ? ['--ignored=matching'] : [])], 1024 * 1024)
@@ -240,13 +307,18 @@ async function statusOf(cwd: string, includeIgnored = false): Promise<WorkerWork
   if (status.code !== 0) throw new WorkerWorktreeError('WORKTREE_STATUS_FAILED', status.stderr || 'Git status failed');
   const parts = text(status).split('\0').filter(Boolean);
   const changes: string[] = [];
+  const trackedChanges: string[] = [], untrackedFiles: string[] = [], ignoredFiles: string[] = [];
   for (let index = 0; index < parts.length && changes.length < MAX_STATUS; index++) {
     const record = parts[index]!;
     if (record.length < 4) continue;
-    changes.push(record.slice(3));
+    const filename = record.slice(3);
+    changes.push(filename);
+    if (record.startsWith('!! ')) ignoredFiles.push(filename);
+    else if (record.startsWith('?? ')) untrackedFiles.push(filename);
+    else trackedChanges.push(filename);
     if ((record[0] === 'R' || record[0] === 'C' || record[1] === 'R' || record[1] === 'C') && index + 1 < parts.length) index++;
   }
-  return { headOid, dirty: parts.length > 0, changes, truncated: parts.length > MAX_STATUS };
+  return { headOid, dirty: parts.length > 0, changes, truncated: parts.length > MAX_STATUS, trackedChanges, untrackedFiles, ignoredFiles };
 }
 
 async function ensureDirectoryTree(root: string, segments: readonly string[]): Promise<string> {
@@ -647,6 +719,129 @@ async function candidateMarkerPaths(
 }
 
 /**
+ * A broker-approved cleanup offer can inspect an on-disk lease after Clear/restart.
+ * Unlike startup recovery this must never add that lease to the live worker registry:
+ * a completed/cleared worker must not regain execution authority.
+ */
+async function offeredWorkerLease(
+  approvedRoots: readonly Root[],
+  offer: WorkerCleanupOfferIdentity
+): Promise<WorkerWorktreeLease> {
+  const identity = checkedIdentity(offer.runId, offer.agentId);
+  if (!Number.isSafeInteger(offer.createdAt) || offer.createdAt <= 0 ||
+      typeof offer.reason !== 'string' || !offer.reason ||
+      (offer.ownershipToken !== undefined && (!offer.ownershipToken || typeof offer.ownershipToken !== 'string'))) {
+    throw new WorkerWorktreeError('WORKTREE_OFFER_INVALID', 'cleanup offer is missing a durable allocation identity');
+  }
+  const accepted = new Map([[identity.runId, new Set([identity.agentId])]]);
+  const roots = await rootsOf(approvedRoots);
+  const matches: WorkerWorktreeLease[] = [];
+  for (const approved of roots) {
+    // The actual originally approved directory must still be authorized, not an alias.
+    if (path.resolve(approved.real) !== path.resolve(approved.root.path)) continue;
+    const rejected: RestoreManagedWorktreesResult['rejected'] = [];
+    const markerPaths = await candidateMarkerPaths(approved.real, rejected, accepted);
+    if (rejected.length) throw new WorkerWorktreeError('WORKTREE_STORAGE_UNSAFE', 'cleanup storage ownership cannot be proven');
+    for (const markerPath of markerPaths) {
+      const marker = await readMarker(markerPath);
+      if (!marker || marker.runId !== identity.runId || marker.agentId !== identity.agentId) {
+        throw new WorkerWorktreeError('WORKTREE_OWNER_INVALID', 'cleanup slot marker does not match its broker offer');
+      }
+      assertMarkerSlot(marker, markerPath);
+      // Offer.createdAt is the broker's cleanup-event time, not the checkout's
+      // allocation time. A newer checkout cannot inherit an older cleanup offer.
+      if (marker.createdAt > offer.createdAt ||
+          (offer.ownershipToken !== undefined && marker.ownershipToken !== offer.ownershipToken)) {
+        throw new WorkerWorktreeError('WORKTREE_NOT_OWNED', 'cleanup offer does not match the allocated worker generation');
+      }
+      if (marker.approvedRoot.name !== approved.root.name ||
+          path.resolve(marker.approvedRoot.path) !== path.resolve(approved.root.path) ||
+          ![marker.sourceRepoRoot, marker.commonDir, marker.worktreePath, marker.workspace.real]
+            .every(value => containedByAny(roots, path.resolve(value)))) {
+        throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'cleanup offer no longer belongs to an approved root');
+      }
+      const source = await repositoryContext(marker.sourceRepoRoot, roots);
+      if (path.resolve(source.root) !== path.resolve(marker.sourceRepoRoot) ||
+          path.resolve(source.commonDir) !== path.resolve(marker.commonDir)) {
+        throw new WorkerWorktreeError('WORKTREE_REPOSITORY_CHANGED', 'cleanup offer belongs to a different source repository');
+      }
+      const lease = leaseFromMarker(marker, false);
+      if (marker.workspace.virtual !== virtualPath(approved.root, approved.real, marker.workspace.real)) {
+        throw new WorkerWorktreeError('WORKTREE_OWNER_INVALID', 'cleanup offer has an invalid virtual workspace');
+      }
+      await assertOwnedWorktree(lease);
+      matches.push(lease);
+    }
+  }
+  if (matches.length !== 1) {
+    throw new WorkerWorktreeError(matches.length ? 'WORKTREE_OWNER_AMBIGUOUS' : 'WORKTREE_NOT_OWNED',
+      matches.length ? 'multiple worker worktrees match this cleanup offer' : 'cleanup offer has no verified owned worktree');
+  }
+  return matches[0]!;
+}
+
+/**
+ * On-demand only. The caller supplies exact still-authorized broker cleanup offers.
+ * Refused/removed/ambiguous candidates are omitted; no workspace is adopted.
+ */
+export async function listOfferedWorkerWorktrees(
+  approvedRoots: readonly Root[],
+  offers: readonly WorkerCleanupOfferIdentity[]
+): Promise<WorkerCleanupOfferPreview[]> {
+  const result: WorkerCleanupOfferPreview[] = [];
+  const seen = new Set<string>();
+  for (const offer of offers) {
+    if (!RUN_ID.test(offer.runId) || !AGENT_ID.test(offer.agentId)) continue;
+    const key = keyOf(offer.runId, offer.agentId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const lease = await offeredWorkerLease(approvedRoots, offer);
+      const inspected = await inspectWorkerWorkspaceForCleanup(lease);
+      result.push({
+        runId: lease.runId, agentId: lease.agentId, createdAt: offer.createdAt,
+        reason: offer.reason, workspace: lease.workspace.virtual, branch: inspected.branch,
+        dirty: inspected.trackedChanges.length + inspected.untrackedFiles.length + inspected.ignoredFiles.length > 0 || inspected.changesTruncated,
+        ignoredFiles: inspected.ignoredFiles.length > 0,
+        uniqueCommits: inspected.hasWorkerCommits && !inspected.branchIntegratedIntoSource,
+        changes: [...inspected.trackedChanges, ...inspected.untrackedFiles, ...inspected.ignoredFiles],
+        blockers: inspected.blockers, canOfferRemoval: inspected.canOfferRemoval,
+        hasWorkerCommits: inspected.hasWorkerCommits,
+        branchIntegratedIntoSource: inspected.branchIntegratedIntoSource,
+        trackedChangesCount: inspected.trackedChanges.length,
+        untrackedFilesCount: inspected.untrackedFiles.length,
+        ignoredFilesCount: inspected.ignoredFiles.length,
+        changesTruncated: inspected.changesTruncated
+      });
+    } catch { /* Fail closed: a broker offer is not proof that a disk checkout is safe. */ }
+  }
+  return result;
+}
+
+/**
+ * Called only after a UI confirmation for an exact broker offer. This explicitly
+ * discards local working files (including ignored files) but always preserves the
+ * branch and its commits. The broker must revoke worker execution before calling.
+ */
+export async function disposeOfferedWorkerWorktree(
+  approvedRoots: readonly Root[],
+  offer: WorkerCleanupOfferIdentity,
+  activeProcessCwds: readonly string[]
+): Promise<WorkerFinalizeResult> {
+  // The caller is the confirmation-gated main-process IPC; no tool/worker path
+  // may call this with a marker it discovered or synthesized on its own.
+  const lease = await offeredWorkerLease(approvedRoots, offer);
+  // A Clear action can retire a broker worker while an autonomous shell it previously
+  // started still runs. Removing that shell's cwd would race an active writer. The main
+  // process passes the live process-manager cwd projection immediately before disposal.
+  // No permission to remove is inferred from an empty/incomplete broker history.
+  if (activeProcessCwds.some(cwd => path.isAbsolute(cwd) && isContained(lease.worktreePath, path.resolve(cwd)))) {
+    throw new WorkerWorktreeError('WORKTREE_ACTIVE_PROCESS', 'a running command still uses this checkout');
+  }
+  return finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'keep' } });
+}
+
+/**
  * Startup recovery for broker-restored workers. Only worker allocations accepted by the
  * restored durable broker may be discovered; an orphaned checkout's own marker grants no
  * recovery authority. Discovery is fixed-depth beneath approved managed directories.
@@ -730,6 +925,52 @@ export async function restoreManagedWorktrees(
 export async function inspectWorkerWorkspace(lease: WorkerWorktreeLease): Promise<WorkerWorktreeStatus> {
   await assertOwnedWorktree(lease);
   return statusOf(lease.worktreePath);
+}
+
+/**
+ * Inspect an exact, marker-proven worker checkout for a cleanup offer. The broker must
+ * retain its durable worker identity/lease until the user decides; do not discover
+ * cleanup authority by scanning stray marker directories.
+ */
+export async function inspectWorkerWorkspaceForCleanup(lease: WorkerWorktreeLease): Promise<WorkerCleanupInspection> {
+  const marker = await assertOwnedWorktree(lease);
+  const [status, source, branch] = await Promise.all([
+    statusOf(marker.worktreePath, true),
+    runGit(marker.sourceRepoRoot, ['rev-parse', '--verify', 'HEAD^{commit}'], 256),
+    runGit(marker.sourceRepoRoot, ['rev-parse', '--verify', `${marker.branchRef}^{commit}`], 256)
+  ]);
+  const sourceHeadOid = text(source).trim();
+  if (source.code !== 0 || !OID.test(sourceHeadOid)) {
+    throw new WorkerWorktreeError('WORKTREE_SOURCE_HEAD_INVALID', source.stderr || 'source HEAD is unavailable');
+  }
+  if (branch.code !== 0 || text(branch).trim() !== status.headOid) {
+    throw new WorkerWorktreeError('WORKTREE_BRANCH_CHANGED', 'worker branch changed during cleanup inspection');
+  }
+  const hasWorkerCommits = status.headOid !== marker.baseOid;
+  let branchIntegratedIntoSource = !hasWorkerCommits;
+  if (hasWorkerCommits) {
+    const ancestry = await runGit(marker.sourceRepoRoot, ['merge-base', '--is-ancestor', status.headOid, sourceHeadOid], 128);
+    if (ancestry.code > 1 || ancestry.code < 0) {
+      throw new WorkerWorktreeError('WORKTREE_ANCESTRY_FAILED', ancestry.stderr || 'worker branch integration could not be checked');
+    }
+    branchIntegratedIntoSource = ancestry.code === 0;
+  }
+  // Prove this is still the same checkout after the asynchronous Git inspections.
+  await assertOwnedWorktree(lease);
+  const blockers: WorkerCleanupBlocker[] = [];
+  if (status.trackedChanges.length) blockers.push('tracked-changes');
+  if (status.untrackedFiles.length) blockers.push('untracked-files');
+  if (status.ignoredFiles.length) blockers.push('ignored-files');
+  if (hasWorkerCommits && !branchIntegratedIntoSource) blockers.push('unintegrated-commits');
+  if (status.truncated) blockers.push('status-truncated');
+  return {
+    worktreePath: marker.worktreePath, branch: marker.branch, branchRef: marker.branchRef,
+    baseOid: marker.baseOid, headOid: status.headOid, sourceHeadOid,
+    hasWorkerCommits, branchIntegratedIntoSource,
+    trackedChanges: status.trackedChanges, untrackedFiles: status.untrackedFiles,
+    ignoredFiles: status.ignoredFiles, changesTruncated: status.truncated,
+    blockers, canOfferRemoval: blockers.length === 0
+  };
 }
 
 async function patchOrTruncated(cwd: string, args: readonly string[]): Promise<{ patch: string | null; truncated: boolean }> {

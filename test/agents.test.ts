@@ -97,6 +97,9 @@ const {
   managedWorkerAllocationIdentity,
   managedWorkerIsolationRequired,
   managedWorkerRecoveryIdentities,
+  managedWorktreeCleanupOffers,
+  resolveManagedWorktreeCleanupOffer,
+  acknowledgeManagedWorktreeCleanupOffer,
   managedWorkerWorktreeRequired,
   snapshotSwarm,
   spawn,
@@ -2823,6 +2826,163 @@ describe('restart', () => {
     resetAgentsForTests();
     restoreSwarm(saved);
     expect(managedWorkerRecoveryIdentities()).toEqual(expected);
+  });
+
+  it('offers cleanup only for an accepted terminal worktree, preserving sleepers and failed finishes', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'retain checkout until terminal' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    const conversationId = 'managed-terminal-cleanup';
+    expect(bindConversation('worker-1', conversationId, staged.runId)).toBe(true);
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+
+    const ordinary = stageFinishAgent({ conversationId }, 'done with this task');
+    expect(ordinary.info.state).toBe('sleeping');
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    ordinary.rollback();
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    finishAgent({ conversationId }, 'sleep until revived');
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+
+    fillContext(conversationId);
+    expect(swarmStateForCaller(prime).agents.find(agent => agent.id === 'worker-1')?.state).toBe('finished');
+    const offer = resolveManagedWorktreeCleanupOffer(staged.runId, 'worker-1');
+    expect(offer).toMatchObject({ runId: staged.runId, agentId: 'worker-1', reason: 'completed' });
+    expect(offer?.createdAt).toEqual(expect.any(Number));
+  });
+
+  it('projects a staged terminal finish into the critical snapshot but not an unaccepted ordinary snapshot', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'finish with durability' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    const conversationId = 'managed-staged-cleanup';
+    expect(bindConversation('worker-1', conversationId, staged.runId)).toBe(true);
+    fillContext(conversationId);
+
+    const candidate = stageFinishAgent({ conversationId }, 'terminal result');
+    expect(candidate.info.state).toBe('finished');
+    expect(snapshotSwarm()?.managedWorktreeCleanupOffers).toBeUndefined();
+    const writes: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersistNow(async snapshot => { writes.push(structuredClone(snapshot)); });
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    expect(writes.at(-1)?.managedWorktreeCleanupOffers).toEqual([
+      expect.objectContaining({ runId: staged.runId, agentId: 'worker-1', reason: 'completed' })
+    ]);
+    candidate.commit();
+    expect(managedWorktreeCleanupOffers()).toHaveLength(1);
+  });
+
+  it('retains cleanup offers for cleared worktree workers and unbound accepted allocations across restart', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'never starts browser chat' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    expect(clearAgent('worker-1', staged.runId).cleared).toBe('worker');
+    const offer = resolveManagedWorktreeCleanupOffer(staged.runId, 'worker-1');
+    expect(offer).toMatchObject({ reason: 'cleared', runId: staged.runId, agentId: 'worker-1' });
+
+    resetSwarm();
+    expect(managedWorkerRecoveryIdentities()).toEqual([]);
+    expect(managedWorktreeCleanupOffers()).toEqual([offer]);
+    const saved = structuredClone(snapshotSwarm());
+    expect(saved?.activeRuns).toEqual([]);
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(managedWorktreeCleanupOffers()).toEqual([offer]);
+    expect(managedWorkerRecoveryIdentities()).toEqual([]);
+    expect(acknowledgeManagedWorktreeCleanupOffer(staged.runId, 'worker-1')).toBe(true);
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    const afterCleanup = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    restoreSwarm(afterCleanup);
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+  });
+
+  it('acknowledges a confirmed terminal checkout removal while preserving its broker isolation fence', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'cleanup with retained worker row' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    const chat = 'ack-terminal-worktree';
+    expect(bindConversation('worker-1', chat, staged.runId)).toBe(true);
+    expect(acknowledgeManagedWorktreeCleanupOffer(staged.runId, 'worker-1')).toBe(false);
+    fillContext(chat);
+    expect(finishAgent({ conversationId: chat }, 'finished').info.state).toBe('finished');
+    expect(managedWorktreeCleanupOffers()).toHaveLength(1);
+
+    expect(acknowledgeManagedWorktreeCleanupOffer(staged.runId, 'worker-1')).toBe(true);
+    expect(acknowledgeManagedWorktreeCleanupOffer(staged.runId, 'worker-1')).toBe(false);
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    expect(managedWorkerRecoveryIdentities()).toEqual([]);
+    const saved = structuredClone(snapshotSwarm());
+    expect(saved?.activeRuns?.[0]?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+    expect(saved?.activeRuns?.[0]?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktreeCleaned).toBe(true);
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    expect(managedWorkerWorktreeRequired({ conversationId: chat })).toBe(true);
+    resetSwarm();
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+  });
+
+  it('offers abandoned managed worktrees when dormant broker history is evicted', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'parked checkout' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    expect(bindConversation('worker-1', 'cleanup-parked-chat', staged.runId)).toBe(true);
+    finishAgent({ conversationId: 'cleanup-parked-chat' }, 'work is reusable');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    const saved = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      restoreSwarm(saved);
+      expect(managedWorktreeCleanupOffers()).toEqual([
+        expect.objectContaining({ runId: staged.runId, agentId: 'worker-1', reason: 'evicted' })
+      ]);
+      const afterEviction = structuredClone(snapshotSwarm());
+      resetAgentsForTests();
+      restoreSwarm(afterEviction);
+      expect(managedWorktreeCleanupOffers()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains every durable cleanup offer across restart, including older valid Git allocation UUID versions', () => {
+    const offers = Array.from({ length: 2050 }, (_, index) => ({
+      runId: `${(index + 1).toString(16).padStart(8, '0')}-1234-1234-8123-123456789abc`,
+      agentId: 'worker-1', reason: 'evicted' as const, createdAt: 1_000 + index
+    }));
+    restoreSwarm({
+      version: 7, savedAt: Date.now(), runId: null, primeConversationId: null, startedAt: null,
+      agents: [], activeRuns: [], dormantRuns: [], managedWorktreeCleanupOffers: offers
+    });
+    expect(managedWorktreeCleanupOffers()).toHaveLength(offers.length);
+    expect(resolveManagedWorktreeCleanupOffer(offers[0]!.runId, 'worker-1')).toEqual(offers[0]);
+    const saved = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(managedWorktreeCleanupOffers()).toEqual(offers);
+  });
+
+  it('does not authorize a rolled back unpublished worker allocation for cleanup', () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'never durably accepted' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.rollback();
+    expect(managedWorktreeCleanupOffers()).toEqual([]);
+    expect(snapshotSwarm()).toBeNull();
   });
 
   it('keeps a recorded worker isolated after the broker drops a seven-day-old family and its retired fence expires', async () => {

@@ -892,6 +892,13 @@ Root approval and lease ownership are rechecked immediately before worker admiss
 after asynchronous Git work and the broker durability barrier. Evicting finite broker history
 must not turn a previously isolated worker chat back into a Prime-project worker: the durable
 worker-origin/retired identity remains a fail-closed fence without granting a new checkout.
+Terminal/failed/cleared/evicted managed worker checkouts are offered for cleanup through the
+Chat UI only after durable broker authority proves the exact allocation identity. The UI lists
+retained checkouts on demand rather than scanning unowned markers during startup. Deletion is
+never automatic: the main process must obtain explicit user confirmation, recheck the current
+approved root and Git/marker ownership, and preserve the Git branch/committed work. Checkout
+removal can discard ignored/uncommitted files; do not conflate a clean `git status` with safe
+implicit deletion. Sleeping/revivable workers retain their worktree for follow-up tasks.
 Missing, corrupt or conflicting marker/identity evidence must fail closed rather than silently
 resolve an isolated worker to the prime's project; reviewing changes and integrating branches
 remain explicit steps.

@@ -369,6 +369,57 @@ const retiredWorkers = new Map<string, RetiredChat>();
  * No entry can authorize a checkout; snapshots preserve exact browser-bound IDs.
  */
 const retiredManagedWorkerConversations = new Set<string>();
+/**
+ * Durable cleanup authority for accepted worker checkouts after their broker family is
+ * cleared or evicted. A filesystem marker alone cannot authorize a retired allocation.
+ * This contains only identity, never a path or permission to delete any worker data.
+ */
+export interface ManagedWorktreeCleanupOffer {
+  runId: string;
+  agentId: string;
+  reason: 'completed' | 'failed' | 'cleared' | 'evicted';
+  createdAt: number;
+}
+const managedWorktreeCleanupHistory = new Map<string, ManagedWorktreeCleanupOffer>();
+const managedAllocationRunPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const managedAllocationAgentPattern = /^worker-[1-9][0-9]{0,5}$/;
+
+function cleanupIdentity(info: AgentInfo): { runId: string; agentId: string } | null {
+  const runId = info.workerAllocationRunId;
+  if (info.role !== 'worker' || info.managedWorktree !== true ||
+      typeof runId !== 'string' || !managedAllocationRunPattern.test(runId) ||
+      !managedAllocationAgentPattern.test(info.id)) return null;
+  return { runId: runId.toLowerCase(), agentId: info.id };
+}
+
+function cleanupAcknowledged(info: AgentInfo): boolean {
+  return (info as AgentInfo & { managedWorktreeCleaned?: boolean }).managedWorktreeCleaned === true;
+}
+
+function cleanupOfferKey(identity: { runId: string; agentId: string }): string {
+  return `${identity.runId}:${identity.agentId}`;
+}
+
+/** Preserve accepted cleanup authority before the last owner row is removed. */
+function retireManagedWorktreeCleanupOffers(agents: Iterable<Agent>, reason: 'cleared' | 'evicted'): void {
+  for (const agent of agents) {
+    if (unpublishedAgents.has(agent)) continue;
+    const identity = cleanupIdentity(agent.info);
+    if (!identity) continue;
+    const key = cleanupOfferKey(identity);
+    if (cleanupAcknowledged(agent.info)) {
+      managedWorktreeCleanupHistory.delete(key);
+      continue;
+    }
+    const existing = managedWorktreeCleanupHistory.get(key);
+    managedWorktreeCleanupHistory.set(key, {
+      ...identity, reason, createdAt: existing?.createdAt ?? Date.now()
+    });
+  }
+  // Preserve every pending authorization until an explicit cleanup acknowledgement exists.
+  // Truncating by count would strand older checkouts: their markers may not independently
+  // authorize a delete once their broker family has been evicted.
+}
 /** Worker objects created by a spawn whose public durable acceptance has not succeeded yet. */
 const unpublishedAgents = new WeakSet<Agent>();
 /** A brand-new run is itself unpublished until its staged spawn crosses the acceptance barrier. */
@@ -1457,6 +1508,7 @@ function primeAgent(run: Run | null): Agent {
  */
 function endRun(run: Run, reason: string): void {
   if (!run) return;
+  retireManagedWorktreeCleanupOffers(run.agents.values(), 'cleared');
   // The prime's tool calls switch from `agent:prime` back to its conversation identity the
   // instant this run disappears. Collapse that temporary workspace identity first so the next
   // relative path cannot revive the project the chat was using before it spawned workers.
@@ -1533,6 +1585,7 @@ function pruneDormantRuns(now = Date.now()): boolean {
   if (evict.length === 0) return false;
   for (const dormant of evict) {
     dormantRuns.delete(familyKey(dormant));
+    retireManagedWorktreeCleanupOffers(dormant.agents.values(), 'evicted');
     for (const agent of dormant.agents.values()) {
       if (agent.info.role !== 'worker' || !agent.info.conversationId) continue;
       if (agent.info.managedWorktree) retiredManagedWorkerConversations.add(agent.info.conversationId);
@@ -1854,11 +1907,12 @@ export function managedWorkerRecoveryIdentities(): Array<{ runId: string; agentI
   const families = allFamilies();
   const candidates = families.flatMap(owner => [...owner.agents.values()]
     .filter(agent => agent.info.role === 'worker' && agent.info.managedWorktree === true &&
+      !cleanupAcknowledged(agent.info) &&
       !unpublishedAgents.has(agent) && !unpublishedRuns.has(owner as Run))
     .map(agent => ({ runId: agent.info.workerAllocationRunId, agentId: agent.info.id, owner })));
   return candidates.filter(candidate =>
     typeof candidate.runId === 'string' &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate.runId) &&
+    managedAllocationRunPattern.test(candidate.runId) &&
     candidates.filter(other => other.runId === candidate.runId && other.agentId === candidate.agentId).length === 1 &&
     families.filter(owner => owner.agents.get(candidate.agentId)?.info.workerAllocationRunId === candidate.runId).length === 1
   ).map(candidate => ({ runId: candidate.runId!, agentId: candidate.agentId }));
@@ -1874,7 +1928,7 @@ export function managedWorkerAllocationIdentity(input: Caller): { runId: string;
   const owner = runForAgent(member);
   if (!owner || unpublishedRuns.has(owner)) return null;
   const allocation = member.info.workerAllocationRunId;
-  if (typeof allocation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(allocation)) return null;
+  if (typeof allocation !== 'string' || !managedAllocationRunPattern.test(allocation)) return null;
   const owners = allFamilies().filter(family =>
     family.agents.get(member.info.id)?.info.workerAllocationRunId === allocation);
   if (owners.length !== 1 || owners[0] !== owner) return null;
@@ -1901,7 +1955,7 @@ export function workerBootstrapWorktreeIdentity(runId: string, agentId: string):
   }
   if (member.info.managedWorktree !== true) return null;
   const allocation = member.info.workerAllocationRunId;
-  if (!allocation || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(allocation) ||
+  if (!allocation || !managedAllocationRunPattern.test(allocation) ||
       allFamilies().filter(owner => owner.agents.get(agentId)?.info.workerAllocationRunId === allocation).length !== 1) {
     throw new AgentError('WORKTREE_BOOTSTRAP_OWNER_INVALID: managed worker allocation identity could not be proven');
   }
@@ -4674,6 +4728,7 @@ export function resetSwarm(): void {
   const retiredAt = Date.now();
   let retiredDormant = false;
   for (const dormant of dormantRuns.values()) {
+    retireManagedWorktreeCleanupOffers(dormant.agents.values(), 'cleared');
     for (const agent of dormant.agents.values()) {
       if (agent.info.role !== 'worker' || !agent.info.conversationId) continue;
       if (agent.info.managedWorktree) retiredManagedWorkerConversations.add(agent.info.conversationId);
@@ -4811,6 +4866,10 @@ export function clearAgent(id: string, runId?: string): ClearResult {
     `[${id} cleared] The user ended this worker from the app. It will not report and cannot be messaged. Carry on ` +
       'without it, or spawn a replacement worker if the work still needs doing.', {}, run?.runId
   );
+  if (outcome) {
+    retireManagedWorktreeCleanupOffers([agent], 'cleared');
+    changed();
+  }
   return { cleared: 'worker', report: outcome?.report ?? null, reason };
 }
 
@@ -4895,6 +4954,78 @@ export interface SwarmSnapshot {
   dormantRuns?: DormantRunSnapshot[];
   /** Denial-only managed worker identities after family eviction or explicit Clear. */
   managedRetiredConversations?: string[];
+  /** Cleanup-only authority retained when a managed worker's family leaves broker history. */
+  managedWorktreeCleanupOffers?: ManagedWorktreeCleanupOffer[];
+}
+
+/**
+ * Project eligible terminal workers from the exact snapshot generation being persisted.
+ * The immediate snapshot includes accepted finish overlays while the ordinary snapshot omits
+ * them, so a failed staged finish can never leak an offer into a debounced disk write.
+ */
+function collectManagedWorktreeCleanupOffers(groups: readonly (readonly SerializedAgent[])[]): ManagedWorktreeCleanupOffer[] {
+  const offers = new Map(managedWorktreeCleanupHistory);
+  const candidates = new Map<string, ManagedWorktreeCleanupOffer[]>();
+  for (const group of groups) for (const { info } of group) {
+    const identity = cleanupIdentity(info);
+    if (!identity || cleanupAcknowledged(info)) continue;
+    if (info.state !== 'finished' && !(info.state === 'failed' && info.revivable !== true)) continue;
+    const key = cleanupOfferKey(identity);
+    candidates.set(key, [...(candidates.get(key) ?? []), {
+      ...identity,
+      reason: info.state === 'finished' ? 'completed' : 'failed',
+      createdAt: info.finishedAt ?? info.sleptAt ?? Date.now()
+    }]);
+  }
+  // A duplicated restored identity cannot grant cleanup authorization by either record.
+  for (const [key, matches] of candidates) {
+    if (matches.length !== 1 || offers.has(key)) continue;
+    offers.set(key, matches[0]!);
+  }
+  return [...offers.values()]
+    .sort((a, b) => a.createdAt - b.createdAt || cleanupOfferKey(a).localeCompare(cleanupOfferKey(b)));
+}
+
+/**
+ * Authoritative broker identities eligible for an opt-in cleanup offer. Caller must cross
+ * persistAgentAuthorityNow() before publishing these to UI, and the worktree manager must
+ * independently verify the marker and Git lease before any filesystem operation.
+ */
+export function managedWorktreeCleanupOffers(): ManagedWorktreeCleanupOffer[] {
+  return snapshotSwarm()?.managedWorktreeCleanupOffers?.map(offer => ({ ...offer })) ?? [];
+}
+
+/** Compatibility name for consumers describing offers as allocation identities. */
+export const managedWorkerCleanupIdentities = managedWorktreeCleanupOffers;
+
+export function resolveManagedWorktreeCleanupOffer(runId: string, agentId: string): ManagedWorktreeCleanupOffer | null {
+  if (!managedAllocationRunPattern.test(runId) || !managedAllocationAgentPattern.test(agentId)) return null;
+  return managedWorktreeCleanupOffers().find(offer => offer.runId === runId.toLowerCase() && offer.agentId === agentId) ?? null;
+}
+
+/**
+ * Called only after the worktree manager confirms the checkout was removed. Preserve a durable
+ * closed marker on any retained broker row, so it cannot generate a fresh terminal offer after
+ * the retirement catalog entry is deleted. Caller persists this mutation before reporting success.
+ */
+export function acknowledgeManagedWorktreeCleanupOffer(runId: string, agentId: string): boolean {
+  const offer = resolveManagedWorktreeCleanupOffer(runId, agentId);
+  if (!offer) return false;
+  const key = cleanupOfferKey(offer);
+  const owned = allFamilies().flatMap(owner => [...owner.agents.values()]
+    .filter(agent => cleanupIdentity(agent.info) &&
+      cleanupOfferKey(cleanupIdentity(agent.info)!) === key));
+  if (owned.length > 1 || owned.some(agent =>
+    unpublishedAgents.has(agent) ||
+    (agent.info.state !== 'finished' && !(agent.info.state === 'failed' && agent.info.revivable !== true)))) {
+    return false;
+  }
+  for (const agent of owned) {
+    (agent.info as AgentInfo & { managedWorktreeCleaned?: boolean }).managedWorktreeCleaned = true;
+  }
+  managedWorktreeCleanupHistory.delete(key);
+  changed();
+  return true;
 }
 
 export function snapshotSwarm(): SwarmSnapshot | null {
@@ -4964,11 +5095,12 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
   const active = [...runs.values()].filter(r =>
     (!unpublishedRuns.has(r) || (includeUnpublished && stageEligible(r))));
   const dormant = [...dormantRuns.values()];
-  if (active.length === 0 && dormant.length === 0 && retiredManagedWorkerConversations.size === 0) return null;
+  if (active.length === 0 && dormant.length === 0 && retiredManagedWorkerConversations.size === 0 &&
+      managedWorktreeCleanupHistory.size === 0) return null;
   // Legacy top-level projection is deliberately empty with multiple owners. Version 6 readers
   // use activeRuns exclusively; retaining a sole-owner projection keeps older diagnostic readers useful.
   const sole = active.length === 1 ? active[0] : null;
-  return { version: 7, savedAt: Date.now(), runId: sole?.runId ?? null,
+  const snapshot: SwarmSnapshot = { version: 7, savedAt: Date.now(), runId: sole?.runId ?? null,
     ...(sole?.setupProfileId ? { setupProfileId: sole.setupProfileId } : {}),
     primeConversationId: sole?.primeConversationId ?? null, startedAt: sole?.startedAt ?? null,
     agents: sole ? serializeAgents(sole.agents, includeUnpublished) : [],
@@ -4981,6 +5113,12 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
       ...(h.setupProfileId ? { setupProfileId: h.setupProfileId } : {}), primeConversationId: h.primeConversationId, startedAt: h.startedAt,
       primeRequestId: h.primeRequestId,
       parkedAt: h.parkedAt, agents: serializeAgents(h.agents, includeUnpublished) })) };
+  const offers = collectManagedWorktreeCleanupOffers([
+    ...(snapshot.activeRuns ?? []).map(run => run.agents),
+    ...(snapshot.dormantRuns ?? []).map(run => run.agents)
+  ]);
+  if (offers.length > 0) snapshot.managedWorktreeCleanupOffers = offers;
+  return snapshot;
 }
 
 function serializeAgents(agents: Map<string, Agent>, includeUnpublished: boolean): SerializedAgent[] {
@@ -5054,6 +5192,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   runs.clear();
   dormantRuns.clear();
   retiredManagedWorkerConversations.clear();
+  managedWorktreeCleanupHistory.clear();
   unpublishedRuns.clear();
   activeSpawnStages.clear();
   activeFinishStages.clear();
@@ -5064,6 +5203,26 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   if (snapshot.version !== 4 && snapshot.version !== 5 && snapshot.version !== 6 && snapshot.version !== 7) {
     logInfo('multi-agent: discarded a run saved by an older build — spawn again to start a new one.');
     return;
+  }
+  if (Array.isArray(snapshot.managedWorktreeCleanupOffers)) {
+    const seen = new Set<string>();
+    const ambiguous = new Set<string>();
+    for (const offer of snapshot.managedWorktreeCleanupOffers) {
+      if (!offer || typeof offer.runId !== 'string' || typeof offer.agentId !== 'string' ||
+          !managedAllocationRunPattern.test(offer.runId) || !managedAllocationAgentPattern.test(offer.agentId) ||
+          !['completed', 'failed', 'cleared', 'evicted'].includes(offer.reason) ||
+          !Number.isFinite(offer.createdAt) || offer.createdAt <= 0) continue;
+      const normalized = { ...offer, runId: offer.runId.toLowerCase() };
+      const key = cleanupOfferKey(normalized);
+      if (seen.has(key)) {
+        managedWorktreeCleanupHistory.delete(key);
+        ambiguous.add(key);
+        continue;
+      }
+      seen.add(key);
+      if (ambiguous.has(key)) continue;
+      managedWorktreeCleanupHistory.set(key, normalized);
+    }
   }
   // These rows deny access; they can never grant worker role, checkout ownership or revival.
   // Restore them before seven-day history pruning adds any newly evicted managed workers.
@@ -5244,8 +5403,8 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
       continue;
     }
     const rawAllocation = entry.info.workerAllocationRunId;
-    const allocation = typeof rawAllocation === 'string' &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rawAllocation)
+      const allocation = typeof rawAllocation === 'string' &&
+      managedAllocationRunPattern.test(rawAllocation)
       ? rawAllocation.toLowerCase() : undefined;
     if (rawAllocation !== undefined && !allocation) repaired = true;
     const agent: Agent = {
@@ -5253,6 +5412,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         ...entry.info,
         workerAllocationRunId: allocation,
         managedWorktree: entry.info.managedWorktree === true,
+        managedWorktreeCleaned: entry.info.managedWorktree === true && cleanupAcknowledged(entry.info),
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
         reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
@@ -5325,6 +5485,7 @@ export function resetAgentsForTests(): void {
   runs.clear();
   dormantRuns.clear();
   retiredManagedWorkerConversations.clear();
+  managedWorktreeCleanupHistory.clear();
   archivedAssignments.clear();
   consecutiveWakeFailures.clear();
   pageGenerating.clear();
