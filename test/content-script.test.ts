@@ -4194,7 +4194,10 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
         rawText: 'Checking ownership.',
         renderedHtml: '<p>Checking ownership.</p>'
       }],
-      activities: [{ messageId: 'thought-late-owner-0', label: 'Inspecting ownership' }]
+      activities: [{ messageId: 'thought-late-owner-0', label: 'Inspecting ownership' }],
+      // #1301: the outline names the user message that opened its page turn.
+      trace: [{ kind: 'say', text: 'Checking ownership.', done: false }],
+      question: 'q-late-owner'
     };
     await replyFiber([], [descriptor]);
     await live.hook.flush();
@@ -4222,6 +4225,7 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(emitted(live.sent, 'assistant_message').at(-1)!.event.turnId).toBe(opened);
     expect(emitted(live.sent, 'page_tool').at(-1)!.event.turnId).toBe(opened);
     expect(emitted(live.sent, 'tool_evidence').at(-1)!.event.turnId).toBe(opened);
+    expect(emitted(live.sent, 'turn_trace').at(-1)!.event).toMatchObject({ turnId: opened, question: 'q-late-owner' });
   });
 
   it('publishes one stable native activity id and revises only its label', async () => {
@@ -8824,6 +8828,23 @@ describe('a stop button that goes missing while the turn is still running', () =
     const stalled = emitted(live.sent, 'chat_error').filter(row => /ten minutes/.test(String(row.event.text)));
     expect(stalled, kind === 'steered' ? 'live steered work was reported stalled' : 'unrelated work hid a stall')
       .toHaveLength(kind === 'steered' ? 0 : 1);
+  });
+
+  it('marks the end of a turn a message steered as continued (#1301)', async () => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        userAnchors: [{ seq: 1, time: 1_787_165_090_500, messageId: 'm-older-user' }] } })
+    });
+    userTurn(live.document, 'older-user', 'the question before', { sent: false });
+    await live.hook.pullActivity();
+    userTurn(live.document, 'steer-first', 'run the import', { sent: false });
+    startGenerating(live.document, { send: false });
+    for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
+    const first = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    // Typed while it works: Stop never goes away, and ChatGPT carries the answer on.
+    userTurn(live.document, 'steer-second', 'also keep the tag', { sent: false });
+    for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
+    expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
   });
 
   it('keeps an in-flight Fiber scan owned by the generation that requested it', async () => {

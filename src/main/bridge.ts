@@ -1569,6 +1569,8 @@ function parseObservations(input: unknown): ChatObservation[] {
       const trace = turnTrace(item['trace']);
       if (!trace || !observation.turnId) continue;
       observation.trace = trace;
+      // The user message that opened the page turn the outline was read from (#1301).
+      if (typeof item['question'] === 'string' && /^[A-Za-z0-9_:.-]{1,200}$/.test(item['question'])) observation.question = item['question'];
     }
     if (typeof item['renderedHtml'] === 'string') {
       // Keep the whole compact rendering of a stable final through /events.
@@ -1598,6 +1600,7 @@ function parseObservations(input: unknown): ChatObservation[] {
       observation.goalEligible = true;
     }
     if (typeof item['detail'] === 'string') observation.detail = item['detail'].slice(0, 500);
+    if (kind === 'turn_end' && item['continued'] === true) observation.continued = true;
     if (typeof item['recoverable'] === 'boolean') observation.recoverable = item['recoverable'];
     if (item['blocking'] === true) observation.blocking = true;
     if (kind === 'chat_error' && item['blocking'] === true && typeof item['retryAt'] === 'number' &&
