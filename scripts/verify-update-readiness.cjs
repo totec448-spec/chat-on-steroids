@@ -31,7 +31,10 @@ app.whenReady().then(async () => {
       getSwarm:()=>ok({running:false,agents:[],pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]}),
       onStateChanged:fn=>{listener=fn;return()=>{}},onSessionChanged:()=>()=>{},
       installUpdate:()=>{window.mutations.push('install');return ok(true)},connect:()=>{window.mutations.push('connect');return ok(state)},
-      updateAll:()=>{window.mutations.push('update-all');return new Promise(resolve=>{window.fixtureFinishUpdate=()=>resolve({ok:true,data:'checking-connectors'})})}
+      updateAll:()=>{window.mutations.push('update-all');return new Promise((resolve,reject)=>{
+        window.fixtureFinishUpdate=(reply={ok:true,data:'checking-connectors'})=>resolve(reply);
+        window.fixtureRejectUpdate=reason=>reject(new Error(reason));
+      })}
     },{get:(target,key)=>key in target?target[key]:String(key).startsWith('on')?()=>()=>{}:()=>ok(null)});
     window.fixturePush=next=>listener(next);`;
   const server = http.createServer((request, response) => {
@@ -120,7 +123,39 @@ app.whenReady().then(async () => {
     await pause(400); await shot('updating-en-dark.png');
     await js('window.fixtureFinishUpdate()');
     await until(`!document.getElementById('updateAll').disabled`);
+    // Owner failures explain both the known cause and the next explicit action.
+    for (const lang of ['en','ja','de']) {
+      await open('lang='+lang);
+      await js(`(()=>{const next=structuredClone(window.fixtureState);
+        next.update.stage='failed';next.update.error='GitHub returned 503';
+        next.bridge.extensionVersion='2.1.32';
+        next.connectorRefresh.core={schemaId:'schema-a',state:'failed',failure:'inspection'};
+        window.fixturePush(next)})()`);
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false');
+      assert.ok(await js(`document.querySelector('[data-update-part="app"]').textContent.includes('GitHub returned 503')`));
+      const core = await js(`document.querySelector('[data-update-part="core"]').textContent`);
+      assert.ok(core.includes(lang==='ja'?'確認できませんでした':lang==='de'?'nicht geprüft':'Could not inspect'),core);
+      assert.deepEqual(await js('window.mutations'),[],'Error guidance starts no provider work');
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'Network unavailable'})`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),false);
+      await until(`!document.querySelector('.toast')`);
+      await pause(600);
+      await shot('errors-'+lang+'-dark.png');
+      await js(`window.fixturePush(window.fixtureState)`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),false,'Pushes cannot erase operation failures');
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false','Healthy component pushes do not claim a failed operation passed');
+      await js(`document.getElementById('updateAll').click()`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,'Explicit retry clears the old operation error');
+      await js(`window.fixtureRejectUpdate('Network unavailable')`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),false,'Rejected IPC is presented and re-enables retry');
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate()`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),true);
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
+    }
     assert.deepEqual(errors,[],'No production renderer errors');
-    console.log('PASS: production update status, all three proofs, live transitions, stable keyboard action, no mutations, en/ja/de, both themes and narrow layout');
+    console.log('PASS: production update status, proofs, transitions, keyboard action, read-only pushes, error guidance, persistent reply/IPC failures and explicit retry; en/ja/de, both themes and narrow layout');
   } finally { win?.destroy(); await new Promise(resolve=>server.close(resolve)); app.quit(); }
 }).catch(error=>{ console.error(error); app.exit(1); });

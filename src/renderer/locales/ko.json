@@ -2139,5 +2139,17 @@
   "Calmer when ChatGPT is busy": "ChatGPT가 바쁠 때도 차분하게",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT가 기록 로드를 제한하면 복구가 다시 로드하지 않고 요청된 시간만큼 기다립니다.",
   "Lighter on your computer": "컴퓨터에 더 가볍게",
-  "Open ChatGPT chats use much less CPU while they wait.": "열려 있는 ChatGPT 채팅이 대기 중에 CPU를 훨씬 적게 씁니다."
+  "Open ChatGPT chats use much less CPU while they wait.": "열려 있는 ChatGPT 채팅이 대기 중에 CPU를 훨씬 적게 씁니다.",
+  "Choose Update all to retry. You can keep using the current app.": "모두 업데이트를 선택하여 다시 시도하세요. 현재 앱은 계속 사용할 수 있습니다.",
+  "Let active chats finish, then reload the companion extension in your browser.": "진행 중인 채팅이 끝난 후 브라우저에서 companion 확장 프로그램을 새로고침하세요.",
+  "Open ChatGPT with the companion extension enabled, then choose Review setup.": "companion 확장 프로그램을 활성화한 상태로 ChatGPT를 열고 설정 확인을 선택하세요.",
+  "Choose Review setup to check the connection, then choose Update all to retry.": "설정 확인에서 연결을 확인한 후 모두 업데이트를 선택하여 다시 시도하세요.",
+  "Could not inspect the installed connector in ChatGPT.": "ChatGPT에 설치된 커넥터를 검사하지 못했습니다.",
+  "Could not confirm the current connector schema in ChatGPT.": "ChatGPT에서 현재 커넥터 스키마를 확인하지 못했습니다.",
+  "Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.": "ChatGPT에서 이 커넥터를 열어 도구 목록을 확인한 후 모두 업데이트를 선택하여 다시 확인하세요.",
+  "Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.": "ChatGPT에서 이 커넥터를 새로고침하거나 다시 만든 후 모두 업데이트를 선택하여 다시 확인하세요.",
+  "Choose Update all to check the installed connector schema.": "모두 업데이트를 선택하여 설치된 커넥터 스키마를 확인하세요.",
+  "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "확인을 기다려 주세요. 완료되지 않으면 ChatGPT에서 이 커넥터를 열고 모두 업데이트를 선택하여 다시 확인하세요.",
+  "Run a tool through this connector in ChatGPT to confirm this connection.": "ChatGPT에서 이 커넥터의 도구를 실행하여 연결을 확인하세요.",
+  "Update all could not finish: {0}. Choose Update all to retry.": "모두 업데이트를 완료하지 못했습니다: {0}. 모두 업데이트를 선택하여 다시 시도하세요."
 }

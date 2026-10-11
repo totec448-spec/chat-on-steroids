@@ -464,6 +464,19 @@ it('keeps pre-claim errors observable and retries the same obligation after rest
   expect((await readDurable('plugin-refresh') as any[])[0].error).toBeUndefined();
   expect(await pendingPluginRefreshes()).toEqual([]);
 });
+it('projects the failed refresh phase without exposing private diagnostics or borrowing another schema', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  const privateDiagnostic = 'fixture-private-token and asdk_app_private';
+  await failPluginRefresh({ id: request.id, error: privateDiagnostic });
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'inspection' });
+  expect(JSON.stringify(await pluginRefreshStatuses())).not.toContain(privateDiagnostic);
+  await claim(request);
+  await failPluginRefresh({ id: request.id, error: privateDiagnostic });
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'confirmation' });
+  publish('2', [{ ...tools[0]!, description: 'New declaration' }]);
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'pending' });
+  expect((await pluginRefreshStatuses()).core).not.toHaveProperty('failure');
+});
 it('requires readable declarations before claiming even an enrolled exact app', async () => {
   publish(); const first = (await pendingPluginRefreshes())[0]!;
   await claim(first);

@@ -2139,5 +2139,17 @@
   "Calmer when ChatGPT is busy": "ChatGPT が混雑しても落ち着いて",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT が履歴の読み込みを制限したとき、再読み込みを繰り返さず、求められた時間だけ待って復旧します。",
   "Lighter on your computer": "パソコンに優しく",
-  "Open ChatGPT chats use much less CPU while they wait.": "開いている ChatGPT のチャットが待機中に使う CPU が大幅に減りました。"
+  "Open ChatGPT chats use much less CPU while they wait.": "開いている ChatGPT のチャットが待機中に使う CPU が大幅に減りました。",
+  "Choose Update all to retry. You can keep using the current app.": "「まとめて更新」で再試行してください。現在のアプリは引き続き使用できます。",
+  "Let active chats finish, then reload the companion extension in your browser.": "実行中のチャットが終わってから、ブラウザーでcompanion拡張を再読み込みしてください。",
+  "Open ChatGPT with the companion extension enabled, then choose Review setup.": "companion拡張を有効にしてChatGPTを開き、「設定を確認」を選んでください。",
+  "Choose Review setup to check the connection, then choose Update all to retry.": "「設定を確認」で接続を確認し、「まとめて更新」で再試行してください。",
+  "Could not inspect the installed connector in ChatGPT.": "ChatGPTにインストールされたコネクターを確認できませんでした。",
+  "Could not confirm the current connector schema in ChatGPT.": "ChatGPTで現在のコネクタースキーマを確認できませんでした。",
+  "Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.": "ChatGPTでこのコネクターを開いてツール一覧を確認し、「まとめて更新」で再確認してください。",
+  "Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.": "ChatGPTでこのコネクターを更新または作り直し、「まとめて更新」で再確認してください。",
+  "Choose Update all to check the installed connector schema.": "「まとめて更新」でインストールされたコネクタースキーマを確認してください。",
+  "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "確認が完了するまでお待ちください。完了しない場合はChatGPTでこのコネクターを開き、「まとめて更新」で再確認してください。",
+  "Run a tool through this connector in ChatGPT to confirm this connection.": "ChatGPTでこのコネクターのツールを実行し、接続を確認してください。",
+  "Update all could not finish: {0}. Choose Update all to retry.": "まとめて更新を完了できませんでした: {0}。「まとめて更新」で再試行してください。"
 }

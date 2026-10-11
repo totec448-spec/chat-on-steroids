@@ -2139,5 +2139,17 @@
   "Calmer when ChatGPT is busy": "Más calma cuando ChatGPT está ocupado",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Cuando ChatGPT limita la carga del historial, la recuperación espera lo que ChatGPT pide en lugar de recargar otra vez.",
   "Lighter on your computer": "Más ligero para tu equipo",
-  "Open ChatGPT chats use much less CPU while they wait.": "Los chats de ChatGPT abiertos usan mucha menos CPU mientras esperan."
+  "Open ChatGPT chats use much less CPU while they wait.": "Los chats de ChatGPT abiertos usan mucha menos CPU mientras esperan.",
+  "Choose Update all to retry. You can keep using the current app.": "Elige Actualizar todo para volver a intentarlo. Puedes seguir usando la aplicación actual.",
+  "Let active chats finish, then reload the companion extension in your browser.": "Espera a que terminen los chats activos y vuelve a cargar la extensión companion en el navegador.",
+  "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Abre ChatGPT con la extensión companion activada y elige Revisar configuración.",
+  "Choose Review setup to check the connection, then choose Update all to retry.": "Elige Revisar configuración para comprobar la conexión y Actualizar todo para volver a intentarlo.",
+  "Could not inspect the installed connector in ChatGPT.": "No se pudo inspeccionar el conector instalado en ChatGPT.",
+  "Could not confirm the current connector schema in ChatGPT.": "No se pudo confirmar el esquema actual del conector en ChatGPT.",
+  "Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.": "Abre este conector en ChatGPT, comprueba su lista de herramientas y elige Actualizar todo para comprobarlo de nuevo.",
+  "Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.": "Actualiza o vuelve a crear este conector en ChatGPT y elige Actualizar todo para comprobarlo de nuevo.",
+  "Choose Update all to check the installed connector schema.": "Elige Actualizar todo para comprobar el esquema del conector instalado.",
+  "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Espera la confirmación. Si no llega, abre este conector en ChatGPT y elige Actualizar todo para comprobarlo de nuevo.",
+  "Run a tool through this connector in ChatGPT to confirm this connection.": "Ejecuta una herramienta de este conector en ChatGPT para confirmar la conexión.",
+  "Update all could not finish: {0}. Choose Update all to retry.": "No se pudo completar Actualizar todo: {0}. Elige Actualizar todo para volver a intentarlo."
 }

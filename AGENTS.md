@@ -4026,8 +4026,13 @@ refresh receipts can use it; a newly published tunnel starts its full grace even
 read committed evidence without joining the refresh mutation queue. `AppState.connectorRefresh`
 carries only each currently published surface's
 schema fingerprint, `unknown/current/pending/refreshing/manual/failed` state and optional
-`responding` boolean; no app IDs,
-tools or raw errors leave the owner through this projection. Activity's Update status card
+`responding` boolean and a failed phase (`inspection` or `confirmation`); no app IDs,
+tools or raw refresh errors leave the owner through this projection. The phase applies only
+to failed evidence for the current publication and is never borrowed from an older schema.
+Activity shows existing updater/connection errors and the safe refresh phase with the next
+explicit action. An Update all failure, including rejected IPC, remains visible across state
+pushes until the user retries; a new check clears that operation error, not connector evidence.
+Activity's Update status card
 combines it with the updater, bridge and connection owners. All checks pass only after a
 successful release check with no newer app, a live paired extension at the running version,
 and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its

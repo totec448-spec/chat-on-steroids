@@ -130,6 +130,7 @@ const GROUPS: Group[] = [
 ];
 
 let state: AppState | null = null;
+let updateAllError: string | null = null;
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1486,7 +1487,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
-  paintUpdateReadiness(next);
+  paintUpdateReadiness(next, updateAllError);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
 
   // ---- health numbers and facts
@@ -2443,12 +2444,19 @@ updateAllButton.addEventListener('click', async () => {
   updateAllButton.disabled = true;
   updateAllButton.setAttribute('aria-busy', 'true');
   ui(updateAllButton, 'textContent', () => t('Updating…'));
+  updateAllError = null;
+  if (state) paintUpdateReadiness(state, updateAllError);
   try {
-    const result = await run(api.updateAll());
+    const reply = await api.updateAll();
+    if (!reply.ok) { updateAllError = reply.error; toast(t(reply.error)); return; }
+    const result = reply.data;
     if (result === 'manual') toast(t('Download opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
     else if (result === 'checking-connectors') toast(t('Updates requested. Any remaining steps are shown in Update status.'));
+  } catch (error) {
+    updateAllError = error instanceof Error ? error.message : String(error);
   } finally {
+    if (state) paintUpdateReadiness(state, updateAllError);
     updateAllButton.disabled = false;
     updateAllButton.removeAttribute('aria-busy');
     ui(updateAllButton, 'textContent', () => t('Update all'));

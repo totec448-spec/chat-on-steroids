@@ -2139,5 +2139,17 @@
   "Calmer when ChatGPT is busy": "ChatGPT 繁忙时更从容",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "当 ChatGPT 限制历史记录的加载速度时，恢复会按要求等待，而不是反复重新加载。",
   "Lighter on your computer": "更省电脑资源",
-  "Open ChatGPT chats use much less CPU while they wait.": "打开的 ChatGPT 聊天在等待时占用的 CPU 大幅减少。"
+  "Open ChatGPT chats use much less CPU while they wait.": "打开的 ChatGPT 聊天在等待时占用的 CPU 大幅减少。",
+  "Choose Update all to retry. You can keep using the current app.": "请选择“全部更新”重试。你可以继续使用当前应用。",
+  "Let active chats finish, then reload the companion extension in your browser.": "请等待正在运行的聊天结束，然后在浏览器中重新加载 companion 扩展。",
+  "Open ChatGPT with the companion extension enabled, then choose Review setup.": "启用 companion 扩展后打开 ChatGPT，然后选择“检查设置”。",
+  "Choose Review setup to check the connection, then choose Update all to retry.": "请选择“检查设置”检查连接，然后选择“全部更新”重试。",
+  "Could not inspect the installed connector in ChatGPT.": "无法检查 ChatGPT 中已安装的连接器。",
+  "Could not confirm the current connector schema in ChatGPT.": "无法确认 ChatGPT 中当前的连接器架构。",
+  "Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.": "请在 ChatGPT 中打开此连接器并检查工具列表，然后选择“全部更新”重新检查。",
+  "Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.": "请在 ChatGPT 中刷新或重新创建此连接器，然后选择“全部更新”重新检查。",
+  "Choose Update all to check the installed connector schema.": "请选择“全部更新”检查已安装的连接器架构。",
+  "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "请等待确认。如果一直未完成，请在 ChatGPT 中打开此连接器，然后选择“全部更新”重新检查。",
+  "Run a tool through this connector in ChatGPT to confirm this connection.": "请在 ChatGPT 中通过此连接器运行一个工具，以确认连接。",
+  "Update all could not finish: {0}. Choose Update all to retry.": "无法完成全部更新：{0}。请选择“全部更新”重试。"
 }

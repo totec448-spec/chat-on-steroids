@@ -2139,5 +2139,17 @@
   "Calmer when ChatGPT is busy": "Bình tĩnh hơn khi ChatGPT bận",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Khi ChatGPT giới hạn tốc độ tải lịch sử, việc khôi phục chờ đúng thời gian ChatGPT yêu cầu thay vì tải lại liên tục.",
   "Lighter on your computer": "Nhẹ hơn cho máy tính của bạn",
-  "Open ChatGPT chats use much less CPU while they wait.": "Các cuộc trò chuyện ChatGPT đang mở dùng ít CPU hơn nhiều khi chờ."
+  "Open ChatGPT chats use much less CPU while they wait.": "Các cuộc trò chuyện ChatGPT đang mở dùng ít CPU hơn nhiều khi chờ.",
+  "Choose Update all to retry. You can keep using the current app.": "Chọn Cập nhật tất cả để thử lại. Bạn có thể tiếp tục dùng ứng dụng hiện tại.",
+  "Let active chats finish, then reload the companion extension in your browser.": "Chờ các cuộc trò chuyện đang chạy kết thúc, rồi tải lại tiện ích companion trong trình duyệt.",
+  "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Mở ChatGPT với tiện ích companion được bật, rồi chọn Kiểm tra thiết lập.",
+  "Choose Review setup to check the connection, then choose Update all to retry.": "Chọn Kiểm tra thiết lập để kiểm tra kết nối, rồi chọn Cập nhật tất cả để thử lại.",
+  "Could not inspect the installed connector in ChatGPT.": "Không thể kiểm tra trình kết nối đã cài trong ChatGPT.",
+  "Could not confirm the current connector schema in ChatGPT.": "Không thể xác nhận lược đồ hiện tại của trình kết nối trong ChatGPT.",
+  "Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.": "Mở trình kết nối này trong ChatGPT, kiểm tra danh sách công cụ, rồi chọn Cập nhật tất cả để kiểm tra lại.",
+  "Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.": "Làm mới hoặc tạo lại trình kết nối này trong ChatGPT, rồi chọn Cập nhật tất cả để kiểm tra lại.",
+  "Choose Update all to check the installed connector schema.": "Chọn Cập nhật tất cả để kiểm tra lược đồ của trình kết nối đã cài.",
+  "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Chờ xác nhận. Nếu không có, hãy mở trình kết nối này trong ChatGPT và chọn Cập nhật tất cả để kiểm tra lại.",
+  "Run a tool through this connector in ChatGPT to confirm this connection.": "Chạy một công cụ qua trình kết nối này trong ChatGPT để xác nhận kết nối.",
+  "Update all could not finish: {0}. Choose Update all to retry.": "Không thể hoàn tất Cập nhật tất cả: {0}. Chọn Cập nhật tất cả để thử lại."
 }

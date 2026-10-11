@@ -215,7 +215,9 @@ export function pluginRefreshStatuses(): Promise<Partial<Record<PluginSurface, P
         : row.parked || row.error ? 'failed'
         : row.appId && row.completedSchemaId === publication.schemaId ? (!row.tunnelKey?.startsWith('unbound:') || row.verifiedRun === runId ? 'current' : 'unknown')
         : row.attempted && row.appId ? 'refreshing' : 'pending';
-      return [publication.surface, { schemaId: publication.schemaId, state, ...(responding.get(publication.surface) === publication && publicationScopes.get(publication.surface) === scope(publication.surface) ? { responding: true } : {}) }];
+      return [publication.surface, { schemaId: publication.schemaId, state,
+        ...(state === 'failed' ? { failure: row?.attempted && row.appId ? 'confirmation' : 'inspection' } : {}),
+        ...(responding.get(publication.surface) === publication && publicationScopes.get(publication.surface) === scope(publication.surface) ? { responding: true } : {}) }];
     }));
   })();
 }

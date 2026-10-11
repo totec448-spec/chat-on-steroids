@@ -2367,6 +2367,72 @@ it('keeps update readiness actions stable and does not start update or connectio
   expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
 });
 
+it('shows update failure causes and next steps without using stale connector diagnostics', async () => {
+  const { window: w, state, push } = await mountChat();
+  const next = structuredClone(state) as any;
+  const core = { id: 'core', connectorName: 'Core', description: 'Core', cardSummary: 'Files and terminal',
+    optional: false, available: true, state: 'live', detail: '', tools: ['read'], localUrl: null,
+    publicUrl: null, lastRequestAt: null, lastToolCallAt: null };
+  next.update = { ...next.update, stage: 'failed', error: 'GitHub returned 503' };
+  next.bridge = { ...next.bridge, running: true, paired: true, present: false, extensionVersion: '0.0.1' };
+  next.status = { ...next.status, state: 'offline', detail: 'Network unavailable',
+    surfaces: [{ ...core, state: 'error', detail: 'Network unavailable' }] };
+  const row = (id: string) => w.document.querySelector(`[data-update-part="${id}"]`)!.textContent!;
+  push(next);
+  expect(row('app')).toContain('GitHub returned 503');
+  expect(row('app')).toContain('current app');
+  expect(row('extension')).toContain('active chats');
+  expect(row('core')).toContain('Network unavailable');
+  expect(row('core')).toContain('Review setup');
+  next.status.surfaces = []; push(next);
+  expect(row('core')).toContain('Network unavailable');
+  expect(w.document.querySelector('[data-update-part="core"]')!.classList.contains('is-bad')).toBe(true);
+  next.status.detail = ''; push(next);
+  expect(row('core')).toContain('Review setup');
+  next.status.surfaces = [{ ...core }];
+  next.status.state = 'connected'; next.status.surfaces[0].state = 'live';
+  next.connectorSchemas = { core: 'current' };
+  next.connectorRefresh = { core: { schemaId: 'current', state: 'failed', failure: 'inspection' } };
+  push(next);
+  expect(row('core')).toContain('Could not inspect');
+  expect(row('core')).toContain('tool list');
+  next.connectorRefresh.core.failure = 'confirmation'; push(next);
+  expect(row('core')).toContain('Could not confirm');
+  next.connectorRefresh.core.schemaId = 'old'; push(next);
+  expect(row('core')).not.toContain('Could not confirm');
+  next.connectorRefresh.core = { schemaId: 'current', state: 'manual' }; push(next);
+  expect(row('core')).toContain('Refresh or recreate');
+  expect(row('core')).toContain('Update all to recheck');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(row('core')).toContain('更新または作り直し');
+  expect(row('core')).toContain('まとめて更新');
+  setLanguage('en');
+});
+
+it.each(['reply', 'transport'])('keeps an Update all %s failure visible across pushes until explicit retry', async kind => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn().mockImplementationOnce(() => kind === 'reply'
+    ? Promise.resolve({ ok: false, error: 'Network unavailable' }) : Promise.reject(new Error('Network unavailable')))
+    .mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  button.click();
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  const error = w.document.getElementById('updateAllError')!;
+  expect(error.hidden).toBe(false);
+  expect(error.textContent).toContain('Network unavailable');
+  expect(error.textContent).toContain('Update all to retry');
+  push(structuredClone(state));
+  expect(error.hidden).toBe(false);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  button.click();
+  expect(error.hidden).toBe(true);
+  resolve({ ok: true, data: 'checking-connectors' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(error.hidden).toBe(true);
+});
+
 it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
   let resolve!: (reply: any) => void;
   const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));

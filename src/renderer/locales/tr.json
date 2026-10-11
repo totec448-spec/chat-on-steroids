@@ -2139,5 +2139,17 @@
   "Calmer when ChatGPT is busy": "ChatGPT meşgulken daha sakin",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT geçmişin yüklenmesini sınırladığında kurtarma, yeniden yüklemek yerine istenen süre kadar bekler.",
   "Lighter on your computer": "Bilgisayarınıza daha hafif",
-  "Open ChatGPT chats use much less CPU while they wait.": "Açık ChatGPT sohbetleri beklerken çok daha az CPU kullanır."
+  "Open ChatGPT chats use much less CPU while they wait.": "Açık ChatGPT sohbetleri beklerken çok daha az CPU kullanır.",
+  "Choose Update all to retry. You can keep using the current app.": "Yeniden denemek için Tümünü güncelle seçeneğini seçin. Mevcut uygulamayı kullanmaya devam edebilirsiniz.",
+  "Let active chats finish, then reload the companion extension in your browser.": "Etkin sohbetlerin bitmesini bekleyin, ardından tarayıcınızda companion uzantısını yeniden yükleyin.",
+  "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Companion uzantısı etkinken ChatGPT’yi açın, ardından Kurulumu gözden geçir seçeneğini seçin.",
+  "Choose Review setup to check the connection, then choose Update all to retry.": "Bağlantıyı kontrol etmek için Kurulumu gözden geçir, yeniden denemek için Tümünü güncelle seçeneğini seçin.",
+  "Could not inspect the installed connector in ChatGPT.": "ChatGPT’de yüklü bağlayıcı incelenemedi.",
+  "Could not confirm the current connector schema in ChatGPT.": "ChatGPT’de mevcut bağlayıcı şeması doğrulanamadı.",
+  "Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.": "ChatGPT’de bu bağlayıcıyı açıp araç listesini kontrol edin, ardından yeniden kontrol etmek için Tümünü güncelle seçeneğini seçin.",
+  "Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.": "ChatGPT’de bu bağlayıcıyı yenileyin veya yeniden oluşturun, ardından yeniden kontrol etmek için Tümünü güncelle seçeneğini seçin.",
+  "Choose Update all to check the installed connector schema.": "Yüklü bağlayıcı şemasını kontrol etmek için Tümünü güncelle seçeneğini seçin.",
+  "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Doğrulamayı bekleyin. Gelmezse ChatGPT’de bu bağlayıcıyı açın ve yeniden kontrol etmek için Tümünü güncelle seçeneğini seçin.",
+  "Run a tool through this connector in ChatGPT to confirm this connection.": "Bağlantıyı doğrulamak için ChatGPT’de bu bağlayıcı üzerinden bir araç çalıştırın.",
+  "Update all could not finish: {0}. Choose Update all to retry.": "Tümünü güncelle tamamlanamadı: {0}. Yeniden denemek için Tümünü güncelle seçeneğini seçin."
 }
