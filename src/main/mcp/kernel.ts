@@ -41,6 +41,7 @@ import {
   type Resolved
 } from '../sandbox.js';
 import { currentWorkspace, forgetMissingWorkspace, learnWorkspace, setCurrentWorkspace } from '../workspace.js';
+import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from '../worktrees/index.js';
 import { getSessionProject } from '../projects.js';
 import { firstTaskRoot, resolveLinkedSkillAlias } from '../skill-access.js';
 import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js';
@@ -66,6 +67,8 @@ import {
   sleepSilentWorkers,
   noteAgentAlive,
   agentForCaller,
+  managedWorkerAllocationIdentity,
+  managedWorkerWorktreeRequired,
   agentForOwnedConversation,
   agentForFinishCaller,
   hasRetiredWorkerLeases,
@@ -1249,13 +1252,28 @@ function isFinishCall(name: string, args: unknown): boolean {
  * refusal it would have got for a relative path before, which is why ambiguity here costs a
  * retry rather than reaching the wrong file.
  */
-async function validatedWorkspace() {
+export async function validatedWorkspace() {
   return (await liveWorkspace()).workspace;
 }
 
 /** The workspace, plus the virtual path of a learned one just dropped because its folder is gone. */
 async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: string } | null; missing: string | null }> {
-  const sessionId = currentCall()?.caller.sessionId;
+  const call = currentCall();
+  const sessionId = call?.caller.sessionId;
+  // Session project metadata is inherited by workers for grouping; the broker's exact
+  // worktree allocation must take precedence, including after a restart or revival.
+  if (call && managedWorkerWorktreeRequired(call.caller)) {
+    const allocation = managedWorkerAllocationIdentity(call.caller);
+    const lease = allocation && call.agent === allocation.agentId ? lookupWorkerWorkspace(allocation) : null;
+    if (!lease) {
+      throw new Error('WORKTREE_OWNER_UNAVAILABLE: the required isolated worker checkout has no verified owner. Relative file and command operations are blocked.');
+    }
+    // Cache provenance is not filesystem ownership: another process may replace the
+    // directory while this worker sleeps. Recheck marker, inode and Git owner now.
+    const verified = await validateWorkerWorkspaceLease(lease, getConfig().roots);
+    setCurrentWorkspace(verified.workspace);
+    return { workspace: verified.workspace, missing: null };
+  }
   // Explicit project bindings are durable authority, even after a cwd was learned.
   // Validate first so a revoked or moved project never becomes a first-root fallback.
   const project = sessionId ? await getSessionProject(sessionId) : null;

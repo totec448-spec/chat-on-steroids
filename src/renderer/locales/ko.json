@@ -2131,5 +2131,7 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT가 같은 채팅에서 아직 실행 중인 명령을 다시 시작하면, 결과가 실행 중인 명령을 알려 줍니다.",
   "Compact & Resume in Projects": "프로젝트에서 압축 후 계속",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT 프로젝트 안의 채팅을 새 채팅으로 옮기는 작업이 이제 끝까지 완료되고, 새 채팅도 그 프로젝트에 남습니다.",
-  "In ChatGPT: {0}": "ChatGPT에서: {0}"
+  "In ChatGPT: {0}": "ChatGPT에서: {0}",
+  "Isolate new workers in Git worktrees": "새 워커를 Git 워크트리로 격리",
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git 프로젝트의 새 워커에게 승인된 별도 작업 공간과 브랜치를 할당합니다. 승인된 상위 폴더가 필요합니다. 기존 워커는 변경되지 않으며, 브랜치에 통합하려면 검토가 필요합니다."
 }

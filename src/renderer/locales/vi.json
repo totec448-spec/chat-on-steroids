@@ -2131,5 +2131,7 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Khi ChatGPT khởi động một lệnh vẫn đang chạy trong cuộc trò chuyện đó, kết quả sẽ chỉ nó đến lệnh đang chạy.",
   "Compact & Resume in Projects": "Compact & Resume trong Dự án",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Chuyển một cuộc trò chuyện trong Dự án ChatGPT sang cuộc trò chuyện mới giờ đã hoàn tất, và cuộc trò chuyện mới vẫn ở trong Dự án đó.",
-  "In ChatGPT: {0}": "Trong ChatGPT: {0}"
+  "In ChatGPT: {0}": "Trong ChatGPT: {0}",
+  "Isolate new workers in Git worktrees": "Cô lập worker mới trong Git worktree",
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Worker mới trong dự án Git nhận không gian làm việc và nhánh riêng đã được cho phép. Cần cấp quyền cho thư mục cha. Worker hiện có không thay đổi; việc hợp nhất vào nhánh của bạn cần được xem xét."
 }

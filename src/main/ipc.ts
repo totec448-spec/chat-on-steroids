@@ -248,6 +248,7 @@ const settingsPatch = z.object({
     strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
+    autoWorktrees: z.boolean().optional(),
     endSleepingWorkerProcesses: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
@@ -448,6 +449,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.waitForSubAgents,
         base.multiAgent.waitForSubAgents,
         wanted.multiAgent.waitForSubAgents
+      ),
+      autoWorktrees: pick(
+        current.multiAgent.autoWorktrees ?? false,
+        base.multiAgent.autoWorktrees ?? false,
+        wanted.multiAgent.autoWorktrees ?? false
       ),
       endSleepingWorkerProcesses: pick(
         current.multiAgent.endSleepingWorkerProcesses ?? false,

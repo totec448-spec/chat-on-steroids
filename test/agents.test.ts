@@ -93,6 +93,9 @@ const {
   stageMessages,
   stagePrimeMessage,
   stageSpawn,
+  markStagedWorkerWorktree,
+  managedWorkerAllocationIdentity,
+  managedWorkerWorktreeRequired,
   snapshotSwarm,
   spawn,
   swarmRunning,
@@ -2734,6 +2737,158 @@ describe('restart', () => {
     expect(snapshotSwarm()?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
     expect(pendingWorkerSpawns()).toEqual([{ runId: staged.runId, primeConversationId: PRIME_CHAT, id: 'worker-1', model: null, reasoningEffort: null, task: 'inspect topology' }]);
     expect(ordinary.at(-1)?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
+  });
+
+  it('allocates identity only to newly staged workers, never a replay or a sleeping slot', async () => {
+    const request = { caller: prime, workers: [{ label: 'Audit', task: 'check files' }] };
+    const first = stageSpawn(request);
+    expect(first.newlyStaged).toBe(true);
+    expect(first.newlyStagedWorkerIds).toEqual(['worker-1']);
+    markStagedWorkerWorktree(first.runId, 'worker-1');
+    expect(() => markStagedWorkerWorktree(first.runId, 'worker-2')).toThrow(/NOT_STAGED/);
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    first.commit();
+    expect(bindConversation('worker-1', 'worktree-worker-original', first.runId)).toBe(true);
+    expect(managedWorkerWorktreeRequired({ conversationId: 'worktree-worker-original' })).toBe(true);
+    expect(managedWorkerAllocationIdentity({ conversationId: 'worktree-worker-original' })).toEqual({
+      runId: first.runId, agentId: 'worker-1'
+    });
+
+    const retry = stageSpawn(request);
+    expect(retry.newlyStaged).toBe(false);
+    expect(retry.newlyStagedWorkerIds).toEqual([]);
+    retry.commit();
+    expect(snapshotSwarm()?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+
+    sleepWorker('worker-1', 'job done', first.runId);
+    const fresh = stageSpawn(request);
+    expect(fresh.newlyStagedWorkerIds).toEqual(['worker-2']);
+    expect(fresh.created[0]?.workerAllocationRunId).toBe(first.runId);
+    fresh.rollback();
+    expect(managedWorkerAllocationIdentity({ conversationId: 'forged-worker' })).toBeNull();
+    expect(managedWorkerWorktreeRequired({ conversationId: 'forged-worker' })).toBe(false);
+  });
+
+  it('treats a mixed duplicate/new spawn as all newly admitted workers, without touching earlier leases', async () => {
+    const first = stageSpawn({ caller: prime, workers: [{ label: 'A', task: 'existing' }] });
+    markStagedWorkerWorktree(first.runId, 'worker-1');
+    first.commit();
+    const mixed = stageSpawn({ caller: prime, workers: [
+      { label: 'A', task: 'existing' }, { label: 'B', task: 'new work' }
+    ] });
+    expect(mixed.newlyStagedWorkerIds).toEqual(['worker-2', 'worker-3']);
+    expect(mixed.created.map(worker => worker.id)).toEqual(['worker-2', 'worker-3']);
+    mixed.rollback();
+    expect(snapshotSwarm()?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+  });
+
+  it('retains the exact worktree allocation through snapshot, dormancy, and a fresh run incarnation', () => {
+    const created = stageSpawn({ caller: prime, workers: [{ task: 'preserve isolation' }] });
+    markStagedWorkerWorktree(created.runId, 'worker-1');
+    created.commit();
+    const workerChat = 'managed-persisted-worker';
+    expect(bindConversation('worker-1', workerChat, created.runId)).toBe(true);
+    sleepWorker('worker-1', 'completed', created.runId);
+    expect(releaseQuiescentRun()).toBe(true);
+    const snapshot = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    restoreSwarm(snapshot);
+    expect(managedWorkerWorktreeRequired({ conversationId: workerChat })).toBe(true);
+    expect(reactivateDormantRunForConversation(workerChat)).toBe(true);
+    expect(currentRunId(PRIME_CHAT)).not.toBe(created.runId);
+    expect(managedWorkerAllocationIdentity({ conversationId: workerChat })).toEqual({
+      runId: created.runId, agentId: 'worker-1'
+    });
+    const after = snapshotSwarm()!;
+    expect(after.agents.find(row => row.info.id === 'worker-1')?.info.workerAllocationRunId).toBe(created.runId);
+    expect(after.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+  });
+
+  it('writes a second critical revision if isolation is marked during another acceptance writer', async () => {
+    const snapshots: Array<ReturnType<typeof snapshotSwarm>> = [];
+    const ordinary: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersist(() => ordinary.push(snapshotSwarm()));
+    let releaseFirst!: () => void;
+    let firstCaptured!: () => void;
+    const holdFirst = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const firstSeen = new Promise<void>(resolve => { firstCaptured = resolve; });
+    onSwarmPersistNow(async snapshot => {
+      snapshots.push(structuredClone(snapshot));
+      if (snapshots.length === 1) {
+        firstCaptured();
+        await holdFirst;
+      }
+    });
+
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'keep marker policy after restart' }] });
+    const writer = persistCriticalSwarmNow();
+    await firstSeen;
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    expect(snapshotSwarm()).toBeNull();
+    expect(ordinary.at(-1)).toBeNull();
+    releaseFirst();
+    expect(await writer).toBe(true);
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).not.toBe(true);
+    expect(snapshots[1]?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+    staged.commit();
+    expect(snapshotSwarm()?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+  });
+
+  it('does not durably admit another family while its worktree allocation is unfinished', async () => {
+    const beforeConfig = getConfig();
+    await saveConfig({ ...beforeConfig, multiAgent: { ...beforeConfig.multiAgent, autoWorktrees: true } });
+    try {
+      const stagedA = stageSpawn({ caller: prime, workers: [{ task: 'requires an isolated checkout' }] });
+      expect(stagedA.newlyStagedWorkerIds).toEqual(['worker-1']);
+      const saved: Array<ReturnType<typeof snapshotSwarm>> = [];
+      onSwarmPersistNow(async snapshot => { saved.push(structuredClone(snapshot)); });
+      const primeB = { conversationId: 'other-family-durable-writer' };
+      const b = spawn({ caller: primeB, workers: [{ task: 'independent already ready' }] });
+      expect(await persistCriticalSwarmNow()).toBe(true);
+      const crashSnapshot = saved.at(-1)!;
+      expect(crashSnapshot?.activeRuns?.map(run => run.runId)).toEqual([b.runId]);
+      // Crash before A even receives its marker: it must not become a runnable ghost worker
+      // whose inherited prime workspace would otherwise be writable on restart.
+      resetAgentsForTests();
+      restoreSwarm(crashSnapshot);
+      expect(swarmStateForCaller(prime).agents).toEqual([]);
+      expect(swarmStateForCaller(primeB).agents.map(agent => agent.id)).toEqual(['prime', 'worker-1']);
+    } finally {
+      await saveConfig(beforeConfig);
+    }
+  });
+
+  it('makes a fully allocated staged family durable after a foreign family already persisted', async () => {
+    const beforeConfig = getConfig();
+    await saveConfig({ ...beforeConfig, multiAgent: { ...beforeConfig.multiAgent, autoWorktrees: true } });
+    try {
+      const stagedA = stageSpawn({ caller: prime, workers: [{ task: 'isolated worker after B writes' }] });
+      const primeB = { conversationId: 'prepared-cross-family-other' };
+      const b = spawn({ caller: primeB, workers: [{ task: 'B accepted first' }] });
+      const writes: Array<ReturnType<typeof snapshotSwarm>> = [];
+      onSwarmPersistNow(async snapshot => { writes.push(structuredClone(snapshot)); });
+      expect(await persistCriticalSwarmNow()).toBe(true);
+      expect(writes.at(-1)?.activeRuns?.map(run => run.runId)).toEqual([b.runId]);
+
+      // Worker Git creation and marker persistence completed, then A advertises its exact
+      // required worktree before the acceptance barrier. B cannot make that revision vanish.
+      markStagedWorkerWorktree(stagedA.runId, 'worker-1');
+      stagedA.prepareDurability();
+      expect(await persistCriticalSwarmNow()).toBe(true);
+      const accepted = writes.at(-1)!;
+      expect(accepted?.activeRuns?.map(run => run.runId)).toEqual([stagedA.runId, b.runId]);
+      expect(accepted?.activeRuns?.[0]?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+      stagedA.commit();
+
+      resetAgentsForTests();
+      restoreSwarm(accepted);
+      expect(swarmStateForCaller(prime).agents.map(agent => agent.id)).toEqual(['prime', 'worker-1']);
+      expect(swarmStateForCaller(primeB).agents.map(agent => agent.id)).toEqual(['prime', 'worker-1']);
+      expect(snapshotSwarm()?.activeRuns?.[0]?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+    } finally {
+      await saveConfig(beforeConfig);
+    }
   });
 
   it('rolls a staged addition back to the previously accepted run without leaking it to ordinary snapshots', () => {
