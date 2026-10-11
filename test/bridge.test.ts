@@ -112,6 +112,7 @@ const { completeProcessCall, createSession, deleteSession, findSessionByConversa
   '../src/main/session/store.js'
 );
 const sessionStoreModule = await import('../src/main/session/store.js');
+const { noteServedRequest, resetConnectorIdentityForTests } = await import('../src/main/connector-identity.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { requestCorrelation, resetCorrelationRegistryForTests, restoreRequestCorrelations } = await import('../src/main/session/correlation.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
@@ -15501,5 +15502,45 @@ describe('worker brief on a computer with its own connector names', () => {
       expect(workerBriefForTests('worker-1', 'Check the tests'))
         .toContain('Report to prime through the agents tool of Chat On Steroids Core (Windows VM) — ');
     } finally { await saveConfig(previous); }
+  });
+});
+
+/**
+ * 2026-10-11: ChatGPT keeps a connector's app id across a rename (measured on VM 141). The page
+ * reports what it sees as app sightings; only a request this app served may teach an identity.
+ */
+describe('connector identity through the bridge', () => {
+  beforeEach(() => resetConnectorIdentityForTests());
+
+  it('learns a renamed Core from an app_sightings observation of a served request and publishes it', async () => {
+    await pair();
+    noteServedRequest('req-renamed', 'core');
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d1';
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'app_sightings', time: Date.now(), apps: [
+      { requestId: 'req-renamed', appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', appName: 'My tools' },
+      { requestId: 'not-ours', appId: 'asdk_app_foreign', linkId: null, appName: 'Chat On Steroids Core' }
+    ] }] } });
+    const status = (await request('GET', '/status')).body;
+    expect(status.connectorApps.core).toEqual([{ appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', name: 'My tools' }]);
+    expect(status.connectorApps.desktop).toEqual([]);
+  });
+
+  it('keeps the name a newer chat showed when an older chat still reports the old one', async () => {
+    await pair();
+    const app = { appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f' };
+    noteServedRequest('req-newer-chat', 'core');
+    noteServedRequest('req-older-chat', 'core');
+    await request('POST', '/events', { body: { conversationId: '6acb532d-fe08-83ed-96e2-e22cd7008cb8', events: [{ kind: 'app_sightings', time: Date.now(),
+      apps: [{ requestId: 'req-newer-chat', ...app, appName: 'Renamed' }] }] } });
+    await request('POST', '/events', { body: { conversationId: '6acb3e79-2cd4-83eb-b54b-f9d66653cf07', events: [{ kind: 'app_sightings', time: Date.now(),
+      apps: [{ requestId: 'req-older-chat', ...app, appName: 'Original' }] }] } });
+    expect((await request('GET', '/status')).body.connectorApps.core[0].name).toBe('Renamed');
+  });
+
+  it('does not store app_sightings as transcript content', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d2';
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'app_sightings', time: Date.now(), apps: [] }] } });
+    expect(await findSessionByConversation(conversationId)).toBeNull();
   });
 });
