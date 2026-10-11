@@ -292,7 +292,7 @@
   "Automatic plugin refresh": "自动刷新插件",
   "Browser only": "仅浏览器",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "不为自动刷新插件或聊天恢复打开标签页。主动新建聊天、启动子智能体和重新加载模型仍然有效。",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "应用创建的空闲标签页会在两分钟后关闭。超过子智能体数量上限时，休眠的子智能体标签页可能提前关闭。正在工作的轮次和未发送的草稿会保留。",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "应用创建的空闲标签页会在五分钟后关闭，已完成的在两分钟后关闭。超过子智能体数量上限时，休眠的子智能体标签页可能提前关闭。正在工作的轮次和未发送的草稿会保留。",
   "Overwrite ChatGPT tool rows": "替换 ChatGPT 工具行",
   "Show recorded local activity in the ChatGPT page.": "在 ChatGPT 页面中显示已记录的本地活动。",
   "Show durations in ChatGPT": "在 ChatGPT 中显示耗时",

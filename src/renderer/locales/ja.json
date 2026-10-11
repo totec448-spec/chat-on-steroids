@@ -292,7 +292,7 @@
   "Automatic plugin refresh": "プラグインの自動更新",
   "Browser only": "既存のブラウザーのみ",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "プラグインの自動更新やチャットの復旧のためにタブを開きません。明示的な新規チャット、ワーカー、「モデルを再読み込み」は引き続き使用できます。",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "アプリが作成したタブは、待機状態が2分続くと閉じます。ワーカー数の上限を超えた場合、休止中のワーカーのタブはそれより早く閉じることがあります。作業中のターンや未送信の下書きがあるタブは開いたままにします。",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "アプリが作成したタブは、待機状態が5分続くと閉じます（完了したタブは2分）。ワーカー数の上限を超えた場合、休止中のワーカーのタブはそれより早く閉じることがあります。作業中のターンや未送信の下書きがあるタブは開いたままにします。",
   "Overwrite ChatGPT tool rows": "ChatGPT のツール行を置き換える",
   "Show recorded local activity in the ChatGPT page.": "記録したローカルのアクティビティを ChatGPT のページに表示します。",
   "Show durations in ChatGPT": "ChatGPT に所要時間を表示",

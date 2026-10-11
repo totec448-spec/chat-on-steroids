@@ -270,7 +270,7 @@
   "Automatic plugin refresh": "Automatische Plugin-Aktualisierung",
   "Browser only": "Nur Browser",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "Keine Tabs für die automatische Plugin-Aktualisierung oder die Chat-Wiederherstellung öffnen. Ausdrücklich gestartete neue Chats, Worker und „Modelle neu laden“ funktionieren weiterhin.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Untätige, von der App geöffnete Tabs schließen sich nach zwei Minuten. Ruhende Worker-Tabs können früher schließen, wenn das Worker-Limit überschritten ist. Laufende Durchläufe und ungesendete Entwürfe bleiben offen.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Untätige, von der App geöffnete Tabs schließen sich nach fünf Minuten, abgeschlossene nach zwei. Ruhende Worker-Tabs können früher schließen, wenn das Worker-Limit überschritten ist. Laufende Durchläufe und ungesendete Entwürfe bleiben offen.",
   "Overwrite ChatGPT tool rows": "Tool-Zeilen in ChatGPT überschreiben",
   "Show recorded local activity in the ChatGPT page.": "Aufgezeichnete lokale Aktivität auf der ChatGPT-Seite anzeigen.",
   "Show durations in ChatGPT": "Dauer in ChatGPT anzeigen",
