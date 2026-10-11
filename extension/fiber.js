@@ -174,6 +174,10 @@
     }
     OUR_APP_IDS = next;
   }
+  /** This install's Plugins connector, by name or (after a rename) by its proven app id. */
+  function pluginsConnectorApp(name, appId) {
+    return pluginsConnectorName(name) || (typeof appId === 'string' && OUR_APP_IDS.some(app => app.surface === 'plugins' && app.appId === appId));
+  }
   /** `/asdk_app_…/link_…/tool` → the app id, or null. */
   function appIdOf(resource) {
     if (typeof resource !== 'string' || resource.charCodeAt(0) !== 47) return null;
@@ -2814,7 +2818,7 @@
       }
     }
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
-    const externalPlugins = pluginsConnectorName(connector.name);
+    const externalPlugins = pluginsConnectorApp(connector.name, connector.id);
     if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
     const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
     // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
@@ -2860,7 +2864,7 @@
         if (props.actions === observedActions) continue;
         if (observedActions) return null;
         observedActions = props.actions;
-        const externalPlugins = pluginsConnectorName(props.connector.name);
+        const externalPlugins = pluginsConnectorApp(props.connector.name, props.connector.id);
         if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
