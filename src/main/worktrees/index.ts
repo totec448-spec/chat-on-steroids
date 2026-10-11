@@ -266,6 +266,15 @@ function containedByAny(roots: readonly ResolvedRoot[], value: string): boolean 
   return roots.some(entry => isContained(entry.real, value));
 }
 
+function sameApprovedRoot(approved: ResolvedRoot, original: Root): boolean {
+  // Root approval identity is its configured name/path pair. The canonical path
+  // is separately used for containment: macOS can resolve /var to /private/var,
+  // and a symlink may have been the originally approved path. A different
+  // configured alias must never inherit an existing worker's lease.
+  return approved.root.name === original.name &&
+    path.resolve(approved.root.path) === path.resolve(original.path);
+}
+
 async function repositoryContext(cwd: string, roots: readonly ResolvedRoot[]): Promise<RepoContext> {
   const realCwd = await realDirectory(cwd);
   if (!containedByAny(roots, realCwd)) throw new WorkerWorktreeError('WORKTREE_OUTSIDE_ROOT', 'workspace is outside the approved roots');
@@ -643,9 +652,7 @@ export async function validateWorkerWorkspaceLease(
   }
   try {
     const roots = await rootsOf(approvedRoots);
-    const owningRoot = roots.find(root => root.root.name === lease.approvedRoot.name &&
-      path.resolve(root.root.path) === path.resolve(lease.approvedRoot.path) &&
-      path.resolve(root.real) === path.resolve(lease.approvedRoot.path));
+    const owningRoot = roots.find(root => sameApprovedRoot(root, lease.approvedRoot));
     if (!owningRoot || !isContained(owningRoot.real, lease.worktreePath)) {
       throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'worker worktree no longer belongs to a current approved root');
     }
@@ -737,8 +744,6 @@ async function offeredWorkerLease(
   const roots = await rootsOf(approvedRoots);
   const matches: WorkerWorktreeLease[] = [];
   for (const approved of roots) {
-    // The actual originally approved directory must still be authorized, not an alias.
-    if (path.resolve(approved.real) !== path.resolve(approved.root.path)) continue;
     const rejected: RestoreManagedWorktreesResult['rejected'] = [];
     const markerPaths = await candidateMarkerPaths(approved.real, rejected, accepted);
     if (rejected.length) throw new WorkerWorktreeError('WORKTREE_STORAGE_UNSAFE', 'cleanup storage ownership cannot be proven');
@@ -754,10 +759,9 @@ async function offeredWorkerLease(
           (offer.ownershipToken !== undefined && marker.ownershipToken !== offer.ownershipToken)) {
         throw new WorkerWorktreeError('WORKTREE_NOT_OWNED', 'cleanup offer does not match the allocated worker generation');
       }
-      if (marker.approvedRoot.name !== approved.root.name ||
-          path.resolve(marker.approvedRoot.path) !== path.resolve(approved.root.path) ||
+      if (!sameApprovedRoot(approved, marker.approvedRoot) ||
           ![marker.sourceRepoRoot, marker.commonDir, marker.worktreePath, marker.workspace.real]
-            .every(value => containedByAny(roots, path.resolve(value)))) {
+            .every(value => isContained(approved.real, path.resolve(value)))) {
         throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'cleanup offer no longer belongs to an approved root');
       }
       const source = await repositoryContext(marker.sourceRepoRoot, roots);
@@ -873,11 +877,11 @@ export async function restoreManagedWorktrees(
         if (!marker) continue;
         const identity = checkedIdentity(marker.runId, marker.agentId);
         assertMarkerSlot(marker, markerPath);
-        if (marker.approvedRoot.name !== approved.root.name ||
-            path.resolve(marker.approvedRoot.path) !== path.resolve(approved.root.path)) {
+        if (!sameApprovedRoot(approved, marker.approvedRoot)) {
           throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'the owning approved root has changed since allocation');
         }
-        if (![marker.sourceRepoRoot, marker.commonDir, marker.worktreePath, marker.workspace.real].every(value => containedByAny(roots, path.resolve(value)))) {
+        if (![marker.sourceRepoRoot, marker.commonDir, marker.worktreePath, marker.workspace.real]
+          .every(value => isContained(approved.real, path.resolve(value)))) {
           throw new WorkerWorktreeError('WORKTREE_OUTSIDE_ROOT', 'restored worktree or repository metadata is outside current approved roots');
         }
         const source = await repositoryContext(marker.sourceRepoRoot, roots);

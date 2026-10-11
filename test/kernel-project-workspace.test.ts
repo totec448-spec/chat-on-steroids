@@ -11,7 +11,7 @@ vi.mock('../src/main/agents.js', async (original) => ({
   ...(await original<typeof import('../src/main/agents.js')>()),
   swarmRunning: () => swarm.running,
   managedWorkerWorktreeRequired: () => swarm.managed,
-  managedWorkerIsolationRequired: async () => swarm.managed || swarm.orphanedWorker,
+  managedWorkerIsolationRequired: () => swarm.managed || swarm.orphanedWorker,
   managedWorkerAllocationIdentity: () => swarm.managed ? { runId: 'owner-allocation', agentId: 'worker-1' } : null
 }));
 import { resolveCwd, resolveIn } from '../src/main/mcp/kernel.js';
@@ -97,6 +97,13 @@ it('recovers a managed worker checkout even when its session still names the pri
   const cwd = await workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined));
   expect(cwd?.virtual).toBe('/work/b');
   expect(leaseLookup).toHaveBeenCalledWith({ runId: 'owner-allocation', agentId: 'worker-1' });
+});
+
+it('keeps an unmanaged legacy worker on its inherited project without requiring a worktree', async () => {
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  expect((await workerRun('legacy', () => resolveIn(roots(), 'file.txt'))).real).toBe(path.join(base, 'a', 'file.txt'));
+  expect((await workerRun('legacy', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))?.virtual).toBe('/work/a');
+  expect(leaseLookup).not.toHaveBeenCalled();
 });
 
 it('refuses a required worker checkout when its marker cannot be recovered, even with cached prime cwd', async () => {
