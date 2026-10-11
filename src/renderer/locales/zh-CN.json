@@ -2151,5 +2151,16 @@
   "Choose Update all to check the installed connector schema.": "请选择“全部更新”检查已安装的连接器架构。",
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "请等待确认。如果一直未完成，请在 ChatGPT 中打开此连接器，然后选择“全部更新”重新检查。",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "请在 ChatGPT 中通过此连接器运行一个工具，以确认连接。",
-  "Update all could not finish: {0}. Choose Update all to retry.": "无法完成全部更新：{0}。请选择“全部更新”重试。"
+  "Update all could not finish: {0}. Choose Update all to retry.": "无法完成全部更新：{0}。请选择“全部更新”重试。",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "所有套餐都能用目标、项目中的压缩并继续，以及保持不变的后台窗口。",
+  "Goal on every plan": "所有套餐都能用目标",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "在没有模型选择器的套餐（如 Free）上，目标和循环的后续消息会使用聊天当前的模型，不再失败。",
+  "A background window that stays": "保持不变的后台窗口",
+  "Background chats keep using the same window after the extension updates or reloads.": "扩展更新或重新加载后，后台聊天会继续使用同一个窗口。",
+  "Clearer connector hints": "更清晰的连接器提示",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "当 ChatGPT 调用其连接器没有的工具时，结果会指出拥有该工具的连接器。",
+  "Fewer repeated commands": "更少的重复命令",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "当 ChatGPT 再次启动该聊天中仍在运行的命令时，结果会引导它查看正在运行的那个。",
+  "Compact & Resume in Projects": "项目中的压缩并继续",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "把 ChatGPT 项目中的聊天转到新聊天现在能顺利完成，新聊天也会留在同一个项目里。"
 }

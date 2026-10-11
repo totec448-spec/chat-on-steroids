@@ -425,6 +425,44 @@ describe('native Project entry readiness', () => {
     expect(failure).toHaveBeenCalledWith('transition-timeout:last=source-route');
   });
 
+  it('clicks again when ChatGPT rewrites the source route under the first click', async () => {
+    // Measured 2026-10-10: a replacement tab opens /c/<id>; ChatGPT rewrites it to /g/<id>/c/<chat>
+    // and then to /g/<id>-<name>/c/<chat>. A click between the two was taken by the router and
+    // dropped by the second rewrite, so the entry timed out on the source chat (8 of 14 attempts).
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    box.textContent = '';
+    let clicks = 0;
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicks++;
+      if (clicks === 1) {
+        // The router's own rewrite takes this click away.
+        dom.window.setTimeout(() => dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}-homelab/c/${entry.sourceConversationId}` }), 200);
+        return;
+      }
+      dom.reconfigure({ url: projectUrl });
+    });
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await entered).toBe(true);
+    expect(clicks).toBe(2);
+  });
+
+  it('stops clicking after two rewrites and still gives up within the transition deadline', async () => {
+    const link = sourceLink(`<a href="/g/${entry.id}/project"><span>Homelab</span></a>`);
+    box.textContent = '';
+    let clicks = 0;
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicks++;
+      dom.window.setTimeout(() => dom.reconfigure({ url: `https://chatgpt.com/g/${entry.id}-v${clicks}/c/${entry.sourceConversationId}` }), 100);
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(false);
+    expect(clicks).toBe(3);
+    expect(failure).toHaveBeenCalledWith(expect.stringMatching(/^transition-timeout:last=source-route/));
+  });
+
   it('reports a Project route whose editor never becomes ready after the one click', async () => {
     const link = sourceLink();
     box.textContent = '';

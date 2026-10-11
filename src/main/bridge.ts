@@ -209,6 +209,7 @@ import {
   supersededSourceConversations,
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
+  releaseUndeliveredSourceDispatchNow,
   normalizeProjectId,
   openContinuationNow,
   reopenWithHandoffNow,
@@ -3536,8 +3537,22 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (body['sourceDispatch'] === true) {
       const entry = continuationByToken(checkpointToken);
       if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
-      const armed = await dispatchContinuationSourceSendNow(checkpointToken);
+      const before = typeof body['before'] === 'string' ? body['before'] : null;
+      const armed = await dispatchContinuationSourceSendNow(checkpointToken, before);
       return json(res, armed ? 200 : 409, armed ? { armed: true } : { error: 'source_send_reclaimed' }, origin);
+    }
+    // A later document's proof that the armed click never reached ChatGPT: it still shows, as
+    // the newest user message, the one that was newest before the click.
+    if (body['sourceUndelivered'] === true) {
+      const entry = continuationByToken(checkpointToken);
+      if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
+      const newest = typeof body['newestUserMessage'] === 'string' ? body['newestUserMessage'] : null;
+      const since = typeof body['documentSince'] === 'number' ? body['documentSince'] : 0;
+      const released = await releaseUndeliveredSourceDispatchNow(checkpointToken, newest, since);
+      if (!released) return json(res, 409, { error: 'source_send_not_releasable' }, origin);
+      logInfo(`bridge: the handoff click for ${entry.sessionId} never reached ChatGPT; it may be sent once more`);
+      changed();
+      return json(res, 200, { released: true, sourceSend: released, job: resumeJobFor(entry.sessionId) }, origin);
     }
     if (body['sourceAttempt'] === true) {
       const entry = continuationByToken(checkpointToken);

@@ -2151,5 +2151,16 @@
   "Choose Update all to check the installed connector schema.": "「まとめて更新」でインストールされたコネクタースキーマを確認してください。",
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "確認が完了するまでお待ちください。完了しない場合はChatGPTでこのコネクターを開き、「まとめて更新」で再確認してください。",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "ChatGPTでこのコネクターのツールを実行し、接続を確認してください。",
-  "Update all could not finish: {0}. Choose Update all to retry.": "まとめて更新を完了できませんでした: {0}。「まとめて更新」で再試行してください。"
+  "Update all could not finish: {0}. Choose Update all to retry.": "まとめて更新を完了できませんでした: {0}。「まとめて更新」で再試行してください。",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "すべてのプランでゴール、プロジェクトでの圧縮して再開、残り続けるバックグラウンドウィンドウ。",
+  "Goal on every plan": "すべてのプランでゴール",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "Free などモデル選択のないプランでも、ゴールとループのフォローアップは失敗せず、チャットの現在のモデルを使います。",
+  "A background window that stays": "残り続けるバックグラウンドウィンドウ",
+  "Background chats keep using the same window after the extension updates or reloads.": "拡張機能の更新や再読み込みの後も、バックグラウンドのチャットは同じウィンドウを使い続けます。",
+  "Clearer connector hints": "コネクターについての明確なヒント",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "ChatGPT がそのコネクターにないツールを呼ぶと、結果にそのツールを持つコネクターが表示されます。",
+  "Fewer repeated commands": "コマンドの重複が減少",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "同じチャットでまだ実行中のコマンドを ChatGPT がもう一度始めると、結果が実行中のものを案内します。",
+  "Compact & Resume in Projects": "プロジェクトでの圧縮して再開",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT プロジェクト内のチャットを新しいチャットへ移す処理が最後まで完了し、新しいチャットも同じプロジェクトに残ります。"
 }
