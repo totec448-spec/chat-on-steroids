@@ -127,6 +127,20 @@ describe('settings migration', () => {
       expect((await loadConfig()).ui.backgroundChats).toBe(backgroundChats);
     }
   });
+  it('defaults background placement to a window and keeps a saved tab-group choice', async () => {
+    expect(defaultConfig().ui.backgroundPlacement).toBe('window');
+    const legacy = defaultConfig(); delete (legacy.ui as { backgroundPlacement?: string }).backgroundPlacement;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.backgroundPlacement).toBe('window');
+    for (const backgroundPlacement of ['group', 'window'] as const) {
+      await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, backgroundPlacement } });
+      expect((await loadConfig()).ui.backgroundPlacement).toBe(backgroundPlacement);
+    }
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, backgroundPlacement: 'sidebar' } }), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.ui.backgroundPlacement).toBe('window');
+    expect(loaded.ui.backgroundChats).toBe(true);
+  });
   it('defaults login startup off for fresh and legacy settings independently of auto-connect', async () => {
     expect(defaultConfig().ui.startAtLogin).toBe(false);
     const legacy = defaultConfig();

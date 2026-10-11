@@ -10,7 +10,8 @@
     "scripting",
     "alarms",
     "debugger",
-    "tabs"
+    "tabs",
+    "tabGroups"
   ],
   "optional_permissions": ["cookies"],
   "host_permissions": [

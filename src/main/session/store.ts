@@ -784,6 +784,7 @@ async function rebuildSummaryFromHistory(
     identities.push({ seq: event.seq, origin: positionOf(event), time: event.time, kind: event.kind,
       source: event.source, turnId: event.turnId,
       ...(event.kind === 'user_message' ? { messageId: event.messageId, inputId: event.inputId } : {}),
+      ...(event.kind === 'turn_end' && event.continued === true ? { continued: true } : {}),
       ...(event.kind === 'tool_call' ? { call: { requestId: event.call.requestId,
         conversationId: event.call.conversationId, attribution: event.call.attribution } } : {}) });
   };
@@ -3185,12 +3186,17 @@ async function readTraceFile(id: string, turnId: string): Promise<{ json: string
 }
 
 /** Replaces one turn's outline. False when it is unchanged, invalid, or the session is gone. */
-export async function writeTurnTrace(id: string, turnId: string, input: unknown): Promise<boolean> {
+export async function writeTurnTrace(id: string, turnId: string, input: unknown, question?: string): Promise<boolean> {
   assertSessionId(id);
   const incoming = TRACE_TURN_ID.test(turnId) ? turnTrace(input) : null;
   if (!incoming) return false;
   const entry = await ensureOpen(id);
   return enqueueSessionOperation(entry, 'trace', async () => {
+    // An outline read from a page turn another question opened is not this turn's (#1301): the
+    // moment a message sent into a running answer switches turns, the page can still name the
+    // earlier local turn as the newer answer's owner.
+    const asked = entry.summary.timelineTurns?.[turnId]?.questionId;
+    if (question && asked && asked !== question) return false;
     // When a call first showed is known only to the page that ran the turn live; a page reloaded
     // since reads the same calls without it. The earliest time recorded for a call id is kept.
     const seen = new Map((await readTraceFile(id, turnId))?.trace.flatMap(item => item.kind === 'call' && item.at ? [[item.id, item.at] as const] : []) ?? []);
