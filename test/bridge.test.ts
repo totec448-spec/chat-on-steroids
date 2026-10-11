@@ -15541,6 +15541,43 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); }
   });
+
+  const placement = async (value: 'window' | 'group') => {
+    const config = getConfig();
+    await saveConfig({ ...config, ui: { ...config.ui, backgroundPlacement: value } });
+  };
+
+  it('asks for no follow when background tabs go to a tab group', async () => {
+    await pair();
+    await background(true);
+    await placement('group');
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); await placement('window'); }
+  });
+
+  it('drops a pending follow once the placement switches to a tab group', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      await placement('group');
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); await placement('window'); }
+  });
+
+  it.each(['window', 'group'] as const)('publishes the background placement %s in /status', async (value) => {
+    await pair();
+    await placement(value);
+    try {
+      expect((await poll(BROWSER_B, [])).backgroundPlacement).toBe(value);
+    } finally { await placement('window'); }
+  });
 });
 
 describe('worker brief on a computer with its own connector names', () => {
