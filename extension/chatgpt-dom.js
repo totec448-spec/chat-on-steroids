@@ -2687,6 +2687,22 @@ var CLF_DOM = (() => {
     ownConnectors = list;
     return true;
   }
+  /** This install's proven connector apps ({ surface, appId, linkId, name }), from the app's status. */
+  let ownApps = [];
+  function setConnectorApps(value) {
+    const list = [];
+    for (const surface of ['core', 'desktop', 'plugins']) {
+      for (const app of (value && Array.isArray(value[surface]) ? value[surface] : []).slice(0, 4)) {
+        if (!app || typeof app.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(app.appId)) continue;
+        list.push({ surface, appId: app.appId, linkId: typeof app.linkId === 'string' ? app.linkId : null,
+          name: typeof app.name === 'string' ? app.name : null });
+      }
+    }
+    const changed = JSON.stringify(list) !== JSON.stringify(ownApps);
+    ownApps = list;
+    return changed;
+  }
+  const connectorApps = () => ownApps.map(app => ({ ...app }));
   /** This install's three names, or the plain ones while the app has not said. */
   const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
   /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
@@ -2703,7 +2719,7 @@ var CLF_DOM = (() => {
         if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames() }, location.origin);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
@@ -2827,7 +2843,7 @@ var CLF_DOM = (() => {
       };
       const timer = setTimeout(() => finish(null), 1500);
       window.addEventListener('message', receive);
-      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames() }, location.origin);
+      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
     });
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
@@ -3305,6 +3321,8 @@ var CLF_DOM = (() => {
     composerAttachmentNames,
     pluginRefreshView,
     setConnectorNames,
+    setConnectorApps,
+    connectorApps,
     connectorNames,
     pluginInstalledButtons,
     pluginManagementIdle,

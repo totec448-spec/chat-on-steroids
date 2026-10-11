@@ -1902,6 +1902,22 @@ describe('desktop input delivery and helper ownership', () => {
     expect(mentions).toEqual([expected]);
   });
 
+  it('hands the proven connector apps to fiber.js with every scan', async () => {
+    const asked: unknown[] = [];
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0,
+        connectorApps: { core: [{ appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }], desktop: [], plugins: [] } })
+    });
+    live.window.addEventListener('message', (event: MessageEvent) => {
+      if (event.data?.source === 'clf-fiber-ask') asked.push(event.data.appIds);
+    });
+    await settle();
+    expect((live.window as any).CLF_DOM.connectorApps()).toEqual([{ surface: 'core', appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }]);
+    userTurn(live.document, 'apps-user', 'hello');
+    live.hook.observe();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual([{ surface: 'core', appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }]));
+  });
+
   it('keeps the plain names for a status reply that carries foreign or malformed names', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
