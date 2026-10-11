@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
+    <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
     <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
@@ -1256,6 +1257,7 @@
                     </div>
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
+                  <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
@@ -1303,6 +1305,7 @@
                 </div>
               </div>
               <p id="composerStatus" role="status" aria-live="polite"></p>
+              <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>
