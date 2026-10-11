@@ -395,3 +395,72 @@ it('5.6 forgets a stored group that refused a tab, so the next placement does no
   expect(app.session.chatBackgroundGroup).toBeUndefined();
   expect(app.local.chatBackgroundGroupMirror).toBeUndefined();
 });
+
+const MAIN = 'https://chatgpt.com/c/main';
+it('6.1 keeps using a mirrored group after an extension reload while it carries the title', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 50, windowId: 1, title: TITLE }],
+    tabs: [{ id: 1, windowId: 1, url: MAIN, groupId: 50, index: 0 }], local: { chatBackgroundGroupMirror: 50 } });
+  await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.group).toHaveBeenCalledWith({ groupId: 50, tabIds: [expect.any(Number)] });
+  expect(app.session.chatBackgroundGroup).toBe(50);
+});
+
+it('6.2 lets go of a mirrored group the user renamed and starts its own', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 50, windowId: 1, title: 'Research' }],
+    tabs: [{ id: 1, windowId: 1, url: MAIN, groupId: 50, index: 0 }], local: { chatBackgroundGroupMirror: 50 } });
+  const tab = await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.tabs.get(tab.id)!.groupId).not.toBe(50);
+  expect(app.groups.get(50)!.title).toBe('Research');
+  expect(app.local.chatBackgroundGroupMirror).toBe(app.tabs.get(tab.id)!.groupId);
+});
+
+it('6.3 adopts a restored all-app titled group after a browser restart', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 60, windowId: 1, title: TITLE }],
+    tabs: [{ id: 1, windowId: 1, url: MAIN, groupId: 60, index: 0 }, { id: 2, windowId: 1, url: 'https://example.com/', index: 1 }] });
+  expect(await app.reconcileBackgroundWindow(policy)).toBe(true);
+  expect(app.session.chatBackgroundGroup).toBe(60);
+  await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.group).toHaveBeenCalledExactlyOnceWith({ groupId: 60, tabIds: [expect.any(Number)] });
+});
+
+it.each([
+  ['holds a personal tab', [{ id: 1, windowId: 1, url: MAIN, groupId: 60 }, { id: 2, windowId: 1, url: 'https://example.com/', groupId: 60 }], TITLE],
+  ['carries another title', [{ id: 1, windowId: 1, url: MAIN, groupId: 60 }], 'Chat On Steroids (2)'],
+  ['is empty', [], TITLE]
+])('6.4 never adopts a group that %s', async (_name, tabs, title) => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 60, windowId: 1, title }], tabs: tabs as GTab[] });
+  expect(await app.reconcileBackgroundWindow(policy)).toBe(false);
+  expect(app.session.chatBackgroundGroup).toBeUndefined();
+});
+
+it('6.5 never moves or regroups tabs in group mode, even with an old background window around', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }, { id: 9 }], lastFocused: 1, groups: [{ id: 60, windowId: 1, title: TITLE }],
+    session: { chatBackgroundWindow: 9, chatBackgroundGroup: 60 },
+    tabs: [{ id: 1, windowId: 1, url: MAIN, groupId: 60 }, { id: 2, windowId: 9, url: 'https://chatgpt.com/c/worker' },
+      { id: 3, windowId: 1, url: 'https://chatgpt.com/c/worker' }] });
+  expect(await app.reconcileBackgroundWindow(policy)).toBe(true);
+  expect(app.move).not.toHaveBeenCalled();
+  expect(app.group).not.toHaveBeenCalled();
+});
+
+it('6.6 adopts in group mode even with Background chats off, so helper tabs reuse the group', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 60, windowId: 1, title: TITLE }],
+    tabs: [{ id: 1, windowId: 1, url: 'https://chatgpt.com/?cos-model-catalog=11111111-1111-1111-1111-111111111111', groupId: 60 }] });
+  expect(await app.reconcileBackgroundWindow({ background: false })).toBe(true);
+  expect(app.session.chatBackgroundGroup).toBe(60);
+});
+
+it('6.7 adopts the lowest of two qualifying groups', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 61, windowId: 1, title: TITLE }, { id: 60, windowId: 1, title: TITLE }],
+    tabs: [{ id: 1, windowId: 1, url: MAIN, groupId: 61 }, { id: 2, windowId: 1, url: 'https://chatgpt.com/c/worker', groupId: 60 }] });
+  await app.reconcileBackgroundWindow(policy);
+  expect(app.session.chatBackgroundGroup).toBe(60);
+});
+
+it('6.8 keeps today\'s window reconcile with the window placement', async () => {
+  const app = groupHarness({ placement: 'window', windows: [{ id: 9 }, { id: 10 }], session: { chatBackgroundWindow: 10 },
+    tabs: [{ id: 1, windowId: 9, url: MAIN }, { id: 2, windowId: 10, url: 'https://chatgpt.com/c/worker' }] });
+  await app.reconcileBackgroundWindow(policy);
+  expect(app.move).toHaveBeenCalledWith(1, { windowId: 10, index: -1 });
+  expect(app.groupQuery).not.toHaveBeenCalled();
+});
