@@ -337,3 +337,61 @@ it('4.9 leaves foreground tabs alone in group mode', async () => {
   expect(app.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/?cos-input=a', active: true });
   expect(app.group).not.toHaveBeenCalled();
 });
+
+it('5.1 starts a fresh group once when the stored group vanished mid-placement', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 50, windowId: 1, title: TITLE }],
+    session: { chatBackgroundGroup: 50 }, local: { chatBackgroundGroupMirror: 50 } });
+  app.group.mockImplementationOnce(async () => { app.groups.delete(50); throw new Error('No group with id: 50.'); });
+  const tab = await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.group.mock.calls.map(([o]) => o.groupId ?? 'new')).toEqual([50, 'new']);
+  const fresh = app.tabs.get(tab.id)!.groupId!;
+  expect(fresh).not.toBe(50);
+  expect(app.session.chatBackgroundGroup).toBe(fresh);
+  expect(app.local.chatBackgroundGroupMirror).toBe(fresh);
+  expect(app.groups.get(fresh)).toMatchObject({ title: TITLE, collapsed: true });
+});
+
+it('5.2 moves the tab into a new minimized window when grouping fails twice', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }] });
+  app.group.mockRejectedValue(new Error('Grouping is not supported in this window.'));
+  const tab = await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.windowCreate).toHaveBeenCalledWith({ tabId: tab.id, type: 'normal', width: 800, height: 600, focused: false });
+  expect(app.windowUpdate).toHaveBeenCalledWith(tab.windowId, { state: 'minimized', focused: false });
+  expect(app.tabs.get(tab.id)!.windowId).toBe(tab.windowId);
+  expect(tab.windowId).not.toBe(1);
+  expect(app.session.chatBackgroundWindow).toBe(tab.windowId);
+  expect(app.session.chatBackgroundGroup).toBeUndefined();
+});
+
+it('5.3 moves the tab into the existing background window when grouping fails twice', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }, { id: 5 }], lastFocused: 1, session: { chatBackgroundWindow: 5 } });
+  app.group.mockRejectedValue(new Error('Grouping is not supported in this window.'));
+  const tab = await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.move).toHaveBeenCalledWith(tab.id, { windowId: 5, index: -1 });
+  expect(app.windowCreate).not.toHaveBeenCalled();
+  expect(app.windowUpdate).not.toHaveBeenCalled();
+});
+
+it('5.4 reports a tab that vanished before it could be placed', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }] });
+  app.group.mockImplementation(async ({ tabIds }) => { app.tabs.delete(tabIds[0]); throw new Error(`No tab with id: ${tabIds[0]}.`); });
+  await expect(app.createChatTab('https://chatgpt.com/?a', true)).rejects.toThrow(/No tab with id/);
+});
+
+it('5.5 recovers from a failed title update by starting a fresh group in the same window', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }] });
+  app.groupUpdate.mockImplementationOnce(async (id: number) => { app.groups.delete(id); throw new Error(`No group with id: ${id}.`); });
+  const tab = await app.createChatTab('https://chatgpt.com/?a', true);
+  const groupId = app.tabs.get(tab.id)!.groupId!;
+  expect(app.groups.get(groupId)).toMatchObject({ title: TITLE, collapsed: true });
+  expect(app.session.chatBackgroundGroup).toBe(groupId);
+});
+
+it('5.6 forgets a stored group that refused a tab, so the next placement does not retry it', async () => {
+  const app = groupHarness({ windows: [{ id: 1 }], groups: [{ id: 50, windowId: 1, title: TITLE }],
+    session: { chatBackgroundGroup: 50 }, local: { chatBackgroundGroupMirror: 50 } });
+  app.group.mockRejectedValue(new Error('Grouping is not supported in this window.'));
+  await app.createChatTab('https://chatgpt.com/?a', true);
+  expect(app.session.chatBackgroundGroup).toBeUndefined();
+  expect(app.local.chatBackgroundGroupMirror).toBeUndefined();
+});
