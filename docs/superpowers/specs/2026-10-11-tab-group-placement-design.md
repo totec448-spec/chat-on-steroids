@@ -169,6 +169,9 @@ sends took 11–14 s.
 | Extension reloaded mid-session (self-update) | The group is re-found through the local mirror plus the title check. |
 | Several chats open at once | One serialized queue, so one group. |
 | Memory Saver / discarding | Unchanged: `protectCreatedTab` sets `autoDiscardable: false`, and the existing frozen/discarded repair applies. |
+| Compact & Resume successor of a grouped chat | Opened right after its home tab, inactive, and joined to the app's group (found in the live round: it opened active and outside the group). |
+| A grouped page asks to be focused (`focus_tab`) | Answered `focused: false` without selecting it. |
+| Worker revival with no open tab | Opened through the group placement (window mode unchanged: inactive in the current window). |
 | Chrome pausing collapsed-group tabs | Every page in the app's group holds a keep-awake Web Lock (§3a); a page frozen before it could take one gets the group expanded until it does. |
 | User collapses the group while chats work | The pages already hold their locks, so nothing pauses; the group stays as the user left it. |
 | Extension self-update | The old content script's lock stays with its document until the page navigates; the new script is told again by the next pass. Harmless: an awake page is what window mode has anyway. |
