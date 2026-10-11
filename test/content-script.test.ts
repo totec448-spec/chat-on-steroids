@@ -8676,7 +8676,9 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends).toHaveLength(1);
     expect(ends[0]).toMatchObject({
       outcome: 'interrupted',
-      detail: 'a new user message replaced the unfinished turn'
+      detail: 'a new user message replaced the unfinished turn',
+      // ChatGPT carries an unfinished answer on past a message sent into it (#1301).
+      continued: true
     });
   });
 
@@ -8743,7 +8745,9 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends[0]!.turnId).toBe(firstGeneration);
     expect(ends[0]).toMatchObject({
       outcome: 'interrupted',
-      detail: 'a new user message replaced the unfinished turn'
+      detail: 'a new user message replaced the unfinished turn',
+      // ChatGPT carries an unfinished answer on past a message sent into it (#1301).
+      continued: true
     });
   });
 
