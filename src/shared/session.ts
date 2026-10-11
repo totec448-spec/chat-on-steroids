@@ -897,6 +897,10 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 export interface AgentInfo {
   /** Broker owner projection. IDs such as worker-1 are local to this incarnation. */
   runId?: string;
+  /** Immutable broker allocation identity; survives a sleeping family's new incarnation. */
+  workerAllocationRunId?: string;
+  /** Durable requirement for a marker-proven Git worktree; never fall back to the prime cwd. */
+  managedWorktree?: boolean;
   primeConversationId?: string;
   id: string;
   role: AgentRole;

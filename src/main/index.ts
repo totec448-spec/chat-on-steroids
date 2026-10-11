@@ -89,6 +89,7 @@ import {
 } from './session/continuation.js';
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
+import { restoreManagedWorktrees } from './worktrees/index.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
@@ -500,6 +501,20 @@ void app.whenReady().then(async () => {
   // history; in the background, since startup does not wait on presentation.
   void archiveWorkerAssignments(savedSwarm);
   restoreSwarm(savedSwarm);
+  // Restore only marker-verified leases after broker identity is loaded and before any
+  // browser/MCP worker can execute. An existing isolated worker retains its assigned
+  // checkout even if autoWorktrees has subsequently been turned Off in Settings.
+  if (getConfig().roots.length > 0) {
+    try {
+      const recovered = await restoreManagedWorktrees(getConfig().roots);
+      logInfo(`worktrees: restored ${recovered.restored.length} worker workspace(s); refused ${recovered.rejected.length} invalid marker(s)`);
+    } catch (error) {
+      // No marker is accepted on failure; workspace resolution must still require an
+      // exact active lease rather than silently sending this worker into the prime cwd.
+      logWarn(`worktrees: restore failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (windowActivation.isDisabled()) return;
+  }
   if (!getConfig().multiAgent.enabled) {
     // A feature toggle is a pause, not Clear swarm. Canonicalize any active incarnation left by
     // a crash into stopped prime-owned history before the bridge exists, then make that safer

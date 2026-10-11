@@ -370,6 +370,8 @@ const unpublishedRuns = new Set<Run>();
 interface SpawnStageState {
   run: Run;
   created: Agent[];
+  /** Resource allocation is complete; foreign critical writes must not admit an earlier stage. */
+  durableReady: boolean;
   becamePrime: boolean;
   /** Existing dormant history temporarily reactivated for this staged spawn, if any. */
   resumedDormant: DormantRun | null;
@@ -1593,6 +1595,12 @@ export interface SpawnResult {
  * safe snapshot, exactly like staged agent messages.
  */
 export interface StagedSpawn extends SpawnResult {
+  /** A replay of already accepted workers does not own a new allocation. */
+  newlyStaged: boolean;
+  /** Exact newly reserved workers, excluding existing matches and sleeping workers. */
+  newlyStagedWorkerIds: readonly string[];
+  /** Makes this stage eligible for critical snapshots only after resource setup completes. */
+  prepareDurability: () => void;
   commit: () => void;
   rollback: () => void;
 }
@@ -1756,12 +1764,70 @@ export function stageSpawn(input: SpawnInput): StagedSpawn {
   const stage = owner ? activeSpawnStages.get(owner) : undefined;
   // An exact retry can match workers that were already accepted earlier. That is not a new
   // mutation and therefore needs no publication transaction.
-  if (!stage) return { ...result, commit: () => undefined, rollback: () => undefined };
+  if (!stage) return { ...result, newlyStaged: false, newlyStagedWorkerIds: [], prepareDurability: () => undefined, commit: () => undefined, rollback: () => undefined };
   return {
     ...result,
+    newlyStaged: true,
+    newlyStagedWorkerIds: stage.created.map(agent => agent.info.id),
+    prepareDurability: () => {
+      if (stage.settled || activeSpawnStages.get(stage.run) !== stage) {
+        throw new AgentError('SPAWN_STAGE_EXPIRED: the worker reservation is no longer pending');
+      }
+      if (stage.durableReady) return;
+      stage.durableReady = true;
+      // B's in-flight writer could have flushed before this stage completed allocation.
+      // A new revision forces A's own acceptance barrier to publish its prepared topology.
+      changed();
+    },
     commit: () => settleSpawnStage(stage, true),
     rollback: () => settleSpawnStage(stage, false)
   };
+}
+
+/** A worktree lease is durable only after this same staged spawn crosses its write barrier. */
+export function markStagedWorkerWorktree(runId: string, agentId: string): void {
+  const run = runs.get(runId);
+  const stage = run ? activeSpawnStages.get(run) : undefined;
+  const agent = stage?.created.find(worker => worker.info.id === agentId);
+  if (!stage || stage.settled || !agent || agent.info.role !== 'worker') {
+    throw new AgentError('WORKTREE_OWNER_NOT_STAGED: only a newly reserved worker may claim a managed worktree');
+  }
+  if (agent.info.workerAllocationRunId !== runId) {
+    throw new AgentError('WORKTREE_OWNER_MISMATCH: worker allocation identity changed during staging');
+  }
+  agent.info.managedWorktree = true;
+  // Another family's acceptance writer may already be draining the staged topology. This
+  // policy change needs its own critical revision so that writer cannot certify an earlier
+  // snapshot lacking the worktree requirement as the final accepted spawn state.
+  changed();
+}
+
+/** Require isolation only for workers whose accepted broker record says it was allocated. */
+export function managedWorkerWorktreeRequired(input: Caller): boolean {
+  const caller = exactCaller(input);
+  if (!caller.conversationId) return false;
+  // Even a corrupt or multiply claimed restored conversation must retain its isolation
+  // requirement. Ambiguous identity must fail instead of reaching the prime's project.
+  return allFamilies().some(owner => [...owner.agents.values()].some(member =>
+    member.info.role === 'worker' && member.info.conversationId === caller.conversationId &&
+    member.info.managedWorktree === true));
+}
+
+/** Resolve worktree identity solely from unique, published, broker-owned conversation proof. */
+export function managedWorkerAllocationIdentity(input: Caller): { runId: string; agentId: string } | null {
+  const caller = exactCaller(input);
+  if (!caller.conversationId) return null;
+  const member = resolve({ ...caller, runId: undefined });
+  if (!member || member.info.role !== 'worker' || member.info.conversationId !== caller.conversationId ||
+      member.info.managedWorktree !== true || unpublishedAgents.has(member)) return null;
+  const owner = runForAgent(member);
+  if (!owner || unpublishedRuns.has(owner)) return null;
+  const allocation = member.info.workerAllocationRunId;
+  if (typeof allocation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(allocation)) return null;
+  const owners = allFamilies().filter(family =>
+    family.agents.get(member.info.id)?.info.workerAllocationRunId === allocation);
+  if (owners.length !== 1 || owners[0] !== owner) return null;
+  return { runId: allocation, agentId: member.info.id };
 }
 
 /**
@@ -1955,6 +2021,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   for (const [index, worker] of planned.entries()) {
     const id = ids[index] as string;
     const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort);
+    agent.info.workerAllocationRunId = activeRun.runId;
     activeRun.agents.set(id, agent);
     stampOwner(activeRun);
     // A worker starts in the folder the prime was working in, so its first call can use the
@@ -1969,6 +2036,8 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     const stage: SpawnStageState = {
       run: activeRun,
       created: createdAgents,
+      // Old direct/unit staging has no resource transaction; managed Git allocation does.
+      durableReady: getConfig().multiAgent.autoWorktrees !== true,
       becamePrime,
       resumedDormant,
       createdFreshRun,
@@ -4804,7 +4873,12 @@ function savedFormerRunIds(saved: unknown, current: string): string[] | undefine
 }
 
 function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
-  const active = [...runs.values()].filter(r => includeUnpublished || !unpublishedRuns.has(r));
+  const stageEligible = (run: Run): boolean => {
+    const stage = activeSpawnStages.get(run);
+    return !stage || stage.durableReady;
+  };
+  const active = [...runs.values()].filter(r =>
+    (!unpublishedRuns.has(r) || (includeUnpublished && stageEligible(r))));
   const dormant = [...dormantRuns.values()];
   if (active.length === 0 && dormant.length === 0) return null;
   // Legacy top-level projection is deliberately empty with multiple owners. Version 6 readers
@@ -4825,12 +4899,14 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
 }
 
 function serializeAgents(agents: Map<string, Agent>, includeUnpublished: boolean): SerializedAgent[] {
+  const stage = [...activeSpawnStages.values()].find(candidate => candidate.run.agents === agents && !candidate.settled);
+  const stagedEligible = !stage || stage.durableReady;
   const stagedFinishes =
     includeUnpublished
       ? [...activeFinishStages.values()].filter((stage) => !stage.settled && stage.run.agents === agents)
       : [];
   return [...agents.values()]
-    .filter((agent) => includeUnpublished || !unpublishedAgents.has(agent))
+    .filter((agent) => !unpublishedAgents.has(agent) || (includeUnpublished && stagedEligible))
     .map((agent) => {
       const finish = includeUnpublished ? activeFinishStages.get(agent) : undefined;
       const info =
@@ -5073,9 +5149,16 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
       repaired = true;
       continue;
     }
+    const rawAllocation = entry.info.workerAllocationRunId;
+    const allocation = typeof rawAllocation === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rawAllocation)
+      ? rawAllocation.toLowerCase() : undefined;
+    if (rawAllocation !== undefined && !allocation) repaired = true;
     const agent: Agent = {
       info: {
         ...entry.info,
+        workerAllocationRunId: allocation,
+        managedWorktree: entry.info.managedWorktree === true,
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
         reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,

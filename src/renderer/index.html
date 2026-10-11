@@ -1016,6 +1016,14 @@
 
                   <label class="setting">
                     <span class="setting-text">
+                      <b>Isolate new workers in Git worktrees</b>
+                      <em>When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.</em>
+                    </span>
+                    <input id="autoWorktrees" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
                       <b>End background processes of workers asleep for more than 30 minutes</b>
                       <em>The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.</em>
                     </span>

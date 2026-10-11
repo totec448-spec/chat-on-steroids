@@ -33,7 +33,9 @@ import {
 } from '../codex/view-image.js';
 import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
-import { currentWorkspace } from '../workspace.js';
+import { currentWorkspace, primeWorkspace, setWorkspaceFor } from '../workspace.js';
+import { getSessionProject } from '../projects.js';
+import { allocWorkerWorkspace, type WorkerWorktreeLease } from '../worktrees/index.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -108,7 +110,7 @@ import {
 } from '../exec-hints.js';
 import { childEnv } from '../exec.js';
 import { locateRipgrep } from '../ripgrep.js';
-import { ensureDevToolchain } from '../toolchain.js';
+import { ensureDevToolchain, isGitRepository } from '../toolchain.js';
 import {
   agentForCaller,
   agentFamiliesForCaller,
@@ -123,6 +125,8 @@ import {
   stageMessages,
   stagePrimeMessage,
   stageSpawn,
+  markStagedWorkerWorktree,
+  managedWorkerWorktreeRequired,
   swarmRunning,
   swarmStateForCaller,
   type Caller
@@ -146,6 +150,7 @@ import {
   adoptAgent,
   fail,
   failIdentity,
+  validatedWorkspace,
   formatFileInfo,
   friendlyError,
   guard,
@@ -704,7 +709,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           if (args.environmentId !== null) {
             return fail('apply_patch environment selection is unavailable for this turn');
           }
-          const workspace = currentWorkspace();
+          // apply_patch previously read the synchronous cwd cache, bypassing the managed
+          // lease check shared by resolveIn/resolveCwd. Validate before patch base selection.
+          const workspace = await validatedWorkspace();
           const hasRelativePath = args.hunks.some(hunk => {
             const paths = hunk.kind === 'update_file' && hunk.movePath !== null
               ? [hunk.path, hunk.movePath]
@@ -722,6 +729,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             return fail('No folder is approved, so there is nowhere to apply the patch.');
           }
           const base = await resolveIn(ctx.roots, baseVirtual);
+          if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
           return (await runParsedPatch(args, ctx.roots, base, caps)).result;
         })
     );
@@ -865,6 +873,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const useLoginShell = input.login ?? process.platform !== 'win32';
           const command = deriveExecArgs(shell, boundCommand, useLoginShell);
           try {
+            if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
             // the same tree-sitter-bash grammar/query as upstream.
@@ -930,6 +939,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             const ripgrep = locateRipgrep();
             const executionCommand = deriveExecArgs(shell,
               withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
+            if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
             const output = await unifiedExecManager.execCommand({
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
@@ -1093,6 +1103,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             const message = `write_stdin failed for session ${input.session_id}: ${reason} No input was sent and no output was read. This refusal concerns this process id, not Read-only mode or permission to edit files or launch other authorized work.`;
             return denied === 'unidentified' ? failIdentity(message) : fail(message);
           }
+          // A worker can keep an interactive shell running after its Git worktree has been
+          // replaced. Verify the exact current allocation before forwarding even empty polls:
+          // stdin may execute writes in the shell's now user-owned directory.
+          if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
           // sitting in one is attending its session rather than neglecting it.
           noteExecAttended(input.session_id);
@@ -1355,8 +1369,58 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             context: input.context ?? null,
             caller: await callerNow(startedAt, { exact: true, runId: input.run_id })
           });
-          await acceptAgentMutation(staged,
-            'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.');
+          // Newly staged admissions alone may own Git branches. A repeated spawn may show
+          // existing workers in `created`, but must never reallocate their checkouts.
+          const allocated: WorkerWorktreeLease[] = [];
+          const isolationNotes: string[] = [];
+          try {
+            if (staged.newlyStaged && getConfig().multiAgent.autoWorktrees === true) {
+              // A selected Local Project is durable even before this prime has made its first
+              // file call. Fetch that binding explicitly instead of relying on the cwd cache.
+              const sessionId = currentCall()?.caller.sessionId;
+              const source = (sessionId ? await getSessionProject(sessionId) : null) ??
+                primeWorkspace(currentCaller().conversationId) ?? currentWorkspace();
+              if (!source) throw new Error('WORKTREE_SOURCE_REQUIRED: select a workspace before enabling automatic worker isolation.');
+              if (isGitRepository(source.real)) {
+                if (reg.ctx.readOnly || !reg.caps.command || !reg.caps.create || !reg.caps.edit) {
+                  throw new Error('WORKTREE_PERMISSION_REQUIRED: worker isolation requires Command, Create and Edit, with Read-only disabled.');
+                }
+                for (const agentId of staged.newlyStagedWorkerIds) {
+                  const lease = await allocWorkerWorkspace({
+                    runId: staged.runId,
+                    agentId,
+                    primeWorkspace: source,
+                    approvedRoots: getConfig().roots
+                  });
+                  if (lease.newlyCreated) allocated.push(lease);
+                  markStagedWorkerWorktree(staged.runId, agentId);
+                  setWorkspaceFor(`agent:${staged.runId}:${agentId}`, lease.workspace);
+                }
+                if (getConfig().multiAgent.autoWorktrees !== true) {
+                  throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
+                }
+                isolationNotes.push(`${staged.newlyStagedWorkerIds.length} newly staged worker(s) received isolated Git worktrees.`);
+              } else {
+                isolationNotes.push('The selected workspace is not a Git repository; no worktrees were allocated.');
+              }
+            }
+            staged.prepareDurability();
+            await acceptAgentMutation(staged,
+              'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.');
+          } catch (error) {
+            staged.rollback();
+            // An unaccepted spawn never opened a worker chat, but user files can appear in a
+            // checkout between a Git status check and `git worktree remove`. Even non-force
+            // removal may erase ignored files. Retain these newly created leases on failure;
+            // they are not broker-admitted and can be inspected/disposed of explicitly later.
+            // In particular, a retry must not take another user's branch or remove its files.
+            if (allocated.length) {
+              const retained = allocated.map(lease => lease.worktreePath).join(', ');
+              logWarn(`multi-agent: spawn failed; ${allocated.length} unaccepted managed worktree(s) retained for safe inspection: ${retained}`);
+              throw new Error(`${error instanceof Error ? error.message : String(error)} WORKTREE_ROLLBACK_RETAINED: unaccepted Git checkouts were kept to protect any user files: ${retained}`);
+            }
+            throw error;
+          }
           const { created, becamePrime, runId, defaultNotes } = staged;
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
@@ -1374,6 +1438,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
                   (defaultNotes?.length ? `${defaultNotes.join(' ')} ` : '') +
+                  (isolationNotes.length ? `${isolationNotes.join(' ')} ` : '') +
                   (sleeping.length > 0
                     ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
                     : '') +

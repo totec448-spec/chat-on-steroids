@@ -2131,5 +2131,7 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Quand ChatGPT lance une commande qui tourne encore dans ce chat, le résultat le renvoie vers celle en cours.",
   "Compact & Resume in Projects": "Compacter et reprendre dans les Projets",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Passer un chat d'un Projet ChatGPT à un nouveau chat aboutit désormais, et le nouveau chat reste dans ce Projet.",
-  "In ChatGPT: {0}": "Dans ChatGPT : {0}"
+  "In ChatGPT: {0}": "Dans ChatGPT : {0}",
+  "Isolate new workers in Git worktrees": "Isoler les nouveaux agents dans des worktrees Git",
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Chaque nouvel agent d'un projet Git reçoit un espace de travail et une branche distincts et autorisés. Un dossier parent autorisé est nécessaire. Les agents existants ne changent pas ; l'intégration à votre branche exige une vérification."
 }
