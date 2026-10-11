@@ -1172,6 +1172,25 @@ describe('ChatGPT\'s plugin list as proof', () => {
 });
 
 describe('this install\'s Core app for fresh tabs (#1086)', () => {
+  it('hands a redeeming page this install\'s Core identity with its command', async () => {
+    // A tab the app opened runs its command before its first status reply, so the command
+    // carries what the page needs to mention this install's own Core rather than another's.
+    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
+    const ownCoreApp = { appId: 'asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' };
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names, ownCoreApp });
+    const worker = loadWorker({
+      local, session: new FakeStorageArea(),
+      fetch: async input => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/commands/redeem') return response(200, { command: { id: 'cmd-1', kind: 'resume', text: 'brief', agent: null } });
+        return response(404, {});
+      }
+    });
+    expect(await worker.send({ type: 'redeem', id: 'cmd-1', client: 'page-1' })).toMatchObject({
+      ok: true, command: { id: 'cmd-1' }, identity: { connectorNames: names, ownCoreApp } });
+  });
+
   it('remembers the Core app a page lists under this install\'s name, and forgets it when it goes missing', async () => {
     const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names });
