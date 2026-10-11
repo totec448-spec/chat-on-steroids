@@ -9,6 +9,9 @@ import {
   allocWorkerWorkspace,
   diffWorkerWorkspace,
   finalizeWorkerWorkspace,
+  inspectWorkerWorkspaceForCleanup,
+  listOfferedWorkerWorktrees,
+  disposeOfferedWorkerWorktree,
   lookupWorkerWorkspace,
   resetWorkerWorktreeRegistryForTests,
   restoreManagedWorktrees,
@@ -497,6 +500,126 @@ describe('automatic worker Git worktrees', () => {
     expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
     expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
     await finalizeWorkerWorkspace({ lease, reason: 'failed', discardChanges: true, branch: { mode: 'discard' } });
+  });
+
+  it('offers a clean, unchanged checkout after broker Clear/restart and deletes only after explicit action', async () => {
+    const lease = await allocate();
+    const offered = {
+      runId: lease.runId, agentId: lease.agentId, createdAt: lease.createdAt + 3_000,
+      ownershipToken: lease.ownershipToken, reason: 'cleared'
+    };
+    const inspected = await inspectWorkerWorkspaceForCleanup(lease);
+    expect(inspected).toMatchObject({
+      hasWorkerCommits: false, branchIntegratedIntoSource: true,
+      trackedChanges: [], untrackedFiles: [], ignoredFiles: [],
+      blockers: [], canOfferRemoval: true
+    });
+    const markerPath = path.join(path.dirname(lease.worktreePath), 'owner.json');
+    resetWorkerWorktreeRegistryForTests();
+    expect(lookupWorkerWorkspace(ACCEPTED[0])).toBeNull();
+    const previews = await listOfferedWorkerWorktrees(roots, [offered]);
+    expect(previews).toMatchObject([{
+      runId: RUN_ID, agentId: 'worker-1', reason: 'cleared',
+      createdAt: offered.createdAt,
+      workspace: lease.workspace.virtual, dirty: false, ignoredFiles: false,
+      uniqueCommits: false, changes: [], canOfferRemoval: true
+    }]);
+    expect(JSON.stringify(previews)).not.toContain(lease.worktreePath);
+    expect(lookupWorkerWorkspace(ACCEPTED[0])).toBeNull();
+    expect(await fs.readFile(markerPath, 'utf8')).toContain(lease.ownershipToken);
+
+    const removed = await disposeOfferedWorkerWorktree(roots, offered, []);
+    expect(removed).toMatchObject({ removed: true, branchRemoved: false, changes: [] });
+    await expect(fs.stat(lease.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(lease.baseOid);
+    expect(await listOfferedWorkerWorktrees(roots, [offered])).toEqual([]);
+    expect(lookupWorkerWorkspace(ACCEPTED[0])).toBeNull();
+  });
+
+  it('refuses confirmed removal while a background process still owns the worker checkout cwd', async () => {
+    const lease = await allocate();
+    const offer = { runId: lease.runId, agentId: lease.agentId, createdAt: lease.createdAt + 1000, reason: 'cleared' };
+    resetWorkerWorktreeRegistryForTests();
+    await expect(disposeOfferedWorkerWorktree(roots, offer, [lease.worktreePath]))
+      .rejects.toMatchObject({ code: 'WORKTREE_ACTIVE_PROCESS' });
+    await expect(disposeOfferedWorkerWorktree(roots, offer, [path.join(lease.worktreePath, 'nested')]))
+      .rejects.toMatchObject({ code: 'WORKTREE_ACTIVE_PROCESS' });
+    expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    const removed = await disposeOfferedWorkerWorktree(roots, offer, []);
+    expect(removed).toMatchObject({ removed: true, branchRemoved: false });
+  });
+
+  it('reports tracked, untracked and ignored file blockers without deleting user data', async () => {
+    await write(path.join(repo, '.gitignore'), 'private-secret.txt\n');
+    await commit(repo, 'ignore worker local files');
+    const lease = await allocate();
+    await write(path.join(lease.worktreePath, 'file.txt'), 'worker edit\n');
+    await write(path.join(lease.worktreePath, 'notes.txt'), 'PRIVATE DRAFT\n');
+    await write(path.join(lease.worktreePath, 'private-secret.txt'), 'PRIVATE IGNORED BYTES\n');
+    const offered = { runId: RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt, reason: 'failed' };
+    resetWorkerWorktreeRegistryForTests();
+
+    const previews = await listOfferedWorkerWorktrees(roots, [offered]);
+    expect(previews).toMatchObject([{
+      dirty: true, ignoredFiles: true, uniqueCommits: false,
+      canOfferRemoval: false, blockers: ['tracked-changes', 'untracked-files', 'ignored-files']
+    }]);
+    expect(previews[0]?.changes).toEqual(expect.arrayContaining(['file.txt', 'notes.txt', 'private-secret.txt']));
+    expect(await fs.readFile(path.join(lease.worktreePath, 'private-secret.txt'), 'utf8')).toBe('PRIVATE IGNORED BYTES\n');
+    expect(await fs.readFile(path.join(lease.worktreePath, 'notes.txt'), 'utf8')).toBe('PRIVATE DRAFT\n');
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+  });
+
+  it('retains worker commits for review and preserves the branch after confirmed checkout disposal', async () => {
+    const lease = await allocate();
+    await write(path.join(lease.worktreePath, 'file.txt'), 'worker committed change\n');
+    const commitOid = await commit(lease.worktreePath, 'worker produced changes');
+    const offer = {
+      runId: lease.runId, agentId: lease.agentId,
+      createdAt: lease.createdAt, reason: 'completed', ownershipToken: lease.ownershipToken
+    };
+    const before = await inspectWorkerWorkspaceForCleanup(lease);
+    expect(before).toMatchObject({
+      headOid: commitOid, hasWorkerCommits: true, branchIntegratedIntoSource: false,
+      blockers: ['unintegrated-commits'], canOfferRemoval: false
+    });
+    const defaultFinalize = await finalizeWorkerWorkspace({ lease, reason: 'completed' });
+    expect(defaultFinalize).toMatchObject({ removed: false, branchRemoved: false });
+    resetWorkerWorktreeRegistryForTests();
+    expect(await listOfferedWorkerWorktrees(roots, [offer])).toMatchObject([{
+      uniqueCommits: true, dirty: false, ignoredFiles: false, changes: []
+    }]);
+    const disposed = await disposeOfferedWorkerWorktree(roots, offer, []);
+    expect(disposed).toMatchObject({ removed: true, branchRemoved: false });
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(commitOid);
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(lease.baseOid);
+    expect(await fs.readFile(path.join(repo, 'file.txt'), 'utf8')).toBe('base\n');
+  });
+
+  it('refuses forged and obsolete broker offers without touching the real worker checkout', async () => {
+    const lease = await allocate();
+    const markerFile = path.join(path.dirname(lease.worktreePath), 'owner.json');
+    const originalMarker = await fs.readFile(markerFile, 'utf8');
+    const falseOffers = [
+      { runId: RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt - 1, reason: 'cleared' },
+      { runId: RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt, reason: 'cleared', ownershipToken: 'forged-token' },
+      { runId: OTHER_RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt, reason: 'cleared' }
+    ];
+    resetWorkerWorktreeRegistryForTests();
+    for (const offer of falseOffers) {
+      expect(await listOfferedWorkerWorktrees(roots, [offer])).toEqual([]);
+      await expect(disposeOfferedWorkerWorktree(roots, offer, [])).rejects.toMatchObject({
+        code: expect.stringMatching(/^WORKTREE_(NOT_OWNED|OWNER_INVALID)$/)
+      });
+      expect(await fs.readFile(markerFile, 'utf8')).toBe(originalMarker);
+      expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+      expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    }
+    expect(await listOfferedWorkerWorktrees([], [{
+      runId: RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt, reason: 'cleared'
+    }])).toEqual([]);
   });
 
 });

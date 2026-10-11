@@ -4807,10 +4807,48 @@ function paintSwarm(state: SwarmState): void {
       })
     );
   }
+  // Worker branches and ignored/uncommitted files are never discarded merely because a
+  // worker finished or the user cleared its row. Offer review at a stable, discoverable
+  // place even when all worker history has disappeared after Clear workers. Discovery runs
+  // only when clicked, not on every UI refresh or at application startup.
+  const cleanup = el('div', 'hint worktree-cleanup-review');
+  const review = el('button', 'btn btn-quiet', t('Review retained worker checkouts'));
+  review.dataset.worktreeReview = 'true';
+  cleanup.append(review);
+  list.append(cleanup);
   // Usable whenever there is a run to clear, not only while a worker is still going.
   // Gating on `running` left finished-but-present swarm state with no way out, which is
   // exactly the state a user wants to clear before starting the next run.
   $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0 && state.retainedHistory !== true;
+}
+
+async function showWorktreeCleanupOffers(): Promise<void> {
+  const panel = $('swarmList').querySelector<HTMLElement>('.worktree-cleanup-review');
+  if (!panel) return;
+  const offers = await run(api.listWorktreeCleanupOffers());
+  if (!offers) return;
+  const results = el('div', 'worktree-cleanup-offers');
+  if (!offers.length) results.append(el('p', 'hint', t('No retained worker checkouts are awaiting cleanup.')));
+  for (const offer of offers) {
+    const row = el('div', 'agent');
+    row.append(el('b', '', `${offer.agentId} · ${offer.reason}`));
+    row.append(el('p', 'hint', offer.workspace));
+    const notes = [
+      offer.dirty ? t('Uncommitted or untracked files') : null,
+      offer.ignoredFiles ? t('Ignored files') : null,
+      offer.uniqueCommits ? t('Worker-only Git commits') : null,
+      offer.changeCount ? t('{0} changed paths', [offer.changeCount]) : null
+    ].filter((item): item is string => item !== null);
+    if (notes.length) row.append(el('p', 'hint is-warn', notes.join(' · ')));
+    const remove = el('button', 'btn btn-quiet', t('Review removal…'));
+    remove.dataset.worktreeRemove = 'true';
+    remove.dataset.runId = offer.runId;
+    remove.dataset.agentId = offer.agentId;
+    row.append(remove);
+    results.append(row);
+  }
+  panel.querySelector('.worktree-cleanup-offers')?.remove();
+  panel.append(results);
 }
 
 /**
@@ -6629,7 +6667,7 @@ export function initChat(next: Deps): void {
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast(t('Workers cleared'));
+      toast(t('Workers cleared; retained Git checkouts can be reviewed below.'));
     }
   });
 
@@ -6637,6 +6675,21 @@ export function initChat(next: Deps): void {
   // so the toast describes the actual outcome rather than the intent of the click.
   $('swarmList').addEventListener('click', async (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest<HTMLElement>('[data-worktree-review]')) {
+      await showWorktreeCleanupOffers();
+      return;
+    }
+    const worktreeRemove = target.closest<HTMLElement>('[data-worktree-remove]');
+    if (worktreeRemove) {
+      const runId = worktreeRemove.dataset.runId;
+      const agentId = worktreeRemove.dataset.agentId;
+      if (!runId || !agentId) return;
+      const result = await run(api.removeWorktreeCleanupOffer(runId, agentId));
+      if (!result) return;
+      toast(result.removed ? t('Worker checkout removed; its Git branch was preserved.') : t('Worker checkout kept.'));
+      await showWorktreeCleanupOffers();
+      return;
+    }
     const button = target.closest<HTMLElement>('[data-clear]');
     const id = button?.dataset.clear;
     if (!id) return;
@@ -6645,9 +6698,9 @@ export function initChat(next: Deps): void {
     paintSwarm(outcome.swarm);
     toast(
       outcome.cleared === 'run'
-        ? t('Run cleared — every worker ended')
+        ? t('Run cleared — worker Git checkouts can be reviewed below')
         : outcome.cleared === 'worker'
-          ? t('{0} cleared — its slot is free', [id])
+          ? t('{0} cleared — its checkout can be reviewed below', [id])
           : t(outcome.reason)
     );
   });
