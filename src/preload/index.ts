@@ -246,6 +246,7 @@ const api = {
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
+  retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
