@@ -2111,7 +2111,7 @@
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT geçmişin yüklenmesini sınırladığında kurtarma, yeniden yüklemek yerine istenen süre kadar bekler.",
   "Lighter on your computer": "Bilgisayarınıza daha hafif",
   "Open ChatGPT chats use much less CPU while they wait.": "Açık ChatGPT sohbetleri beklerken çok daha az CPU kullanır.",
-  "Goal on every plan, a background window that stays, and clearer hints for ChatGPT.": "Her planda Hedef, kalıcı bir arka plan penceresi ve ChatGPT için daha net ipuçları.",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "Her planda Hedef, Projelerde Sıkıştır ve sürdür ve kalıcı bir arka plan penceresi.",
   "Goal on every plan": "Her planda Hedef",
   "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "Free gibi model seçicisi olmayan planlarda Hedef ve Döngü devam mesajları başarısız olmak yerine sohbetin mevcut modelini kullanır.",
   "A background window that stays": "Kalıcı bir arka plan penceresi",
@@ -2119,5 +2119,7 @@
   "Clearer connector hints": "Daha net bağlayıcı ipuçları",
   "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "ChatGPT, bağlayıcısında olmayan bir aracı çağırdığında sonuç, o araca sahip bağlayıcıyı söyler.",
   "Fewer repeated commands": "Daha az tekrarlanan komut",
-  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT o sohbette hâlâ çalışan bir komutu yeniden başlattığında sonuç onu çalışan komuta yönlendirir."
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT o sohbette hâlâ çalışan bir komutu yeniden başlattığında sonuç onu çalışan komuta yönlendirir.",
+  "Compact & Resume in Projects": "Projelerde Sıkıştır ve sürdür",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Bir ChatGPT Projesi içindeki sohbeti yeni bir sohbete taşımak artık tamamlanıyor ve yeni sohbet aynı Projede kalıyor."
 }
