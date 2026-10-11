@@ -1729,8 +1729,11 @@ export interface ChatObservation {
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
-    | 'tool_evidence';
+    | 'tool_evidence'
+    | 'app_sightings';
   time: number;
+  /** app_sightings only: connector result rows as the page saw them (connector-identity.ts). */
+  apps?: import('../connector-identity.js').AppSighting[];
   /** Current native selection evidence, not a historical message or requested worker model. */
   model?: string;
   reasoningEffort?: import('../../shared/session.js').ReasoningEffort;

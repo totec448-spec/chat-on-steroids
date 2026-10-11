@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as identity from '../src/main/connector-identity.js';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
 import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../src/main/codex/tool-specs.js';
 import { skillCatalogInstructions } from '../src/main/skills.js';
@@ -3397,6 +3398,14 @@ describe('exec sessions belong to the chat that opened them', () => {
       { name, arguments: args },
       requestId ? { 'x-request-id': `${requestId}/att1` } : {}
     );
+
+  it('notes the served request id for its surface', async () => {
+    const spy = vi.spyOn(identity, 'noteServedRequest');
+    expect(prove('wfr_identity_served', 'conv-identity')).toBe('stored');
+    await asChat('wfr_identity_served', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(spy).toHaveBeenCalledWith('wfr_identity_served', 'core');
+    spy.mockRestore();
+  });
 
   it('refuses write_stdin from a chat that does not own the session, and keeps serving the one that does', async () => {
     expect(prove('wfr_execown_opener', 'conv-execown-opener')).toBe('stored');
