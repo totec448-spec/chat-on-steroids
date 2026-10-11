@@ -4048,6 +4048,12 @@ publishes `connectorApps`. Model-facing text uses `liveConnectorName` (proven na
 configured one); protected-resource `resource_name` and the Setup card's Name row stay on
 `configuredConnectorName`. `SurfaceStatus.chatgptName` carries a proven different name for the
 card's "In ChatGPT: …" line.
+Page side: fiber.js decides ownership once (`ownResult`, `ownRequestPath`, `ownServerName`):
+proven app id, then proven link, then the configured/proven name, except that a name match on a
+surface with a proven app but a different id is foreign. Rows carry `own`; content.js trusts it.
+Turns carry `sightings` for every connector's result rows, emitted once per request id as
+`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, installed-row names) and the
+Plugins catalog limit use proven ids first.
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
 waking browser work; ordinary status polling and a closed helper do not grant another attempt.

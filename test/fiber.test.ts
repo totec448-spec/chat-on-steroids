@@ -602,7 +602,8 @@ describe('reading a row out of the page', () => {
 
     it('does not claim a same-named app once the real app id is learned', async () => {
       const messages = pair(APP, 'q2', '/asdk_app_foreign/link_foreign/read');
-      (messages[0]!.content as Record<string, string>).text = (messages[0]!.content as Record<string, string>).text.replace(LINK, 'link_foreign');
+      const content = messages[0]!.content as Record<string, string>;
+      content['text'] = content['text']!.replace(LINK, 'link_foreign');
       const { rows, turns } = await scan([rowInTurn(messages, messages)], [{ id: 'foreign-turn', messages }], false, NAMES,
         [{ surface: 'core', appId: ASDK, linkId: LINK, name: APP }]);
       expect(turns[0]?.calls ?? []).toEqual([]);
