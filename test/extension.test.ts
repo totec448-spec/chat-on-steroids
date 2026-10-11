@@ -5593,6 +5593,31 @@ describe('this install\'s connector names', () => {
     core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)'
   };
   const paired = { port: 8765, token: 'paired-token' };
+  it('keeps the app\'s proven connector apps across a worker restart, drops malformed ones and hands them to pages', async () => {
+    // A connector renamed in ChatGPT keeps its app id (2026-10-11). Pages recognize this install's
+    // calls by the ids the app proved from its own served requests.
+    const local = new FakeStorageArea(paired);
+    const session = new FakeStorageArea();
+    const apps = { core: [{ appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }, { appId: 'not-an-id', linkId: 'link_y', name: 'bad' }],
+      desktop: [], plugins: [{ appId: 'asdk_app_p1', linkId: 'bogus', name: 'x'.repeat(80) }] };
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') return response(200, { connectorNames: windows, connectorApps: apps });
+      return response(200, {});
+    });
+    const worker = loadWorker({ local, session, fetch });
+    await worker.fireAlarm();
+    const expected = { core: [{ appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }], desktop: [],
+      plugins: [{ appId: 'asdk_app_p1', linkId: null, name: 'x'.repeat(64) }] };
+    expect((await worker.send({ type: 'status' }) as any).connectorApps).toEqual(expected);
+    expect(local.data.connectorApps).toEqual(expected);
+    const quiet = vi.fn(async (input: string) => new URL(input).pathname === '/hello'
+      ? response(200, { app: 'chat-on-steroids', paired: true }) : response(200, {}));
+    const restarted = loadWorker({ local, session, fetch: quiet });
+    expect((await restarted.send({ type: 'status' }) as any).connectorApps).toEqual(expected);
+  });
+
   it('keeps the app\'s names across a worker restart, refuses foreign ones and hands them to pages', async () => {
     // One ChatGPT account on two computers: pages recognize this install's calls by these names.
     // A restarted worker that fell back to the plain names would claim the other computer's calls.

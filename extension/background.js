@@ -299,6 +299,31 @@ async function rememberOwnCoreApp(value) {
   try { await chrome.storage.local.set({ ownCoreApp: next }); } catch { /* Kept in memory for this worker. */ }
 }
 
+/**
+ * This install's connector apps as the app proved them from its own served requests
+ * (connector-identity.ts): ChatGPT keeps an app's id across a rename, so pages recognize a renamed
+ * connector by these ids. At most four per surface, ids exact, names one short line.
+ */
+let connectorApps = null;
+function cleanConnectorApps(value) {
+  if (!value || typeof value !== 'object') return null;
+  const out = {};
+  for (const surface of ['core', 'desktop', 'plugins']) {
+    out[surface] = (Array.isArray(value[surface]) ? value[surface] : []).slice(0, 4)
+      .filter(app => app && typeof app.appId === 'string' && /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(app.appId))
+      .map(app => ({ appId: app.appId,
+        linkId: typeof app.linkId === 'string' && /^link_[A-Za-z0-9_-]{1,160}$/.test(app.linkId) ? app.linkId : null,
+        name: typeof app.name === 'string' && app.name ? app.name.slice(0, 64) : null }));
+  }
+  return out;
+}
+async function rememberConnectorApps(value) {
+  const apps = cleanConnectorApps(value);
+  if (!apps || JSON.stringify(apps) === JSON.stringify(connectorApps)) return;
+  connectorApps = apps;
+  try { await chrome.storage.local.set({ connectorApps: apps }); } catch { /* Kept in memory for this worker. */ }
+}
+
 async function rememberConnectorNames(value) {
   const names = cleanConnectorNames(value);
   if (!names || JSON.stringify(names) === JSON.stringify(connectorNames)) return;
@@ -320,10 +345,11 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp', 'connectorApps']);
   port = typeof stored.port === 'number' ? stored.port : null;
   connectorNames = cleanConnectorNames(stored.connectorNames);
   ownCoreApp = cleanOwnCoreApp(stored.ownCoreApp);
+  connectorApps = cleanConnectorApps(stored.connectorApps);
   // Tells this browser apart from another one paired with the same app, so a new chat is opened
   // and sent in one browser only. Random, local, and never tied to the profile or the user.
   browserId = typeof stored.browserId === 'string' && /^[a-z0-9]{16,64}$/.test(stored.browserId) ? stored.browserId : '';
@@ -2936,6 +2962,7 @@ async function maintainOnce() {
   }
   inspectRequestedModels(reply.data.modelCatalogRequest);
   await rememberConnectorNames(reply.data.connectorNames);
+  await rememberConnectorApps(reply.data.connectorApps);
   inspectRequestedPluginRefresh(reply.data.pluginRefreshRequests, reply.data.background === true, reply.data.browserOnly === true);
   const repairConversations = new Set(repairs.map(entry => entry.conversationId));
   // Reloading the same document races its final input offer. Repair it now; the
@@ -3653,6 +3680,7 @@ const HANDLERS = {
       paired: token !== null,
       disconnected,
       connectorNames,
+      connectorApps,
       ownCoreApp,
       pending: journal.length,
       pendingCommandAcks: commandAckOutbox.length,

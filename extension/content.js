@@ -4210,7 +4210,7 @@
       window.addEventListener('message', onMessage);
       setTimeout(() => finish(null), FIBER_TIMEOUT_MS);
       try {
-        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames() }, location.origin);
+        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames(), appIds: CLF_DOM.connectorApps() }, location.origin);
       } catch {
         finish(null);
       }
@@ -11137,6 +11137,7 @@
     knownOwnCore = known && typeof known.appId === 'string' && /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(known.appId) &&
       typeof known.name === 'string' ? { path: `app://${known.appId}`, name: known.name } : null;
     if (reply?.connectorNames && CLF_DOM.setConnectorNames(reply.connectorNames)) { ownNamesKnown = true; reportCorePlugin(); }
+    if (reply?.connectorApps && CLF_DOM.setConnectorApps(reply.connectorApps)) reportCorePlugin();
     if (reply) {
       status = {
         connected: reply.connected === true,
