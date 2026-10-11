@@ -1971,7 +1971,7 @@
       const node = Object.getOwnPropertyDescriptor(mapping, id)?.value, message = node?.message;
       if (node?.id !== id || message?.id !== id) continue;
       // The stripped entries below carry no app identity; read it here, ids only (sightingsOf).
-      for (const sighting of sightingsOf([message])) if (sightings.length < 50) sightings.push(sighting);
+      for (const sighting of sightingsOf([message])) if (sightings.length < 50 && !sightings.some(prior => prior.requestId === sighting.requestId && prior.appId === sighting.appId)) sightings.push(sighting);
       const request = str(message.metadata?.request_id), cached = data?.mapping?.[id]?.message;
       if (live && cached?.id === id && request && cached.metadata?.request_id && cached.metadata.request_id !== request) return [];
       const publicMessage = selected.has(id) && message.author?.role === 'assistant' && !hiddenMessage(message) &&
@@ -1985,6 +1985,24 @@
         ...(preamble ? { preamble: budgetedText(preamble, publicBudget, MAX_RENDERED_TEXT),
           publicIdentity: { parent_id: str(message.metadata?.parent_id), working_turn_id: str(message.metadata?.working_turn_id),
             turn_exchange_id: str(message.metadata?.turn_exchange_id) } } : {}) });
+    }
+    // A result row can sit outside the turn's message ids (a new chat, measured 2026-10-11). Find
+    // the result rows of this turn's own request ids anywhere in the mapping; bounded, ids only.
+    const turnRequests = new Set();
+    for (const entry of out) if (entry.metadata.request_id) turnRequests.add(entry.metadata.request_id);
+    if (turnRequests.size && sightings.length < 50) {
+      const known = new Set(sightings.map(sighting => `${sighting.requestId} ${sighting.appId}`));
+      let visited = 0;
+      for (const key in mapping) {
+        if (++visited > 5000 || sightings.length >= 50) break;
+        if (!own.call(mapping, key)) continue;
+        const message = Object.getOwnPropertyDescriptor(mapping, key)?.value?.message;
+        if (!message || !turnRequests.has(str(message.metadata?.request_id))) continue;
+        for (const sighting of sightingsOf([message])) {
+          const seen = `${sighting.requestId} ${sighting.appId}`;
+          if (!known.has(seen)) { known.add(seen); sightings.push(sighting); }
+        }
+      }
     }
     return out;
   }
