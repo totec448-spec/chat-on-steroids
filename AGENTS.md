@@ -3447,6 +3447,16 @@ of appearance controls.
 
 ### Renderer and IPC
 
+The Windows composer dictation control uses `preload/index.ts`'s fixed
+`dictationSupported`, `startDictation`, `stopDictation` and
+`onDictationEvent` methods. `main/dictation.ts` alone owns a Windows
+`System.Speech.Recognition` child process and sends validated
+`shared/dictation.ts` events (`status`, `partial`, `final`, `error`) to
+its originating `webContents`. Only an explicit microphone click starts it;
+the renderer owns the current composer draft, stops on manual edits/navigation,
+and never sends recognized text automatically. No audio enters IPC or storage;
+macOS/Linux hide this Windows-only control.
+
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
 `@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
 alone picks its glyph; static markup names the glyph class. `--ico` sizes the layout box and
