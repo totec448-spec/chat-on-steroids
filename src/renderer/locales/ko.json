@@ -2174,5 +2174,7 @@
   "Choose Update all to check the installed connector tool definitions.": "모두 업데이트를 선택하여 설치된 커넥터의 도구 정의를 확인하세요.",
   "In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.": "ChatGPT의 커넥터 설정에서 이 커넥터를 새로고침하거나 다시 만든 다음 모두 업데이트를 선택하여 재확인하세요.",
   "Your settings are kept. Manual steps appear in the status list.": "설정은 유지됩니다. 수동으로 진행해야 하는 단계는 상태 목록에 표시됩니다.",
-  "Update all could not finish: {0}": "모두 업데이트를 완료하지 못했습니다: {0}"
+  "Update all could not finish: {0}": "모두 업데이트를 완료하지 못했습니다: {0}",
+  "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "실행 중인 작업을 마치고 Chat On Steroids를 완전히 종료하세요. /Applications에서 앱을 교체한 다음, 그곳에서 업데이트된 앱을 여세요.",
+  "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "「연결 설정 확인」에서 macOS 권한을 확인한 다음, 앱을 완전히 종료하고 다시 여세요."
 }

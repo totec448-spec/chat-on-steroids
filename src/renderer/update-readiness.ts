@@ -29,7 +29,9 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
     { id: 'app', label: 'Chat On Steroids', status: appReady ? 'pass' : update.stage === 'failed' ? 'fail' : 'not-run',
       detail: t('Version {0}', [update.current]) + ' · ' + appDetail,
       reason: update.stage === 'failed' && update.error ? updateErrorText(update.error) : undefined,
-      nextStep: update.stage === 'failed' ? t('Choose Update all to retry. You can keep using the current app.') : undefined },
+      nextStep: update.stage === 'failed' ? t('Choose Update all to retry. You can keep using the current app.')
+        : next.platform?.family === 'macos' && update.stage === 'idle' && update.latest
+          ? t('Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.') : undefined },
     { id: 'extension', label: t('Browser extension'), status: extensionReady ? 'pass' : 'not-run',
       detail: (bridge.extensionVersion ? t('Version {0}', [bridge.extensionVersion]) + ' · ' : '') +
         (extensionReady ? t('Connected') : !bridge.present || !bridge.paired ? t('Not connected') :
@@ -80,9 +82,22 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
       : sameSchema && refresh?.state === 'current'
         ? t('Run a tool through this connector in ChatGPT to confirm this connection.')
       : t('Choose Update all to check the installed connector tool definitions.');
-    rows.push({ id: surface.id, label: surface.connectorName, reason, nextStep,
+    const row: ReadinessRow = { id: surface.id, label: surface.connectorName, reason, nextStep,
       schemaUnchecked: !off && functional && !verified,
-      status: off ? 'skipped' : verified || (functional && refresh?.state === 'unknown') ? 'pass' : surfaceFailed || (sameSchema && refresh?.state === 'failed') ? 'fail' : 'not-run', detail });
+      status: off ? 'skipped' : verified || (functional && refresh?.state === 'unknown') ? 'pass' : surfaceFailed || (sameSchema && refresh?.state === 'failed') ? 'fail' : 'not-run', detail };
+    if (surface.id === 'desktop' && !off && connected && next.platform?.family === 'macos') {
+      const permissions = [
+        ...(next.config.capabilities.screen ? [{ label: 'Screen Recording: {0}', state: next.desktopAccess?.screen ?? 'unknown' }] : []),
+        ...(next.config.capabilities.control && !next.config.readOnly ? [{ label: 'Accessibility: {0}', state: next.desktopAccess?.accessibility ?? 'unknown' }] : [])
+      ].filter(permission => permission.state !== 'granted');
+      if (permissions.length) {
+        // The native backend owns these verdicts. Reading them never requests an OS grant.
+        row.status = row.status === 'fail' || permissions.some(permission => permission.state === 'missing') ? 'fail' : 'not-run';
+        row.reason = [row.reason, ...permissions.map(permission => t(permission.label, [t(permission.state === 'missing' ? 'required' : 'unknown')]))].filter(Boolean).join(' · ');
+        row.nextStep = [row.nextStep, t('Choose Review setup to check macOS permissions, then fully quit and reopen the app.')].filter(Boolean).join(' ');
+      }
+    }
+    rows.push(row);
   }
   return rows;
 }

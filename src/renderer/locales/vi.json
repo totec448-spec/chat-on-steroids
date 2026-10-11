@@ -2174,5 +2174,7 @@
   "Choose Update all to check the installed connector tool definitions.": "Chọn Cập nhật tất cả để kiểm tra các định nghĩa công cụ của trình kết nối đã cài.",
   "In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.": "Trong phần cài đặt trình kết nối của ChatGPT, làm mới hoặc tạo lại trình kết nối này, rồi chọn Cập nhật tất cả để kiểm tra lại.",
   "Your settings are kept. Manual steps appear in the status list.": "Các thiết lập của bạn được giữ nguyên. Các bước cần thực hiện thủ công được hiển thị trong danh sách trạng thái.",
-  "Update all could not finish: {0}": "Không thể hoàn tất Cập nhật tất cả: {0}"
+  "Update all could not finish: {0}": "Không thể hoàn tất Cập nhật tất cả: {0}",
+  "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Hoàn tất các tác vụ đang chạy và thoát hoàn toàn Chat On Steroids. Thay ứng dụng trong /Applications, rồi mở phiên bản đã cập nhật từ thư mục đó.",
+  "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Chọn “Kiểm tra thiết lập” để kiểm tra quyền trên macOS, sau đó thoát hoàn toàn ứng dụng rồi mở lại."
 }

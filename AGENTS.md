@@ -4064,7 +4064,13 @@ Activity's Update status card
 combines it with the updater, bridge and connection owners. All checks pass only after a
 successful release check with no newer app, a live paired extension at the running version,
 and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
-exact current schema. Optional off connectors or ones with no advertised tools do not block
+exact current schema. Enabled macOS Desktop also projects the native backend's existing
+`desktopAccess` verdicts for the selected screen/control capabilities: missing blocks readiness,
+unknown stays unverified, and read-only ignores control consent. Off/empty Desktop and clipboard-only
+use require no native screen/control grant. The card requests no permission itself and preserves
+connector failures alongside permission guidance. A confirmed manual macOS update explains fully
+quitting, replacing the app in `/Applications`, and launching that copy; it never deletes a copy.
+Optional off connectors or ones with no advertised tools do not block
 completion, matching Update all's requested surfaces. Core always remains required. Unknown schema or historical
 connection proof alone never establish full verification. Successful external tool calls under the same live publication
 and tunnel may instead establish **Ready to use; tool definitions not fully verified** when

@@ -2174,5 +2174,7 @@
   "Choose Update all to check the installed connector tool definitions.": "Kurulu bağlayıcının araç tanımlarını kontrol etmek için Tümünü güncelle seçeneğini seçin.",
   "In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.": "ChatGPT’nin bağlayıcı ayarlarında bu bağlayıcıyı yenileyin veya yeniden oluşturun, ardından tekrar kontrol etmek için Tümünü güncelle seçeneğini seçin.",
   "Your settings are kept. Manual steps appear in the status list.": "Ayarlarınız korunur. Elle yapılması gereken adımlar durum listesinde gösterilir.",
-  "Update all could not finish: {0}": "Tümünü güncelle tamamlanamadı: {0}"
+  "Update all could not finish: {0}": "Tümünü güncelle tamamlanamadı: {0}",
+  "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Devam eden işleri bitirin ve Chat On Steroids’i tamamen kapatın. /Applications içindeki uygulamayı değiştirin ve güncel sürümü bu klasörden açın.",
+  "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "macOS izinlerini kontrol etmek için “Kurulumu gözden geçir”i seçin. Ardından uygulamayı tamamen kapatıp yeniden açın."
 }

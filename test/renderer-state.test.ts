@@ -2357,6 +2357,93 @@ it('reports update readiness only from checked versions and current connector ev
   setLanguage('en');
 });
 
+it('uses live macOS permission verdicts only for the enabled Desktop capabilities in update readiness', async () => {
+  const update = vi.fn(), connect = vi.fn(), request = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { updateAll: update, connect, requestDesktopAccessibility: request });
+  const ready = structuredClone(state);
+  ready.platform = { family: 'macos', name: 'macOS', desktopAutomation: true };
+  ready.config.readOnly = false;
+  ready.config.capabilities.screen = ready.config.capabilities.control = true;
+  ready.update.checkedAt = 1;
+  ready.bridge = { ...ready.bridge, paired: true, present: true, extensionVersion: ready.update.current };
+  ready.status = { ...ready.status, state: 'connected', surfaces: ['core', 'desktop'].map(id => ({ id, connectorName: id,
+    optional: id === 'desktop', available: true, state: 'live', detail: '', description: id, cardSummary: id,
+    localUrl: null, publicUrl: null, lastRequestAt: 1, lastToolCallAt: 1, tools: [id === 'core' ? 'read' : 'screen_capture'] })) };
+  ready.connectorSchemas = { core: 'core-a', desktop: 'desktop-a' };
+  ready.connectorRefresh = { core: { schemaId: 'core-a', state: 'current' }, desktop: { schemaId: 'desktop-a', state: 'current' } };
+  ready.desktopAccess = { screen: 'granted', accessibility: 'granted', checkedAt: 1, error: null };
+  const summary = () => w.document.getElementById('updateReadinessSummary')!;
+  const desktop = () => w.document.querySelector('[data-update-part="desktop"]')!;
+  push(ready); expect(summary().dataset.ready).toBe('true');
+  const missing = structuredClone(ready);
+  missing.desktopAccess.screen = missing.desktopAccess.accessibility = 'missing';
+  push(missing);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().classList.contains('is-bad')).toBe(true);
+  expect(desktop().textContent).toContain('Screen Recording: required');
+  expect(desktop().textContent).toContain('Accessibility: required');
+  expect(desktop().textContent).toContain('Choose Review setup to check macOS permissions');
+  const unverified = structuredClone(ready); delete unverified.desktopAccess;
+  push(unverified);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().classList.contains('is-not-run')).toBe(true);
+  expect(desktop().textContent).toContain('Screen Recording: unknown');
+  const screenOnly = structuredClone(missing); screenOnly.config.readOnly = true;
+  push(screenOnly);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().textContent).not.toContain('Accessibility: required');
+  screenOnly.desktopAccess.screen = 'granted'; push(screenOnly);
+  expect(summary().dataset.ready).toBe('true');
+  const controlOnly = structuredClone(missing); controlOnly.config.capabilities.screen = false;
+  push(controlOnly);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().textContent).not.toContain('Screen Recording: required');
+  const clipboardOnly = structuredClone(controlOnly); clipboardOnly.config.capabilities.control = false;
+  push(clipboardOnly); expect(summary().dataset.ready).toBe('true');
+  const off = structuredClone(missing); off.status.surfaces[1].state = 'off';
+  push(off); expect(summary().dataset.ready).toBe('true');
+  const windows = structuredClone(missing); windows.platform.family = 'windows';
+  push(windows); expect(summary().dataset.ready).toBe('true');
+  const connectorFailure = structuredClone(missing);
+  connectorFailure.connectorRefresh.desktop = { schemaId: 'desktop-a', state: 'failed', failure: 'inspection' };
+  push(connectorFailure);
+  expect(desktop().textContent).toContain('Could not inspect the installed connector');
+  expect(desktop().textContent).toContain('Open this connector in ChatGPT');
+  expect(desktop().textContent).toContain('check macOS permissions');
+  expect(update).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled();
+});
+
+it('explains replacement and the launch location only for a confirmed manual macOS app update', async () => {
+  const update = vi.fn(), connect = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { updateAll: update, connect });
+  const manual = structuredClone(state);
+  manual.platform = { family: 'macos', name: 'macOS', desktopAutomation: true };
+  manual.update = { ...manual.update, latest: '99.0.0', stage: 'idle', checkedAt: 1 };
+  const app = () => w.document.querySelector('[data-update-part="app"]')!;
+  push(manual);
+  expect(app().textContent).toContain('Install 99.0.0 manually');
+  expect(app().textContent).toContain('fully quit Chat On Steroids');
+  expect(app().textContent).toContain('/Applications');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(app().textContent).toContain('完全に終了');
+  expect(app().textContent).toContain('/Applications');
+  setLanguage('en');
+  for (const change of [
+    (s: any) => { s.platform.family = 'windows'; },
+    (s: any) => { s.platform.family = 'linux'; },
+    (s: any) => { s.update.latest = null; },
+    (s: any) => { s.update.stage = 'checking'; },
+    (s: any) => { s.update.stage = 'ready'; },
+    (s: any) => { s.update.stage = 'failed'; s.update.error = 'Network unavailable'; }
+  ]) {
+    const other = structuredClone(manual); change(other); push(other);
+    expect(app().textContent).not.toContain('/Applications');
+  }
+  expect(app().textContent).toContain('Choose Update all to retry');
+  expect(update).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled();
+});
+
 it('keeps update readiness actions stable and does not start update or connection work on pushes', async () => {
   const installUpdate = vi.fn(), connect = vi.fn(), refreshUpdate = vi.fn(), updateAll = vi.fn();
   const { window: w, state, push } = await mountChat({}, [], { installUpdate, connect, refreshUpdate, updateAll });

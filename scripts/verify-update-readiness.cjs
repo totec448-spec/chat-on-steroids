@@ -156,10 +156,35 @@ app.whenReady().then(async () => {
       assert.equal(await js(`document.getElementById('updateAllError').hidden`),true);
       assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
     }
+    // Manual macOS updates and native permission verdicts reuse the existing owners only.
+    const macState = () => `(()=>{const next=structuredClone(window.fixtureState);
+      next.platform={family:'macos',name:'macOS',desktopAutomation:true};
+      next.config.capabilities.screen=next.config.capabilities.control=true;next.config.readOnly=false;
+      next.update.latest='99.0.0';next.update.stage='idle';
+      next.status.surfaces.push({...next.status.surfaces[0],id:'desktop',connectorName:'Chat On Steroids Desktop',optional:true,tools:['screen_capture']});
+      next.connectorSchemas.desktop='desktop-a';next.connectorRefresh.desktop={schemaId:'desktop-a',state:'current'};
+      next.desktopAccess={screen:'missing',accessibility:'missing',checkedAt:Date.now(),error:null};
+      window.fixtureMacState=next;window.fixturePush(next)})()`;
+    await open('lang=en'); await js(macState());
+    assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false');
+    await pause(600); await shot('macos-manual-permissions-en.png');
     // All locales must keep failures and recovery actions accessible outside closed details.
     win.setContentSize(700,600);
     for (const lang of ['en','ja','de','es','fr','ko','pt-BR','pt-PT','ru','tr','vi','zh-CN','zh-TW']) {
       await open('lang='+lang);
+      await js(`(()=>{const size=document.getElementById('appearanceSize');size.value='18';size.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+      await js(macState());
+      const catalog = lang==='en' ? null : JSON.parse(fs.readFileSync(path.join(root,'src/renderer/locales',lang+'.json'),'utf8'));
+      const copy = key => catalog ? catalog[key] : key;
+      assert.ok(await js(`document.querySelector('[data-update-part="app"]').textContent.includes(${JSON.stringify(copy('Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.'))})`),lang+' manual replacement instructions');
+      assert.ok(await js(`document.querySelector('[data-update-part="desktop"]').textContent.includes(${JSON.stringify(copy('Choose Review setup to check macOS permissions, then fully quit and reopen the app.'))})`),lang+' permission instructions');
+      assert.equal(await js(`document.querySelector('[data-update-part="desktop"]').classList.contains('is-bad')`),true);
+      await js(`document.getElementById('updateReviewSetup').scrollIntoView({block:'nearest'})`);
+      assert.equal(await js(`(()=>{const b=document.getElementById('updateReviewSetup'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' macOS setup action is reachable');
+      assert.equal(await js(`(()=>{const c=document.querySelector('.update-readiness');return c.scrollWidth<=c.clientWidth+1&&[...c.querySelectorAll('p,button')].every(e=>e.scrollWidth<=e.clientWidth+1)})()`),true,lang+' macOS copy is not horizontally clipped');
+      assert.deepEqual(await js('window.mutations'),[],'Native consent is never requested by a state push');
+      await js(`(()=>{const next=structuredClone(window.fixtureMacState);next.update.latest=null;next.desktopAccess.screen=next.desktopAccess.accessibility='granted';window.fixturePush(next)})()`);
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true',lang+' granted permissions restore readiness');
       await js(`(()=>{const size=document.getElementById('appearanceSize');size.value='18';size.dispatchEvent(new Event('input',{bubbles:true}));
         const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';
         next.status.surfaces.push({...next.status.surfaces[0],id:'plugins',connectorName:'Chat On Steroids Plugins',optional:true,tools:[]});

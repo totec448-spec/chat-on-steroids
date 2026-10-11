@@ -2174,5 +2174,7 @@
   "Choose Update all to check the installed connector tool definitions.": "Selecione «Atualizar tudo» para verificar as definições das ferramentas do conector instalado.",
   "In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.": "Nas definições de conectores do ChatGPT, atualize ou recrie este conector e selecione «Atualizar tudo» para verificar novamente.",
   "Your settings are kept. Manual steps appear in the status list.": "As suas definições são mantidas. Os passos manuais aparecem na lista de estados.",
-  "Update all could not finish: {0}": "Não foi possível concluir Atualizar tudo: {0}"
+  "Update all could not finish: {0}": "Não foi possível concluir Atualizar tudo: {0}",
+  "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Conclua as tarefas em curso e encerre completamente o Chat On Steroids. Substitua a aplicação em /Applications e abra a versão atualizada a partir dessa pasta.",
+  "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Selecione «Rever configuração» para verificar as permissões do macOS. Depois, encerre completamente a aplicação e volte a abri-la."
 }
