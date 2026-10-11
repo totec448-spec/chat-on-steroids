@@ -3338,6 +3338,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // "Follow new output" applies to the ChatGPT page too; the page owns the scrolling.
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -4093,6 +4094,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(),
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         goal: {
           enabled: getConfig().goal.enabled,
           // The app-wide setting is nobody's own answer, by definition: it is what a chat that

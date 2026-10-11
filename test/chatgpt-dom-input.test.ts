@@ -674,6 +674,21 @@ describe('Core app mention on app-owned sends (#861)', () => {
     await vi.advanceTimersByTimeAsync(10);
     return result;
   }
+  it('uses the exact Plugins app token and does not add a Core token for an opted-in send', async () => {
+    const plugins = { path: 'app://asdk_app_plugins123', name: 'Chat On Steroids Plugins (Windows)' };
+    let atClick = '';
+    button.addEventListener('click', () => {
+      atClick = box.innerHTML;
+      user('Exact app prompt');
+      box.replaceChildren();
+    });
+    expect(await sendMention({ mention: plugins })).toBe(true);
+    const sent = document.createElement('div'); sent.innerHTML = atClick;
+    const chips = sent.querySelectorAll('[app-mention-path]');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.getAttribute('app-mention-path')).toBe(plugins.path);
+    expect(chips[0]?.getAttribute('data-prompt-link-label')).toBe('$chat-on-steroids-plugins-windows');
+  });
   // ChatGPT's editor drops the inserted element on a microtask and draws its own token one
   // task later; only that token is part of what Send submits.
   function redrawingEditor(draw = true) {

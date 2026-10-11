@@ -2121,5 +2121,7 @@
   "Fewer repeated commands": "반복 명령 감소",
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT가 같은 채팅에서 아직 실행 중인 명령을 다시 시작하면, 결과가 실행 중인 명령을 알려 줍니다.",
   "Compact & Resume in Projects": "프로젝트에서 압축 후 계속",
-  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT 프로젝트 안의 채팅을 새 채팅으로 옮기는 작업이 이제 끝까지 완료되고, 새 채팅도 그 프로젝트에 남습니다."
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT 프로젝트 안의 채팅을 새 채팅으로 옮기는 작업이 이제 끝까지 완료되고, 새 채팅도 그 프로젝트에 남습니다.",
+  "Prefer Plugins on app-sent messages": "앱에서 보내는 메시지에 Plugins 우선 사용",
+  "When enabled, use the installed Chat On Steroids Plugins mention instead of Core for regular messages sent by CoS, including Goal and Loop. Workers and recovery still use Core. Only one app is mentioned; this does not affect messages you send directly in ChatGPT. Turn off for coding chats that need Core.": "활성화하면 Goal과 Loop를 포함한 일반 CoS 메시지에서 Core 대신 설치된 Plugins 앱을 멘션합니다. 워커와 복구는 계속 Core를 사용합니다. 한 번에 하나의 앱만 멘션하며 ChatGPT에서 직접 보내는 메시지에는 영향이 없습니다. Core가 필요한 코딩 채팅에서는 끄세요."
 }
