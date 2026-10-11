@@ -2140,5 +2140,9 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT o sohbette hâlâ çalışan bir komutu yeniden başlattığında sonuç onu çalışan komuta yönlendirir.",
   "Compact & Resume in Projects": "Projelerde Sıkıştır ve sürdür",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Bir ChatGPT Projesi içindeki sohbeti yeni bir sohbete taşımak artık tamamlanıyor ve yeni sohbet aynı Projede kalıyor.",
-  "In ChatGPT: {0}": "ChatGPT'de: {0}"
+  "In ChatGPT: {0}": "ChatGPT'de: {0}",
+  "This chat was deleted in ChatGPT. Start a new chat to continue.": "Bu sohbet ChatGPT'de silindi. Devam etmek için yeni bir sohbet başlatın.",
+  "Chat deleted in ChatGPT": "Sohbet ChatGPT'de silindi",
+  "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT'de bu sohbet artık yok, bu yüzden ona başka bir şey gönderilemez.",
+  "Start a new chat to continue. This history stays in the app.": "Devam etmek için yeni bir sohbet başlatın. Bu geçmiş uygulamada kalır."
 }

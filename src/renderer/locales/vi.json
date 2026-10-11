@@ -2140,5 +2140,9 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Khi ChatGPT khởi động một lệnh vẫn đang chạy trong cuộc trò chuyện đó, kết quả sẽ chỉ nó đến lệnh đang chạy.",
   "Compact & Resume in Projects": "Compact & Resume trong Dự án",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Chuyển một cuộc trò chuyện trong Dự án ChatGPT sang cuộc trò chuyện mới giờ đã hoàn tất, và cuộc trò chuyện mới vẫn ở trong Dự án đó.",
-  "In ChatGPT: {0}": "Trong ChatGPT: {0}"
+  "In ChatGPT: {0}": "Trong ChatGPT: {0}",
+  "This chat was deleted in ChatGPT. Start a new chat to continue.": "Cuộc trò chuyện này đã bị xóa trong ChatGPT. Hãy bắt đầu cuộc trò chuyện mới để tiếp tục.",
+  "Chat deleted in ChatGPT": "Cuộc trò chuyện đã bị xóa trong ChatGPT",
+  "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT không còn cuộc trò chuyện này nên không thể gửi thêm gì vào đó.",
+  "Start a new chat to continue. This history stays in the app.": "Hãy bắt đầu cuộc trò chuyện mới để tiếp tục. Lịch sử này vẫn được giữ trong ứng dụng."
 }
