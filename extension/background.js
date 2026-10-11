@@ -4310,6 +4310,12 @@ const HANDLERS = {
       await noteTabConversation(source, conversationId);
       if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     }
+    // A page in the app's tab group sits in the user's own window (#128): selecting it would
+    // switch what they are looking at, so the courtesy is skipped there.
+    const placed = await chrome.tabs.get(source.tab).catch(() => null);
+    if (await inAppGroup(placed).catch(() => false)) {
+      return ownsDocument(source) ? { ok: true, focused: false } : { ok: false, error: 'stale_document' };
+    }
     try {
       await chrome.tabs.update(source.tab, { active: true });
     } catch {
@@ -4975,7 +4981,10 @@ async function placeSuccessorChat(raw, tabId) {
   const query = [marker];
   if (model) query.push(`model=${encodeURIComponent(model)}`);
   if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
-  const create = { url: `${base}?${query.join('&')}#${marker}`, windowId: home.windowId, active: raw.active !== false };
+  // A chat in the app's own tab group sits in the user's window (#128): its successor joins that
+  // group without being selected, since selecting it would switch what the user is looking at.
+  const grouped = await inAppGroup(home).catch(() => false);
+  const create = { url: `${base}?${query.join('&')}#${marker}`, windowId: home.windowId, active: !grouped && raw.active !== false };
   // Directly after the chat it continues, so a handoff reads as one piece of work instead of a
   // tab appended to the far end of a long strip.
   if (typeof home.index === 'number') create.index = home.index + 1;
@@ -4985,6 +4994,10 @@ async function placeSuccessorChat(raw, tabId) {
   } catch (error) {
     await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
     return;
+  }
+  if (grouped && Number.isInteger(created?.id)) {
+    // A group gone in between leaves the tab beside its home, inactive; nothing else changes.
+    await chrome.tabs.group({ groupId: home.groupId, tabIds: [created.id] }).catch(() => undefined);
   }
   try {
     await protectCreatedTab(created, id);
@@ -5111,8 +5124,9 @@ function recoverDeferredRevivals() {
       const url = deferredRevivalUrl(entry);
       if (!url) continue;
       try {
-        // A worker revival is background work; do not select its tab in the user's window.
-        const created = await chrome.tabs.create({ url, active: false });
+        // A worker revival is background work; do not select its tab in the user's window. In
+        // tab-group mode it joins the app's group like every other background tab (#128).
+        const created = groupsAvailable() ? await createChatTab(url, true) : await chrome.tabs.create({ url, active: false });
         if (created && typeof created.id === 'number') tabs.push({ ...created, url });
       } catch {
         // Opening authority stays spent even if Chrome rejects creation. The app's command

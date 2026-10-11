@@ -493,6 +493,7 @@ interface WorkerHarness {
   tabsReload: ReturnType<typeof vi.fn>;
   windowsUpdate: ReturnType<typeof vi.fn>;
   tabGroupsUpdate: ReturnType<typeof vi.fn>;
+  tabsGroup: ReturnType<typeof vi.fn> | undefined;
   scriptingExecuteScript: ReturnType<typeof vi.fn>;
   scriptingInsertCSS: ReturnType<typeof vi.fn>;
   alarmCreate: ReturnType<typeof vi.fn>;
@@ -571,7 +572,7 @@ function loadWorker(options: {
       update: tabGroupsUpdate,
       query: async () => [...groups.values()].map(group => ({ ...group }))
     },
-    group: vi.fn(async () => { throw new Error('not modelled'); }),
+    group: vi.fn(async (properties: { groupId?: number }) => properties.groupId ?? 999),
     getLastFocused: async () => ({ id: 7, type: 'normal' }),
     getAll: async () => [{ id: 7, type: 'normal' }]
   } : null;
@@ -682,6 +683,7 @@ function loadWorker(options: {
     tabsReload,
     windowsUpdate,
     tabGroupsUpdate,
+    tabsGroup: groupApi?.group,
     scriptingExecuteScript,
     scriptingInsertCSS,
     alarmCreate,
@@ -2128,6 +2130,70 @@ describe('active agent tab discard protection', () => {
       await worker.registerTab(61);
       await worker.fireAlarm();
       expect(worker.tabGroupsUpdate.mock.calls).toEqual([[50, { collapsed: false }]]);
+    });
+
+    it.each([
+      ['in the app group', 50, { active: false }, true],
+      ['in the user\'s own window', -1, { active: true }, false]
+    ])('places the successor of a chat %s beside it', async (_name, groupId, expected, grouped) => {
+      let offered = false;
+      const home = { id: 61, windowId: 7, index: 3, groupId, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete', active: false, frozen: false };
+      const worker = loadWorker({
+        local: new FakeStorageArea({ ...paired, backgroundPlacement: 'group' }),
+        session: new FakeStorageArea({ chatBackgroundGroup: 50 }),
+        fetch: vi.fn(async (input: string) => {
+          const url = new URL(input);
+          if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+          if (url.pathname === '/status') {
+            const placement = offered ? {} : { placement: { id: 'cmd-successor', homeConversationId: CHAT } };
+            offered = true;
+            return response(200, { ok: true, repairs: [], backgroundPlacement: 'group', ...placement });
+          }
+          return response(404, {});
+        }),
+        tabsQuery: async () => [{ ...home }],
+        tabsGet: async (id: number) => {
+          if (id !== home.id) throw new Error(`No tab with id: ${id}.`);
+          return { ...home };
+        },
+        tabGroups: [{ ...GROUP }]
+      });
+      await worker.fireAlarm();
+      expect(worker.tabsCreate).toHaveBeenCalledWith(expect.objectContaining({ windowId: 7, index: 4, ...expected }));
+      if (grouped) expect(worker.tabsGroup).toHaveBeenCalledWith({ groupId: 50, tabIds: [99] });
+      else expect(worker.tabsGroup).not.toHaveBeenCalled();
+    });
+
+    it.each([[50, false], [-1, true]])('selects a page asking for focus only outside the app group (group %s)', async (groupId, focused) => {
+      const worker = groupWorker([tab(61, groupId)]);
+      await worker.registerTab(61);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 61);
+      await expect(worker.send({ type: 'focus_tab', conversationId: CHAT, turnId: 'generation-owned' }, 61))
+        .resolves.toMatchObject({ ok: true, focused });
+      expect(worker.tabsUpdate.mock.calls.some(([, change]) => (change as { active?: boolean }).active === true)).toBe(focused);
+    });
+
+    it('opens a worker revival in the app group, inactive', async () => {
+      const revival = { id: 'cmd-wake', conversationId: CHAT };
+      const worker = loadWorker({
+        local: new FakeStorageArea({ ...paired, backgroundPlacement: 'group', deferredRevivals: [revival] }),
+        session: new FakeStorageArea({ chatBackgroundGroup: 50 }),
+        fetch: vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+          const url = new URL(input);
+          if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+          if (url.pathname === '/status') return response(200, { ok: true, recoveryMonitoring: true, repairs: [], revival, backgroundPlacement: 'group' });
+          if (url.pathname === '/commands/revivals/pending') {
+            const body = JSON.parse(String(init.body || '{}'));
+            return response(200, { pending: body.entries.map((entry: { id: string }) => entry.id) });
+          }
+          return response(404, {});
+        }),
+        tabsQuery: async () => [],
+        tabGroups: [{ ...GROUP }]
+      });
+      await vi.waitFor(() => expect(worker.tabsCreate).toHaveBeenCalledTimes(1));
+      expect(worker.tabsCreate).toHaveBeenCalledWith(expect.objectContaining({ windowId: 7, active: false }));
+      await vi.waitFor(() => expect(worker.tabsGroup).toHaveBeenCalledWith({ groupId: 50, tabIds: [99] }));
     });
 
     it('never touches a group the user collapsed or expanded when no app page is frozen', async () => {
