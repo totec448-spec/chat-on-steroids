@@ -67,6 +67,9 @@ it('migrates real legacy ordinary openings to durable owners without changing cu
   const approved = await validateNewRoot(requestedRoot, []);
   await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: approved }] });
   const project = await addProject(approved);
+  // A project of that era had no native ChatGPT Project; a new one now waits for its own (#1176).
+  const { chatgpt: _, ...legacyProject } = project;
+  await writeDurableNow('projects', [legacyProject]);
   const stamp = Date.now();
   const queued = legacy({ projectId: project.id, text: 'Queued legacy opening' });
   const browser = legacy({ text: 'Claimed legacy opening', state: 'browser', owner: 'legacy-page', offeredAt: stamp,

@@ -210,6 +210,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
+| Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
 
 Keep evidence levels separate in all reports: **source → tests → build → package → installed
 payload → live browser/device/provider behavior**. Passing one level does not prove the next.
@@ -885,6 +886,38 @@ prime. Resume retains the same project binding without reinjecting its instructi
 chats receive no project file. Missing AGENTS is fine; an unsafe/unreadable/binary file fails
 preparation visibly. Full prompt budgeting and
 hidden framing are described in §6.
+
+### Native ChatGPT Project for a new CoS project (#1176)
+
+One-way, CoS-owned and only for projects created after this existed: `addProject` gives a new row
+`chatgpt: { state: 'requested' }`; an existing, restored or older row never gets one. The link
+grants no filesystem permission and is never derived from a name. States (`ChatgptProjectLink`):
+`requested` and `claimed` are before any click, so nothing exists remotely; `creating` is written
+before the click that creates the Project (`armProjectCreate`); from there it ends `linked` (the
+id ChatGPT shows on the new Project's own page, reported by the page that armed it) or
+`uncertain` (the app's own timer, `PROJECT_CREATE_ARMED_MS`, also swept at start). `failed` is a
+failure before the click, or a linked Project ChatGPT no longer opens. `uncertain` and `failed`
+are never retried on their own: only the project's "Retry ChatGPT Project" menu item asks again,
+and for `uncertain` it warns that a second Project may result.
+
+The browser does it (`inspectProjectCreates` in background.js): one request at a time in one
+foreground helper tab `https://chatgpt.com/?cos-project-create=<request>` (the dialog needs a
+laid-out page; the person just added the project, so it also runs under `browserOnly`). The page
+(`createChatgptProject`) claims first, opens a collapsed sidebar once, clicks ChatGPT's own control
+(`button[data-app-action-sidebar-project-create]`, labelled in the account's language), types the
+folder name into `input#chatgpt-project-name`, arms, submits, and takes the id only from the
+Project page ChatGPT opens by itself, and only one the sidebar did not list before the click. The
+helper is closed once its request is no longer pending and it proves it holds nothing; a closed
+helper is reopened at most every 2 minutes.
+
+A new chat of a linked project (`pendingBrowserInputs` adds `project`) opens on
+`/g/<id>/project?cos-input=…#cos-input=…`, never by borrowing a tab (ChatGPT's New chat is the
+root); the page claims only on that exact Project home and names it, and `/input/claim` refuses
+anything else. While the Project is being created, or could not be, the message is held and its
+row says so ("Creating this project in ChatGPT…", or the unavailable line pointing at Retry). A
+deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
+`gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
+An opening remembers its Project, so a retry's new Project gets its own tab.
 
 ## 10. Files, terminal, patches and images
 
@@ -2342,7 +2375,8 @@ Selecting a chat in the app (`sessions:followTab`, preload `followSessionTab`) w
 chats on hands its conversation to the same extensions as `follow`: only the newest selection,
 only to a browser that already has the chat open, and it lapses after 10 s. The extension makes
 that tab the selected one in its Background chats window. That never focuses the window, opens a
-tab or touches the user's own windows (#1249).
+tab or touches the user's own windows (#1249). With `backgroundPlacement: 'group'` the app sends no
+follow and the extension ignores one (#128).
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
@@ -2363,6 +2397,21 @@ its fiber-stamped `<img>` already loaded and answers `{ data: base64 }` or `{ er
 app requires a decodable PNG, JPEG or WebP of at most 25 MB, writes a `.part` file beside the
 destination and hard-links it into place, so an existing name is never replaced, and answers the
 tool within 60 s. No URL, cookie or credential leaves the page.
+
+In tab-group mode (#128) the extension keeps the group's id in `chrome.storage.session`
+(`chatBackgroundGroup`) and mirrors it to local storage (`chatBackgroundGroupMirror`); a mirrored id is
+trusted only while the group still carries the title "Chat On Steroids", and `onStartup` drops the
+mirror. After a browser restart only an exactly titled group in a normal window whose every tab the
+app owns is adopted again. Group mode's reconcile never moves or regroups tabs. Only a group the app
+just created is collapsed, and every grouped tab is created inactive. A group that vanishes during
+placement is retried once, then the tab moves to the minimized window. When the last app tab closes,
+Chrome deletes the group and its auto-saved copy. Browsers without `chrome.tabGroups` use the window.
+Chrome freezes a collapsed group's tabs within seconds (2 of 7 sends stalled on Chrome 154), so every
+page in the app's group holds a Web Lock (`chat-on-steroids-keep-awake-<random>`), which Chrome's
+freezing rules exempt: `register_document` answers `keepAwake`, and `clf-keep-awake { on }` from
+the maintenance pass and the `groupId` change event turns it on or off per document (told state in
+session storage `keepAwakeTabs`). A grouped page frozen before it could take the lock gets the group
+expanded; once all hold their locks the worker collapses it again unless the active tab is in it.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
@@ -3634,7 +3683,20 @@ read after a reload sends its outline too, which is how recaps that arrived late
 The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
 `sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
 beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
-(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. A DIL reply whose
+(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows.
+
+A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
+of its own but keeps the answer's one MCP request id across it. The page ends the local turn there
+and sends `turn_end` with `continued: true` when a message steered it (Stop stayed) or replaced it
+while it was unfinished (no answer yet; Stop can already be gone at that tick). A turn that ended
+with its answer is never marked. Past a `continued` end, a call of that request that *started*
+after the end is filed under the turn that began then, and the request's ownership moves there
+(`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);
+a late result of a call that started before the end stays with the earlier turn (`turnOpenAt`).
+Each shell turn descriptor names the user message that opened it (`question`, fiber.js
+`shellQuestion`); content.js sends it with `turn_trace`, and `writeTurnTrace` refuses an outline
+whose question differs from the turn's recorded question (`timelineTurns[turnId].questionId`), so
+the moment the page switches turns cannot file the newer answer's outline under the earlier turn. A DIL reply whose
 `content` is only `::chatgpt-content-reference{…}` naming itself is read as the `fallbackMarkdown`
 of that one `dil` reference (`shellItemText`), so its recorded text is the reply rather than the
 directive. In that Markdown the timeline shows an `entity` widget as its name in bold and drops
