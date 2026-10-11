@@ -1902,6 +1902,50 @@ describe('desktop input delivery and helper ownership', () => {
     expect(mentions).toEqual([expected]);
   });
 
+  it('hands the proven connector apps to fiber.js with every scan', async () => {
+    const asked: unknown[] = [];
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0,
+        connectorApps: { core: [{ appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }], desktop: [], plugins: [] } })
+    });
+    live.window.addEventListener('message', (event: MessageEvent) => {
+      if (event.data?.source === 'clf-fiber-ask') asked.push(event.data.appIds);
+    });
+    await settle();
+    expect((live.window as any).CLF_DOM.connectorApps()).toEqual([{ surface: 'core', appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }]);
+    userTurn(live.document, 'apps-user', 'hello');
+    live.hook.observe();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual([{ surface: 'core', appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }]));
+  });
+
+  it('mentions a renamed Core by its proven app id and never reports it missing', async () => {
+    const asks: any[] = [];
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0,
+        connectorApps: { core: [{ appId: 'asdk_app_x1', linkId: 'link_x1', name: 'My tools' }], desktop: [], plugins: [] } }),
+      core_plugin: (message: unknown) => { asks.push(message); return { ok: true, data: {} }; },
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed() } })
+    });
+    await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com', data: { type: 'cos-core-mention', path: null, name: null,
+        candidates: [{ name: 'My tools', path: 'app://asdk_app_x1' }, { name: 'Gmail', path: 'app://asdk_app_gmail' }], pluginList: true } }));
+    await settle();
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'renamed-core-receipt', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(mentions).toEqual([{ path: 'app://asdk_app_x1', name: 'My tools' }]);
+    expect(asks.some(message => message?.missing === true)).toBe(false);
+    expect(asks).toContainEqual(expect.objectContaining({ type: 'core_plugin', appId: 'asdk_app_x1' }));
+  });
+
   it('keeps the plain names for a status reply that carries foreign or malformed names', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
@@ -6560,6 +6604,50 @@ describe('the app-owned chronological stream', () => {
     await live.hook.pullActivity(); live.hook.renderStreams();
     expect(overwriteRows(section, '[data-clf-call="exact-block-call"]')).toHaveLength(1);
     expect(block.closest('[data-clf-native-hidden]') !== null).toBe(hidden);
+  });
+
+  it.each([
+    ['My tools', true, true],
+    ['Chat On Steroids Plugins', false, false]
+  ] as const)('trusts fiber.js\'s own verdict for a connector row (%s, own %s)', async (app, own, hidden) => {
+    // A connector renamed in ChatGPT is recognized by its app id in fiber.js (2026-10-11); a
+    // same-named app that fiber.js proved foreign stays native.
+    live = await harness(undefined, { activity: () => ({ ok: true, data: {
+      entries: [], userAnchors: [{ seq: 0, time: 50, messageId: 'm-own-block-owner' }], stream: [
+        { seq: 1, time: 100, kind: 'turn_start', turnId: 'own-block-owner' },
+        { seq: 2, time: 110, kind: 'tool_call', turnId: 'own-block-owner', callId: 'own-block-call',
+          requestId: 'wfr-own-block', tool: 'read_file', outcome: 'ok', summary: { title: 'Local exact call' } }
+      ]
+    } }) }); renderingOn();
+    userTurn(live.document, 'own-block-owner', 'Read the exact file', { sent: false });
+    const section = assistantTurn(live.document, 'own-block-page', ['Native connector row']);
+    const block = blocksOf(section)[0]!; section.setAttribute('data-clf-fiber-turn', '0'); block.setAttribute('data-clf-fiber', '0');
+    await replyFiber([{ v: fiberVersion, index: 0, messageId: 'fiber-own-block', tool: 'read_file',
+      path: `/${app}/link_x1/read_file`, app, answered: true, own, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }], [{
+      turnId: 'own-block-page', calls: [{ messageId: 'fiber-own-block', tool: 'read_file', order: 0,
+        answered: true, requestId: 'wfr-own-block' }]
+    }]);
+    await live.hook.pullActivity(); live.hook.renderStreams();
+    expect(block.closest('[data-clf-native-hidden]') !== null).toBe(hidden);
+  });
+
+  it('reports each new app sighting once, as an app_sightings observation', async () => {
+    live = await harness();
+    assistantTurn(live.document, 'sighting-page', []);
+    live.hook.observe();
+    await settle();
+    const turn = { turnId: 'sighting-page', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], messages: [],
+      sightings: [{ requestId: 'q4', appId: 'asdk_app_x1', linkId: 'link_x1', appName: 'My tools' },
+        { requestId: 'bad', appId: 'not-an-app', linkId: null, appName: 'x' }] };
+    await replyFiber([], [turn]);
+    await live.hook.flush();
+    await settle();
+    await replyFiber([], [turn]);
+    await live.hook.flush();
+    await settle();
+    const sent = emitted(live.sent, 'app_sightings');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.event.apps).toEqual([{ requestId: 'q4', appId: 'asdk_app_x1', linkId: 'link_x1', appName: 'My tools' }]);
   });
 
   it.each([false, true])('hides result-only native duplicates only after mounted coverage for a shared request (same tool: %s)', async sameTool => {
