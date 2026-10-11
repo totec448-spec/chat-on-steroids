@@ -179,6 +179,25 @@ it.each(['empty', 'draft', 'navigated', 'rejected', 'transport', 'pinned', 'pinn
   expect(h.remove).toHaveBeenCalledTimes(mode === 'empty' ? 1 : 0);
   if (mode === 'empty') expect(h.sendMessage).toHaveBeenCalledWith(8, { type: 'clf-tab-close-check', conversationId: null, failedCommand: { id: firstId, client: 'worker-client' } }, { documentId: source.documentId });
 });
+// 2026-10-10: a failed Compact & resume Project entry left its source tab (?clf=<id>&clf_project=1)
+// open every time, because only a chat-less tab could be retired.
+it.each(['helper', 'unmarked', 'other-command'])('terminal Project-entry failure retires only its own marked source tab (%s)', async mode => {
+  const h = await worker([]);
+  const source = { tab: 8, documentId: 'failed-entry', navigationEpoch: 1 };
+  const marker = mode === 'unmarked' ? '' : `?clf=${mode === 'other-command' ? 'someone-else' : firstId}&clf_project=1`;
+  h.tabs.push({ id: 8, url: `https://chatgpt.com/g/g-p-11111111222233334444555555555555-homelab/c/${secondId}${marker}` });
+  await h.authorizeDocument({ tab: { id: 8 }, documentId: source.documentId, frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+  h.fetch.mockImplementation(async input => ({ ok: true, status: 200,
+    json: async () => new URL(input).pathname === '/hello'
+      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+      : { ok: true, outcome: 'terminal-failure', committed: false } }));
+  h.sendMessage.mockImplementation(async (_tabId, message): Promise<any> =>
+    message.type === 'clf-tab-close-check' ? { safe: true, conversationId: secondId, navigationEpoch: 1 } : { ok: true });
+  await (h as any).ackCommand(firstId, 'failed', 'project entry', null, null, 'resume-client', source);
+  expect(h.remove).toHaveBeenCalledTimes(mode === 'helper' ? 1 : 0);
+  if (mode === 'helper') expect(h.sendMessage).toHaveBeenCalledWith(8, { type: 'clf-tab-close-check', conversationId: secondId,
+    failedCommand: { id: firstId, client: 'resume-client' } }, { documentId: source.documentId });
+});
 it('executes a due refresh before an unrelated input readiness probe settles', async () => {
   const h = await worker([{ id: firstId, conversationId: null }]);
   h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}` }, { id: 9, url: 'https://chatgpt.com/' });
