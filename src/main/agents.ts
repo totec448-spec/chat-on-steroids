@@ -1831,6 +1831,33 @@ export function managedWorkerAllocationIdentity(input: Caller): { runId: string;
 }
 
 /**
+ * The bridge redeems a worker's first browser message before that worker has a conversation
+ * id. Its durable spawn command has the exact broker run + worker id instead. Never infer a
+ * checkout from the display slot or Prime's project: only this published worker can name its
+ * immutable allocation identity. A corrupt managed owner must not fall back to Prime's cwd.
+ */
+export function workerBootstrapWorktreeIdentity(runId: string, agentId: string): { runId: string; agentId: string } | null {
+  const run = runs.get(runId);
+  const member = run?.agents.get(agentId);
+  // A leased bootstrap can be redeemed again by its original browser document after
+  // binding was durably accepted but the HTTP reply was lost. Bridge command restoration
+  // already permits that exact `active` state; do not break that existing recovery path.
+  const awaitingBootstrap = member?.info.state === 'invited' ||
+    ((member?.info.state === 'waking' || member?.info.state === 'active') && Boolean(member.info.conversationId));
+  if (!run || unpublishedRuns.has(run) || !member || unpublishedAgents.has(member) ||
+      member.info.role !== 'worker' || !awaitingBootstrap) {
+    throw new AgentError('WORKTREE_BOOTSTRAP_OWNER_UNAVAILABLE: worker has no published bootstrap or revival owner in this run');
+  }
+  if (member.info.managedWorktree !== true) return null;
+  const allocation = member.info.workerAllocationRunId;
+  if (!allocation || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(allocation) ||
+      allFamilies().filter(owner => owner.agents.get(agentId)?.info.workerAllocationRunId === allocation).length !== 1) {
+    throw new AgentError('WORKTREE_BOOTSTRAP_OWNER_INVALID: managed worker allocation identity could not be proven');
+  }
+  return { runId: allocation, agentId };
+}
+
+/**
  * Publishes browser bootstraps only for worker ids that are still genuinely invited.
  *
  * Production MCP spawn uses this as the second half of its transaction: broker state is

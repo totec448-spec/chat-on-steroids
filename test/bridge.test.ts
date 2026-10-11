@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import sharp from 'sharp';
@@ -138,6 +139,7 @@ const {
   cancelPrimeTransfer,
   finishAgent,
   currentRunId,
+  markStagedWorkerWorktree,
   WORKER_SILENCE_MS,
   noteAgentAlive,
   noteAgentContextTokens,
@@ -148,6 +150,7 @@ const {
   requestWorkerBootstraps,
   requestWorkerRevivals,
   spawn,
+  stageSpawn,
   stageMessages,
   pendingWorkerSpawns,
   releaseQuiescentRun,
@@ -168,6 +171,8 @@ const { makeTempDir, removeTempDir, SAMPLE_BRIEF, faultGate } = await import('./
 const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
 const { getLog } = await import('../src/main/logger.js');
 const { setShippedExtensionBuildForTest } = await import('../src/main/extension-path.js');
+const { gitExecutable } = await import('../src/main/project-git.js');
+const { allocWorkerWorkspace, resetWorkerWorktreeRegistryForTests, restoreManagedWorktrees } = await import('../src/main/worktrees/index.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 /** The chat that spawns the swarm in these tests: only a proven conversation can. */
@@ -4330,6 +4335,108 @@ describe('delivering a bootstrap', () => {
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('redeems a restored broker-owned worktree as the worker cwd, preserves source instructions and rejects a lost lease', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject, assignSessionProject } = await import('../src/main/projects.js');
+    const sourcePath = path.join(dir, 'managed-bootstrap-source');
+    const roots = [{ name: 'project', path: dir }];
+    const git = (args: string[]) => {
+      const env = { ...process.env };
+      for (const key of Object.keys(env)) if (/^GIT_/i.test(key)) delete env[key];
+      execFileSync(gitExecutable(), args, { cwd: sourcePath, env, windowsHide: true });
+    };
+    await fs.mkdir(sourcePath, { recursive: true });
+    git(['init']);
+    git(['config', 'user.name', 'Bridge Test']);
+    git(['config', 'user.email', 'bridge-test@example.invalid']);
+    await fs.writeFile(path.join(sourcePath, 'AGENTS.md'), 'SOURCE_GUIDELINES_PRESERVED');
+    await fs.writeFile(path.join(sourcePath, 'file.txt'), 'original source');
+    git(['add', '-A']);
+    git(['commit', '-m', 'source baseline']);
+    await saveConfig({ ...suiteConfig, roots });
+    const project = await addProject(sourcePath);
+    const conversationId = 'managed-bootstrap-prime';
+    const source = await createSession({ title: 'Managed source', conversationId });
+    await assignSessionProject(source.id, project.id);
+    await pair();
+
+    const stage = stageSpawn({ caller: { conversationId }, workers: [{ task: 'WORK_IN_ISOLATED_CHECKOUT' }] });
+    const lease = await allocWorkerWorkspace({ runId: stage.runId, agentId: 'worker-1',
+      primeWorkspace: { real: sourcePath, virtual: '/project/managed-bootstrap-source' }, approvedRoots: roots });
+    markStagedWorkerWorktree(stage.runId, 'worker-1');
+    stage.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    stage.commit();
+    expect(requestWorkerBootstraps(['worker-1'], stage.runId)).toBe(1);
+    await flushDurable();
+    const pending = pendingCommands().find(row => row.what.includes('worker-1'));
+    expect(pending).toBeDefined();
+    // The first page leased the command but lost the HTTP response before typing. Restore
+    // must permit that same document to redeem again, with the restored owned checkout.
+    await redeem(pending!.id);
+    await flushDurable();
+    const durableCommands = await readDurable<any>('bridge-commands');
+    expect(durableCommands?.commands?.find((row: any) => row.id === pending!.id)?.phase).toBe('leased');
+
+    // Reconstruct both durable broker and command state after an app restart. Only the
+    // immutable broker allocation plus marker can recover the checkout after reset.
+    const savedBroker = structuredClone(snapshotSwarm());
+    const savedCommands = structuredClone(await readDurable<any>('bridge-commands'));
+    // Restore the broker while the test bridge's existing listener is still wired. Its
+    // synchronous replay can schedule a fresh duplicate browser command; discard this
+    // in-memory replay and put the pre-crash leased receipt back as durable authority.
+    restoreSwarm(savedBroker);
+    resetBridgeForTests();
+    setBrowserOpener(async url => { opened.push(url); });
+    await writeDurableNow('bridge-commands', savedCommands);
+    expect(pendingWorkerSpawns().some(row => row.runId === stage.runId && row.id === 'worker-1')).toBe(true);
+    expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === pending!.id)).toBe(true);
+    resetWorkerWorktreeRegistryForTests();
+    const restored = await restoreManagedWorktrees(roots);
+    expect(restored.rejected).toEqual([]);
+    expect(restored.restored).toHaveLength(1);
+    await restoreCommands();
+    expect(pendingCommands().some(row => row.id === pending!.id)).toBe(true);
+    const command = await redeem(pending!.id);
+    expect(command.text).toContain(`Worker working directory (allocated Git worktree): ${lease.workspace.virtual}`);
+    expect(command.text).toContain('SOURCE_GUIDELINES_PRESERVED');
+    expect(command.text).not.toContain('Selected project directory: /project/managed-bootstrap-source');
+    expect(command.text).not.toContain('Use this directory as your default working directory and keep task work there');
+    expect(userPromptText(command.text)).toContain('WORK_IN_ISOLATED_CHECKOUT');
+
+    // A removed/corrupt marker must never silently hand the original project cwd to this worker.
+    resetWorkerWorktreeRegistryForTests();
+    const refused = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-1' } });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('worker_worktree_unavailable');
+
+    const recovery = await restoreManagedWorktrees(roots);
+    expect(recovery.restored).toHaveLength(1);
+    const workerConversation = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const acknowledged = await request('POST', '/commands/ack', { body: {
+      id: command.id, client: 'tab-1', conversationId: workerConversation, agent: 'worker-1', status: 'sent'
+    } });
+    expect(acknowledged.status).toBe(200);
+    expect(acknowledged.body.committed).toBe(true);
+    finishAgent({ conversationId: workerConversation }, 'First task completed');
+    const next = stageMessages({ conversationId }, [{ to: 'worker-1', text: 'CONTINUE_IN_WORKTREE' }]);
+    next.commit();
+    expect(next.waking).toEqual(['worker-1']);
+    expect(requestWorkerRevivals(next.waking, stage.runId)).toBe(1);
+    const revival = pendingCommands().find(row => row.what === `revive:${stage.runId}:worker-1`);
+    expect(revival).toBeDefined();
+    const reopened = await request('POST', '/commands/redeem', { body: {
+      id: revival!.id, client: 'revival-page', conversationId: workerConversation
+    } });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.command.text).toContain('CONTINUE_IN_WORKTREE');
+    expect(reopened.body.command.text).toContain(lease.workspace.virtual);
+    expect(reopened.body.command.text).not.toContain('Selected project directory: /project/managed-bootstrap-source');
+    expect(reopened.body.command.text).not.toContain('SOURCE_GUIDELINES_PRESERVED');
+    resetWorkerWorktreeRegistryForTests();
   });
 
   /**

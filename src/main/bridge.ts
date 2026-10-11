@@ -171,6 +171,7 @@ import { ownCoreHint,
   pendingWorkerSpawns,
   primeConversationGone,
   primeConversation,
+  workerBootstrapWorktreeIdentity,
   requestWorkerRevivals,
   rollbackWorkerRevivalClaim,
   releaseQuiescentRun,
@@ -192,6 +193,7 @@ import { ownCoreHint,
   workerRevivalDeliveredSince,
   type WorkerRevival
 } from './agents.js';
+import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from './worktrees/index.js';
 import {
   abortContinuation,
   abortContinuationNow,
@@ -4509,13 +4511,38 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
     }
     const described = describe(command, client, claimedSummary);
-    if (described.text && command.spec.type === 'worker') {
-      // A newly spawned worker gets setup once. Revival and Compact & Resume
-      // carry their own continuation text without repeating executor setup.
-      const sourceConversation = primeConversation(command.spec.runId);
-      const source = sourceConversation ? await findSessionByConversation(sourceConversation, { requireUnique: true }) : null;
-      const sessionId = source?.conversationId === sourceConversation ? source?.id : undefined;
-      described.text = await prepareSessionPrompt(described.text, { sessionId });
+    if (described.text && (command.spec.type === 'worker' || command.spec.type === 'revive')) {
+      // The broker knows whether this *exact* worker was allocated an isolated checkout.
+      // Its allocation id survives a restart or a new active run incarnation, unlike the
+      // current run id or the display-only worker slot name.
+      let allocation: { runId: string; agentId: string } | null;
+      try {
+        allocation = workerBootstrapWorktreeIdentity(command.spec.runId, command.spec.agent);
+      } catch {
+        return json(res, 409, { error: 'worker_identity_changed' }, origin);
+      }
+      let workingDirectory: string | undefined;
+      if (allocation) {
+        const lease = lookupWorkerWorkspace(allocation);
+        if (!lease) return json(res, 409, { error: 'worker_worktree_unavailable' }, origin);
+        try {
+          workingDirectory = (await validateWorkerWorkspaceLease(lease, getConfig().roots)).workspace.virtual;
+        } catch {
+          return json(res, 409, { error: 'worker_worktree_unavailable' }, origin);
+        }
+      }
+      if (command.spec.type === 'worker') {
+        // New workers read the source project's AGENTS.md, but when a worktree is allocated
+        // only that verified checkout may be presented as their working directory.
+        const sourceConversation = primeConversation(command.spec.runId);
+        const source = sourceConversation ? await findSessionByConversation(sourceConversation, { requireUnique: true }) : null;
+        const sessionId = source?.conversationId === sourceConversation ? source?.id : undefined;
+        described.text = await prepareSessionPrompt(described.text, { sessionId, workingDirectory });
+      } else if (workingDirectory) {
+        // Revivals carry the prime's latest user-authored message, without repeating Core or
+        // source AGENTS. Reassert the same checkout after a restart or worker reuse.
+        described.text += `\n\n(Chat On Steroids worker working directory: ${workingDirectory}. Keep worker task changes in this allocated Git worktree; the source project only supplies instructions.)`;
+      }
     }
     if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
     const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
