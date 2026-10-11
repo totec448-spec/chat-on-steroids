@@ -35,7 +35,7 @@ import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
 import { currentWorkspace, primeWorkspace, setWorkspaceFor } from '../workspace.js';
 import { getSessionProject } from '../projects.js';
-import { allocWorkerWorkspace, WorkerWorktreeError, type WorkerWorktreeLease } from '../worktrees/index.js';
+import { allocWorkerWorkspace, validateWorkerWorkspaceLease, WorkerWorktreeError, type WorkerWorktreeLease } from '../worktrees/index.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -126,7 +126,8 @@ import {
   stagePrimeMessage,
   stageSpawn,
   markStagedWorkerWorktree,
-  managedWorkerWorktreeRequired,
+  managedWorkerIsolationRequired,
+  managedWorkerAllocationIdentity,
   swarmRunning,
   swarmStateForCaller,
   type Caller
@@ -729,7 +730,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             return fail('No folder is approved, so there is nowhere to apply the patch.');
           }
           const base = await resolveIn(ctx.roots, baseVirtual);
-          if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
+          await validatedWorkspace();
           return (await runParsedPatch(args, ctx.roots, base, caps)).result;
         })
     );
@@ -873,7 +874,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const useLoginShell = input.login ?? process.platform !== 'win32';
           const command = deriveExecArgs(shell, boundCommand, useLoginShell);
           try {
-            if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
+            await validatedWorkspace();
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
             // the same tree-sitter-bash grammar/query as upstream.
@@ -939,7 +940,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             const ripgrep = locateRipgrep();
             const executionCommand = deriveExecArgs(shell,
               withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
-            if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
+            await validatedWorkspace();
             const output = await unifiedExecManager.execCommand({
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
@@ -1106,7 +1107,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // A worker can keep an interactive shell running after its Git worktree has been
           // replaced. Verify the exact current allocation before forwarding even empty polls:
           // stdin may execute writes in the shell's now user-owned directory.
-          if (managedWorkerWorktreeRequired(currentCaller())) await validatedWorkspace();
+          await validatedWorkspace();
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
           // sitting in one is attending its session rather than neglecting it.
           noteExecAttended(input.session_id);
@@ -1226,7 +1227,8 @@ async function measureSleepingWorkers(caller: Caller): Promise<void> {
 async function acceptAgentMutation(
   staged: { commit(): void | boolean; rollback(): void },
   failure: string,
-  commitFailure: string = failure
+  commitFailure: string = failure,
+  admission?: { validate(): Promise<void>; assertCurrent(): void }
 ): Promise<void> {
   try {
     let durable: boolean;
@@ -1236,9 +1238,27 @@ async function acceptAgentMutation(
       throw new Error(`${failure} (${error instanceof Error ? error.message : String(error)})`);
     }
     if (!durable) throw new Error(failure);
+    // The durable write itself awaits filesystem IO. Recheck live ownership after it,
+    // then check the current policy synchronously beside the broker's commit.
+    if (admission) {
+      await admission.validate();
+      admission.assertCurrent();
+    }
     if (staged.commit() === false) throw new Error(commitFailure);
   } catch (error) {
     staged.rollback();
+    if (admission) {
+      // A rejected admission can happen after the persistence sink successfully wrote
+      // the staged topology. Publish the compensating rollback before returning the
+      // rejection, otherwise an immediate restart could restore unaccepted workers.
+      try {
+        if (!(await persistCriticalSwarmNow())) {
+          throw new Error('the broker has no immediate durable persistence sink');
+        }
+      } catch (rollbackError) {
+        throw new Error(`Worker admission rollback could not be made durable (${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)})`);
+      }
+    }
     throw error;
   }
 }
@@ -1364,14 +1384,22 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // Reserve under exact chat proof or the permitted transport request, atomically.
           // The request remains the reachable prime before browser attachment; later proof
           // changes its frontend projection without recreating workers or replaying spawn.
+          const spawnCaller = await callerNow(startedAt, { exact: true, runId: input.run_id });
+          // A stale managed worker whose family and ordinary retired-worker TTL have expired
+          // must not bootstrap a new prime family to regain local mutation authority. Session
+          // origin and durable managed tombstones are denial-only, not adoption credentials.
+          if (await managedWorkerIsolationRequired(spawnCaller) && !managedWorkerAllocationIdentity(spawnCaller)) {
+            return fail('WORKTREE_OWNER_UNAVAILABLE: a retired worker cannot create a prime run after its isolated checkout owner was lost.');
+          }
           const staged = stageSpawn({
             workers: input.workers,
             context: input.context ?? null,
-            caller: await callerNow(startedAt, { exact: true, runId: input.run_id })
+            caller: spawnCaller
           });
           // Newly staged admissions alone may own Git branches. A repeated spawn may show
           // existing workers in `created`, but must never reallocate their checkouts.
           const allocated: WorkerWorktreeLease[] = [];
+          const admittedLeases: WorkerWorktreeLease[] = [];
           const isolationNotes: string[] = [];
           let sourceDirty = false;
           let allocationAttempted = false;
@@ -1399,9 +1427,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                     approvedRoots: getConfig().roots
                   });
                   if (lease.newlyCreated) allocated.push(lease);
+                  // Allocation awaited Git with the then-current approved roots. Revocation,
+                  // rename or replacement during that wait must prevent worker admission.
+                  await validateWorkerWorkspaceLease(lease, getConfig().roots);
+                  admittedLeases.push(lease);
                   sourceDirty ||= lease.sourceDirty;
                   markStagedWorkerWorktree(staged.runId, agentId);
-                  setWorkspaceFor(`agent:${staged.runId}:${agentId}`, lease.workspace);
                 }
                 if (getConfig().multiAgent.autoWorktrees !== true) {
                   throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
@@ -1416,7 +1447,27 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             }
             staged.prepareDurability();
             await acceptAgentMutation(staged,
-              'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.');
+              'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.',
+              undefined,
+              admittedLeases.length ? {
+                validate: async () => {
+                  for (const lease of admittedLeases) {
+                    await validateWorkerWorkspaceLease(lease, getConfig().roots);
+                  }
+                },
+                assertCurrent: () => {
+                  const liveConfig = getConfig();
+                  if (liveConfig.multiAgent.autoWorktrees !== true) {
+                    throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
+                  }
+                  for (const lease of admittedLeases) {
+                    if (!liveConfig.roots.some(root => root.name === lease.approvedRoot.name &&
+                      nodePath.resolve(root.path) === nodePath.resolve(lease.approvedRoot.path))) {
+                      throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'the owning approved root was revoked during worker admission');
+                    }
+                  }
+                }
+              } : undefined);
           } catch (error) {
             staged.rollback();
             // An unaccepted spawn never opened a worker chat, but user files can appear in a
@@ -1440,6 +1491,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             throw error;
           }
           const { created, becamePrime, runId, defaultNotes } = staged;
+          // Keep provisional workspaces out of the cwd cache until the broker has accepted
+          // their owners. A failed stage retains its checkout but exposes no orphan cwd.
+          for (const lease of admittedLeases) {
+            setWorkspaceFor(`agent:${lease.runId}:${lease.agentId}`, lease.workspace);
+          }
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
           // visible only after the exact broker revision above is durable.

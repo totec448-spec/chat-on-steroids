@@ -16,6 +16,8 @@ import {
 } from '../src/main/worktrees/index.js';
 
 const RUN_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_RUN_ID = '22222222-2222-4222-8222-222222222222';
+const ACCEPTED = [{ runId: RUN_ID, agentId: 'worker-1' }] as const;
 
 function gitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -119,7 +121,7 @@ describe('automatic worker Git worktrees', () => {
     expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
 
     resetWorkerWorktreeRegistryForTests();
-    const restored = await restoreManagedWorktrees(roots);
+    const restored = await restoreManagedWorktrees(roots, ACCEPTED);
     expect(restored.rejected).toEqual([]);
     expect(restored.restored).toHaveLength(1);
     await expect(validateWorkerWorkspaceLease(restored.restored[0]!, roots)).resolves.toMatchObject({
@@ -316,7 +318,7 @@ describe('automatic worker Git worktrees', () => {
     resetWorkerWorktreeRegistryForTests();
     expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })).toBeNull();
 
-    const restored = await restoreManagedWorktrees(roots);
+    const restored = await restoreManagedWorktrees(roots, ACCEPTED);
     expect(restored.rejected).toEqual([]);
     expect(restored.restored).toHaveLength(1);
     expect(restored.restored[0]).toMatchObject({
@@ -330,6 +332,70 @@ describe('automatic worker Git worktrees', () => {
     await finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
   });
 
+  it('leaves an unaccepted managed checkout untouched without reading its damaged marker', async () => {
+    const orphan = await allocate();
+    const markerPath = path.join(path.dirname(orphan.worktreePath), 'owner.json');
+    const orphanFile = path.join(orphan.worktreePath, 'worker-draft.txt');
+    await write(orphanFile, 'UNACCEPTED WORKER BYTES\n');
+    await write(markerPath, '{"unaccepted":true}');
+    const beforeGit = git(repo, ['worktree', 'list', '--porcelain']);
+    resetWorkerWorktreeRegistryForTests();
+
+    const recovered = await restoreManagedWorktrees(roots, []);
+    expect(recovered).toEqual({ restored: [], rejected: [] });
+    expect(lookupWorkerWorkspace(ACCEPTED[0])).toBeNull();
+    expect(await fs.readFile(markerPath, 'utf8')).toBe('{"unaccepted":true}');
+    expect(await fs.readFile(orphanFile, 'utf8')).toBe('UNACCEPTED WORKER BYTES\n');
+    expect(git(repo, ['worktree', 'list', '--porcelain'])).toBe(beforeGit);
+
+    // Once the exact broker allocation is accepted, a damaged marker is diagnosed.
+    const matched = await restoreManagedWorktrees(roots, ACCEPTED);
+    expect(matched.restored).toEqual([]);
+    expect(matched.rejected).toHaveLength(1);
+    expect(matched.rejected[0]?.error).toContain('WORKTREE_OWNER_INVALID');
+    expect(await fs.readFile(orphanFile, 'utf8')).toBe('UNACCEPTED WORKER BYTES\n');
+  });
+
+  it('restores the retained worker while skipping stale and mismatched worker allocation slots', async () => {
+    const stale = await allocate();
+    const sameRunOtherWorker = await allocWorkerWorkspace({
+      runId: RUN_ID,
+      agentId: 'worker-2',
+      primeWorkspace: { real: repo, virtual: '/approved/repo' },
+      approvedRoots: roots
+    });
+    const accepted = await allocWorkerWorkspace({
+      runId: OTHER_RUN_ID,
+      agentId: 'worker-1',
+      primeWorkspace: { real: repo, virtual: '/approved/repo' },
+      approvedRoots: roots
+    });
+    const staleMarker = path.join(path.dirname(stale.worktreePath), 'owner.json');
+    const wrongWorkerMarker = path.join(path.dirname(sameRunOtherWorker.worktreePath), 'owner.json');
+    await write(staleMarker, '{stale-pruned-family');
+    await write(wrongWorkerMarker, '{unaccepted-worker-in-retained-family');
+    const beforeGit = git(repo, ['worktree', 'list', '--porcelain']);
+    resetWorkerWorktreeRegistryForTests();
+
+    const recovered = await restoreManagedWorktrees(roots, [
+      { runId: OTHER_RUN_ID, agentId: 'worker-1' },
+      { runId: RUN_ID, agentId: 'worker-3' }
+    ]);
+    expect(recovered.rejected).toEqual([]);
+    expect(recovered.restored).toHaveLength(1);
+    expect(recovered.restored[0]).toMatchObject({
+      runId: accepted.runId, agentId: accepted.agentId, ownershipToken: accepted.ownershipToken
+    });
+    expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })).toBeNull();
+    expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-2' })).toBeNull();
+    expect(lookupWorkerWorkspace({ runId: OTHER_RUN_ID, agentId: 'worker-1' })?.ownershipToken).toBe(accepted.ownershipToken);
+    expect(await fs.readFile(staleMarker, 'utf8')).toBe('{stale-pruned-family');
+    expect(await fs.readFile(wrongWorkerMarker, 'utf8')).toBe('{unaccepted-worker-in-retained-family');
+    expect(await fs.readFile(path.join(stale.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+    expect(await fs.readFile(path.join(sameRunOtherWorker.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+    expect(git(repo, ['worktree', 'list', '--porcelain'])).toBe(beforeGit);
+  });
+
   it('refuses a tampered restart marker instead of following an arbitrary path', async () => {
     const lease = await allocate();
     const markerPath = path.join(path.dirname(lease.worktreePath), 'owner.json');
@@ -338,7 +404,7 @@ describe('automatic worker Git worktrees', () => {
     await fs.writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, 'utf8');
     resetWorkerWorktreeRegistryForTests();
 
-    const restored = await restoreManagedWorktrees(roots);
+    const restored = await restoreManagedWorktrees(roots, ACCEPTED);
     expect(restored.restored).toEqual([]);
     expect(restored.rejected).toHaveLength(1);
     expect(restored.rejected[0]?.error).toContain('WORKTREE_OWNER_INVALID');
@@ -348,7 +414,7 @@ describe('automatic worker Git worktrees', () => {
   it('does not claim restored ownership through a renamed approved virtual root', async () => {
     const lease = await allocate();
     resetWorkerWorktreeRegistryForTests();
-    const result = await restoreManagedWorktrees([{ name: 'renamed', path: approved }]);
+    const result = await restoreManagedWorktrees([{ name: 'renamed', path: approved }], ACCEPTED);
     expect(result.restored).toEqual([]);
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]?.error).toContain('WORKTREE_ROOT_CHANGED');

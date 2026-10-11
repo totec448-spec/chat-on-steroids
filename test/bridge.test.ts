@@ -140,6 +140,7 @@ const {
   finishAgent,
   currentRunId,
   markStagedWorkerWorktree,
+  managedWorkerRecoveryIdentities,
   WORKER_SILENCE_MS,
   noteAgentAlive,
   noteAgentContextTokens,
@@ -4395,7 +4396,7 @@ describe('delivering a bootstrap', () => {
     expect(pendingWorkerSpawns().some(row => row.runId === stage.runId && row.id === 'worker-1')).toBe(true);
     expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === pending!.id)).toBe(true);
     resetWorkerWorktreeRegistryForTests();
-    const restored = await restoreManagedWorktrees(roots);
+    const restored = await restoreManagedWorktrees(roots, managedWorkerRecoveryIdentities());
     expect(restored.rejected).toEqual([]);
     expect(restored.restored).toHaveLength(1);
     await restoreCommands();
@@ -4413,7 +4414,7 @@ describe('delivering a bootstrap', () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe('worker_worktree_unavailable');
 
-    const recovery = await restoreManagedWorktrees(roots);
+    const recovery = await restoreManagedWorktrees(roots, managedWorkerRecoveryIdentities());
     expect(recovery.restored).toHaveLength(1);
     const workerConversation = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     const acknowledged = await request('POST', '/commands/ack', { body: {

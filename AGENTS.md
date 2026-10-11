@@ -885,7 +885,13 @@ An isolated worktree starts at a committed Git base: never imply the Prime's dir
 files are present in that checkout. Unrelated unavailable approved roots must not invalidate
 the valid root that owns a worker; the actual owning root must remain available and approved.
 Existing isolated workers keep their workspace even if the setting is later disabled. Startup
-restores marker-verified leases only after the broker snapshot and before worker execution.
+restores marker-verified leases only for identities authorized by the restored durable broker,
+after its snapshot and before worker execution. Stale or unaccepted checkout markers do not
+authorize their own recovery and are never deleted merely for lacking a broker owner.
+Root approval and lease ownership are rechecked immediately before worker admission, including
+after asynchronous Git work and the broker durability barrier. Evicting finite broker history
+must not turn a previously isolated worker chat back into a Prime-project worker: the durable
+worker-origin/retired identity remains a fail-closed fence without granting a new checkout.
 Missing, corrupt or conflicting marker/identity evidence must fail closed rather than silently
 resolve an isolated worker to the prime's project; reviewing changes and integrating branches
 remain explicit steps.

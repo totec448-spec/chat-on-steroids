@@ -607,7 +607,11 @@ function expectedBranch(runId: string, agentId: string): { branch: string; branc
   return { branch, branchRef: `refs/heads/${branch}` };
 }
 
-async function candidateMarkerPaths(rootReal: string, rejected: RestoreManagedWorktreesResult['rejected']): Promise<string[]> {
+async function candidateMarkerPaths(
+  rootReal: string,
+  rejected: RestoreManagedWorktreesResult['rejected'],
+  accepted: ReadonlyMap<string, ReadonlySet<string>>
+): Promise<string[]> {
   const managed = path.join(rootReal, MANAGED_FOLDER);
   let managedStat: Awaited<ReturnType<typeof fs.lstat>>;
   try { managedStat = await fs.lstat(managed); }
@@ -630,9 +634,11 @@ async function candidateMarkerPaths(rootReal: string, rejected: RestoreManagedWo
     const repoDir = path.join(managedReal, repoEntry.name);
     for (const runEntry of await fs.readdir(repoDir, { withFileTypes: true })) {
       if (!runEntry.isDirectory() || runEntry.isSymbolicLink() || !RUN_ID.test(runEntry.name)) continue;
+      const workers = accepted.get(runEntry.name.toLowerCase());
+      if (!workers?.size) continue;
       const runDir = path.join(repoDir, runEntry.name);
       for (const agentEntry of await fs.readdir(runDir, { withFileTypes: true })) {
-        if (!agentEntry.isDirectory() || agentEntry.isSymbolicLink() || !AGENT_ID.test(agentEntry.name)) continue;
+        if (!agentEntry.isDirectory() || agentEntry.isSymbolicLink() || !workers.has(agentEntry.name)) continue;
         markers.push(path.join(runDir, agentEntry.name, 'owner.json'));
       }
     }
@@ -641,17 +647,31 @@ async function candidateMarkerPaths(rootReal: string, rejected: RestoreManagedWo
 }
 
 /**
- * Startup recovery for broker-restored workers. Discovery is deliberately fixed-depth beneath
- * each approved `.chat-on-steroids-worktrees` directory; it never searches arbitrary user files.
+ * Startup recovery for broker-restored workers. Only worker allocations accepted by the
+ * restored durable broker may be discovered; an orphaned checkout's own marker grants no
+ * recovery authority. Discovery is fixed-depth beneath approved managed directories.
  * A marker is adopted only after its deterministic path, branch, repository common-dir and live
  * Git worktree all prove the same run/worker owner. Ambiguous duplicate identities restore none.
  */
-export async function restoreManagedWorktrees(approvedRoots: readonly Root[]): Promise<RestoreManagedWorktreesResult> {
-  const roots = await rootsOf(approvedRoots);
+export async function restoreManagedWorktrees(
+  approvedRoots: readonly Root[],
+  acceptedAllocations: readonly { runId: string; agentId: string }[]
+): Promise<RestoreManagedWorktreesResult> {
   const result: RestoreManagedWorktreesResult = { restored: [], rejected: [] };
+  const accepted = new Map<string, Set<string>>();
+  for (const allocation of acceptedAllocations) {
+    // Never infer broker authority from malformed or partial identities.
+    if (!RUN_ID.test(allocation.runId) || !AGENT_ID.test(allocation.agentId)) continue;
+    const runId = allocation.runId.toLowerCase();
+    const workers = accepted.get(runId) ?? new Set<string>();
+    workers.add(allocation.agentId);
+    accepted.set(runId, workers);
+  }
+  if (accepted.size === 0) return result;
+  const roots = await rootsOf(approvedRoots);
   const candidates = new Map<string, Array<{ lease: WorkerWorktreeLease; markerPath: string }>>();
   for (const approved of roots) {
-    const markerPaths = await candidateMarkerPaths(approved.real, result.rejected);
+    const markerPaths = await candidateMarkerPaths(approved.real, result.rejected, accepted);
     for (const markerPath of markerPaths) {
       try {
         const marker = await readMarker(markerPath);
