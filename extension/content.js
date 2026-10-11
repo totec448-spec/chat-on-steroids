@@ -975,12 +975,15 @@
   /**
    * This install's Core in the page's app list: a proven app id first (it survives a rename in
    * ChatGPT), else the configured name. Once a Core app is proven, a same-named app with another
-   * id is somebody else's.
+   * id is somebody else's. Until the app has said its names, the plain name stands in only as a
+   * default: on a computer with a suffix it is the other computer's Core, so nothing matches by
+   * name before then.
    */
   function ownCoreCandidate() {
     const proven = provenCorePaths();
     const byId = coreCandidates.find(entry => entry.path && proven.includes(entry.path));
     if (byId) return byId;
+    if (!ownNamesKnown) return null;
     const own = CLF_DOM.connectorNames()[0];
     const byName = coreCandidates.find(entry => entry.name === own);
     return byName && (!proven.length || (byName.path && proven.includes(byName.path))) ? byName : null;
@@ -993,9 +996,12 @@
   function currentCoreMention() {
     if (ownCoreCandidate()) return pageCoreMention();
     // A fresh tab can send before its own plugin list arrives; then this browser's last sighting of
-    // this install's Core stands in. Never once this page's complete list says the Core is missing.
+    // this install's Core stands in. Never once this page's complete list says the Core is missing,
+    // and never against a proven Core id: a sighting is only as good as the names it was taken under.
     const own = CLF_DOM.connectorNames()[0];
-    if (corePluginList || !knownOwnCore || (knownOwnCore.name !== own && !provenCorePaths().includes(knownOwnCore.path))) return null;
+    const proven = provenCorePaths();
+    if (corePluginList || !knownOwnCore ||
+        (proven.length ? !proven.includes(knownOwnCore.path) : !ownNamesKnown || knownOwnCore.name !== own)) return null;
     return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
   /**
@@ -11214,13 +11220,18 @@
 
   // -------------------------------------------------------------- commands
 
-  async function checkStatus() {
-    const reply = await ask({ type: 'status' });
+  /** This install's names, proven apps and remembered Core, from `status` or a redeemed command. */
+  function applyCoreIdentity(reply) {
     const known = reply?.ownCoreApp;
     knownOwnCore = known && typeof known.appId === 'string' && /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(known.appId) &&
       typeof known.name === 'string' ? { path: `app://${known.appId}`, name: known.name } : null;
     if (reply?.connectorNames && CLF_DOM.setConnectorNames(reply.connectorNames)) { ownNamesKnown = true; reportCorePlugin(); }
     if (reply?.connectorApps && CLF_DOM.setConnectorApps(reply.connectorApps)) reportCorePlugin();
+  }
+
+  async function checkStatus() {
+    const reply = await ask({ type: 'status' });
+    applyCoreIdentity(reply);
     if (reply) {
       status = {
         connected: reply.connected === true,
@@ -11742,6 +11753,9 @@
       reportClaim(false);
       return;
     }
+    // This runs before the first status reply: the command brings this install's Core identity,
+    // so the bootstrap mentions this computer's own Core (see applyCoreIdentity).
+    if (reply.identity) applyCoreIdentity(reply.identity);
     const commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
     const commandAlive = () => commandExpiresAt === null || Date.now() < commandExpiresAt;
     const commandWaitMs = (fallbackMs, reserveMs = 0) => commandExpiresAt === null
