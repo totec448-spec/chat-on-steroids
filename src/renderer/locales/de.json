@@ -2110,5 +2110,16 @@
   "Calmer when ChatGPT is busy": "Gelassener, wenn ChatGPT ausgelastet ist",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Wenn ChatGPT das Laden des Verlaufs bremst, wartet die Wiederherstellung so lange wie verlangt, statt erneut zu laden.",
   "Lighter on your computer": "Schonender für deinen Computer",
-  "Open ChatGPT chats use much less CPU while they wait.": "Offene ChatGPT-Chats brauchen im Leerlauf viel weniger CPU."
+  "Open ChatGPT chats use much less CPU while they wait.": "Offene ChatGPT-Chats brauchen im Leerlauf viel weniger CPU.",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "Goal in jedem Tarif, Komprimieren & Fortsetzen in Projekten und ein Hintergrundfenster, das bleibt.",
+  "Goal on every plan": "Goal in jedem Tarif",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "In Tarifen ohne Modellauswahl, etwa Free, nutzen Goal- und Loop-Folgenachrichten das aktuelle Modell des Chats, statt zu scheitern.",
+  "A background window that stays": "Ein Hintergrundfenster, das bleibt",
+  "Background chats keep using the same window after the extension updates or reloads.": "Chats im Hintergrund nutzen weiter dasselbe Fenster, wenn sich die Erweiterung aktualisiert oder neu lädt.",
+  "Clearer connector hints": "Klarere Connector-Hinweise",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "Ruft ChatGPT ein Tool auf, das sein Connector nicht hat, nennt das Ergebnis den Connector, der es hat.",
+  "Fewer repeated commands": "Weniger doppelte Befehle",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Startet ChatGPT einen Befehl, der in diesem Chat noch läuft, verweist das Ergebnis auf den laufenden.",
+  "Compact & Resume in Projects": "Komprimieren & Fortsetzen in Projekten",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Ein Chat in einem ChatGPT-Projekt lässt sich jetzt zuverlässig in einen neuen Chat übertragen, und der neue Chat bleibt in diesem Projekt."
 }
