@@ -18355,6 +18355,26 @@ describe('one live isolated-world recorder per document', () => {
     await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: false });
   });
 
+  it('passes on an app the response stream names for this chat, once per request (#1305)', async () => {
+    live = await harness();
+    await settle();
+    const chat = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const sighting = { requestId: '11111111-2222-4333-8444-555555555555', appId: 'asdk_app_6ac261da', linkId: 'link_6ac26253', appName: 'Chat On Steroids Core' };
+    const publish = (conversationId: string, sightings: unknown[]) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-app-sighting', conversationId, sightings }
+    }));
+    publish(chat, [sighting]); await settle();
+    publish(chat, [sighting]); await settle();
+    // Another chat's stream, a malformed id or a foreign page says nothing about this one.
+    publish('bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', [{ ...sighting, requestId: '22222222-2222-4333-8444-555555555555' }]); await settle();
+    publish(chat, [{ ...sighting, requestId: '33333333-2222-4333-8444-555555555555', appId: 'not-an-app' }]); await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', { source: live.window as unknown as Window, origin: 'https://evil.example',
+      data: { type: 'cos-app-sighting', conversationId: chat, sightings: [{ ...sighting, requestId: '44444444-2222-4333-8444-555555555555' }] } }));
+    await settle(); await live.hook.flush(); await settle();
+    expect(emitted(live.sent, 'app_sightings').map(row => row.event.apps)).toEqual([[sighting]]);
+  });
+
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
     live = await harness();
 
