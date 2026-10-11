@@ -131,7 +131,7 @@ opening at once therefore create one group, not two.
 | User expands the group or clicks a chat in it | Allowed. The app never re-collapses an existing group and never changes which tab is active. |
 | Follow (the chat selected in the app) | Does nothing (user decision). The app sends no follow in group mode, and the extension's `followChat` also returns early. |
 | "Show in browser" (`revealChats`) | Unchanged: it activates the tab, which expands the group, and focuses its window. The user asked to see it. |
-| Compaction repair with `focus` | It selects the tab only when the tab sits in the app's background window, which is today's case. A tab elsewhere, including in the group, is not selected, since that would switch the user's view. A tab it has to create in group mode is created inactive. |
+| Compaction repair with `focus` | With the group setting, it selects the tab only when the tab sits in the app's background window. A tab elsewhere, including in the group, is not selected, since that would switch the user's view. With the window setting, nothing changes. A tab it has to create in group mode is created inactive. |
 | Idle closing | Unchanged rules (`pruneManagedTabs`): quiet ≥ 5 min, not recently read, no unsent draft, no journal. When the last app tab closes, Chrome deletes the group and its saved entry (user choice 2). The next background chat creates a new group. |
 | User drags an app tab out of the group | Respected. It is never pulled back, and idle rules still close it. |
 | User drags their own tab into the group | It is never closed by the app. The group therefore outlives the app's tabs and stays saved by Chrome; that is the user's group then, and it is not re-adopted after a restart. |
@@ -160,7 +160,7 @@ opening at once therefore create one group, not two.
   - `groupTarget()` and `placeInGroup(url)` inside `createChatTab`;
   - reconcile in group mode: adopt, never move;
   - `followChat` returns early in group mode;
-  - the compaction focus selects a tab only inside the background window;
+  - with the group setting, the compaction focus selects a tab only inside the background window;
   - `onStartup` also drops the group mirror;
   - `backgroundPlacement` is read from status and restored from storage.
 - `src/main/config.ts`, `src/main/ipc.ts`, `src/shared/types.ts`: `backgroundPlacement`.
@@ -200,7 +200,7 @@ opening at once therefore create one group, not two.
 - Re-adoption: an all-owned titled group is adopted; a group with a foreign tab is not.
 - Reconcile in group mode never calls `tabs.move` or `tabs.ungroup`.
 - `followChat`: no `tabs.update` in group mode.
-- Compaction focus: a tab in the background window is activated; a tab in the group or a user window is not.
+- Compaction focus with the group setting: a tab in the background window is activated; a tab in the group or a user window is not. With the window setting: unchanged.
 - App:
   - config default `'window'`, schema and IPC round trip;
   - `/status` carries `backgroundPlacement`;
