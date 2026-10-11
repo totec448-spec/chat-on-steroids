@@ -82,7 +82,7 @@ describe('Windows dictation child lifetime', () => {
   });
 
   it.runIf(process.platform === 'win32')('PowerShell exits when its watched parent disappears (no microphone)', () => {
-    execFileSync(process.execPath, ['scripts/smoke-dictation-parent-windows.cjs'], {
+    execFileSync(process.execPath, ['scripts/fixtures/smoke-dictation-parent-windows.cjs'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 15_000
     });
   }, 20_000);
