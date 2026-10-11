@@ -22,6 +22,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as identity from '../src/main/connector-identity.js';
+import { connectorName } from '../src/shared/connector-names.js';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
 import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../src/main/codex/tool-specs.js';
 import { skillCatalogInstructions } from '../src/main/skills.js';
@@ -502,6 +503,19 @@ describe('endpoint hardening', () => {
       tunnelProbeHeaders()
     );
     expect(lastRequestAt()).toBeNull();
+  });
+
+  it('keeps serving the configured name as resource_name after a rename was learned', async () => {
+    identity.noteServedRequest('prm-rename', 'core');
+    identity.noteAppSightings([{ requestId: 'prm-rename', appId: 'asdk_app_prm', linkId: 'link_prm', appName: 'My tools' }]);
+    try {
+      const url = new URL(endpoint.urls.core);
+      url.pathname = `/.well-known/oauth-protected-resource${url.pathname}`;
+      const metadata = JSON.parse((await rawGet(url.toString())).text);
+      expect(metadata.resource_name).toBe(connectorName('core', getConfig().connectorSuffix));
+    } finally {
+      identity.resetConnectorIdentityForTests();
+    }
   });
 
   it('serves protected resource metadata per surface, naming that surface', async () => {
