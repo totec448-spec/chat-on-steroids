@@ -172,7 +172,7 @@ let learned: Record<SurfaceId, LearnedApp[]> = { core: [], desktop: [], plugins:
 /** One printable line of at most 64 characters, or null. */
 export function cleanAppName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  if (/[\u0000-\u001f\u007f  ]/.test(value)) return null;
+  if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(value)) return null;
   const name = value.trim().replace(/\s+/g, ' ');
   return name.length > 0 && name.length <= 64 ? name : null;
 }
