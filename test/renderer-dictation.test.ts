@@ -40,7 +40,7 @@ describe('renderer microphone draft ownership', () => {
   it('ships a real accessible composer control and its bundled icon mapping', async () => {
     const [html, css] = await Promise.all([
       readFile('src/renderer/index.html', 'utf8'),
-      readFile('src/renderer/dictation.css', 'utf8')
+      readFile('src/renderer/icons.css', 'utf8')
     ]);
     const page = new JSDOM(html);
     const mic = page.window.document.getElementById('dictationButton') as HTMLButtonElement;
