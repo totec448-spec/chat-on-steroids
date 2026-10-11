@@ -152,7 +152,7 @@ it('does not adopt a conversation or personal page carrying a catalog-looking qu
   expect(await app.reconcileBackgroundWindow({ background: true })).toBe(false);
 });
 
-type GTab = Tab & { groupId?: number; index?: number; incognito?: boolean; active?: boolean };
+type GTab = Tab & { groupId?: number; index?: number; incognito?: boolean; active?: boolean; lastAccessed?: number };
 type Win = { id: number; type?: string; incognito?: boolean };
 type Group = { id: number; windowId: number; title?: string; collapsed?: boolean; color?: string };
 function groupHarness(options: { tabs?: GTab[]; windows?: Win[]; lastFocused?: number | null; groups?: Group[];
@@ -290,6 +290,16 @@ it.each([
   await app.createChatTab('https://chatgpt.com/?cos-input=a', true);
   expect(app.create).toHaveBeenCalledWith(expect.objectContaining({ windowId: 7 }));
   expect(app.group).toHaveBeenCalledWith(expect.objectContaining({ createProperties: { windowId: 7 } }));
+});
+
+it('4.4b falls back to the window whose tab was used most recently, not the lowest id', async () => {
+  // Measured on the Mac (2026-10-11): Chrome named the app's own background window last-focused.
+  const app = groupHarness({ windows: [{ id: 5 }, { id: 6 }, { id: 7 }], lastFocused: 5, session: { chatBackgroundWindow: 5 },
+    tabs: [{ id: 1, windowId: 6, url: 'https://example.com/a', lastAccessed: 100 },
+      { id: 2, windowId: 7, url: 'https://example.com/b', lastAccessed: 900 },
+      { id: 3, windowId: 5, url: 'https://chatgpt.com/c/main', lastAccessed: 2000 }] });
+  await app.createChatTab('https://chatgpt.com/?cos-input=a', true);
+  expect(app.create).toHaveBeenCalledWith(expect.objectContaining({ windowId: 7 }));
 });
 
 it('4.5 uses the background window when it is the only normal window', async () => {
