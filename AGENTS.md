@@ -3933,6 +3933,13 @@ With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` 
 The `+` popover must receive real pointer input above any active tool header.
 The bottom dock has no generic shortcut screen or second tool tab strip; Terminal owns its own
 tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
+Project Files watches only the visible project's expanded directories. An `fs.watch` error
+retires its exact handle and pending debounce timer, then emits `ProjectFilesChanged` with
+`watchLost: true`; the renderer clears its cached watch signature and re-admits the visible
+directories through the normal project sandbox. Ordinary changes remain debounced, and
+callbacks or asynchronous validations from retired watcher generations may not affect newer
+watchers.
+
 Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
 does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
 dock. The layout control group sits at the right end of the title bar (`.app-topbar`) and orders
