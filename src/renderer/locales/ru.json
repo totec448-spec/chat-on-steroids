@@ -2121,5 +2121,6 @@
   "Fewer repeated commands": "Меньше повторных команд",
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Если ChatGPT снова запускает команду, которая ещё выполняется в этом чате, результат указывает на уже запущенную.",
   "Compact & Resume in Projects": "«Сжать и продолжить» в Проектах",
-  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Перенос чата из Проекта ChatGPT в новый чат теперь доходит до конца, и новый чат остаётся в том же Проекте."
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Перенос чата из Проекта ChatGPT в новый чат теперь доходит до конца, и новый чат остаётся в том же Проекте.",
+  "In ChatGPT: {0}": "В ChatGPT: {0}"
 }
