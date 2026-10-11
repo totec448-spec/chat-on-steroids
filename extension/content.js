@@ -1335,13 +1335,48 @@
     }
   }
 
+  /**
+   * Keeps this page from being paused while it sits in the app's own tab group (#128).
+   *
+   * Chrome freezes the tabs of a collapsed group, and a frozen page neither sends nor records:
+   * measured on Chrome 154, 2 of 7 sends stalled for minutes. Chrome never freezes a page that
+   * holds a Web Lock, so this page holds one, under a name nothing else uses, for exactly as
+   * long as the worker says the tab is in that group. The worker turns it off when the tab
+   * leaves the group or the mode changes; the browser drops it with the document.
+   */
+  let keepAwakeRelease = null;
+  function setKeepAwake(on) {
+    const locks = globalThis.navigator && globalThis.navigator.locks;
+    if (on && !keepAwakeRelease && locks && typeof locks.request === 'function') {
+      const name = `chat-on-steroids-keep-awake-${Math.random().toString(36).slice(2, 12).padEnd(8, '0')}`;
+      let release = null;
+      const held = new Promise((resolve) => { release = resolve; });
+      keepAwakeRelease = release;
+      Promise.resolve(locks.request(name, () => held)).catch(() => {
+        if (keepAwakeRelease === release) keepAwakeRelease = null;
+      });
+    } else if (!on && keepAwakeRelease) {
+      const release = keepAwakeRelease;
+      keepAwakeRelease = null;
+      release();
+    }
+    return Boolean(keepAwakeRelease);
+  }
+
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
     // any observation or mutation. This is what lets the worker retain a terminal tombstone
     // across external navigation and still admit the genuinely new page, without accepting
     // delayed IPC from the dead one merely because both share a numeric tab id.
-    if (!documentReady) documentReady = sendToWorker({ type: 'register_document', navigationEpoch: epoch });
+    if (!documentReady) {
+      documentReady = sendToWorker({ type: 'register_document', navigationEpoch: epoch }).then((registered) => {
+        // A tab the app placed in its own tab group starts awake: Chrome pauses tabs in a
+        // collapsed group within seconds, often before the worker's next pass could say so (#128).
+        if (registered && registered.ok === true && registered.keepAwake === true) setKeepAwake(true);
+        return registered;
+      });
+    }
     const registered = await documentReady;
     if (!registered || registered.ok !== true) {
       // A sleeping/reloading service worker is transient. Keep the document unregistered
@@ -13324,6 +13359,10 @@
       if (message.type === 'clf-desktop-input') {
         void acceptDesktopInput(message).then((ok) => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));
         return true;
+      }
+      if (message.type === 'clf-keep-awake') {
+        sendResponse({ ok: true, held: setKeepAwake(message.on === true) });
+        return false;
       }
       if (message.type === 'clf-recorder-ping') {
         // `busy`: this page is mid-turn or mid-handoff, so the extension must not reload under it.

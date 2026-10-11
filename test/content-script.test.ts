@@ -18190,6 +18190,58 @@ describe('one live isolated-world recorder per document', () => {
     expect(live.listenerCounts()).toEqual({ runtime: 0, storage: 0 });
   });
 
+  /** A Web Locks stand-in: `held` lists the locks whose callback promise has not settled yet. */
+  function fakeLocks() {
+    const held: string[] = [];
+    const request = vi.fn((name: string, callback: () => unknown) => {
+      held.push(name);
+      return Promise.resolve(callback()).then(() => { held.splice(held.indexOf(name), 1); });
+    });
+    return { request, held };
+  }
+  const withLocks = (locks: unknown) => (_document: Document, dom: JSDOM) => {
+    Object.defineProperty(dom.window.navigator, 'locks', { value: locks, configurable: true });
+  };
+
+  it('holds one uniquely named Web Lock when the worker says the tab sits in the app group (#128)', async () => {
+    const locks = fakeLocks();
+    live = await harness(undefined, { register_document: () => ({ ok: true, keepAwake: true }) }, withLocks(locks));
+    await settle();
+    expect(live.sent.some(message => message.type === 'register_document')).toBe(true);
+    expect(locks.request).toHaveBeenCalledTimes(1);
+    expect(locks.request.mock.calls[0]![0]).toMatch(/^chat-on-steroids-keep-awake-[a-z0-9]{8,}$/);
+    expect(locks.held).toHaveLength(1);
+  });
+
+  it('holds no lock for a tab outside the app group (#128)', async () => {
+    const locks = fakeLocks();
+    live = await harness(undefined, {}, withLocks(locks));
+    await settle();
+    expect(live.sent.some(message => message.type === 'register_document')).toBe(true);
+    expect(locks.request).not.toHaveBeenCalled();
+  });
+
+  it('takes and releases the keep-awake lock on the worker\'s word, once each (#128)', async () => {
+    const locks = fakeLocks();
+    live = await harness(undefined, {}, withLocks(locks));
+    await settle();
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: true });
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: true });
+    expect(locks.request).toHaveBeenCalledTimes(1);
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: false })).resolves.toEqual({ ok: true, held: false });
+    await settle();
+    expect(locks.held).toHaveLength(0);
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: true });
+    expect(locks.request).toHaveBeenCalledTimes(2);
+    expect(locks.request.mock.calls[1]![0]).not.toBe(locks.request.mock.calls[0]![0]);
+  });
+
+  it('answers without a lock where the browser has no Web Locks (#128)', async () => {
+    live = await harness(undefined, {}, withLocks(undefined));
+    await settle();
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: false });
+  });
+
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
     live = await harness();
 

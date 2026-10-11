@@ -492,6 +492,7 @@ interface WorkerHarness {
   tabsRemove: ReturnType<typeof vi.fn>;
   tabsReload: ReturnType<typeof vi.fn>;
   windowsUpdate: ReturnType<typeof vi.fn>;
+  tabGroupsUpdate: ReturnType<typeof vi.fn>;
   scriptingExecuteScript: ReturnType<typeof vi.fn>;
   scriptingInsertCSS: ReturnType<typeof vi.fn>;
   alarmCreate: ReturnType<typeof vi.fn>;
@@ -525,6 +526,8 @@ function loadWorker(options: {
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
   windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
+  /** Chrome's tab-group API with these groups; omitted, the browser has none. */
+  tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -555,6 +558,23 @@ function loadWorker(options: {
   const alarmCreate = vi.fn(() => undefined);
   const alarmClear = vi.fn(async () => true);
   const windowsUpdate = vi.fn(async () => ({ id: 7 }));
+  const groups = new Map((options.tabGroups ?? []).map(group => [group.id, { title: '', collapsed: false, ...group }]));
+  const tabGroupsUpdate = vi.fn(async (id: number, properties: Record<string, unknown>) => {
+    const group = groups.get(id);
+    if (!group) throw new Error(`No group with id: ${id}.`);
+    Object.assign(group, properties);
+    return { ...group };
+  });
+  const groupApi = options.tabGroups ? {
+    tabGroups: {
+      get: async (id: number) => { const group = groups.get(id); if (!group) throw new Error(`No group with id: ${id}.`); return { ...group }; },
+      update: tabGroupsUpdate,
+      query: async () => [...groups.values()].map(group => ({ ...group }))
+    },
+    group: vi.fn(async () => { throw new Error('not modelled'); }),
+    getLastFocused: async () => ({ id: 7, type: 'normal' }),
+    getAll: async () => [{ id: 7, type: 'normal' }]
+  } : null;
   const documentNumbers = new Map<number, number>();
   const currentDocuments = new Map<number, string>();
   const documentFor = (tabId: number): string => {
@@ -589,7 +609,9 @@ function loadWorker(options: {
       },
       onStartup: { addListener(fn: () => void) { startupListeners.push(fn); } }
     },
-    windows: { update: windowsUpdate, get: options.windowsGet ?? (async () => ({ focused: true })) },
+    windows: { update: windowsUpdate, get: options.windowsGet ?? (async () => ({ focused: true })),
+      ...(groupApi ? { getLastFocused: groupApi.getLastFocused, getAll: groupApi.getAll } : {}) },
+    ...(groupApi ? { tabGroups: groupApi.tabGroups } : {}),
     scripting: {
       executeScript: scriptingExecuteScript,
       insertCSS: scriptingInsertCSS
@@ -611,6 +633,7 @@ function loadWorker(options: {
         throw new Error('tab state unavailable in this harness');
       }),
       sendMessage: tabsSendMessage,
+      ...(groupApi ? { group: groupApi.group } : {}),
       remove: tabsRemove,
       reload: tabsReload,
       onCreated: {
@@ -658,6 +681,7 @@ function loadWorker(options: {
     tabsRemove,
     tabsReload,
     windowsUpdate,
+    tabGroupsUpdate,
     scriptingExecuteScript,
     scriptingInsertCSS,
     alarmCreate,
@@ -2015,6 +2039,104 @@ describe('active agent tab discard protection', () => {
     const worker = loadWorker({ local, session: new FakeStorageArea(), fetch: vi.fn(async () => response(404, {})) });
     await worker.startup();
     expect((await local.get('chatBackgroundWindowMirror')).chatBackgroundWindowMirror).toBeUndefined();
+  });
+
+  describe('keep-awake in the app tab group (#128)', () => {
+    type GroupTab = { id: number; windowId: number; groupId: number; url: string; status: string; active: boolean; frozen: boolean };
+    const GROUP = { id: 50, windowId: 7, title: 'Chat On Steroids', collapsed: true };
+    const groupWorker = (tabs: GroupTab[], placement: () => string = () => 'group', groups = [GROUP]) => loadWorker({
+      local: new FakeStorageArea({ ...paired, backgroundPlacement: 'group' }),
+      session: new FakeStorageArea({ chatBackgroundGroup: 50 }),
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/status') return response(200, { ok: true, repairs: [], backgroundPlacement: placement() });
+        return response(404, {});
+      }),
+      tabsQuery: async () => tabs.map(tab => ({ ...tab })),
+      tabsGet: async (id: number) => {
+        const tab = tabs.find(candidate => candidate.id === id);
+        if (!tab) throw new Error(`No tab with id: ${id}.`);
+        return { ...tab };
+      },
+      tabGroups: groups.map(group => ({ ...group }))
+    });
+    const keepAwakeCalls = (worker: WorkerHarness) => worker.tabsSendMessage.mock.calls
+      .filter(([, message]) => (message as { type?: string }).type === 'clf-keep-awake')
+      .map(([tabId, message]) => [tabId, (message as { on: boolean }).on]);
+    const tab = (id: number, groupId: number, extra: Partial<GroupTab> = {}): GroupTab =>
+      ({ id, windowId: 7, groupId, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete', active: false, frozen: false, ...extra });
+
+    it.each([[50, true], [-1, false], [51, false]])('answers a page registering in group %s with keepAwake %s', async (groupId, keepAwake) => {
+      const worker = groupWorker([tab(61, groupId)]);
+      await expect(worker.registerTab(61)).resolves.toMatchObject({ ok: true, keepAwake });
+    });
+
+    it('lets a page go once its tab leaves the app group, and tells it nothing twice', async () => {
+      const tabs = [tab(61, 50), tab(62, -1)];
+      const worker = groupWorker(tabs);
+      await worker.registerTab(61);
+      await worker.registerTab(62);
+      await worker.fireAlarm();
+      expect(keepAwakeCalls(worker)).toEqual([]);
+      tabs[0]!.groupId = -1;
+      await worker.fireAlarm();
+      expect(keepAwakeCalls(worker)).toEqual([[61, false]]);
+      await worker.fireAlarm();
+      expect(keepAwakeCalls(worker)).toEqual([[61, false]]);
+    });
+
+    it('wakes a page whose tab joins the app group after it registered', async () => {
+      const tabs = [tab(61, -1)];
+      const worker = groupWorker(tabs);
+      await worker.registerTab(61);
+      await worker.fireAlarm();
+      tabs[0]!.groupId = 50;
+      // Chrome reports the move at once; the page is told before the group can pause it.
+      worker.updateTab(61, { groupId: 50 } as never, { ...tabs[0]! });
+      await vi.waitFor(() => expect(keepAwakeCalls(worker)).toEqual([[61, true]]));
+      await worker.fireAlarm();
+      expect(keepAwakeCalls(worker)).toEqual([[61, true]]);
+    });
+
+    it('releases every page when the placement switches back to the window', async () => {
+      let placement = 'group';
+      const worker = groupWorker([tab(61, 50)], () => placement);
+      await worker.registerTab(61);
+      placement = 'window';
+      await worker.fireAlarm();
+      expect(keepAwakeCalls(worker)).toEqual([[61, false]]);
+    });
+
+    it('opens the group for a page Chrome froze before it could hold its lock, then collapses it again', async () => {
+      const tabs = [tab(61, 50, { frozen: true })];
+      const worker = groupWorker(tabs);
+      await worker.fireAlarm();
+      expect(worker.tabGroupsUpdate.mock.calls).toEqual([[50, { collapsed: false }]]);
+      tabs[0]!.frozen = false;
+      await worker.registerTab(61);
+      await worker.fireAlarm();
+      expect(worker.tabGroupsUpdate.mock.calls).toEqual([[50, { collapsed: false }], [50, { collapsed: true }]]);
+    });
+
+    it('leaves a group it opened open while the user is reading a tab in it', async () => {
+      const tabs = [tab(61, 50, { frozen: true })];
+      const worker = groupWorker(tabs);
+      await worker.fireAlarm();
+      tabs[0]!.frozen = false;
+      tabs[0]!.active = true;
+      await worker.registerTab(61);
+      await worker.fireAlarm();
+      expect(worker.tabGroupsUpdate.mock.calls).toEqual([[50, { collapsed: false }]]);
+    });
+
+    it('never touches a group the user collapsed or expanded when no app page is frozen', async () => {
+      const worker = groupWorker([tab(61, 50)]);
+      await worker.registerTab(61);
+      await worker.fireAlarm();
+      await worker.fireAlarm();
+      expect(worker.tabGroupsUpdate).not.toHaveBeenCalled();
+    });
   });
 
   it('forgets the mirrored tab group when the browser starts', async () => {

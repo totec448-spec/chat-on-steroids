@@ -109,6 +109,26 @@ the user's now. If no group qualifies, the next background tab creates a new one
 **Serialization:** all group work runs inside the existing `inBackgroundWindow` queue. Two chats
 opening at once therefore create one group, not two.
 
+### 3a. Keep-awake (added after the live round, user decision 2026-10-11)
+
+Chrome freezes the tabs of a collapsed group, and a frozen page neither sends nor records. On VM
+141 (Chrome 154), 2 of 7 first sends into a collapsed group stalled for minutes; the frozen tab's
+send completed within 6 s of expanding the group. A tab holding a Web Lock is never frozen (Chrome's
+[freezing opt-outs](https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/browser/performance_manager/docs/freezing_opt_out_opt_in.md));
+a lock taken from the content script's isolated world counts. With it, 10 of 10 collapsed-group
+sends took 11–14 s.
+
+- `register_document` answers `keepAwake: true` when the tab sits in the app's group; the content
+  script then holds a Web Lock under a unique name (`chat-on-steroids-keep-awake-<random>`).
+- `clf-keep-awake { on }` turns it on or off. The worker sends it from every maintenance pass and at
+  once on Chrome's `groupId` change, only when the wanted state differs from what it last told that
+  document (remembered in session storage).
+- A tab that leaves the group, or every tab when the placement switches back to the window, is told
+  to let go. The user's own groups and tabs are never told anything.
+- Safety net: a grouped page Chrome froze before it could take the lock cannot hear the worker, so
+  the worker expands the group (which unfreezes it). Once every grouped page holds its lock, a group
+  expanded that way is collapsed again, unless the window's active tab is in it.
+
 ### 4. Failure handling during placement
 
 - If `tabs.group` fails for an existing group (gone or moving), the ID is dropped and the
@@ -149,6 +169,9 @@ opening at once therefore create one group, not two.
 | Extension reloaded mid-session (self-update) | The group is re-found through the local mirror plus the title check. |
 | Several chats open at once | One serialized queue, so one group. |
 | Memory Saver / discarding | Unchanged: `protectCreatedTab` sets `autoDiscardable: false`, and the existing frozen/discarded repair applies. |
+| Chrome pausing collapsed-group tabs | Every page in the app's group holds a keep-awake Web Lock (§3a); a page frozen before it could take one gets the group expanded until it does. |
+| User collapses the group while chats work | The pages already hold their locks, so nothing pauses; the group stays as the user left it. |
+| Extension self-update | The old content script's lock stays with its document until the page navigates; the new script is told again by the next pass. Harmless: an awake page is what window mode has anyway. |
 | Background chats off | App chats open in the foreground as today. Helper tabs that are always background follow the placement. |
 
 ### 6. Code changes (outline)

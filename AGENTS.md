@@ -2374,6 +2374,12 @@ app owns is adopted again. Group mode's reconcile never moves or regroups tabs. 
 just created is collapsed, and every grouped tab is created inactive. A group that vanishes during
 placement is retried once, then the tab moves to the minimized window. When the last app tab closes,
 Chrome deletes the group and its auto-saved copy. Browsers without `chrome.tabGroups` use the window.
+Chrome freezes a collapsed group's tabs within seconds (2 of 7 sends stalled on Chrome 154), so every
+page in the app's group holds a Web Lock (`chat-on-steroids-keep-awake-<random>`), which Chrome's
+freezing rules exempt: `register_document` answers `keepAwake`, and `clf-keep-awake { on }` from
+the maintenance pass and the `groupId` change event turns it on or off per document (told state in
+session storage `keepAwakeTabs`). A grouped page frozen before it could take the lock gets the group
+expanded; once all hold their locks the worker collapses it again unless the active tab is in it.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
