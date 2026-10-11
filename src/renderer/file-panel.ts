@@ -1449,6 +1449,7 @@ export function createFilePanel(options: FilePanelOptions) {
   async function handleWatchedChange(change: ProjectFilesChanged): Promise<void> {
     const current = project;
     if (!current || change.projectId !== current.id) return;
+    if (change.watchLost) { watchSignature = ''; syncWatches(); }
     scheduleGitReconcile();
     const expectedGeneration = generation;
     const listing = await run(window.api.listProjectFiles(current.id, change.directory));
