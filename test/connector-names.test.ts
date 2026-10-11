@@ -3,7 +3,8 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connectorName, connectorNames, normalizeConnectorSuffix } from '../src/shared/connector-names.js';
 import { defaultConfig, getConfig, initConfigPath, loadConfig, saveConfig } from '../src/main/config.js';
-import { SURFACE_IDS, surfaceDefinition } from '../src/main/mcp/surfaces.js';
+import { SURFACE_IDS, configuredConnectorName, liveConnectorName, surfaceDefinition } from '../src/main/mcp/surfaces.js';
+import { noteAppSightings, noteServedRequest, resetConnectorIdentityForTests } from '../src/main/connector-identity.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 // One ChatGPT account on two computers needs two sets of connectors with different names. ChatGPT
@@ -59,5 +60,23 @@ describe('the configured suffix', () => {
     // The plain definition table itself is never changed.
     await saveConfig({ ...getConfig(), connectorSuffix: '' });
     expect(surfaceDefinition('core').connectorName).toBe('Chat On Steroids Core');
+  });
+});
+
+// 2026-10-11: ChatGPT keeps a renamed connector's app id. Once a served call proves the new name,
+// model-facing text names the connector as ChatGPT shows it; what this app serves stays configured.
+describe('a connector renamed in ChatGPT', () => {
+  it('is named as ChatGPT shows it in model-facing text, while the configured name stays available', () => {
+    resetConnectorIdentityForTests();
+    const configured = configuredConnectorName('core');
+    expect(surfaceDefinition('core').connectorName).toBe(configured);
+    noteServedRequest('rename-proof', 'core');
+    noteAppSightings([{ requestId: 'rename-proof', appId: 'asdk_app_x1', linkId: 'link_x1', appName: 'My tools' }]);
+    expect(liveConnectorName('core')).toBe('My tools');
+    expect(surfaceDefinition('core').connectorName).toBe('My tools');
+    expect(configuredConnectorName('core')).toBe(configured);
+    expect(surfaceDefinition('desktop').connectorName).toBe(configuredConnectorName('desktop'));
+    resetConnectorIdentityForTests();
+    expect(surfaceDefinition('core').connectorName).toBe(configured);
   });
 });

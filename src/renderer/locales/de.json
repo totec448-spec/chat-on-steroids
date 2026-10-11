@@ -2125,5 +2125,6 @@
   "Fewer repeated commands": "Weniger doppelte Befehle",
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Startet ChatGPT einen Befehl, der in diesem Chat noch läuft, verweist das Ergebnis auf den laufenden.",
   "Compact & Resume in Projects": "Komprimieren & Fortsetzen in Projekten",
-  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Ein Chat in einem ChatGPT-Projekt lässt sich jetzt zuverlässig in einen neuen Chat übertragen, und der neue Chat bleibt in diesem Projekt."
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Ein Chat in einem ChatGPT-Projekt lässt sich jetzt zuverlässig in einen neuen Chat übertragen, und der neue Chat bleibt in diesem Projekt.",
+  "In ChatGPT: {0}": "In ChatGPT: {0}"
 }
