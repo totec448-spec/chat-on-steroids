@@ -3213,7 +3213,10 @@ async function performBrowserRepairs(repairs, policy) {
       if (!target && policy.browserOnly === true) continue;
       // Select the working tab within Chrome without stealing OS focus from the
       // desktop app. Tab selection and window activation are separate operations.
-      if (target && focus) {
+      // In tab-group mode the tab sits in the user's own window, where selecting it would switch
+      // what they are looking at (#128); only the app's background window is ours to select in.
+      if (target && focus && (backgroundPlacement !== 'group' ||
+          target.windowId === (await storedBackgroundWindow().catch(() => null))?.id)) {
         await chrome.tabs.update(target.id, { active: true });
       }
       // The tab scan can yield while attribution recovers or a final/new question

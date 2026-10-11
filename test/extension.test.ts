@@ -1640,6 +1640,39 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}`, active: true });
   });
 
+  it.each([
+    ['window placement selects the tab, as before', 'window', 9, true],
+    ['group placement leaves a tab in the user\'s window unselected', 'group', 9, false],
+    ['group placement still selects a tab inside the background window', 'group', 7, true]
+  ])('compaction repair focus: %s (#128)', async (_name, placement, backgroundWindow, selected) => {
+    let token = '';
+    let done = false;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/closed') return response(200, { ok: true });
+      if (url.pathname === '/status') {
+        if (token && url.searchParams.get('repaired') === token) done = true;
+        if (done) return response(200, { ok: true, repairs: [], backgroundPlacement: placement });
+        token = 'tok-1';
+        return response(200, { ok: true, repairs: [{ conversationId: CHAT, token, focus: true }], backgroundPlacement: placement });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea({ chatBackgroundWindow: backgroundWindow }),
+      fetch,
+      windowsGet: async (windowId: number) => ({ id: windowId, type: 'normal', focused: false } as { focused?: boolean })
+    });
+    await worker.registerTab(51);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 51);
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledWith(51);
+    expect(worker.tabsUpdate.mock.calls.some(([id, change]) => id === 51 && (change as { active?: boolean }).active === true)).toBe(selected);
+    expect(worker.windowsUpdate).not.toHaveBeenCalled();
+  });
+
   it('opens an active agent chat in the same close transaction instead of losing its retry alarm', async () => {
     const asked: string[] = [];
     let repaired = false;
