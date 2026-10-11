@@ -80,7 +80,7 @@ app.whenReady().then(async () => {
           title:document.getElementById('whatsNewTitle').textContent,version:document.getElementById('whatsNewVersion').textContent,
           lead:document.getElementById('whatsNewLead').textContent,focus:document.activeElement.id,ring:document.activeElement.matches(':focus-visible'),
           sideways:list.scrollWidth>list.clientWidth,fits:list.scrollHeight<=list.clientHeight,clipped:[...list.querySelectorAll('b,span')].some(e=>e.scrollWidth>e.clientWidth+1)}})()`);
-      assert.equal(view.items,4,'Four highlights for 2.1.34');
+      assert.equal(view.items,5,'Five highlights for 2.1.34');
       assert.equal(view.title,"What's new");
       assert.equal(view.version,'Version 2.1.34');
       assert.match(view.lead,/^Goal on every plan/);

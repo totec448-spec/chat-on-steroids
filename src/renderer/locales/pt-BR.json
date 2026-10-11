@@ -2111,7 +2111,7 @@
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Quando o ChatGPT limita o carregamento do histórico, a recuperação espera o tempo pedido em vez de recarregar de novo.",
   "Lighter on your computer": "Mais leve para o seu computador",
   "Open ChatGPT chats use much less CPU while they wait.": "Chats do ChatGPT abertos usam muito menos CPU enquanto esperam.",
-  "Goal on every plan, a background window that stays, and clearer hints for ChatGPT.": "Goal em todos os planos, uma janela em segundo plano que permanece e dicas mais claras para o ChatGPT.",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "Goal em todos os planos, Compactar e retomar em Projetos e uma janela em segundo plano que permanece.",
   "Goal on every plan": "Goal em todos os planos",
   "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "Em planos sem seletor de modelo, como o Free, as continuações de Goal e Loop usam o modelo atual do chat em vez de falhar.",
   "A background window that stays": "Uma janela em segundo plano que permanece",
@@ -2119,5 +2119,7 @@
   "Clearer connector hints": "Dicas mais claras sobre conectores",
   "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "Quando o ChatGPT chama uma ferramenta que o conector dele não tem, o resultado indica o conector que a tem.",
   "Fewer repeated commands": "Menos comandos repetidos",
-  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Quando o ChatGPT inicia um comando que ainda está rodando naquele chat, o resultado aponta para o que já está em execução."
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Quando o ChatGPT inicia um comando que ainda está rodando naquele chat, o resultado aponta para o que já está em execução.",
+  "Compact & Resume in Projects": "Compactar e retomar em Projetos",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Levar um chat de um Projeto do ChatGPT para um chat novo agora é concluído, e o chat novo fica nesse Projeto."
 }

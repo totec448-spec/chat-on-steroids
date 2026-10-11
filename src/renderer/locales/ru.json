@@ -2111,7 +2111,7 @@
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Когда ChatGPT ограничивает загрузку истории, восстановление ждёт столько, сколько он просит, а не перезагружает снова.",
   "Lighter on your computer": "Легче для компьютера",
   "Open ChatGPT chats use much less CPU while they wait.": "Открытые чаты ChatGPT в ожидании используют гораздо меньше CPU.",
-  "Goal on every plan, a background window that stays, and clearer hints for ChatGPT.": "Цель на любом тарифе, фоновое окно, которое остаётся, и более понятные подсказки для ChatGPT.",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "Цель на любом тарифе, «Сжать и продолжить» в Проектах и фоновое окно, которое остаётся.",
   "Goal on every plan": "Цель на любом тарифе",
   "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "На тарифах без выбора модели, например Free, продолжения Цели и Цикла используют текущую модель чата, а не завершаются ошибкой.",
   "A background window that stays": "Фоновое окно, которое остаётся",
@@ -2119,5 +2119,7 @@
   "Clearer connector hints": "Понятнее, где нужный коннектор",
   "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "Когда ChatGPT вызывает инструмент, которого нет у его коннектора, результат называет коннектор, у которого он есть.",
   "Fewer repeated commands": "Меньше повторных команд",
-  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Если ChatGPT снова запускает команду, которая ещё выполняется в этом чате, результат указывает на уже запущенную."
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Если ChatGPT снова запускает команду, которая ещё выполняется в этом чате, результат указывает на уже запущенную.",
+  "Compact & Resume in Projects": "«Сжать и продолжить» в Проектах",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Перенос чата из Проекта ChatGPT в новый чат теперь доходит до конца, и новый чат остаётся в том же Проекте."
 }

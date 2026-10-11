@@ -2111,7 +2111,7 @@
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "当 ChatGPT 限制历史记录的加载速度时，恢复会按要求等待，而不是反复重新加载。",
   "Lighter on your computer": "更省电脑资源",
   "Open ChatGPT chats use much less CPU while they wait.": "打开的 ChatGPT 聊天在等待时占用的 CPU 大幅减少。",
-  "Goal on every plan, a background window that stays, and clearer hints for ChatGPT.": "所有套餐都能用目标、保持不变的后台窗口，以及给 ChatGPT 的更清晰提示。",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "所有套餐都能用目标、项目中的压缩并继续，以及保持不变的后台窗口。",
   "Goal on every plan": "所有套餐都能用目标",
   "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "在没有模型选择器的套餐（如 Free）上，目标和循环的后续消息会使用聊天当前的模型，不再失败。",
   "A background window that stays": "保持不变的后台窗口",
@@ -2119,5 +2119,7 @@
   "Clearer connector hints": "更清晰的连接器提示",
   "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "当 ChatGPT 调用其连接器没有的工具时，结果会指出拥有该工具的连接器。",
   "Fewer repeated commands": "更少的重复命令",
-  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "当 ChatGPT 再次启动该聊天中仍在运行的命令时，结果会引导它查看正在运行的那个。"
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "当 ChatGPT 再次启动该聊天中仍在运行的命令时，结果会引导它查看正在运行的那个。",
+  "Compact & Resume in Projects": "项目中的压缩并继续",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "把 ChatGPT 项目中的聊天转到新聊天现在能顺利完成，新聊天也会留在同一个项目里。"
 }
