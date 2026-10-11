@@ -1379,6 +1379,20 @@ it('restores a rejected focused port and prevents an unrelated queued save from 
   expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
 });
 
+it('saves the background placement from its settings control and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const placement = w.document.getElementById('backgroundPlacement') as HTMLSelectElement;
+  expect(placement.value).toBe('window'); // older config has no field
+  expect([...placement.options].map(option => option.value)).toEqual(['window', 'group']);
+  placement.value = 'group';
+  placement.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.backgroundPlacement).toBe('group');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, backgroundPlacement: 'window' } } });
+  expect(placement.value).toBe('window');
+});
+
 it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
