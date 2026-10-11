@@ -4048,6 +4048,9 @@ publishes `connectorApps`. Model-facing text uses `liveConnectorName` (proven na
 configured one); protected-resource `resource_name` and the Setup card's Name row stay on
 `configuredConnectorName`. `SurfaceStatus.chatgptName` carries a proven different name for the
 card's "In ChatGPT: …" line.
+A chat keeps the app name it began with, so a learned name changes only to one seen in a chat
+created no earlier (`conversationCreatedAt`: ChatGPT conversation ids start with the creation second
+in hex); shell turns also find this turn's result rows by request id across the native mapping.
 Page side: fiber.js decides ownership once (`ownResult`, `ownRequestPath`, `ownServerName`):
 proven app id, then proven link, then the configured/proven name, except that a name match on a
 surface with a proven app but a different id is foreign. Rows carry `own`; content.js trusts it.

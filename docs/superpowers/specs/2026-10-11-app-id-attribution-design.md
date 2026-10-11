@@ -117,6 +117,8 @@ Exactness stays as today: IDs and names are compared whole, never by prefix.
 | Renamed before the update, no call yet | Name checks miss until the first call. That call still reaches the app (routing never depended on names), is proven by its request ID, and from then on everything matches by ID. |
 | Renamed after the app ID was learned | Matched by ID at once. The new name is learned from that call's result row and used in model-facing text. |
 | A second, extra copy of one connector (same tunnel) | Its rows are foreign until its first call, which reaches this app and is proven like any other; that turn re-reads as ours once the ID is learned. |
+| Older chats after a rename | A chat keeps the app name it began with (measured). The learned name only changes to a name seen in a chat created no earlier, by ChatGPT's conversation id (its first 8 hex digits are the creation second), so an old chat never reverts it. |
+| First call in a brand-new chat | In ChatGPT's shell layout the result row can sit outside the turn's message ids; sightings also match the turn's own request ids anywhere in the native mapping (bounded). |
 | Connector deleted and recreated | New app ID, learned on its first call. The old one ages out after 4 newer apps. |
 | Two computers, one ChatGPT account | Each computer learns only from requests it served. The other computer's connectors are never learned, so its calls are never claimed. |
 | Another person's or app's connector named like ours | Its request IDs never reach this app, so its ID is never learned. A name collision can still match by name before the first proven call, as today. Once this surface has a learned ID, a name match for an app ID that differs from every learned one is *not* ours. |
