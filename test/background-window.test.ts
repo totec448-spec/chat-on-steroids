@@ -374,7 +374,7 @@ it('5.3 moves the tab into the existing background window when grouping fails tw
 
 it('5.4 reports a tab that vanished before it could be placed', async () => {
   const app = groupHarness({ windows: [{ id: 1 }] });
-  app.group.mockImplementation(async ({ tabIds }) => { app.tabs.delete(tabIds[0]); throw new Error(`No tab with id: ${tabIds[0]}.`); });
+  app.group.mockImplementation(async ({ tabIds }) => { app.tabs.delete(tabIds[0]!); throw new Error(`No tab with id: ${tabIds[0]}.`); });
   await expect(app.createChatTab('https://chatgpt.com/?a', true)).rejects.toThrow(/No tab with id/);
 });
 
