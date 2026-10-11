@@ -1926,6 +1926,94 @@ async function storedBackgroundWindow() {
   }
   catch { await forgetBackgroundWindow(); return null; }
 }
+/**
+ * The app's tab group in tab-group mode (#128). Like the window, its id is kept in session storage
+ * and mirrored to local storage, because every self-update reloads this worker. A mirrored id is
+ * only trusted while the group still carries the app's title: group ids are per browser session,
+ * onStartup drops the mirror, and a group the user renamed is theirs now.
+ */
+const BACKGROUND_GROUP_TITLE = 'Chat On Steroids';
+const BACKGROUND_GROUP_MIRROR = 'chatBackgroundGroupMirror';
+async function rememberBackgroundGroup(id) {
+  await chrome.storage.session.set({ chatBackgroundGroup: id });
+  await chrome.storage.local.set({ [BACKGROUND_GROUP_MIRROR]: id });
+}
+async function forgetBackgroundGroup() {
+  await chrome.storage.session.remove('chatBackgroundGroup');
+  await chrome.storage.local.remove(BACKGROUND_GROUP_MIRROR);
+}
+async function storedBackgroundGroup() {
+  const { chatBackgroundGroup: current } = await chrome.storage.session.get('chatBackgroundGroup');
+  const id = Number.isInteger(current) ? current : (await chrome.storage.local.get(BACKGROUND_GROUP_MIRROR))[BACKGROUND_GROUP_MIRROR];
+  if (!Number.isInteger(id)) return null;
+  try {
+    const group = await chrome.tabGroups.get(id);
+    if (!Number.isInteger(group?.windowId)) throw new Error('group_without_window');
+    if (!Number.isInteger(current)) {
+      if (group.title !== BACKGROUND_GROUP_TITLE) { await chrome.storage.local.remove(BACKGROUND_GROUP_MIRROR); return null; }
+      await chrome.storage.session.set({ chatBackgroundGroup: id });
+    }
+    return group;
+  } catch { await forgetBackgroundGroup(); return null; }
+}
+/**
+ * Where a new group goes: the user's last-focused normal window, never the app's own background
+ * window and never an incognito one. Otherwise the lowest such window, otherwise none (window mode).
+ */
+async function groupTargetWindow() {
+  const excluded = (await storedBackgroundWindow())?.id;
+  const eligible = window => Number.isInteger(window?.id) && window.type === 'normal' && window.incognito !== true && window.id !== excluded;
+  try {
+    const last = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+    if (eligible(last)) return last.id;
+  } catch { /* No focused window yet; fall through to any eligible one. */ }
+  const all = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => []);
+  const [first] = (Array.isArray(all) ? all : []).filter(eligible).sort((a, b) => a.id - b.id);
+  return first?.id ?? null;
+}
+/**
+ * One inactive tab in the app's group, creating the group collapsed the first time. Only a group
+ * made here is collapsed: collapsing one that holds the window's active tab would switch the
+ * user's tab. Null hands the tab to window mode before anything was created.
+ */
+async function createGroupedTab(url) {
+  let group = await storedBackgroundGroup();
+  const windowId = group ? group.windowId : await groupTargetWindow();
+  if (!Number.isInteger(windowId)) return null;
+  const members = group ? await chrome.tabs.query({ groupId: group.id }).catch(() => []) : [];
+  const indexes = (Array.isArray(members) ? members : []).filter(tab => tab.windowId === windowId && Number.isInteger(tab.index)).map(tab => tab.index);
+  const tab = await chrome.tabs.create({ url, windowId, active: false, ...(indexes.length ? { index: Math.max(...indexes) + 1 } : {}) });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      if (group) {
+        await chrome.tabs.group({ groupId: group.id, tabIds: [tab.id] });
+        return { ...tab, windowId: group.windowId };
+      }
+      const created = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId ?? windowId } });
+      await rememberBackgroundGroup(created);
+      const titled = await chrome.tabGroups.update(created, { title: BACKGROUND_GROUP_TITLE, color: 'grey', collapsed: true });
+      return { ...tab, windowId: titled?.windowId ?? tab.windowId ?? windowId };
+    } catch {
+      // The group vanished or moved under us. Start one fresh in the tab's window, once.
+      await forgetBackgroundGroup().catch(() => undefined);
+      group = null;
+    }
+  }
+  return moveToBackgroundWindow(tab);
+}
+/** Last resort for a tab grouping could not place: the app's minimized window, never the user's strip. */
+async function moveToBackgroundWindow(tab) {
+  const existing = await storedBackgroundWindow();
+  if (existing) {
+    await chrome.tabs.move(tab.id, { windowId: existing.id, index: -1 });
+    return { ...tab, windowId: existing.id };
+  }
+  const window = await chrome.windows.create({ tabId: tab.id, type: 'normal', ...backgroundWindowBounds, focused: false });
+  if (!Number.isInteger(window?.id)) throw new Error('background_window_not_ready');
+  await rememberBackgroundWindow(window.id);
+  await chrome.windows.update(window.id, { state: 'minimized', focused: false });
+  return { ...tab, windowId: window.id };
+}
 /** Reconstruct ownership from the app's existing tab policy after extension reload or
  * OS browser startup. A cached window id alone never survives a browser restart. */
 async function reconcileBackgroundWindow(policy) {
@@ -1977,6 +2065,11 @@ async function reconcileBackgroundWindow(policy) {
 async function createChatTab(url, background = false, active = !background) {
   if (!background) return chrome.tabs.create({ url, active });
   return inBackgroundWindow(async () => {
+    if (groupsAvailable()) {
+      // A grouped tab is always inactive: selecting it would switch the user's own window.
+      const grouped = await createGroupedTab(url);
+      if (grouped) return grouped;
+    }
     const existing = await storedBackgroundWindow();
     if (existing) {
       return chrome.tabs.create({ url, windowId: existing.id, active });
