@@ -757,7 +757,8 @@ const FOLLOW_TTL_MS = 10_000;
 let pendingFollow: { conversationId: string; at: number } | null = null;
 
 export function followChatInBackground(conversationId: string): void {
-  if (getConfig().ui.backgroundChats !== true || !browserWakeConnected() || !revealCapable()) return;
+  if (getConfig().ui.backgroundChats !== true || getConfig().ui.backgroundPlacement === 'group' ||
+      !browserWakeConnected() || !revealCapable()) return;
   pendingFollow = { conversationId, at: Date.now() };
   wakeBrowserWork();
 }
@@ -765,7 +766,8 @@ export function followChatInBackground(conversationId: string): void {
 function takeFollow(browser: string | null): string | null {
   const entry = pendingFollow;
   if (!entry || !browser) return null;
-  if (Date.now() - entry.at > FOLLOW_TTL_MS || getConfig().ui.backgroundChats !== true) { pendingFollow = null; return null; }
+  if (Date.now() - entry.at > FOLLOW_TTL_MS || getConfig().ui.backgroundChats !== true ||
+      getConfig().ui.backgroundPlacement === 'group') { pendingFollow = null; return null; }
   if (!chatHolders(entry.conversationId).includes(browser)) return null;
   pendingFollow = null;
   return entry.conversationId;
@@ -2569,6 +2571,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             .map(row => ({ id: row.id, owner: row.owner, lifetime: row.lifetime, close: true,
               retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) }))],
         background: getConfig().ui.backgroundChats === true,
+        // #128: where the companion puts background tabs. Unknown or absent means the window.
+        backgroundPlacement: getConfig().ui.backgroundPlacement === 'group' ? 'group' : 'window',
         browserOnly: getConfig().ui.browserOnly === true,
         browserWorkArea: currentBrowserWorkArea(),
         browserWindowBounds: browserWindowBounds(),
