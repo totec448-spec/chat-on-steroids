@@ -2110,5 +2110,16 @@
   "Calmer when ChatGPT is busy": "Bình tĩnh hơn khi ChatGPT bận",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "Khi ChatGPT giới hạn tốc độ tải lịch sử, việc khôi phục chờ đúng thời gian ChatGPT yêu cầu thay vì tải lại liên tục.",
   "Lighter on your computer": "Nhẹ hơn cho máy tính của bạn",
-  "Open ChatGPT chats use much less CPU while they wait.": "Các cuộc trò chuyện ChatGPT đang mở dùng ít CPU hơn nhiều khi chờ."
+  "Open ChatGPT chats use much less CPU while they wait.": "Các cuộc trò chuyện ChatGPT đang mở dùng ít CPU hơn nhiều khi chờ.",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "Goal trên mọi gói, Compact & Resume trong Dự án và cửa sổ nền được giữ lại.",
+  "Goal on every plan": "Goal trên mọi gói",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "Trên các gói không có bộ chọn mô hình, như Free, các lượt tiếp theo của Goal và Loop dùng mô hình hiện tại của cuộc trò chuyện thay vì thất bại.",
+  "A background window that stays": "Cửa sổ nền được giữ lại",
+  "Background chats keep using the same window after the extension updates or reloads.": "Cuộc trò chuyện nền tiếp tục dùng cùng một cửa sổ sau khi tiện ích cập nhật hoặc tải lại.",
+  "Clearer connector hints": "Gợi ý connector rõ hơn",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "Khi ChatGPT gọi một công cụ mà connector của nó không có, kết quả sẽ nêu connector có công cụ đó.",
+  "Fewer repeated commands": "Ít lệnh lặp lại hơn",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Khi ChatGPT khởi động một lệnh vẫn đang chạy trong cuộc trò chuyện đó, kết quả sẽ chỉ nó đến lệnh đang chạy.",
+  "Compact & Resume in Projects": "Compact & Resume trong Dự án",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Chuyển một cuộc trò chuyện trong Dự án ChatGPT sang cuộc trò chuyện mới giờ đã hoàn tất, và cuộc trò chuyện mới vẫn ở trong Dự án đó."
 }

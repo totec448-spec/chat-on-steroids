@@ -2110,5 +2110,16 @@
   "Calmer when ChatGPT is busy": "ChatGPT가 바쁠 때도 차분하게",
   "When ChatGPT limits how fast history loads, recovery waits as long as ChatGPT asks instead of reloading again.": "ChatGPT가 기록 로드를 제한하면 복구가 다시 로드하지 않고 요청된 시간만큼 기다립니다.",
   "Lighter on your computer": "컴퓨터에 더 가볍게",
-  "Open ChatGPT chats use much less CPU while they wait.": "열려 있는 ChatGPT 채팅이 대기 중에 CPU를 훨씬 적게 씁니다."
+  "Open ChatGPT chats use much less CPU while they wait.": "열려 있는 ChatGPT 채팅이 대기 중에 CPU를 훨씬 적게 씁니다.",
+  "Goal on every plan, Compact & Resume in Projects, and a background window that stays.": "모든 요금제에서 Goal, 프로젝트에서 압축 후 계속, 유지되는 백그라운드 창.",
+  "Goal on every plan": "모든 요금제에서 Goal",
+  "On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat's current model instead of failing.": "Free처럼 모델 선택기가 없는 요금제에서도 Goal과 Loop 후속 메시지가 실패하지 않고 채팅의 현재 모델을 사용합니다.",
+  "A background window that stays": "유지되는 백그라운드 창",
+  "Background chats keep using the same window after the extension updates or reloads.": "확장 프로그램이 업데이트되거나 다시 로드된 뒤에도 백그라운드 채팅은 같은 창을 계속 사용합니다.",
+  "Clearer connector hints": "더 명확한 커넥터 안내",
+  "When ChatGPT calls a tool its connector doesn't have, the result names the connector that has it.": "ChatGPT가 자신의 커넥터에 없는 도구를 호출하면, 결과에 그 도구가 있는 커넥터가 표시됩니다.",
+  "Fewer repeated commands": "반복 명령 감소",
+  "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "ChatGPT가 같은 채팅에서 아직 실행 중인 명령을 다시 시작하면, 결과가 실행 중인 명령을 알려 줍니다.",
+  "Compact & Resume in Projects": "프로젝트에서 압축 후 계속",
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT 프로젝트 안의 채팅을 새 채팅으로 옮기는 작업이 이제 끝까지 완료되고, 새 채팅도 그 프로젝트에 남습니다."
 }
