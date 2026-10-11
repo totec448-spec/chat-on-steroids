@@ -3,7 +3,7 @@ import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-tr
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
 import { notePluginInstalled, notePluginMissing } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
-import { connectorApps, noteAppSightings, type AppSighting } from './connector-identity.js';
+import { connectorApps, conversationCreatedAt, noteAppSightings, type AppSighting } from './connector-identity.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
@@ -2803,7 +2803,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // App sightings only teach connector identity (proof: a request this app served). They are
     // never transcript content and on their own must not create or touch a session.
     const sightings = parsed.flatMap(item => item.kind === 'app_sightings' ? item.apps ?? [] : []);
-    if (sightings.length && noteAppSightings(sightings)) {
+    // A chat keeps the app name it began with, so the name from the newest chat wins (connector-identity.ts).
+    if (sightings.length && noteAppSightings(sightings, Date.now(), conversationCreatedAt(id) ?? Date.now())) {
       const apps = connectorApps();
       logInfo(`connector identity learned: ${(['core', 'desktop', 'plugins'] as const).map(s => `${s}=${apps[s][0]?.appId ?? '-'}`).join(' ')}`);
       changed();

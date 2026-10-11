@@ -11,7 +11,8 @@ import { readDurable, writeDurableSoon } from './durable.js';
 import type { SurfaceId } from './mcp/surfaces.js';
 
 export type AppSighting = { requestId: string; appId: string; linkId: string | null; appName: string | null };
-export type LearnedApp = { appId: string; linkId: string | null; name: string | null; seenAt: number };
+/** `nameAt`: when the conversation that showed `name` started; ChatGPT freezes an app's name per chat. */
+export type LearnedApp = { appId: string; linkId: string | null; name: string | null; seenAt: number; nameAt: number };
 
 const STATE = 'connector-identity';
 const SERVED_MAX = 4096;
@@ -32,6 +33,18 @@ export function cleanAppName(value: unknown): string | null {
   return name.length > 0 && name.length <= 64 ? name : null;
 }
 
+/**
+ * When a ChatGPT conversation was created, from its id: the first eight hex digits are that second
+ * (chat 6acb3e79-… was created 2026-10-11 07:44:57 UTC). Null for anything outside ChatGPT's
+ * lifetime, so a fixture or another id format never claims to be newest.
+ */
+export function conversationCreatedAt(conversationId: string, now = Date.now()): number | null {
+  const match = /^([0-9a-f]{8})-[0-9a-f]{4}-/i.exec(conversationId);
+  if (!match) return null;
+  const at = parseInt(match[1]!, 16) * 1000;
+  return at >= Date.UTC(2022, 10, 30) && at <= now + 86_400_000 ? at : null;
+}
+
 export function noteServedRequest(requestId: string | null, surface: SurfaceId, at = Date.now()): void {
   if (!requestId) return;
   served.delete(requestId);
@@ -39,7 +52,11 @@ export function noteServedRequest(requestId: string | null, surface: SurfaceId, 
   while (served.size > SERVED_MAX) served.delete(served.keys().next().value!);
 }
 
-export function noteAppSightings(sightings: readonly AppSighting[], at = Date.now()): boolean {
+/**
+ * `nameAt` is when the reporting conversation started: a chat keeps the app name it began with
+ * (measured 2026-10-11), so a name only replaces one taught by a chat that started no later.
+ */
+export function noteAppSightings(sightings: readonly AppSighting[], at = Date.now(), nameAt = at): boolean {
   const byRequest = new Map<string, AppSighting | null>();
   for (const sighting of sightings) {
     if (!sighting || !APP_ID.test(sighting.appId) || (sighting.linkId !== null && !LINK_ID.test(sighting.linkId))) continue;
@@ -51,10 +68,15 @@ export function noteAppSightings(sightings: readonly AppSighting[], at = Date.no
     const proof = served.get(requestId);
     if (!sighting || !proof || at - proof.at > SERVED_TTL_MS) continue;
     const list = learned[proof.surface];
-    const entry: LearnedApp = { appId: sighting.appId, linkId: sighting.linkId, name: cleanAppName(sighting.appName), seenAt: at };
+    const prior = list.find(app => app.appId === sighting.appId);
+    const name = cleanAppName(sighting.appName);
+    const keepPrior = prior && prior.name !== null && (name === null || prior.nameAt > nameAt);
+    const entry: LearnedApp = { appId: sighting.appId, linkId: sighting.linkId ?? prior?.linkId ?? null,
+      name: keepPrior ? prior.name : name, seenAt: at, nameAt: keepPrior ? prior.nameAt : nameAt };
     const rest = list.filter(app => app.appId !== entry.appId);
     const next = [entry, ...rest].slice(0, APPS_PER_SURFACE);
-    if (JSON.stringify(next.map(({ seenAt, ...app }) => app)) !== JSON.stringify(list.map(({ seenAt, ...app }) => app))) changed = true;
+    const shape = (apps: LearnedApp[]) => JSON.stringify(apps.map(app => [app.appId, app.linkId, app.name]));
+    if (shape(next) !== shape(list)) changed = true;
     learned = { ...learned, [proof.surface]: next };
   }
   if (changed) writeDurableSoon(STATE, learned);
@@ -82,7 +104,8 @@ export async function loadConnectorIdentity(): Promise<void> {
         appId: app.appId,
         linkId: typeof app.linkId === 'string' && LINK_ID.test(app.linkId) ? app.linkId : null,
         name: cleanAppName(app.name),
-        seenAt: Number.isFinite(app.seenAt) ? Number(app.seenAt) : 0
+        seenAt: Number.isFinite(app.seenAt) ? Number(app.seenAt) : 0,
+        nameAt: Number.isFinite(app.nameAt) ? Number(app.nameAt) : 0
       });
     }
   }

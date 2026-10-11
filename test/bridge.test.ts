@@ -15525,6 +15525,18 @@ describe('connector identity through the bridge', () => {
     expect(status.connectorApps.desktop).toEqual([]);
   });
 
+  it('keeps the name a newer chat showed when an older chat still reports the old one', async () => {
+    await pair();
+    const app = { appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f' };
+    noteServedRequest('req-newer-chat', 'core');
+    noteServedRequest('req-older-chat', 'core');
+    await request('POST', '/events', { body: { conversationId: '6acb532d-fe08-83ed-96e2-e22cd7008cb8', events: [{ kind: 'app_sightings', time: Date.now(),
+      apps: [{ requestId: 'req-newer-chat', ...app, appName: 'Renamed' }] }] } });
+    await request('POST', '/events', { body: { conversationId: '6acb3e79-2cd4-83eb-b54b-f9d66653cf07', events: [{ kind: 'app_sightings', time: Date.now(),
+      apps: [{ requestId: 'req-older-chat', ...app, appName: 'Original' }] }] } });
+    expect((await request('GET', '/status')).body.connectorApps.core[0].name).toBe('Renamed');
+  });
+
   it('does not store app_sightings as transcript content', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d2';

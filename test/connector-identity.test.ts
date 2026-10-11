@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  conversationCreatedAt,
   connectorApps, learnedConnectorName, noteAppSightings, noteServedRequest, resetConnectorIdentityForTests
 } from '../src/main/connector-identity.js';
 
@@ -58,5 +59,25 @@ describe('connector identity', () => {
     noteServedRequest('name2', 'core');
     noteAppSightings([{ requestId: 'name2', appId: A, linkId: L, appName: '  My   tools  ' }]);
     expect(learnedConnectorName('core')).toBe('My tools');
+  });
+
+  it('keeps the name from the newest conversation: an older chat still shows the name it started with', () => {
+    // Measured 2026-10-11: after a rename, a chat that began before it still reports the old name.
+    noteServedRequest('new-chat', 'core', 3000);
+    noteAppSightings([{ requestId: 'new-chat', appId: A, linkId: L, appName: 'Renamed' }], 3000, 2000);
+    noteServedRequest('old-chat', 'core', 3100);
+    noteAppSightings([{ requestId: 'old-chat', appId: A, linkId: L, appName: 'Original' }], 3100, 1000);
+    expect(learnedConnectorName('core')).toBe('Renamed');
+    noteServedRequest('newer-chat', 'core', 3200);
+    noteAppSightings([{ requestId: 'newer-chat', appId: A, linkId: L, appName: 'Original' }], 3200, 2500);
+    expect(learnedConnectorName('core')).toBe('Original');
+  });
+
+  it('reads when a ChatGPT conversation was created from its id, and nothing from anything else', () => {
+    // 2026-10-11: chat 6acb3e79-… was created at 07:44:57 UTC; its first 8 hex digits are that second.
+    expect(conversationCreatedAt('6acb3e79-2cd4-83eb-b54b-f9d66653cf07')).toBe(Date.UTC(2026, 9, 11, 7, 44, 57));
+    expect(conversationCreatedAt('a1a1a1a1-0000-4000-8000-00000000c1d1', Date.UTC(2026, 9, 11))).toBeNull();
+    expect(conversationCreatedAt('not-a-conversation')).toBeNull();
+    expect(conversationCreatedAt('00000001-0000-4000-8000-000000000000')).toBeNull();
   });
 });
