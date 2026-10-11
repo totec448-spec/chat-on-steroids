@@ -2140,5 +2140,9 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "同じチャットでまだ実行中のコマンドを ChatGPT がもう一度始めると、結果が実行中のものを案内します。",
   "Compact & Resume in Projects": "プロジェクトでの圧縮して再開",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "ChatGPT プロジェクト内のチャットを新しいチャットへ移す処理が最後まで完了し、新しいチャットも同じプロジェクトに残ります。",
-  "In ChatGPT: {0}": "ChatGPT での名前: {0}"
+  "In ChatGPT: {0}": "ChatGPT での名前: {0}",
+  "This chat was deleted in ChatGPT. Start a new chat to continue.": "このチャットは ChatGPT で削除されました。続けるには新しいチャットを開始してください。",
+  "Chat deleted in ChatGPT": "ChatGPT で削除されたチャット",
+  "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT にこのチャットはもうないため、これ以上送信できません。",
+  "Start a new chat to continue. This history stays in the app.": "続けるには新しいチャットを開始してください。この履歴はアプリに残ります。"
 }

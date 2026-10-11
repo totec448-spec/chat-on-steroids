@@ -43,7 +43,7 @@ function harness() {
     clearTimeout: (id: number) => timers.delete(id) });
   evaluate();
   async function feed(data: unknown, url = 'https://chatgpt.com/backend-api/wham/usage', init: Record<string, unknown> = {},
-                      responseInit: { status?: number; headers?: Record<string, string> } = {}) {
+                      responseInit: { status?: number; headers?: Record<string, string> } = {}, requestUrl = '/endpoint') {
     let done: () => void = () => {};
     const inspected = new Promise<void>(resolve => { done = resolve; });
     let read = false;
@@ -57,7 +57,7 @@ function harness() {
       cancel: async () => { done(); }
     }) } }) };
     const expectedResponse = response;
-    const returned = await window.fetch('/endpoint', { headers: { Authorization: 'private-test-value' }, ...init });
+    const returned = await window.fetch(requestUrl, { headers: { Authorization: 'private-test-value' }, ...init });
     expect(returned).toBe(expectedResponse);
     if (new URL(url).origin === 'https://chatgpt.com' && status >= 200 && status < 300 &&
         /^\/backend-api\/(wham\/usage|conversation\/init|conversation\/prepare|models)$/.test(new URL(url).pathname)) await inspected;
@@ -483,6 +483,46 @@ describe('MAIN-world usage projection', () => {
       expect.objectContaining({ model: 'deep-research', scope: 'feature', remaining: 5 }),
       expect.objectContaining({ model: 'gpt-example', scope: 'model', remaining: 2 })
     ]);
+  });
+
+  describe('a chat deleted in ChatGPT', () => {
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const deleted = (conversation?: string) => ({ detail: { message: 'A conversa foi excluída. Inicie um novo chat.', code: 'conversation_deleted',
+      can_retry: false, ...(conversation ? { conversation_id: conversation } : {}) } });
+    const at = Date.parse('2026-09-05T12:00:00Z');
+
+    it('reports the history answer with only the code and the exact id, and replays it', async () => {
+      const h = harness();
+      await h.feed(deleted(id), `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      expect(h.posts).toEqual([{ type: 'cos-conversation-deleted', conversationId: id, observedAt: at }]);
+      expect(JSON.stringify(h.posts)).not.toContain('excluída');
+      h.request();
+      expect(h.posts).toEqual([h.posts[0], h.posts[0]]);
+    });
+
+    it('reports a send into it by the conversation its own request names', async () => {
+      const h = harness();
+      await h.feed(deleted(), 'https://chatgpt.com/backend-api/f/conversation',
+        { method: 'POST', body: JSON.stringify({ conversation_id: id, messages: [] }) }, { status: 404 },
+        'https://chatgpt.com/backend-api/f/conversation');
+      expect(h.posts.filter(post => post.type === 'cos-conversation-deleted'))
+        .toEqual([{ type: 'cos-conversation-deleted', conversationId: id, observedAt: at }]);
+    });
+
+    it('stays silent for any other 404, code, route, origin or a history answer naming another chat', async () => {
+      const h = harness();
+      await h.feed({ detail: { code: 'conversation_not_found' } }, `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      await h.feed(deleted(id), `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 403 });
+      await h.feed(deleted(id), `https://chatgpt.com/backend-api/conversation/${id}`, { method: 'POST' }, { status: 404 });
+      await h.feed(deleted(id), `https://example.test/backend-api/conversation/${id}`, {}, { status: 404 });
+      await h.feed(deleted('bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'), `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      // A send whose request names no conversation (a new chat) has nothing to report.
+      await h.feed(deleted(), 'https://chatgpt.com/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ messages: [] }) },
+        { status: 404 }, 'https://chatgpt.com/backend-api/f/conversation');
+      await h.feed({ detail: { code: 'conversation_deleted', padding: 'x'.repeat(17 * 1024) } },
+        `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      expect(h.posts.filter(post => post.type === 'cos-conversation-deleted')).toEqual([]);
+    });
   });
 
   it('projects a conversation-history 429 with Retry-After and replays only the bounded deadline', async () => {

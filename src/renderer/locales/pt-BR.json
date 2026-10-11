@@ -2140,5 +2140,9 @@
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Quando o ChatGPT inicia um comando que ainda está rodando naquele chat, o resultado aponta para o que já está em execução.",
   "Compact & Resume in Projects": "Compactar e retomar em Projetos",
   "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Levar um chat de um Projeto do ChatGPT para um chat novo agora é concluído, e o chat novo fica nesse Projeto.",
-  "In ChatGPT: {0}": "No ChatGPT: {0}"
+  "In ChatGPT: {0}": "No ChatGPT: {0}",
+  "This chat was deleted in ChatGPT. Start a new chat to continue.": "Este chat foi excluído no ChatGPT. Comece um chat novo para continuar.",
+  "Chat deleted in ChatGPT": "Chat excluído no ChatGPT",
+  "ChatGPT no longer has this chat, so nothing more can be sent to it.": "O ChatGPT não tem mais este chat, então nada mais pode ser enviado para ele.",
+  "Start a new chat to continue. This history stays in the app.": "Comece um chat novo para continuar. Este histórico continua no app."
 }

@@ -20,6 +20,7 @@ import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../share
 import { inFlightToolCalls } from '../mcp/call-context.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
+import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
@@ -1894,6 +1895,34 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;
+  });
+}
+
+/**
+ * Ends every message still waiting for a chat that ChatGPT says it deleted.
+ *
+ * Measured 2026-10-11: opening a deleted chat sends the tab to ChatGPT's home page, and a
+ * message for it waited in the queue with no status; one already claimed failed as "Requested
+ * model or reasoning could not be confirmed". Nothing can be delivered into that chat any more,
+ * so each one fails with the real reason instead of reopening it. Sent messages are untouched.
+ */
+export function failInputsForDeletedConversation(conversationId: string): Promise<number> {
+  return serial(async () => {
+    const current = await load();
+    const ended = new Set<string>();
+    for (const row of current) {
+      if (row.state !== 'queued' && row.state !== 'browser') continue;
+      let destination = row.conversationId;
+      if (!destination) { try { destination = await target(row); } catch { destination = null; } }
+      if (destination === conversationId) ended.add(row.id);
+    }
+    if (!ended.size) return 0;
+    await commit(current.map(row => ended.has(row.id) ? { ...row, state: 'failed', owner: null, error: CONVERSATION_DELETED } : row));
+    for (const id of ended) {
+      decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + CONVERSATION_DELETED));
+      decisionWaiters.delete(id);
+    }
+    return ended.size;
   });
 }
 

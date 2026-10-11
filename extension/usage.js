@@ -8,10 +8,12 @@
  * reach the stream tens of seconds before React publishes it, which is the difference between
  * an exact Core caller and CALLER_IDENTITY_REQUIRED. Resume requests also project their
  * opaque conversation id and HTTP status; the isolated recorder owns generation eligibility.
+ * A bounded 404 answer to a history or send request contributes only whether its code is
+ * `conversation_deleted`, with the exact conversation id.
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 6;
+  const OBSERVER_VERSION = 7;
   const prior = window.__cosUsageObserver;
   // An extension update re-executes this file in pages that stay open, and the same protocol
   // version used to keep the *old* code running until the tab was reloaded — measured
@@ -34,6 +36,7 @@
   const post = (...args) => { if (active) nativePost(...args); };
   let latest = null;
   let latestHistoryLimit = null;
+  let latestDeleted = null;
   let requestOrder = 0, latestOrder = 0;
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // @ehkogh/#318: the alternate shell also uses bare UUID workflow ids.
@@ -128,6 +131,53 @@
     if (!latestHistoryLimit || projected.retryAt > latestHistoryLimit.retryAt ||
         projected.conversationId !== latestHistoryLimit.conversationId) latestHistoryLimit = projected;
     post(projected, location.origin);
+  }
+  /**
+   * A chat deleted in ChatGPT, in ChatGPT's own words (2026-10-11, measured): opening it answers
+   * the history request, and sending into it answers the send, with HTTP 404 and
+   * `detail.code: "conversation_deleted"`. The page then shows a localized notice, or moves to
+   * its home page. Only that code and the exact conversation id leave this world: the history
+   * route names the id, and a send names it in its own request body.
+   */
+  async function inspectDeleted(response, method, sentTo, observedAt) {
+    if (!active || response.status !== 404) return;
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin) return;
+    const history = method === 'GET' ? HISTORY_PATH.exec(url.pathname)?.[1] : null;
+    const conversationId = history || (method === 'POST' && /^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname) ? sentTo : null);
+    if (!conversationId || !response.headers.get('content-type')?.includes('application/json')) return;
+    const reader = response.clone().body?.getReader();
+    if (!reader) return;
+    readers.add(reader);
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), 10000);
+    let bytes = 0, text = ''; const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        bytes += value.byteLength; if (bytes > 16 * 1024) return;
+        text += decoder.decode(value, { stream: true });
+      }
+      const detail = JSON.parse(text + decoder.decode())?.detail;
+      if (detail?.code !== 'conversation_deleted') return;
+      // The history answer also names the conversation; one naming another proves nothing.
+      if (typeof detail.conversation_id === 'string' && detail.conversation_id.toLowerCase() !== conversationId.toLowerCase()) return;
+      latestDeleted = { type: 'cos-conversation-deleted', conversationId: conversationId.toLowerCase(), observedAt };
+      post(latestDeleted, location.origin);
+    } catch { /* An unreadable answer proves nothing. */ }
+    finally { clearTimeout(timer); readers.delete(reader); void reader.cancel().catch(() => {}); }
+  }
+  /** The conversation a send request names, read before the request leaves. */
+  function sendConversation(args) {
+    try {
+      const init = args[1];
+      const method = String(init?.method || args[0]?.method || 'GET').toUpperCase();
+      const url = new URL(typeof args[0] === 'string' ? args[0] : args[0] instanceof URL ? args[0].href : args[0].url, location.origin);
+      if (method !== 'POST' || url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname) ||
+          typeof init?.body !== 'string' || init.body.length > 2_000_000) return null;
+      const conversationId = JSON.parse(init.body)?.conversation_id;
+      return typeof conversationId === 'string' && CONVERSATION.test(conversationId) ? conversationId : null;
+    } catch { return null; }
   }
   /**
    * The Core app's identity, read from the page's own system hint list (#861).
@@ -473,6 +523,7 @@
       const observedAt = Date.now(), order = ++requestOrder;
       noteSendModel(args, observedAt);
       const resume = active ? resumeRequest(args) : null;
+      const sentTo = active ? sendConversation(args) : null;
       const result = downstreamFetch.apply(this, args);
       if (!active) return result;
       void result.then((response) => {
@@ -498,6 +549,7 @@
           method = String(explicit || inherited || 'GET').toUpperCase();
         } catch { return; }
         inspectHistoryLimit(response, responseAt, method);
+        void inspectDeleted(response, method, sentTo, responseAt).catch(() => {});
         void inspect(response, observedAt, order).catch(() => {});
         void inspectSystemHints(response).catch(() => {});
         if (method === 'POST') void inspectRequestOrigins(response, observedAt).catch(() => {});
@@ -522,6 +574,7 @@
     if (!active || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
     if (latest) post(latest, location.origin);
     if (latestHistoryLimit && latestHistoryLimit.retryAt > Date.now()) post(latestHistoryLimit, location.origin);
+    if (latestDeleted) post(latestDeleted, location.origin);
     if (coreMention) post(coreMention, location.origin);
     // Newest first: old evidence must not fill content's 16-ID pending capacity
     // before the current workflow can enter it during document startup.
@@ -530,7 +583,7 @@
   };
   const hide = () => {
     for (const reader of originReaders) void reader.cancel().catch(() => {});
-    origins.clear(); latestHistoryLimit = null;
+    origins.clear(); latestHistoryLimit = null; latestDeleted = null;
   };
   window.addEventListener('message', request);
   window.addEventListener('pagehide', hide);
@@ -541,7 +594,7 @@
     dispose() {
       active = false;
       for (const reader of readers) void reader.cancel().catch(() => {});
-      readers.clear(); origins.clear(); latest = null; latestHistoryLimit = null;
+      readers.clear(); origins.clear(); latest = null; latestHistoryLimit = null; latestDeleted = null;
       window.removeEventListener('message', request); window.removeEventListener('pagehide', hide);
       window.removeEventListener('DOMContentLoaded', installFetchObserver);
       window.removeEventListener('DOMContentLoaded', installSocketObserver);
