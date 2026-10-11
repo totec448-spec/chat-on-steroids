@@ -2985,7 +2985,7 @@ describe('restart', () => {
     expect(snapshotSwarm()).toBeNull();
   });
 
-  it('keeps a recorded worker isolated after the broker drops a seven-day-old family and its retired fence expires', async () => {
+  it('keeps a recorded managed worker isolated after its broker family and ordinary retired fence expire', async () => {
     const staged = stageSpawn({ caller: prime, workers: [{ task: 'never use the prime checkout' }] });
     markStagedWorkerWorktree(staged.runId, 'worker-1');
     staged.prepareDurability();
@@ -3011,17 +3011,73 @@ describe('restart', () => {
       vi.setSystemTime(Date.now() + 31 * 60_000);
       expect(retiredWorkerForConversation(conversationId)).toBeNull();
       expect(managedWorkerWorktreeRequired({ conversationId })).toBe(false);
-      expect(await managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(true);
-      expect(await managedWorkerIsolationRequired({ conversationId })).toBe(true);
+      expect(managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(true);
+      expect(managedWorkerIsolationRequired({ conversationId })).toBe(true);
       expect(() => stageSpawn({ caller: { conversationId }, workers: [{ task: 'stale worker cannot become prime' }] }))
         .toThrow('WORKTREE_OWNER_UNAVAILABLE');
       // A different exact chat cannot borrow a worker's session id as an identity fence.
-      expect(await managedWorkerIsolationRequired({ conversationId: PRIME_CHAT, sessionId: session.id })).toBe(false);
-      expect(await managedWorkerIsolationRequired({ conversationId: 'ordinary-unmanaged-chat' })).toBe(false);
+      expect(managedWorkerIsolationRequired({ conversationId: PRIME_CHAT, sessionId: session.id })).toBe(false);
+      expect(managedWorkerIsolationRequired({ conversationId: 'ordinary-unmanaged-chat' })).toBe(false);
+      const evicted = structuredClone(snapshotSwarm());
+      expect(evicted?.managedRetiredConversations).toContain(conversationId);
       resetAgentsForTests();
-      expect(await managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(true);
+      restoreSwarm(evicted);
+      expect(managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(true);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('lets pre-feature orphaned worker sessions keep their original workspace with autoWorktrees Off', async () => {
+    const priorConfig = getConfig();
+    await saveConfig({ ...priorConfig, multiAgent: { ...priorConfig.multiAgent, autoWorktrees: false } });
+    try {
+      const staged = stageSpawn({ caller: prime, workers: [{ task: 'legacy worker without managed checkout' }] });
+      staged.commit();
+      const conversationId = 'old-unmanaged-worker-origin';
+      expect(bindConversation('worker-1', conversationId, staged.runId)).toBe(true);
+      const session = await createSession({ conversationId, origin: {
+        kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'legacy worker without managed checkout'
+      } });
+      sleepWorker('worker-1', 'done', staged.runId);
+      expect(releaseQuiescentRun()).toBe(true);
+      const parked = structuredClone(snapshotSwarm());
+      resetAgentsForTests();
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(parked!.savedAt + 8 * 24 * 60 * 60_000);
+        restoreSwarm(parked);
+        vi.setSystemTime(Date.now() + 31 * 60_000);
+        expect(retiredWorkerForConversation(conversationId)).toBeNull();
+        expect((await getSession(session.id))?.origin?.kind).toBe('worker');
+        expect(snapshotSwarm()?.managedRetiredConversations).toBeUndefined();
+        expect(managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(false);
+        expect(managedWorkerIsolationRequired({ conversationId })).toBe(false);
+        const afterEviction = structuredClone(snapshotSwarm());
+        resetAgentsForTests();
+        restoreSwarm(afterEviction);
+        expect(managedWorkerIsolationRequired({ conversationId })).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      await saveConfig(priorConfig);
+    }
+  });
+
+  it('checks unmanaged and managed identities without touching an uninitialized session store', () => {
+    resetSessionStoreForTests();
+    try {
+      expect(managedWorkerIsolationRequired({ conversationId: 'plain-prime', sessionId: 'not/a/session-id' })).toBe(false);
+      expect(managedWorkerIsolationRequired({ conversationId: 'old-worker-without-allocation', sessionId: 'not/a/session-id' })).toBe(false);
+      const staged = stageSpawn({ caller: prime, workers: [{ task: 'isolated even before session storage starts' }] });
+      markStagedWorkerWorktree(staged.runId, 'worker-1');
+      staged.commit();
+      const conversationId = 'managed-without-session-store';
+      expect(bindConversation('worker-1', conversationId, staged.runId)).toBe(true);
+      expect(managedWorkerIsolationRequired({ conversationId, sessionId: 'not/a/session-id' })).toBe(true);
+    } finally {
+      initSessionStore(dir);
     }
   });
 
@@ -3049,15 +3105,15 @@ describe('restart', () => {
       vi.setSystemTime(Date.now() + 31 * 60_000);
       expect(retiredWorkerForConversation(conversationId)).toBeNull();
       expect(managedWorkerWorktreeRequired({ conversationId })).toBe(false);
-      expect(await managedWorkerIsolationRequired({ conversationId })).toBe(true);
+      expect(managedWorkerIsolationRequired({ conversationId })).toBe(true);
       resetAgentsForTests();
       restoreSwarm(evicted);
       expect(snapshotSwarm()?.managedRetiredConversations).toContain(conversationId);
       expect(managedWorkerAllocationIdentity({ conversationId })).toBeNull();
-      expect(await managedWorkerIsolationRequired({ conversationId })).toBe(true);
+      expect(managedWorkerIsolationRequired({ conversationId })).toBe(true);
       expect(() => stageSpawn({ caller: { conversationId }, workers: [{ task: 'stale worker cannot become prime after restart' }] }))
         .toThrow('WORKTREE_OWNER_UNAVAILABLE');
-      expect(await managedWorkerIsolationRequired({ conversationId: 'plain-chat-without-history' })).toBe(false);
+      expect(managedWorkerIsolationRequired({ conversationId: 'plain-chat-without-history' })).toBe(false);
     } finally {
       vi.useRealTimers();
     }

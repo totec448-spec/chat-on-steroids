@@ -369,6 +369,8 @@ const retiredWorkers = new Map<string, RetiredChat>();
  * No entry can authorize a checkout; snapshots preserve exact browser-bound IDs.
  */
 const retiredManagedWorkerConversations = new Set<string>();
+/** Cheap negative guard for the common feature-off installation, where no worker ever had a checkout. */
+let managedWorktreeHistoryPossible = false;
 /**
  * Durable cleanup authority for accepted worker checkouts after their broker family is
  * cleared or evicted. A filesystem marker alone cannot authorize a retired allocation.
@@ -1860,6 +1862,7 @@ export function markStagedWorkerWorktree(runId: string, agentId: string): void {
     throw new AgentError('WORKTREE_OWNER_MISMATCH: worker allocation identity changed during staging');
   }
   agent.info.managedWorktree = true;
+  managedWorktreeHistoryPossible = true;
   // Another family's acceptance writer may already be draining the staged topology. This
   // policy change needs its own critical revision so that writer cannot certify an earlier
   // snapshot lacking the worktree requirement as the final accepted spawn state.
@@ -1868,6 +1871,7 @@ export function markStagedWorkerWorktree(runId: string, agentId: string): void {
 
 /** Require isolation only for workers whose accepted broker record says it was allocated. */
 export function managedWorkerWorktreeRequired(input: Caller): boolean {
+  if (!managedWorktreeHistoryPossible) return false;
   const caller = exactCaller(input);
   if (!caller.conversationId) return false;
   // Even a corrupt or multiply claimed restored conversation must retain its isolation
@@ -1878,24 +1882,21 @@ export function managedWorkerWorktreeRequired(input: Caller): boolean {
 }
 
 /**
- * A broker family is retained for at most seven days after parking, whereas a session's
- * worker origin survives that family. A formerly isolated worker must never inherit its
- * prime's project when the generic 30-minute retired-worker fence also expires. Check the
- * exact durable attachment before any privileged path/command can use a default cwd.
+ * The managed allocation is an accepted broker fact, not a property of a worker-origin
+ * recording. Legacy workers never allocated a worktree and retain their original cwd, even
+ * after their broker history expires. An isolated worker, by contrast, must remain fenced
+ * after its family and ordinary retired lease expire. The snapshot's exact-chat tombstones
+ * survive those limits even when recording is Off; they never restore checkout ownership.
  *
- * Any orphaned worker-origin chat is refused, including older recordings made before
- * managedWorktree existed. A currently broker-owned ordinary worker keeps its legacy cwd.
- * This is a denial fence only: session metadata does not recover allocation authority.
+ * This is a synchronous, in-memory check on every workspace lookup. In particular, it must
+ * not touch the session store: ordinary chats and pre-feature worker chats can call this
+ * before the session store is initialized, or after their histories have been pruned.
  */
-export async function managedWorkerIsolationRequired(input: Caller): Promise<boolean> {
+export function managedWorkerIsolationRequired(input: Caller): boolean {
+  if (!managedWorktreeHistoryPossible && retiredManagedWorkerConversations.size === 0) return false;
   const caller = exactCaller(input);
   if (managedWorkerWorktreeRequired(caller)) return true;
-  if (caller.conversationId && retiredManagedWorkerConversations.has(caller.conversationId)) return true;
-  if (!caller.conversationId || isWorkerConversation(caller.conversationId)) return false;
-  const session = caller.sessionId
-    ? await getSession(caller.sessionId)
-    : await findSessionByConversation(caller.conversationId, { requireUnique: true });
-  return session?.conversationId === caller.conversationId && session.origin?.kind === 'worker';
+  return Boolean(caller.conversationId && retiredManagedWorkerConversations.has(caller.conversationId));
 }
 
 /**
@@ -5192,6 +5193,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   runs.clear();
   dormantRuns.clear();
   retiredManagedWorkerConversations.clear();
+  managedWorktreeHistoryPossible = false;
   managedWorktreeCleanupHistory.clear();
   unpublishedRuns.clear();
   activeSpawnStages.clear();
@@ -5473,6 +5475,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
     }
     recount(agent);
     agents.set(entry.info.id, agent);
+    if (agent.info.role === 'worker' && agent.info.managedWorktree) managedWorktreeHistoryPossible = true;
   }
   return { agents, repaired };
 }
@@ -5485,6 +5488,7 @@ export function resetAgentsForTests(): void {
   runs.clear();
   dormantRuns.clear();
   retiredManagedWorkerConversations.clear();
+  managedWorktreeHistoryPossible = false;
   managedWorktreeCleanupHistory.clear();
   archivedAssignments.clear();
   consecutiveWakeFailures.clear();

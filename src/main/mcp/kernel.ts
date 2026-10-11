@@ -1262,10 +1262,10 @@ async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: st
   const sessionId = call?.caller.sessionId;
   // Session project metadata is inherited by workers for grouping; the broker's exact
   // worktree allocation must take precedence, including after a restart or revival.
-  // An evicted broker family is not permission to use the inherited Prime project.
-  // The durable exact-chat worker origin survives the finite broker-history window;
-  // require the former managed checkout (and fail closed if it cannot be proven).
-  if (call && await managedWorkerIsolationRequired(call.caller)) {
+  // An evicted managed broker family is not permission to use the inherited Prime project.
+  // Exact-chat managed allocation/tombstone proof survives the finite broker-history window;
+  // ordinary and older unmanaged workers never acquire an isolation requirement by origin.
+  if (call && managedWorkerIsolationRequired(call.caller)) {
     const allocation = managedWorkerAllocationIdentity(call.caller);
     const lease = allocation && call.agent === allocation.agentId ? lookupWorkerWorkspace(allocation) : null;
     if (!lease) {

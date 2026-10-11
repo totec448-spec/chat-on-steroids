@@ -134,11 +134,67 @@ describe('automatic worker Git worktrees', () => {
     expect(await fs.readFile(path.join(repo, 'file.txt'), 'utf8')).toBe('user source edit\n');
   });
 
+  it('accepts the originally approved filesystem alias across validation, restart and cleanup', async () => {
+    // macOS tmpdirs may be spelled /var/... but have /private/var/... as their
+    // realpath. Use an explicit symlink/junction to exercise that distinction
+    // on Windows and Linux too.
+    const alias = path.join(temp, 'approved-alias');
+    await fs.symlink(approved, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    roots = [{ name: 'approved', path: alias }];
+    const lease = await allocate();
+    expect(lease.approvedRoot).toEqual({ name: 'approved', path: alias });
+    expect(lease.worktreePath.startsWith(await fs.realpath(approved))).toBe(true);
+    await expect(validateWorkerWorkspaceLease(lease, roots)).resolves.toMatchObject({
+      ownershipToken: lease.ownershipToken
+    });
+
+    resetWorkerWorktreeRegistryForTests();
+    const restored = await restoreManagedWorktrees(roots, ACCEPTED);
+    expect(restored.rejected).toEqual([]);
+    expect(restored.restored).toHaveLength(1);
+    await expect(validateWorkerWorkspaceLease(restored.restored[0]!, roots)).resolves.toMatchObject({
+      ownershipToken: lease.ownershipToken
+    });
+
+    resetWorkerWorktreeRegistryForTests();
+    const offer = { runId: RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt, reason: 'cleared' };
+    expect(await listOfferedWorkerWorktrees(roots, [offer])).toMatchObject([{
+      runId: RUN_ID, agentId: 'worker-1', canOfferRemoval: true
+    }]);
+    const disposed = await disposeOfferedWorkerWorktree(roots, offer, []);
+    expect(disposed).toMatchObject({ removed: true, branchRemoved: false });
+    expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    expect(await fs.readFile(path.join(repo, 'file.txt'), 'utf8')).toBe('base\n');
+  });
+
+  it('revokes an originally approved alias when it is repointed to another directory', async () => {
+    const alias = path.join(temp, 'approved-alias');
+    await fs.symlink(approved, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    roots = [{ name: 'approved', path: alias }];
+    const lease = await allocate();
+    const markerPath = path.join(path.dirname(lease.worktreePath), 'owner.json');
+    const replacement = path.join(temp, 'different-folder');
+    await fs.mkdir(replacement);
+    await fs.unlink(alias);
+    await fs.symlink(replacement, alias, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await expect(validateWorkerWorkspaceLease(lease, roots)).rejects.toMatchObject({ code: 'WORKTREE_ROOT_CHANGED' });
+    expect(lookupWorkerWorkspace(ACCEPTED[0])).toBeNull();
+    resetWorkerWorktreeRegistryForTests();
+    expect((await restoreManagedWorktrees(roots, ACCEPTED)).restored).toEqual([]);
+    expect(await listOfferedWorkerWorktrees(roots, [{
+      runId: RUN_ID, agentId: 'worker-1', createdAt: lease.createdAt, reason: 'cleared'
+    }])).toEqual([]);
+    expect(await fs.readFile(markerPath, 'utf8')).toContain(lease.ownershipToken);
+    expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+  });
+
   it('fails closed if the owning approved root goes offline while another approved root remains available', async () => {
     const otherRoot = path.join(temp, 'unrelated-approved');
     await fs.mkdir(otherRoot);
     roots.push({ name: 'other', path: otherRoot });
     const lease = await allocate();
+    const approvedReal = await fs.realpath(approved);
     const markerPath = path.join(path.dirname(lease.worktreePath), 'owner.json');
     const moved = path.join(temp, 'temporarily-offline');
     const branchHead = git(repo, ['rev-parse', lease.branchRef]);
@@ -147,7 +203,7 @@ describe('automatic worker Git worktrees', () => {
     await expect(validateWorkerWorkspaceLease(lease, roots)).rejects.toMatchObject({ code: 'WORKTREE_ROOT_CHANGED' });
     expect(lookupWorkerWorkspace({ runId: RUN_ID, agentId: 'worker-1' })).toBeNull();
     expect(await fs.readFile(path.join(moved, 'repo', 'file.txt'), 'utf8')).toBe('base\n');
-    expect(await fs.readFile(path.join(moved, path.relative(approved, markerPath)), 'utf8')).toContain(lease.ownershipToken);
+    expect(await fs.readFile(path.join(moved, path.relative(approvedReal, markerPath)), 'utf8')).toContain(lease.ownershipToken);
     expect(git(path.join(moved, 'repo'), ['rev-parse', lease.branchRef])).toBe(branchHead);
 
     await fs.rename(moved, approved);
