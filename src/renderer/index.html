@@ -1316,16 +1316,24 @@
           </header>
           <section class="card update-readiness" aria-labelledby="updateReadinessTitle">
             <h2 id="updateReadinessTitle">Update status</h2>
-            <p id="updateReadinessSummary" role="status"></p>
+            <div class="update-readiness-status">
+              <p id="updateReadinessSummary" role="status"></p>
+              <p id="updateAllError" class="is-warn" role="alert" hidden></p>
+            </div>
             <details id="updateReadinessDetails" open>
               <summary>Component details</summary>
-              <p id="updateAllError" class="is-warn" role="alert" hidden></p>
               <p class="muted">App, browser extension and ChatGPT connectors.</p>
               <ul id="updateReadinessRows"></ul>
-              <p class="muted">Updates supported components and keeps your settings. The app may restart; manual steps appear in the status list.</p>
+              <p class="muted">Your settings are kept. Manual steps appear in the status list.</p>
               <button class="btn" id="updateReviewSetup" type="button">Review setup</button>
             </details>
-            <button class="btn btn-solid" id="updateAll" type="button">Update all</button>
+            <div class="update-readiness-actions">
+              <p class="muted" id="updateAllNotice">The app may restart. Finish active work before updating.</p>
+              <div class="update-readiness-buttons">
+                <button class="btn btn-solid" id="updateAll" type="button">Update all</button>
+                <button class="btn" id="updateDiagnosticsReport" type="button" hidden>Diagnostics report</button>
+              </div>
+            </div>
           </section>
           <section class="card">
             <h2>

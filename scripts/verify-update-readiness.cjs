@@ -31,6 +31,7 @@ app.whenReady().then(async () => {
       getSwarm:()=>ok({running:false,agents:[],pendingReports:0}),getChatModels:()=>ok({state:'unknown',models:[]}),
       onStateChanged:fn=>{listener=fn;return()=>{}},onSessionChanged:()=>()=>{},
       installUpdate:()=>{window.mutations.push('install');return ok(true)},connect:()=>{window.mutations.push('connect');return ok(state)},
+      saveDiagnosticsReport:()=>{window.mutations.push('diagnostics-report');return ok({saved:false})},
       updateAll:()=>{window.mutations.push('update-all');return new Promise((resolve,reject)=>{
         window.fixtureFinishUpdate=(reply={ok:true,data:'checking-connectors'})=>resolve(reply);
         window.fixtureRejectUpdate=reason=>reject(new Error(reason));
@@ -155,7 +156,39 @@ app.whenReady().then(async () => {
       assert.equal(await js(`document.getElementById('updateAllError').hidden`),true);
       assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
     }
+    // All locales must keep failures and recovery actions accessible outside closed details.
+    win.setContentSize(700,600);
+    for (const lang of ['en','ja','de','es','fr','ko','pt-BR','pt-PT','ru','tr','vi','zh-CN','zh-TW']) {
+      await open('lang='+lang);
+      await js(`(()=>{const size=document.getElementById('appearanceSize');size.value='18';size.dispatchEvent(new Event('input',{bubbles:true}));
+        const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';
+        next.status.surfaces.push({...next.status.surfaces[0],id:'plugins',connectorName:'Chat On Steroids Plugins',optional:true,tools:[]});
+        window.fixturePush(next)})()`);
+      const noTools = lang==='en' ? 'No tools published' : JSON.parse(fs.readFileSync(path.join(root,'src/renderer/locales',lang+'.json'),'utf8'))['No tools published'];
+      assert.equal(await js(`Number(getComputedStyle(document.documentElement).getPropertyValue('--text-scale'))`),18/14,lang+' maximum text size is applied');
+      assert.ok(await js(`document.querySelector('[data-update-part="plugins"]').textContent.includes(${JSON.stringify(noTools)})`),lang);
+      await js(`document.getElementById('updateReviewSetup').scrollIntoView({block:'nearest'})`);
+      assert.equal(await js(`(()=>{const b=document.getElementById('updateReviewSetup'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' setup is reachable at maximum text size');
+      await js(`document.getElementById('updateReadinessDetails').scrollTop=0;document.querySelector('#updateReadinessDetails > summary').click();
+        document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'Could not read plugin-refresh state'})`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      await until(`!document.querySelector('.toast')`);
+      const accessible=await js(`(()=>{const card=document.querySelector('.update-readiness'),b=document.getElementById('updateAll'),r=b.getBoundingClientRect(),e=document.getElementById('updateAllError'),n=document.getElementById('updateAllNotice'),d=document.getElementById('updateReadinessDetails');return {closed:!d.open,visible:e.checkVisibility(),outside:!d.contains(e)&&!d.contains(n),errorBottom:e.getBoundingClientRect().bottom,buttonVisible:r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)),sideways:card.scrollWidth>card.clientWidth+1,clipped:[...card.querySelectorAll('p,button')].filter(x=>x.checkVisibility()&&x.scrollWidth>x.clientWidth+1).map(x=>x.id),text:e.textContent,viewport:innerHeight}})()`);
+      assert.ok(accessible.closed&&accessible.visible&&accessible.outside&&accessible.buttonVisible&&!accessible.sideways&&!accessible.clipped.length&&accessible.errorBottom<=accessible.viewport,lang+': '+JSON.stringify(accessible));
+      assert.ok(!accessible.text.includes('Could not read plugin-refresh state'),lang+' authored diagnostic is translated');
+      assert.deepEqual(await js('window.mutations'),['update-all'],'No implicit retry');
+      const recovery = await js(`(()=>{const b=document.getElementById('updateDiagnosticsReport'),r=b.getBoundingClientRect(),d=document.getElementById('updateReadinessDetails');return {visible:b.checkVisibility(),outside:!d.contains(b),bottom:r.bottom,reachable:b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)),viewport:innerHeight}})()`);
+      assert.ok(recovery.visible&&recovery.outside&&recovery.reachable&&recovery.bottom<=recovery.viewport,lang+' recovery action: '+JSON.stringify(recovery));
+      if(lang==='en'){await pause(600);await shot('collapsed-failure-max-text-en.png');}
+      await js(`document.getElementById('updateDiagnosticsReport').click()`);
+      await until(`!document.getElementById('updateDiagnosticsReport').disabled`);
+      assert.deepEqual(await js('window.mutations'),['update-all','diagnostics-report'],'Saving a report cannot retry the update');
+      await js(`window.fixturePush(window.fixtureState)`);
+      assert.equal(await js(`document.getElementById('updateAllError').checkVisibility()`),true);
+      assert.deepEqual(await js('window.mutations'),['update-all','diagnostics-report']);
+      console.log('PASS locale: '+lang+'; closed details, translated failure, both actions reachable, no implicit retry');
+    }
     assert.deepEqual(errors,[],'No production renderer errors');
-    console.log('PASS: production update status, proofs, transitions, keyboard action, read-only pushes, error guidance, persistent reply/IPC failures and explicit retry; en/ja/de, both themes and narrow layout');
+    console.log('PASS: production update status, proofs, transitions, keyboard action, read-only pushes, persistent reply/IPC failures and explicit retry; all 13 locales at 700x600 and 18px, translated recovery guidance and diagnostics action outside collapsed details');
   } finally { win?.destroy(); await new Promise(resolve=>server.close(resolve)); app.quit(); }
 }).catch(error=>{ console.error(error); app.exit(1); });

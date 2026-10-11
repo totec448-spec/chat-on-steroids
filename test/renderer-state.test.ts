@@ -2323,19 +2323,22 @@ it('reports update readiness only from checked versions and current connector ev
   working.connectorRefresh = { core: { schemaId: 'schema-a', state: 'unknown', responding: true } };
   push(working);
   expect(summary().dataset.ready).toBe('true');
-  expect(summary().textContent).toBe('Ready to use; full connector schema not verified');
+  expect(summary().textContent).toBe('Ready to use; tool definitions not fully verified');
   expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(false);
   push(ready);
   const optionalOff = structuredClone(ready);
   optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
   push(optionalOff);
   expect(summary().dataset.ready).toBe('true');
+  expect(w.document.querySelector('[data-update-part="desktop"]')!.textContent).toContain('Not enabled');
   const emptyPlugins = structuredClone(ready);
   emptyPlugins.status.surfaces.push({ ...ready.status.surfaces[0], id: 'plugins', connectorName: 'Plugins', optional: true, tools: [], lastRequestAt: null } as any);
   emptyPlugins.connectorSchemas.plugins = 'empty-schema';
   emptyPlugins.connectorRefresh.plugins = { schemaId: 'empty-schema', state: 'pending' };
   push(emptyPlugins);
   expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.textContent).toContain('No tools published');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.textContent).not.toContain('Not enabled');
   expect(w.document.querySelector('[data-update-part="plugins"]')!.classList.contains('is-skipped')).toBe(true);
   const enabledPlugins = structuredClone(emptyPlugins);
   enabledPlugins.status.surfaces.at(-1)!.tools = ['plugin_tool'];
@@ -2401,7 +2404,8 @@ it('shows update failure causes and next steps without using stale connector dia
   next.connectorRefresh.core.schemaId = 'old'; push(next);
   expect(row('core')).not.toContain('Could not confirm');
   next.connectorRefresh.core = { schemaId: 'current', state: 'manual' }; push(next);
-  expect(row('core')).toContain('Refresh or recreate');
+  expect(row('core')).toContain("ChatGPT's connector settings");
+  expect(row('core')).toContain('refresh or recreate');
   expect(row('core')).toContain('Update all to recheck');
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('ja');
@@ -2417,20 +2421,78 @@ it.each(['reply', 'transport'])('keeps an Update all %s failure visible across p
     .mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   const { window: w, state, push } = await mountChat({}, [], { updateAll });
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const details = w.document.getElementById('updateReadinessDetails') as HTMLDetailsElement;
+  details.open = false;
   button.click();
   await vi.waitFor(() => expect(button.disabled).toBe(false));
   const error = w.document.getElementById('updateAllError')!;
   expect(error.hidden).toBe(false);
   expect(error.textContent).toContain('Network unavailable');
   expect(error.textContent).toContain('Update all to retry');
+  expect(details.open).toBe(false);
+  expect(details.contains(error)).toBe(false);
+  expect(details.contains(w.document.getElementById('updateAllNotice'))).toBe(false);
   push(structuredClone(state));
   expect(error.hidden).toBe(false);
+  expect(details.open).toBe(false);
   expect(updateAll).toHaveBeenCalledTimes(1);
   button.click();
   expect(error.hidden).toBe(true);
   resolve({ ok: true, data: 'checking-connectors' });
   await vi.waitFor(() => expect(button.disabled).toBe(false));
   expect(error.hidden).toBe(true);
+});
+
+it('translates updater reasons and retained recovery guidance when the language changes', async () => {
+  const updateAll = vi.fn().mockResolvedValue({ ok: false, error: 'Could not read plugin-refresh state' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const next = structuredClone(state);
+  next.update.stage = 'failed'; next.update.error = 'Update check failed';
+  push(next);
+  expect(w.document.querySelector('[data-update-part="app"] .is-warn')!.textContent).toBe(t('Update check failed'));
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+  const error = w.document.getElementById('updateAllError')!;
+  expect(error.textContent).not.toContain('Could not read plugin-refresh state');
+  expect(error.textContent).toContain(t('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'));
+  setLanguage('ja');
+  expect(error.textContent).toContain('診断レポート');
+  expect(w.document.querySelector('[data-update-part="app"] .is-warn')!.textContent).toBe('更新の確認に失敗しました');
+  push(next);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  expect(error.hidden).toBe(false);
+  setLanguage('en');
+});
+
+it.each(['cancelled', 'failed', 'transport'])('offers the existing diagnostics action after an unreadable-state failure and keeps a %s report from retrying updates', async outcome => {
+  let finish!: (reply: any) => void;
+  let reject!: (error: Error) => void;
+  const saveDiagnosticsReport = vi.fn(() => new Promise((done, fail) => { finish = done; reject = fail; }));
+  const updateAll = vi.fn().mockResolvedValueOnce({ ok: false, error: 'Could not read plugin-refresh state' })
+    .mockResolvedValueOnce({ ok: true, data: 'checking-connectors' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll, saveDiagnosticsReport });
+  const update = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const shortcut = w.document.getElementById('updateDiagnosticsReport') as HTMLButtonElement;
+  const original = w.document.getElementById('saveDiagnosticsReport') as HTMLButtonElement;
+  expect(shortcut.hidden).toBe(true);
+  update.click(); await vi.waitFor(() => expect(update.disabled).toBe(false));
+  expect(shortcut.hidden).toBe(false);
+  shortcut.click(); original.click();
+  expect(saveDiagnosticsReport).toHaveBeenCalledTimes(1);
+  expect(shortcut.disabled).toBe(true); expect(original.disabled).toBe(true);
+  push(structuredClone(state));
+  expect(shortcut.disabled).toBe(true);
+  if (outcome === 'transport') reject(new Error('Fixture report transport error'));
+  else finish(outcome === 'cancelled' ? { ok: true, data: { saved: false } } : { ok: false, error: 'Fixture report error' });
+  await vi.waitFor(() => expect(shortcut.disabled).toBe(false));
+  expect(original.disabled).toBe(false);
+  expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  update.click(); await vi.waitFor(() => expect(update.disabled).toBe(false));
+  expect(shortcut.hidden).toBe(true);
+  expect(saveDiagnosticsReport).toHaveBeenCalledTimes(1);
 });
 
 it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
@@ -2449,7 +2511,7 @@ it('runs Update all once on explicit click and keeps it busy across state pushes
   button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
   resolve({ ok: true, data: 'manual' });
   await vi.waitFor(() => expect(button.disabled).toBe(false));
-  expect(w.document.body.textContent).toContain('Download opened. Install the app to continue');
+  expect(w.document.body.textContent).toContain('Download link opened. Install the app to continue');
 });
 
 it('reports a staged update in the Activity line and the header bar', async () => {

@@ -1,6 +1,7 @@
 import type { AppState } from '../shared/types.js';
 import { $, el } from './dom.js';
 import { t, ui } from './i18n.js';
+import { updateErrorNextStep, updateErrorText } from './update-error.js';
 
 interface ReadinessRow {
   id: string;
@@ -27,7 +28,7 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
   const rows: ReadinessRow[] = [
     { id: 'app', label: 'Chat On Steroids', status: appReady ? 'pass' : update.stage === 'failed' ? 'fail' : 'not-run',
       detail: t('Version {0}', [update.current]) + ' · ' + appDetail,
-      reason: update.stage === 'failed' ? update.error ?? undefined : undefined,
+      reason: update.stage === 'failed' && update.error ? updateErrorText(update.error) : undefined,
       nextStep: update.stage === 'failed' ? t('Choose Update all to retry. You can keep using the current app.') : undefined },
     { id: 'extension', label: t('Browser extension'), status: extensionReady ? 'pass' : 'not-run',
       detail: (bridge.extensionVersion ? t('Version {0}', [bridge.extensionVersion]) + ' · ' : '') +
@@ -47,14 +48,16 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
   for (const surface of surfaces) {
     const refresh = next.connectorRefresh?.[surface.id];
     const sameSchema = !!next.connectorSchemas?.[surface.id] && refresh?.schemaId === next.connectorSchemas[surface.id];
-    const off = surface.optional && (surface.state === 'off' || surface.tools.length === 0);
+    const disabled = surface.optional && surface.state === 'off';
+    const noTools = surface.optional && !disabled && surface.tools.length === 0;
+    const off = disabled || noTools;
     const connected = surface.state === 'live' && status.state === 'connected';
     const verified = connected && surface.lastRequestAt != null && sameSchema && refresh?.state === 'current';
     const functional = connected && sameSchema && refresh?.responding === true;
     const surfaceFailed = surface.state === 'error' || connectionFailed;
-    const detail = off ? t('Not enabled') : !connected ? t('Not connected')
+    const detail = disabled ? t('Not enabled') : noTools ? t('No tools published') : !connected ? t('Not connected')
       : !sameSchema ? t('Not verified in ChatGPT')
-      : functional && !verified && refresh?.state === 'unknown' ? t('Tool call succeeded; full schema not verified')
+      : functional && !verified && refresh?.state === 'unknown' ? t('Tool call succeeded; full tool definitions not verified')
       : refresh?.state === 'manual' ? t('Manual refresh required in ChatGPT')
       : refresh?.state === 'failed' ? t('Connector refresh failed')
       : refresh?.state === 'refreshing' ? t('Waiting for refresh confirmation')
@@ -65,18 +68,18 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
     const reason = off ? undefined : !connected ? (surfaceFailed || status.state === 'disconnected') && connectionDetail ? t(connectionDetail) : undefined
       : sameSchema && refresh?.state === 'failed' ? refresh.failure === 'inspection'
         ? t('Could not inspect the installed connector in ChatGPT.')
-        : refresh.failure === 'confirmation' ? t('Could not confirm the current connector schema in ChatGPT.') : undefined : undefined;
+        : refresh.failure === 'confirmation' ? t('Could not confirm the current connector tool definitions in ChatGPT.') : undefined : undefined;
     const nextStep = off || verified ? undefined : !connected
       ? t('Choose Review setup to check the connection, then choose Update all to retry.')
       : sameSchema && refresh?.state === 'manual'
-        ? t('Refresh or recreate this connector in ChatGPT, then choose Update all to recheck.')
+        ? t("In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.")
       : sameSchema && refresh?.state === 'failed'
         ? t('Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.')
       : sameSchema && refresh?.state === 'refreshing'
         ? t('Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.')
       : sameSchema && refresh?.state === 'current'
         ? t('Run a tool through this connector in ChatGPT to confirm this connection.')
-      : t('Choose Update all to check the installed connector schema.');
+      : t('Choose Update all to check the installed connector tool definitions.');
     rows.push({ id: surface.id, label: surface.connectorName, reason, nextStep,
       schemaUnchecked: !off && functional && !verified,
       status: off ? 'skipped' : verified || (functional && refresh?.state === 'unknown') ? 'pass' : surfaceFailed || (sameSchema && refresh?.state === 'failed') ? 'fail' : 'not-run', detail });
@@ -90,7 +93,7 @@ export function paintUpdateReadiness(next: AppState, operationError: string | nu
   const schemaUnchecked = rows.some(row => row.schemaUnchecked);
   const summary = $('updateReadinessSummary');
   summary.dataset.ready = String(ready);
-  ui(summary, 'textContent', () => ready ? schemaUnchecked ? t('Ready to use; full connector schema not verified') : t('All checks passed') : t('Checks incomplete'));
+  ui(summary, 'textContent', () => ready ? schemaUnchecked ? t('Ready to use; tool definitions not fully verified') : t('All checks passed') : t('Checks incomplete'));
   const details = $<HTMLDetailsElement>('updateReadinessDetails');
   if (details.dataset.ready !== String(ready)) {
     if (!ready || !details.contains(document.activeElement)) details.open = !ready;
@@ -99,7 +102,8 @@ export function paintUpdateReadiness(next: AppState, operationError: string | nu
   summary.classList.toggle('is-ok', ready);
   const error = $('updateAllError');
   error.hidden = !operationError;
-  ui(error, 'textContent', () => operationError ? t('Update all could not finish: {0}. Choose Update all to retry.', [t(operationError)]) : '');
+  $('updateDiagnosticsReport').hidden = operationError !== 'Could not read plugin-refresh state';
+  ui(error, 'textContent', () => operationError ? t('Update all could not finish: {0}', [updateErrorText(operationError)]) + '\n' + updateErrorNextStep(operationError) : '');
   $('updateReadinessRows').replaceChildren(...rows.map(row => {
     const item = el('li', row.status === 'pass' ? 'check is-ok' : row.status === 'fail' ? 'check is-bad' : `check is-${row.status}`);
     item.dataset.updatePart = row.id;

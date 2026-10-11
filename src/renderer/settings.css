@@ -59,6 +59,10 @@
 .update-readiness .check > div { min-width: 0; overflow-wrap: anywhere; }
 .update-readiness .check p { margin: 4px 0 0; }
 .update-readiness .btn { justify-self: start; }
+.update-readiness-status, .update-readiness-actions { display: grid; gap: 8px; min-width: 0; }
+.update-readiness-status > p, .update-readiness-actions > p { margin: 0; overflow-wrap: anywhere; }
+.update-readiness-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+#updateAllError { white-space: pre-line; }
 #updateReadinessDetails[open] { display: grid; gap: 12px; min-height: 0; overflow: auto; align-content: start; }
 #updateReadinessDetails > summary { cursor: pointer; color: var(--soft); }
 #updateReadinessDetails > p { margin: 0; }

@@ -177,7 +177,7 @@ it('waits a full tunnel grace when an identical schema is published for another 
     expect(await claim(next)).toBe(true);
   } finally { get.mockRestore(); }
 });
-it('ends a failed reobservation of completed evidence without granting a click', async () => {
+it('records the current inspection failure while retaining the older consumed click through restart and recovery', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true });
   expect((await pluginRefreshStatuses()).core?.state).toBe('current');
@@ -185,7 +185,10 @@ it('ends a failed reobservation of completed evidence without granting a click',
   const observation = (await pendingPluginRefreshes(false))[0]!;
   expect(observation.observeOnly).toBe(true);
   expect(await failPluginRefresh({ id: observation.id, error: 'Exact connector settings could not be verified' })).toBe(true);
-  expect((await pluginRefreshStatuses()).core?.state).toBe('failed');
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'inspection' });
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ attempted: true, failure: 'inspection' });
+  resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0); publish();
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'inspection' });
   expect(await hasRequestedPluginRefresh()).toBe(false);
   expect(await pendingPluginRefreshes()).toEqual([]);
   expect(await claim(request)).toBe(false);
@@ -196,6 +199,40 @@ it('ends a failed reobservation of completed evidence without granting a click',
   expect(await claim(recheck)).toBe(false);
   expect(await claimPluginRefresh({ ...recheck, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true }, false)).toBe(true);
   expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+  expect((await readDurable('plugin-refresh') as any[])[0]).not.toHaveProperty('failure');
+});
+it('records confirmation failures only after the current round claimed Refresh', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  await claim(request);
+  await failPluginRefresh({ id: request.id, error: 'No confirmation' });
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'confirmation' });
+  await requestPluginRefreshes(APP_VERSION);
+  const recheck = (await pendingPluginRefreshes(false))[0]!;
+  expect(recheck.observeOnly).toBe(true);
+  expect(await claim(recheck)).toBe(false);
+  await failPluginRefresh({ id: recheck.id, error: 'Could not inspect the connector' });
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'inspection' });
+  expect((await readDurable('plugin-refresh') as any[])[0].attempted).toBe(true);
+});
+it('returns a safe read error for invalid stored records without replacing their contents', async () => {
+  publish(); await requestPluginRefreshes(APP_VERSION);
+  const file = `${directory}/state/plugin-refresh.json`;
+  const broken = JSON.stringify([{ surface: 'private-invalid-surface', error: 'private-record' }]);
+  await fs.writeFile(file, broken); resetPluginRefreshForTests(); publish();
+  await expect(requestPluginRefreshes(APP_VERSION)).rejects.toThrow('Could not read plugin-refresh state');
+  expect(await fs.readFile(file, 'utf8')).toBe(broken);
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+});
+it('projects older failed records without creating new authority or rewriting their missing phase', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!; await claim(request);
+  await failPluginRefresh({ id: request.id, error: 'No confirmation' });
+  const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].failure;
+  await writeDurableNow('plugin-refresh', legacy);
+  const wakes = wake.mock.calls.length;
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'confirmation' });
+  expect(await readDurable('plugin-refresh')).toEqual(legacy);
+  expect(wake).toHaveBeenCalledTimes(wakes);
+  expect(await claim(request)).toBe(false);
 });
 it('projects refresh evidence without creating, repairing or rearming browser work', async () => {
   publish();

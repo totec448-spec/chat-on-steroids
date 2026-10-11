@@ -4045,12 +4045,21 @@ refresh receipts can use it; a newly published tunnel starts its full grace even
 read committed evidence without joining the refresh mutation queue. `AppState.connectorRefresh`
 carries only each currently published surface's
 schema fingerprint, `unknown/current/pending/refreshing/manual/failed` state and optional
-`responding` boolean and a failed phase (`inspection` or `confirmation`); no app IDs,
+`responding` boolean and a failed phase (`inspection` or `confirmation`); the owner records
+the phase of this attempt before ending a read-only observation, retaining earlier consumed
+click authority. Legacy records without the phase retain their conservative projection.
+No app IDs,
 tools or raw refresh errors leave the owner through this projection. The phase applies only
 to failed evidence for the current publication and is never borrowed from an older schema.
 Activity shows existing updater/connection errors and the safe refresh phase with the next
 explicit action. An Update all failure, including rejected IPC, remains visible across state
 pushes until the user retries; a new check clears that operation error, not connector evidence.
+The operation error and the restart notice remain outside collapsed details. App-authored
+update reasons are localized at the renderer boundary; unreadable or invalid refresh state
+keeps its stored contents and directs the user to Activity's Diagnostics report for recovery.
+For that read failure the card exposes the same explicit report action, so it remains reachable
+when the event area has shrunk. Both report buttons join the existing report handler and stay
+disabled during a save; the shortcut does not retry refresh or clear its error.
 Activity's Update status card
 combines it with the updater, bridge and connection owners. All checks pass only after a
 successful release check with no newer app, a live paired extension at the running version,
@@ -4058,7 +4067,7 @@ and every enabled connector is live, reached by ChatGPT in this run, and confirm
 exact current schema. Optional off connectors or ones with no advertised tools do not block
 completion, matching Update all's requested surfaces. Core always remains required. Unknown schema or historical
 connection proof alone never establish full verification. Successful external tool calls under the same live publication
-and tunnel may instead establish **Ready to use; full connector schema not verified** when
+and tunnel may instead establish **Ready to use; tool definitions not fully verified** when
 there is no known stale/manual/failed refresh. This is operational evidence, never a full-schema
 claim. `kernel.dispatch` captures `beginPluginToolCall` before work and confirms only a non-error
 outer provider result; HTTP ingress excludes self-tests and tunnel probes, and a changed schema,

@@ -4,6 +4,7 @@ import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connec
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { paintUpdateReadiness } from './update-readiness.js';
+import { updateErrorText } from './update-error.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -2448,11 +2449,11 @@ updateAllButton.addEventListener('click', async () => {
   if (state) paintUpdateReadiness(state, updateAllError);
   try {
     const reply = await api.updateAll();
-    if (!reply.ok) { updateAllError = reply.error; toast(t(reply.error)); return; }
+    if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
-    if (result === 'manual') toast(t('Download opened. Install the app to continue; your settings are kept.'));
+    if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
-    else if (result === 'checking-connectors') toast(t('Updates requested. Any remaining steps are shown in Update status.'));
+    else if (result === 'checking-connectors') toast(t('Connector checks requested. Any remaining steps are shown in Update status.'));
   } catch (error) {
     updateAllError = error instanceof Error ? error.message : String(error);
   } finally {
@@ -2505,16 +2506,20 @@ for (const id of ['copyLog', 'copyLogText']) {
 }
 
 // One file for a bug report; the main process removes personal details and shows the saved file.
-$('saveDiagnosticsReport').addEventListener('click', async () => {
-  const button = $<HTMLButtonElement>('saveDiagnosticsReport');
-  button.disabled = true;
+const diagnosticsButtons = [$<HTMLButtonElement>('saveDiagnosticsReport'), $<HTMLButtonElement>('updateDiagnosticsReport')];
+async function saveDiagnosticsReport(): Promise<void> {
+  if (diagnosticsButtons.some(button => button.disabled)) return;
+  for (const button of diagnosticsButtons) button.disabled = true;
   try {
     const result = await run(api.saveDiagnosticsReport());
     if (result?.saved) toast(t('Diagnostics report saved as {0}. Read it before you share it.', [result.name]));
+  } catch (error) {
+    toast(t(error instanceof Error ? error.message : String(error)));
   } finally {
-    button.disabled = false;
+    for (const button of diagnosticsButtons) button.disabled = false;
   }
-});
+}
+for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());

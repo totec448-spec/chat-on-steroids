@@ -13,7 +13,7 @@ import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, Plug
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
 const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+$/).optional();
-const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional(), tunnelKey: z.string().optional(), verifiedRun: z.string().optional(), observe: z.boolean().optional().default(false), requestedVersion, requestedFromVersion: requestedVersion }).refine(row => !!row.requestedVersion === !!row.requestedFromVersion);
+const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), failure: z.enum(['inspection', 'confirmation']).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional(), tunnelKey: z.string().optional(), verifiedRun: z.string().optional(), observe: z.boolean().optional().default(false), requestedVersion, requestedFromVersion: requestedVersion }).refine(row => !!row.requestedVersion === !!row.requestedFromVersion);
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
 const publicationScopes = new Map<PluginSurface, string>();
@@ -69,7 +69,12 @@ async function savedRows(retryFailed = false): Promise<Row[]> {
       if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
       entry.rows = result;
       return result;
-    })().catch(error => { entry.failed = true; throw error; });
+    })().catch(() => {
+      entry.failed = true;
+      // Invalid records may contain private values. Report the same safe read failure as
+      // malformed JSON, while retaining the file and all consumed Refresh authority.
+      throw new Error('Could not read plugin-refresh state');
+    });
     savedCache = entry;
   }
   return structuredClone(await savedCache.value);
@@ -85,13 +90,13 @@ async function rows(retryFailed = false): Promise<Row[]> {
   // concrete appId, so null proves these rows never crossed the refresh boundary.
   let repaired = false;
   for (const row of result) if (row.attempted && row.appId === null) {
-    row.attempted = false; delete row.error; repaired = true;
+    row.attempted = false; delete row.error; delete row.failure; repaired = true;
   }
   // A park records what this build could not do. Every row parked on 2026-09-26/27 failed
   // because the extension could not read ChatGPT's new plugin page, and without a schema change
   // or a manual Restart the update that learned to read it would never have been tried.
   for (const row of result) if (row.parked && row.parkedBy !== APP_VERSION) {
-    row.id = randomUUID(); delete row.parked; delete row.parkedBy; delete row.failures; delete row.error; repaired = true;
+    row.id = randomUUID(); delete row.parked; delete row.parkedBy; delete row.failures; delete row.error; delete row.failure; repaired = true;
     logInfo(`plugin refresh unparked surface=${row.surface} for app ${APP_VERSION}`);
   }
   if (repaired) await save(result);
@@ -216,7 +221,7 @@ export function pluginRefreshStatuses(): Promise<Partial<Record<PluginSurface, P
         : row.appId && row.completedSchemaId === publication.schemaId ? (!row.tunnelKey?.startsWith('unbound:') || row.verifiedRun === runId ? 'current' : 'unknown')
         : row.attempted && row.appId ? 'refreshing' : 'pending';
       return [publication.surface, { schemaId: publication.schemaId, state,
-        ...(state === 'failed' ? { failure: row?.attempted && row.appId ? 'confirmation' : 'inspection' } : {}),
+        ...(state === 'failed' ? { failure: row?.failure ?? (row?.attempted && row.appId ? 'confirmation' : 'inspection') } : {}),
         ...(responding.get(publication.surface) === publication && publicationScopes.get(publication.surface) === scope(publication.surface) ? { responding: true } : {}) }];
     }));
   })();
@@ -230,6 +235,7 @@ export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
     if (!publication || !row || row.tunnelKey !== scope(surface) || row.schemaId !== publication.schemaId || row.attempted || row.manual || row.completedSchemaId === row.schemaId) return false;
     row.id = randomUUID();
     delete row.error;
+    delete row.failure;
     delete row.failures;
     delete row.parked;
     delete row.parkedBy;
@@ -299,7 +305,7 @@ export function requestPluginRefreshes(version: string, surfaces: PluginSurface[
       }
       row.requestedVersion = target; row.requestedFromVersion = APP_VERSION;
       if (target === APP_VERSION) {
-        row.id = randomUUID(); delete row.error; delete row.failures; delete row.parked; delete row.parkedBy;
+        row.id = randomUUID(); delete row.error; delete row.failure; delete row.failures; delete row.parked; delete row.parkedBy;
       }
     }
     await save(current);
@@ -361,6 +367,7 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
     row.appId = input.appId; row.attempted = true;
     delete row.error;
+    delete row.failure;
     notePluginInstalled(row.surface);
     // Enrollment/migration may find the installed declaration already current. Record
     // that observation without clicking Refresh or manufacturing a new plugin version.
@@ -385,6 +392,7 @@ export function requireManualPluginRefresh(input: Identity & Enrollment & { erro
     if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools, row.surface)) return false;
     row.appId = input.appId;
     row.manual = true;
+    delete row.failure;
     notePluginInstalled(row.surface);
     row.error = input.error.slice(0, 200);
     await save(current);
@@ -396,7 +404,7 @@ export function completePluginRefresh(input: Identity & { tools: unknown; versio
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
     if (!row || row.manual || !row.attempted || row.appId !== input.appId || !matches(input.tools, publications.get(row.surface)!.tools, row.surface)) return false;
-    row.completedSchemaId = row.schemaId; row.verifiedRun = runId; row.observe = false; delete row.error;
+    row.completedSchemaId = row.schemaId; row.verifiedRun = runId; row.observe = false; delete row.error; delete row.failure;
     if (input.versionId) row.versionId = input.versionId.slice(0, 200);
     await save(current); return true;
   });
@@ -408,6 +416,8 @@ export function failPluginRefresh(input: { id: string; error: string }): Promise
     // Only claimPluginRefresh records an attempted click. Pre-claim failures remain
     // diagnostic errors, distinct from an ambiguous post-click outcome. Existing
     // maintenance may reobserve the same owned page until a claim actually succeeds.
+    // A read-only recheck has no new Refresh click, even if an earlier round did.
+    row.failure = row.observe || !row.attempted || !row.appId ? 'inspection' : 'confirmation';
     row.observe = false;
     row.error = input.error.slice(0, 200);
     row.failures = (row.failures ?? 0) + 1;
