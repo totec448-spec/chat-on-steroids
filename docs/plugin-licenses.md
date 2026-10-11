@@ -10,7 +10,7 @@ license, including its permission and warranty notice in `LICENSE`. No external 
 assets were copied. The icons illustrate the integration's subject (3D, connected
 memory, browser automation, web retrieval, and connectivity), and are not official
 product marks. Product names identify compatible independent integrations and do not
-imply endorsement. This attribution also appears in Settings > Plugins > Legal Notices.
+imply endorsement. This attribution also appears on the app's Plugins page under Legal Notices / Third-party Licenses.
 
 Installed server source, version and license are tracked by the plugin manager. Their
 own license files remain in their installation. Reviewed local-package license snapshots

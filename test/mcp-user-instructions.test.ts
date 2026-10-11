@@ -89,6 +89,9 @@ describe('the user’s own connector instructions', () => {
   it.each(['win32', 'darwin', 'linux'] as const)('teaches the same terminal result lifetime on %s', platform => {
     const text = serverInstructions({ ...ctx, caps: { ...ctx.caps, command: true } }, 'core', platform);
     expect(text).toContain('completed_session_id');
+    // write_stdin has one id argument. completed_session_id is an exec_command result field that
+    // goes into it; read as a second argument, the strict schema refuses the call.
+    expect(text).toContain("pass a finished command's completed_session_id as session_id");
     expect(text).toContain('benign_exit');
     expect(text).toContain('without rerunning work');
     if (platform !== 'win32') {
