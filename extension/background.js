@@ -2085,6 +2085,11 @@ async function adoptBackgroundGroup(owns) {
   }
   return false;
 }
+/** Whether this tab sits in the app's own tab group, where Chrome pauses it once collapsed (#128). */
+async function inAppGroup(tab) {
+  if (!groupsAvailable() || !Number.isInteger(tab?.groupId) || tab.groupId < 0) return false;
+  return (await storedBackgroundGroup())?.id === tab.groupId;
+}
 /** Only app-owned windows are sized; no tab placement changes window focus/state. */
 async function createChatTab(url, background = false, active = !background) {
   if (!background) return chrome.tabs.create({ url, active });
@@ -2884,6 +2889,69 @@ async function runImageExports(jobs) {
   }
 }
 
+/**
+ * Keeps the app's grouped pages from being paused (#128).
+ *
+ * Chrome freezes the tabs of a collapsed tab group within seconds, and a frozen page neither
+ * sends nor records. A page told to keep awake holds a Web Lock, which Chrome's freezing rules
+ * exempt. This pass tells each ChatGPT page in the app's group to hold it and each page that
+ * left the group (or a placement switched back to the window) to let go, once per document.
+ * A page Chrome froze before it could take the lock cannot hear anything, so the group is opened
+ * for it (which unfreezes it); once every grouped page holds its lock, a group opened that way
+ * is collapsed again unless the user is reading one of its tabs.
+ */
+let keepAwakeTabs = null;
+let groupOpenedForWake = null;
+async function keepAwakeState() {
+  if (!keepAwakeTabs) {
+    const stored = (await chrome.storage.session.get('keepAwakeTabs')).keepAwakeTabs;
+    keepAwakeTabs = stored && typeof stored === 'object' ? stored : {};
+  }
+  return keepAwakeTabs;
+}
+async function noteKeepAwake(tabId, documentId, on) {
+  const told = await keepAwakeState();
+  if (on) told[String(tabId)] = documentId;
+  else delete told[String(tabId)];
+  await chrome.storage.session.set({ keepAwakeTabs: told });
+}
+async function syncKeepAwake(tabs, everyTab = true) {
+  const told = await keepAwakeState();
+  const group = groupsAvailable() ? await storedBackgroundGroup() : null;
+  let waiting = false;
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab?.id)) continue;
+    const key = String(tab.id);
+    const documentId = tabDocuments[key];
+    const want = Boolean(group) && tab.groupId === group.id;
+    if (want && (!documentId || told[key] !== documentId)) {
+      if (tab.frozen === true || !documentId) {
+        waiting = true;
+        if (tab.frozen === true && group.collapsed === true && groupOpenedForWake === null) {
+          await chrome.tabGroups.update(group.id, { collapsed: false }).then(() => { groupOpenedForWake = group.id; }, () => undefined);
+        }
+        continue;
+      }
+      const reply = await tabReply(tab.id, { type: 'clf-keep-awake', on: true }, { documentId });
+      if (reply?.ok === true) await noteKeepAwake(tab.id, documentId, true);
+      else waiting = true;
+    } else if (!want && told[key] !== undefined) {
+      if (documentId && told[key] === documentId) await tabReply(tab.id, { type: 'clf-keep-awake', on: false }, { documentId });
+      await noteKeepAwake(tab.id, null, false);
+    }
+  }
+  if (everyTab) {
+    for (const key of Object.keys(told)) if (!tabs.some(tab => String(tab.id) === key)) await noteKeepAwake(key, null, false);
+  }
+  if (everyTab && groupOpenedForWake !== null && !waiting) {
+    const id = groupOpenedForWake;
+    groupOpenedForWake = null;
+    if (group?.id === id && !tabs.some(tab => tab.groupId === id && tab.active === true)) {
+      await chrome.tabGroups.update(id, { collapsed: true }).catch(() => undefined);
+    }
+  }
+}
+
 async function revealChats(ids) {
   if (!Array.isArray(ids)) return;
   for (const raw of ids.slice(0, 5)) {
@@ -3075,6 +3143,7 @@ async function maintainOnce() {
       ...(Number.isInteger(bounds.left) && Number.isInteger(bounds.top) ? { left: bounds.left, top: bounds.top } : {}) };
   }
   const backgroundReady = await reconcileBackgroundWindow(reply.data);
+  await syncKeepAwake(observedTabs).catch(() => undefined);
   if (reply.data.placement) {
     await placeSuccessorChat(reply.data.placement, null);
     await refreshRendering();
@@ -3728,7 +3797,14 @@ const HANDLERS = {
     return messages ? { ok: true, messages } : { ok: false };
   },
   async register_document(_message, sender) {
-    const result = await registerDocument(sender, _message);
+    let result = await registerDocument(sender, _message);
+    if (result?.ok === true) {
+      // A page in the app's tab group holds its keep-awake lock from the start (#128).
+      const tab = await chrome.tabs.get(result.tab).catch(() => null);
+      const keepAwake = await inAppGroup(tab).catch(() => false);
+      if (keepAwake) await noteKeepAwake(result.tab, result.documentId, true);
+      result = { ...result, keepAwake };
+    }
     if (result?.ok === true) void maintain(true).catch(() => undefined);
     if (result && result.ok === true) void recoverDeferredRevivals().catch(() => undefined);
     return result;
@@ -5387,6 +5463,12 @@ if (!globalThis.__cosBrowserWorker) {
     if (changeInfo.status === 'complete' && signInStage(tab?.url || '') === 'done') void reportPresence();
   });
 }
+// A tab moved into or out of the app's tab group is told at once: Chrome pauses a collapsed
+// group's tabs within seconds, long before the next maintenance pass (#128).
+chrome.tabs.onUpdated.addListener((_id, changeInfo, tab) => {
+  if (changeInfo.groupId === undefined || !tab || !isChatGptUrl(tab.pendingUrl || tab.url || '')) return;
+  void load().then(() => syncKeepAwake([tab], false)).catch(() => undefined);
+});
 
 void load()
   .then(() => ensurePaired())
