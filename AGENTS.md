@@ -3946,6 +3946,13 @@ With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` 
 The `+` popover must receive real pointer input above any active tool header.
 The bottom dock has no generic shortcut screen or second tool tab strip; Terminal owns its own
 tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
+Project Files watches only the visible project's expanded directories. An `fs.watch` error
+retires its exact handle and pending debounce timer, then emits `ProjectFilesChanged` with
+`watchLost: true`; the renderer clears its cached watch signature and re-admits the visible
+directories through the normal project sandbox. Ordinary changes remain debounced, and
+callbacks or asynchronous validations from retired watcher generations may not affect newer
+watchers.
+
 Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
 does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
 dock. The layout control group sits at the right end of the title bar (`.app-topbar`) and orders
@@ -4118,6 +4125,10 @@ list (`mode=plugins`) without this install's Core takes the proof back (POST `/c
 Connector identity (`connector-identity.ts`): ChatGPT keeps a connector's `asdk_app_…`/`link_…`
 ids across a rename. The kernel notes each served request id per surface (memory only, 4096,
 24 h); the page reports `app_sightings` (request id, app id, link id, app name from result rows);
+a first turn of a new chat can show no tool rows to the page (#1305), so usage.js also reads the
+tool result message in the response stream (`invoked_resource.resource_uri` of an
+`api_tool.call_tool` result with its `request_id`) and posts `cos-app-sighting`, which content.js
+forwards as the same `app_sightings`, once per request id, only for the chat the tab shows;
 only a served request id teaches that surface's app (at most 4 per surface, durable). `/status`
 publishes `connectorApps`. Model-facing text uses `liveConnectorName` (proven name, else the
 configured one); protected-resource `resource_name` and the Setup card's Name row stay on

@@ -12467,6 +12467,27 @@
       }
     }
   });
+  // The app a connector result names, read by usage.js from this chat's response stream (#1305):
+  // the first turn of a new chat can show no tool rows to the page at all. Same shape and the same
+  // once-per-request rule as the Fiber sightings; only a request id the app served teaches it.
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-app-sighting') return;
+    if (temporaryPlannerPage()) return;
+    const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
+    if (!claimed || CLF_DOM.conversationId() !== claimed) return;
+    const fresh = [];
+    for (const entry of (Array.isArray(event.data.sightings) ? event.data.sightings : []).slice(0, 16)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const appId = cap(entry.appId, 200), requestId = cap(entry.requestId, 100);
+      if (!requestId || !appId || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(appId) || sightingsReported.has(requestId)) continue;
+      const linkId = cap(entry.linkId, 200);
+      fresh.push({ requestId, appId, linkId: linkId && /^link_[A-Za-z0-9_-]{1,160}$/.test(linkId) ? linkId : null, appName: cap(entry.appName, 200) || null });
+    }
+    if (!fresh.length) return;
+    if (sightingsReported.size > 2000) sightingsReported.clear();
+    for (const sighting of fresh) sightingsReported.add(sighting.requestId);
+    emit({ kind: 'app_sightings', apps: fresh });
+  });
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
     // A Goal/Loop helper page records nothing (see emit/flush). Its request origins would
