@@ -270,7 +270,7 @@
   "Automatic plugin refresh": "자동 플러그인 새로고침",
   "Browser only": "브라우저 전용",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "자동 플러그인 새로고침이나 채팅 복구를 위해 탭을 열지 않습니다. 직접 새 채팅을 만들거나 워커를 시작하거나 모델 새로고침을 실행하는 기능은 계속 작동합니다.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "앱이 만든 유휴 탭은 2분 후 닫힙니다. 워커 제한을 초과하면 대기 중인 워커 탭은 더 일찍 닫힐 수 있습니다. 진행 중인 턴과 보내지 않은 초안은 열린 상태로 유지됩니다.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "앱이 만든 유휴 탭은 5분 후, 완료된 탭은 2분 후 닫힙니다. 워커 제한을 초과하면 대기 중인 워커 탭은 더 일찍 닫힐 수 있습니다. 진행 중인 턴과 보내지 않은 초안은 열린 상태로 유지됩니다.",
   "Overwrite ChatGPT tool rows": "ChatGPT 도구 행 덮어쓰기",
   "Show recorded local activity in the ChatGPT page.": "기록된 로컬 활동을 ChatGPT 페이지에 표시합니다.",
   "Show durations in ChatGPT": "ChatGPT에 소요 시간 표시",

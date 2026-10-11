@@ -283,7 +283,7 @@
   "Automatic plugin refresh": "Автоматическое обновление плагина",
   "Browser only": "Только браузер",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "Не открывать вкладки для автоматического обновления плагина или восстановления чата. Создание новых чатов, запуск воркеров и команда «Перезагрузить модели» по-прежнему работают.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Вкладки ChatGPT, созданные приложением и простаивающие, закрываются через две минуты. Вкладки спящих воркеров могут закрываться раньше при превышении лимита воркеров. Активные ходы и неотправленные черновики остаются открытыми.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Вкладки ChatGPT, созданные приложением и простаивающие, закрываются через пять минут, завершённые — через две. Вкладки спящих воркеров могут закрываться раньше при превышении лимита воркеров. Активные ходы и неотправленные черновики остаются открытыми.",
   "Overwrite ChatGPT tool rows": "Перезаписывать строки инструментов ChatGPT",
   "Show recorded local activity in the ChatGPT page.": "Показывать записанную локальную активность на странице ChatGPT.",
   "Show durations in ChatGPT": "Показывать длительность в ChatGPT",

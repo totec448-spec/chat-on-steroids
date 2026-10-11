@@ -270,7 +270,7 @@
   "Automatic plugin refresh": "Tự động làm mới plugin",
   "Browser only": "Chỉ trình duyệt",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "Không mở tab cho việc tự động làm mới plugin hoặc khôi phục cuộc trò chuyện. Tạo cuộc trò chuyện mới, worker và Tải lại mô hình theo yêu cầu vẫn hoạt động.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Các tab do ứng dụng tạo khi không hoạt động sẽ đóng sau hai phút. Tab worker đang ngủ có thể đóng sớm hơn khi vượt giới hạn worker. Lượt đang hoạt động và bản nháp chưa gửi vẫn mở.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Các tab do ứng dụng tạo khi không hoạt động sẽ đóng sau năm phút, tab đã xong sau hai phút. Tab worker đang ngủ có thể đóng sớm hơn khi vượt giới hạn worker. Lượt đang hoạt động và bản nháp chưa gửi vẫn mở.",
   "Overwrite ChatGPT tool rows": "Ghi đè các dòng công cụ ChatGPT",
   "Show recorded local activity in the ChatGPT page.": "Hiển thị hoạt động cục bộ đã ghi trên trang ChatGPT.",
   "Show durations in ChatGPT": "Hiển thị thời lượng trong ChatGPT",

@@ -283,7 +283,7 @@
   "Automatic plugin refresh": "Otomatik eklenti yenileme",
   "Browser only": "Yalnızca mevcut tarayıcı sekmeleri",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "Otomatik eklenti yenileme veya sohbet kurtarma için sekme açma. Doğrudan istenen yeni sohbetler, yardımcı ajanlar ve Modelleri yeniden yükle işlemi çalışmaya devam eder.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Uygulamanın açtığı boşta sekmeler iki dakika sonra kapanır. Yardımcı ajan sınırı aşılırsa uyuyan ajanların sekmeleri daha erken kapanabilir. Etkin turlar ve gönderilmemiş taslaklar açık kalır.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Uygulamanın açtığı boşta sekmeler beş dakika, tamamlananlar iki dakika sonra kapanır. Yardımcı ajan sınırı aşılırsa uyuyan ajanların sekmeleri daha erken kapanabilir. Etkin turlar ve gönderilmemiş taslaklar açık kalır.",
   "Overwrite ChatGPT tool rows": "ChatGPT araç satırlarını değiştir",
   "Show recorded local activity in the ChatGPT page.": "Kaydedilen yerel etkinliği ChatGPT sayfasında göster.",
   "Show durations in ChatGPT": "ChatGPT'de süreleri göster",

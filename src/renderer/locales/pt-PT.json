@@ -283,7 +283,7 @@
   "Automatic plugin refresh": "Atualização automática de plugins",
   "Browser only": "Apenas navegador",
   "Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.": "Não abrir separadores para a atualização automática de plugins ou a recuperação de chats. Novos chats explícitos, workers e Recarregar modelos continuam a funcionar.",
-  "Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Os separadores inativos criados pela aplicação fecham ao fim de dois minutos. Os separadores de workers inativos podem fechar mais cedo quando o limite de workers é excedido. Turnos ativos e rascunhos por enviar permanecem abertos.",
+  "Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.": "Os separadores inativos criados pela aplicação fecham ao fim de cinco minutos, e os concluídos ao fim de dois. Os separadores de workers inativos podem fechar mais cedo quando o limite de workers é excedido. Turnos ativos e rascunhos por enviar permanecem abertos.",
   "Overwrite ChatGPT tool rows": "Substituir linhas de ferramentas do ChatGPT",
   "Show recorded local activity in the ChatGPT page.": "Mostrar a atividade local registada na página do ChatGPT.",
   "Show durations in ChatGPT": "Mostrar durações no ChatGPT",
