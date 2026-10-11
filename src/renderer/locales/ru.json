@@ -2121,5 +2121,7 @@
   "Fewer repeated commands": "Меньше повторных команд",
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Если ChatGPT снова запускает команду, которая ещё выполняется в этом чате, результат указывает на уже запущенную.",
   "Compact & Resume in Projects": "«Сжать и продолжить» в Проектах",
-  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Перенос чата из Проекта ChatGPT в новый чат теперь доходит до конца, и новый чат остаётся в том же Проекте."
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Перенос чата из Проекта ChatGPT в новый чат теперь доходит до конца, и новый чат остаётся в том же Проекте.",
+  "Prefer Plugins on app-sent messages": "Предпочитать Plugins для сообщений из COS",
+  "When enabled, use the installed Chat On Steroids Plugins mention instead of Core for regular messages sent by CoS, including Goal and Loop. Workers and recovery still use Core. Only one app is mentioned; this does not affect messages you send directly in ChatGPT. Turn off for coding chats that need Core.": "Если включено, COS добавляет упоминание Plugins вместо Core в обычные отправляемые им сообщения, включая Goal и Loop. Воркеры и восстановление по-прежнему используют Core. Упоминается только одно приложение; сообщения, отправленные напрямую в ChatGPT, не меняются. Отключите для программирования, когда нужен Core."
 }

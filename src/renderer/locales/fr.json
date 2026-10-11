@@ -2121,5 +2121,7 @@
   "Fewer repeated commands": "Moins de commandes en double",
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "Quand ChatGPT lance une commande qui tourne encore dans ce chat, le résultat le renvoie vers celle en cours.",
   "Compact & Resume in Projects": "Compacter et reprendre dans les Projets",
-  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Passer un chat d'un Projet ChatGPT à un nouveau chat aboutit désormais, et le nouveau chat reste dans ce Projet."
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "Passer un chat d'un Projet ChatGPT à un nouveau chat aboutit désormais, et le nouveau chat reste dans ce Projet.",
+  "Prefer Plugins on app-sent messages": "Préférer Plugins dans les messages envoyés par l’application",
+  "When enabled, use the installed Chat On Steroids Plugins mention instead of Core for regular messages sent by CoS, including Goal and Loop. Workers and recovery still use Core. Only one app is mentioned; this does not affect messages you send directly in ChatGPT. Turn off for coding chats that need Core.": "Si cette option est activée, CoS mentionne Plugins au lieu de Core dans ses messages habituels, y compris Goal et Loop. Les agents et la récupération utilisent toujours Core. Une seule application est mentionnée ; les messages envoyés directement dans ChatGPT ne changent pas. Désactivez pour les discussions de code nécessitant Core."
 }

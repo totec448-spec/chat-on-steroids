@@ -2121,5 +2121,7 @@
   "Fewer repeated commands": "更少的重复命令",
   "When ChatGPT starts a command that is still running in that chat, the result points it to the running one.": "当 ChatGPT 再次启动该聊天中仍在运行的命令时，结果会引导它查看正在运行的那个。",
   "Compact & Resume in Projects": "项目中的压缩并继续",
-  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "把 ChatGPT 项目中的聊天转到新聊天现在能顺利完成，新聊天也会留在同一个项目里。"
+  "Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.": "把 ChatGPT 项目中的聊天转到新聊天现在能顺利完成，新聊天也会留在同一个项目里。",
+  "Prefer Plugins on app-sent messages": "应用发送的消息优先使用 Plugins",
+  "When enabled, use the installed Chat On Steroids Plugins mention instead of Core for regular messages sent by CoS, including Goal and Loop. Workers and recovery still use Core. Only one app is mentioned; this does not affect messages you send directly in ChatGPT. Turn off for coding chats that need Core.": "启用后，CoS 在普通消息（包括 Goal 和 Loop）中提及 Plugins 而非 Core。工作代理和恢复操作仍使用 Core。每条消息仅提及一个应用；直接在 ChatGPT 中发送的消息不受影响。需要 Core 的编程聊天请关闭此选项。"
 }

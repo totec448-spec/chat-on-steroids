@@ -699,6 +699,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
+      mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
@@ -1575,6 +1576,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
+  applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
   // Actions need the API itself, so the switch stays off and disabled until it is on.
@@ -2553,6 +2555,7 @@ for (const id of [
   'playfulStatus',
   'followOutput',
   'mentionCore',
+  'mentionPlugins',
   'controlApiEnabled',
   'controlApiAllowActions',
   'privacyScreenshots',

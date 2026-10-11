@@ -24,6 +24,14 @@ The [responsible-use notice](../README.md#responsible-use-and-provider-rules) ap
    automatic connector refresh. Existing conversations can retain cached declarations;
    disabled tools refuse stale calls immediately.
 
+For conversations driven by CoS messages (including Goal and Loop), **Settings → General →
+Prefer Plugins on app-sent messages** optionally mentions the installed **Chat On Steroids Plugins**
+app instead of Core. This is off by default; only one app is mentioned per CoS-managed
+message. Worker/recovery messages still use Core, and messages typed directly in ChatGPT
+are untouched. CoS selects only the Plugins app whose exact name and ID ChatGPT lists
+for this installation; missing/ambiguous identity adds no token. The setting does not
+refresh a stale ChatGPT tool catalog or guarantee that ChatGPT exposes the MCP tools.
+
 Automatic refresh compares the name, description and input schema that the provider's
 installed-tool UI exposes. For an upstream change confined to annotations or output schema,
 refresh manually; the Plugins endpoint itself always serves the complete current declaration.

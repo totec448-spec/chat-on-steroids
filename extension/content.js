@@ -935,8 +935,8 @@
    * attaches an app only to a message that mentions it, every prompt the app sends mentions
    * Core; on the others the mention is a visible chip and changes nothing else.
    */
-  // Every Core-like app the page lists, by name: this install picks its own (with this
-  // computer's suffix, if any) when it inserts the mention, whenever the app's names arrived.
+  // Core/Plugins identities from the page's hint list. This installation picks
+  // its own exact name (including the computer suffix) at send time.
   let coreCandidates = [];
   // This install's Core as another tab of this browser last saw it listed (background `status`).
   let knownOwnCore = null;
@@ -984,15 +984,26 @@
     if (corePluginList || !knownOwnCore || knownOwnCore.name !== own) return null;
     return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
+  /** Only the exact Plugins app advertised by this page and named by this COS install. */
+  function currentPluginsMention() {
+    const own = CLF_DOM.connectorNames()[2];
+    const matches = coreCandidates.filter(entry => entry.name === own);
+    return matches.length === 1 && matches[0].path ? { path: matches[0].path, name: own } : null;
+  }
   /**
-   * Whether the user's own prompts carry the Core mention (the app's ui.mentionCore, on unless off).
+   * Whether ordinary app-owned prompts carry the Core mention (ui.mentionCore).
    *
    * Some accounts attach an app to a chat only when a message mentions it (#861), so the mention
    * stays on by default. On others ChatGPT reads it as "use this app now" and opens a plain
-   * question with a probe call (#952); those users can switch it off. Workers, Goal, Loop and
-   * Continue keep it regardless, and Goal's helper never gets it: it must not use tools.
+   * question with a probe call (#952); those users can switch it off. Workers and
+   * Continue recovery always keep Core; Goal and Loop can select Plugins by opt-in.
+   * Goal's decision helper never gets an app token: it must not use tools.
    */
   let mentionCore = true;
+  // Explicit opt-in: prefer Plugins instead of Core on ordinary COS-managed sends.
+  // Workers and recovery still need Core. A missing/ambiguous Plugins identity is
+  // never replaced with another computer's app or an invented app id.
+  let mentionPlugins = false;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
                              matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null,
                              whileGenerating = false) {
@@ -6812,6 +6823,7 @@
       context = readContext(reply.data.context) || context;
       if (typeof reply.data.followOutput === 'boolean') followOutput = reply.data.followOutput;
       if (typeof reply.data.mentionCore === 'boolean') mentionCore = reply.data.mentionCore;
+      if (typeof reply.data.mentionPlugins === 'boolean') mentionPlugins = reply.data.mentionPlugins;
       if (reply.data.goal && typeof reply.data.goal === 'object') {
         goalConfig = {
           ...reply.data.goal,
@@ -7037,6 +7049,7 @@
       context = readContext(data.context);
       if (typeof data.followOutput === 'boolean') followOutput = data.followOutput;
       if (typeof data.mentionCore === 'boolean') mentionCore = data.mentionCore;
+      if (typeof data.mentionPlugins === 'boolean') mentionPlugins = data.mentionPlugins;
       // The goal loop's settings and, while one is running, the draft itself: its stage, the
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
@@ -12913,7 +12926,8 @@
       // A person's message asking for a picture goes out without the mention (the app decides:
       // ChatGPT switches its own image tool off for a message that mentions an app).
       input.purpose === 'decision' || (input.coreMention === false && !input.recovery && !agent) ? null
-        : input.recovery || agent || mentionCore ? currentCoreMention() : null,
+        : input.recovery || agent ? currentCoreMention()
+          : mentionPlugins ? currentPluginsMention() : mentionCore ? currentCoreMention() : null,
       sentRequestSince, !!message.directTurn);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
