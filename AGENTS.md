@@ -3503,7 +3503,10 @@ The Windows composer dictation control uses `preload/index.ts`'s fixed
 `shared/dictation.ts` events (`status`, `partial`, `final`, `error`) to
 its originating `webContents`. Only an explicit microphone click starts it;
 the renderer owns the current composer draft, stops on manual edits/navigation,
-and never sends recognized text automatically. No audio enters IPC or storage;
+and never sends recognized text automatically. A normal Stop grants 650ms for
+final recognition; app `before-quit` kills the child synchronously, and the
+PowerShell event loop checks the owning app's PID each second so a crashed/killed
+app cannot leave an orphan recording. No audio enters IPC or storage;
 macOS/Linux hide this Windows-only control.
 
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from

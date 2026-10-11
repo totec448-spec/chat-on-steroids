@@ -5,7 +5,8 @@
  *
  * This process is spawned only when the user clicks the microphone. The child
  * event loop never reads stdin (a synchronous Windows Console reader can block
- * recognition events); the parent stops it after a brief final-result grace.
+ * recognition events). It watches the owning app PID so a crash or forced quit
+ * cannot leave the microphone listening; only an explicit Stop allows grace.
  */
 import { app, ipcMain, type BrowserWindow, type WebContents } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -15,6 +16,7 @@ import { parseDictationEvent } from '../shared/dictation.js';
 const SCRIPT = [
   "$ErrorActionPreference='Stop'",
   '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
+  '$cosParentPid = __COS_PARENT_PID__',
   "function Send([string]$type,[string]$value) {",
   "  $data = if($type -eq 'status') { @{type='status';status=$value} } elseif($type -eq 'error') { @{type='error';message=$value} } else { @{type=$type;text=$value} }",
   '  [Console]::Out.WriteLine(($data | ConvertTo-Json -Compress -Depth 3))',
@@ -24,6 +26,7 @@ const SCRIPT = [
   '$subFinal = $null',
   '$subPartial = $null',
   'try {',
+  "  if(-not (Get-Process -Id $cosParentPid -ErrorAction SilentlyContinue)) { exit 0 }",
   '  Add-Type -AssemblyName System.Speech',
   '  $available = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())',
   "  if($available.Count -eq 0) { throw 'No Windows speech recognizer is installed. Install a Windows speech language pack.' }",
@@ -40,6 +43,7 @@ const SCRIPT = [
   "  Send 'status' 'listening'",
   '  while($true) {',
   '    $item = Wait-Event -Timeout 1',
+  '    if(-not (Get-Process -Id $cosParentPid -ErrorAction SilentlyContinue)) { break }',
   '    if(-not $item) { continue }',
   '    try {',
   '      $result = $item.SourceEventArgs.Result',
@@ -87,7 +91,17 @@ export function registerDictationIpc(getWindow: () => BrowserWindow | null): voi
     row.killTimeout.unref();
   };
 
-  app.once('before-quit', () => { if (active) stop(active); });
+  app.once('before-quit', () => {
+    if (!active) return;
+    // An unref'ed 650ms Stop timer cannot be relied on once Electron quits.
+    // Terminate the child synchronously; the PID watcher covers app crashes.
+    active.stopping = true;
+    if (active.killTimeout) {
+      clearTimeout(active.killTimeout);
+      active.killTimeout = null;
+    }
+    active.child.kill();
+  });
   ipcMain.handle('dictation:start', async event => {
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents)
@@ -96,7 +110,8 @@ export function registerDictationIpc(getWindow: () => BrowserWindow | null): voi
       return { ok: false as const, error: 'Microphone dictation currently requires Windows' };
     if (active)
       return { ok: false as const, error: 'Dictation is already running' };
-    const encoded = Buffer.from(SCRIPT, 'utf16le').toString('base64');
+    const script = SCRIPT.replace('__COS_PARENT_PID__', String(process.pid));
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive',
