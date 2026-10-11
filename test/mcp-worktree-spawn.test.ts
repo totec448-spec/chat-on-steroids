@@ -5,10 +5,12 @@ import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import * as agents from '../src/main/agents.js';
 import { onSwarmPersistNow, resetAgentsForTests, snapshotSwarm } from '../src/main/agents.js';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { createRegistrar, type ToolContext, type ToolResult } from '../src/main/mcp/kernel.js';
 import { registerCoreTools } from '../src/main/mcp/tools-core.js';
+import { initSessionStore, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 import * as worktrees from '../src/main/worktrees/index.js';
 import { DEFAULT_CAPABILITIES } from '../src/shared/types.js';
@@ -38,10 +40,12 @@ describe('MCP worker spawn with automatic Git isolation', () => {
     git('add', 'tracked.txt');
     git('commit', '-m', 'baseline');
     initConfigPath(temp);
+    initSessionStore(temp);
   });
 
   afterAll(async () => {
     resetAgentsForTests();
+    resetSessionStoreForTests();
     vi.restoreAllMocks();
     await fs.rm(temp, { recursive: true, force: true });
   });
@@ -102,6 +106,15 @@ describe('MCP worker spawn with automatic Git isolation', () => {
     expect(allocation).not.toHaveBeenCalled();
   });
 
+  it('refuses to promote an orphaned managed worker to a new prime after broker eviction', async () => {
+    // The exact session-origin/tombstone fence is resolved asynchronously at MCP admission.
+    vi.spyOn(agents, 'managedWorkerIsolationRequired').mockResolvedValueOnce(true);
+    const response = await spawn([{ task: 'Do not reopen a retired managed worker as prime' }]);
+    expect(response.isError).toBe(true);
+    expect(response.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('WORKTREE_OWNER_UNAVAILABLE') });
+    expect(snapshotSwarm()).toBeNull();
+  });
+
   it('warns that dirty source changes are absent from committed-base worktrees', async () => {
     selectedGitSource();
     await fs.writeFile(path.join(repository, 'tracked.txt'), 'local uncommitted edit\n');
@@ -120,16 +133,64 @@ describe('MCP worker spawn with automatic Git isolation', () => {
     expect(snapshotSwarm()?.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
   });
 
+  it.each(['revoked', 'renamed'] as const)('refuses worker admission when its approved root is %s while Git allocation is awaiting', async change => {
+    selectedGitSource();
+    const realAllocate = worktrees.allocWorkerWorkspace;
+    let lease: Awaited<ReturnType<typeof realAllocate>> | undefined;
+    const allocation = vi.spyOn(worktrees, 'allocWorkerWorkspace').mockImplementation(async input => {
+      lease = await realAllocate(input);
+      // Deterministically publish the Settings change while agents::spawn awaits this
+      // allocation. The checkout exists, but its former approval must not reach the broker.
+      await saveConfig({ ...getConfig(), roots: change === 'revoked' ? [] : [{ name: 'renamed', path: temp }] });
+      return lease;
+    });
+    const bootstraps = vi.spyOn(agents, 'requestWorkerBootstraps');
+
+    const response = await spawn([{ task: 'Must not start after losing root approval' }]);
+    const message = response.content[0]?.type === 'text' ? response.content[0].text : '';
+    expect(allocation).toHaveBeenCalledTimes(1);
+    expect(lease?.newlyCreated).toBe(true);
+    expect(response.isError).toBe(true);
+    expect(message).toContain('WORKTREE_ROLLBACK_RETAINED');
+    expect(message).not.toContain(temp);
+    expect(snapshotSwarm()).toBeNull();
+    expect(bootstraps).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(repository, 'tracked.txt'), 'utf8')).toBe('committed\n');
+    expect((await fs.readFile(path.join(lease!.worktreePath, 'tracked.txt'), 'utf8')).replace(/\r\n/g, '\n')).toBe('committed\n');
+  });
+
+  it('rechecks root approval after the asynchronous broker persistence barrier', async () => {
+    selectedGitSource();
+    const allocation = vi.spyOn(worktrees, 'allocWorkerWorkspace');
+    const bootstraps = vi.spyOn(agents, 'requestWorkerBootstraps');
+    const persistedSnapshots: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersistNow(async snapshot => {
+      persistedSnapshots.push(snapshot);
+      // The lease was already validated/marked before this awaited durability sink.
+      await saveConfig({ ...getConfig(), roots: [] });
+    });
+
+    const response = await spawn([{ task: 'Must not be admitted after durable write revocation' }]);
+    const lease = await allocation.mock.results[0]?.value;
+    expect(allocation).toHaveBeenCalledTimes(1);
+    expect(lease?.newlyCreated).toBe(true);
+    expect(response.isError).toBe(true);
+    expect(response.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('WORKTREE_ROLLBACK_RETAINED') });
+    expect(snapshotSwarm()).toBeNull();
+    expect(persistedSnapshots.length).toBeGreaterThanOrEqual(2);
+    expect(persistedSnapshots[0]?.agents.some(row => row.info.id === 'worker-1')).toBe(true);
+    expect(persistedSnapshots.at(-1)).toBeNull();
+    expect(bootstraps).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(repository, 'tracked.txt'), 'utf8')).toBe('committed\n');
+    expect((await fs.readFile(path.join(lease!.worktreePath, 'tracked.txt'), 'utf8')).replace(/\r\n/g, '\n')).toBe('committed\n');
+  });
+
   it('hides native retained paths and underlying native allocation errors after a partial failure', async () => {
     selectedGitSource();
     const nativePath = path.join(temp, 'private-managed-worktree');
+    const realAllocate = worktrees.allocWorkerWorkspace;
     const allocation = vi.spyOn(worktrees, 'allocWorkerWorkspace')
-      .mockResolvedValueOnce({
-        newlyCreated: true,
-        sourceDirty: false,
-        workspace: { real: nativePath, virtual: '/approved/private-managed-worktree' },
-        worktreePath: nativePath
-      } as Awaited<ReturnType<typeof worktrees.allocWorkerWorkspace>>)
+      .mockImplementationOnce(input => realAllocate(input))
       .mockRejectedValueOnce(new Error(`Git failed inside ${nativePath}`));
 
     const response = await spawn([{ task: 'First' }, { task: 'Second' }]);

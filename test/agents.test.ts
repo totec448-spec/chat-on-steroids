@@ -95,6 +95,8 @@ const {
   stageSpawn,
   markStagedWorkerWorktree,
   managedWorkerAllocationIdentity,
+  managedWorkerIsolationRequired,
+  managedWorkerRecoveryIdentities,
   managedWorkerWorktreeRequired,
   snapshotSwarm,
   spawn,
@@ -2802,6 +2804,103 @@ describe('restart', () => {
     const after = snapshotSwarm()!;
     expect(after.agents.find(row => row.info.id === 'worker-1')?.info.workerAllocationRunId).toBe(created.runId);
     expect(after.agents.find(row => row.info.id === 'worker-1')?.info.managedWorktree).toBe(true);
+  });
+
+  it('recovers only published broker-owned worktree allocations, including parked workers', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'isolated work' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    expect(managedWorkerRecoveryIdentities()).toEqual([]);
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    const expected = [{ runId: staged.runId, agentId: 'worker-1' }];
+    expect(managedWorkerRecoveryIdentities()).toEqual(expected);
+    expect(bindConversation('worker-1', 'recovery-worker', staged.runId)).toBe(true);
+    sleepWorker('worker-1', 'done', staged.runId);
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(managedWorkerRecoveryIdentities()).toEqual(expected);
+    const saved = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(managedWorkerRecoveryIdentities()).toEqual(expected);
+  });
+
+  it('keeps a recorded worker isolated after the broker drops a seven-day-old family and its retired fence expires', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'never use the prime checkout' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    const conversationId = 'evicted-managed-worker';
+    expect(bindConversation('worker-1', conversationId, staged.runId)).toBe(true);
+    const session = await createSession({ conversationId, origin: {
+      kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'never use the prime checkout'
+    } });
+    sleepWorker('worker-1', 'finished', staged.runId);
+    expect(releaseQuiescentRun()).toBe(true);
+    const saved = structuredClone(snapshotSwarm());
+    expect(saved).not.toBeNull();
+    resetAgentsForTests();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      restoreSwarm(saved);
+      expect(managedWorkerRecoveryIdentities()).toEqual([]);
+      expect(managedWorkerAllocationIdentity({ conversationId })).toBeNull();
+      expect(retiredWorkerForConversation(conversationId)).not.toBeNull();
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+      expect(retiredWorkerForConversation(conversationId)).toBeNull();
+      expect(managedWorkerWorktreeRequired({ conversationId })).toBe(false);
+      expect(await managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(true);
+      expect(await managedWorkerIsolationRequired({ conversationId })).toBe(true);
+      expect(() => stageSpawn({ caller: { conversationId }, workers: [{ task: 'stale worker cannot become prime' }] }))
+        .toThrow('WORKTREE_OWNER_UNAVAILABLE');
+      // A different exact chat cannot borrow a worker's session id as an identity fence.
+      expect(await managedWorkerIsolationRequired({ conversationId: PRIME_CHAT, sessionId: session.id })).toBe(false);
+      expect(await managedWorkerIsolationRequired({ conversationId: 'ordinary-unmanaged-chat' })).toBe(false);
+      resetAgentsForTests();
+      expect(await managedWorkerIsolationRequired({ conversationId, sessionId: session.id })).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('persists a denial-only worktree worker fence with recording Off after dormant eviction and another restart', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'private checkout with recording disabled' }] });
+    markStagedWorkerWorktree(staged.runId, 'worker-1');
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    const conversationId = 'evicted-unrecorded-worker';
+    expect(bindConversation('worker-1', conversationId, staged.runId)).toBe(true);
+    expect(await findSessionByConversation(conversationId, { requireUnique: true })).toBeNull();
+    sleepWorker('worker-1', 'completed', staged.runId);
+    expect(releaseQuiescentRun()).toBe(true);
+    const dormant = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(dormant!.savedAt + 8 * 24 * 60 * 60_000);
+      restoreSwarm(dormant);
+      expect(managedWorkerRecoveryIdentities()).toEqual([]);
+      const evicted = structuredClone(snapshotSwarm());
+      expect(evicted?.managedRetiredConversations).toContain(conversationId);
+      expect(evicted?.dormantRuns).toEqual([]);
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+      expect(retiredWorkerForConversation(conversationId)).toBeNull();
+      expect(managedWorkerWorktreeRequired({ conversationId })).toBe(false);
+      expect(await managedWorkerIsolationRequired({ conversationId })).toBe(true);
+      resetAgentsForTests();
+      restoreSwarm(evicted);
+      expect(snapshotSwarm()?.managedRetiredConversations).toContain(conversationId);
+      expect(managedWorkerAllocationIdentity({ conversationId })).toBeNull();
+      expect(await managedWorkerIsolationRequired({ conversationId })).toBe(true);
+      expect(() => stageSpawn({ caller: { conversationId }, workers: [{ task: 'stale worker cannot become prime after restart' }] }))
+        .toThrow('WORKTREE_OWNER_UNAVAILABLE');
+      expect(await managedWorkerIsolationRequired({ conversationId: 'plain-chat-without-history' })).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('writes a second critical revision if isolation is marked during another acceptance writer', async () => {

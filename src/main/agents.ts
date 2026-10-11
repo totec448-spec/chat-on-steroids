@@ -363,6 +363,12 @@ let retiredPersist: (() => void) | null = null;
 let retiredPersistNow: ((snapshot: RetiredWorkersSnapshot) => Promise<void>) | null = null;
 const RETIRED_WORKER_TTL_MS = 30 * 60_000;
 const retiredWorkers = new Map<string, RetiredChat>();
+/**
+ * Denial-only worker identity after managed families leave bounded broker history.
+ * Recording may be Off, so SessionOrigin cannot be the only durable fence.
+ * No entry can authorize a checkout; snapshots preserve exact browser-bound IDs.
+ */
+const retiredManagedWorkerConversations = new Set<string>();
 /** Worker objects created by a spawn whose public durable acceptance has not succeeded yet. */
 const unpublishedAgents = new WeakSet<Agent>();
 /** A brand-new run is itself unpublished until its staged spawn crosses the acceptance barrier. */
@@ -1471,6 +1477,10 @@ function endRun(run: Run, reason: string): void {
       retiredAt: Date.now()
     }));
   for (const worker of retired) retiredWorkers.set(worker.conversationId, worker);
+  for (const agent of run.agents.values()) {
+    if (agent.info.role === 'worker' && agent.info.managedWorktree && agent.info.conversationId)
+      retiredManagedWorkerConversations.add(agent.info.conversationId);
+  }
   retiredPersist?.();
   const what = `${run.runId} (${[...run.agents.keys()].join(', ')})`;
   runs.delete(run.runId);
@@ -1525,6 +1535,7 @@ function pruneDormantRuns(now = Date.now()): boolean {
     dormantRuns.delete(familyKey(dormant));
     for (const agent of dormant.agents.values()) {
       if (agent.info.role !== 'worker' || !agent.info.conversationId) continue;
+      if (agent.info.managedWorktree) retiredManagedWorkerConversations.add(agent.info.conversationId);
       retiredWorkers.set(agent.info.conversationId, {
         id: agent.info.id,
         conversationId: agent.info.conversationId,
@@ -1813,6 +1824,46 @@ export function managedWorkerWorktreeRequired(input: Caller): boolean {
     member.info.managedWorktree === true));
 }
 
+/**
+ * A broker family is retained for at most seven days after parking, whereas a session's
+ * worker origin survives that family. A formerly isolated worker must never inherit its
+ * prime's project when the generic 30-minute retired-worker fence also expires. Check the
+ * exact durable attachment before any privileged path/command can use a default cwd.
+ *
+ * Any orphaned worker-origin chat is refused, including older recordings made before
+ * managedWorktree existed. A currently broker-owned ordinary worker keeps its legacy cwd.
+ * This is a denial fence only: session metadata does not recover allocation authority.
+ */
+export async function managedWorkerIsolationRequired(input: Caller): Promise<boolean> {
+  const caller = exactCaller(input);
+  if (managedWorkerWorktreeRequired(caller)) return true;
+  if (caller.conversationId && retiredManagedWorkerConversations.has(caller.conversationId)) return true;
+  if (!caller.conversationId || isWorkerConversation(caller.conversationId)) return false;
+  const session = caller.sessionId
+    ? await getSession(caller.sessionId)
+    : await findSessionByConversation(caller.conversationId, { requireUnique: true });
+  return session?.conversationId === caller.conversationId && session.origin?.kind === 'worker';
+}
+
+/**
+ * A marker may be restored only if the accepted broker still owns the original allocation.
+ * This projection never reconstructs ownership from marker filenames, display slots or
+ * recorded sessions. Duplicate/corrupt allocation identities are excluded fail-closed.
+ */
+export function managedWorkerRecoveryIdentities(): Array<{ runId: string; agentId: string }> {
+  const families = allFamilies();
+  const candidates = families.flatMap(owner => [...owner.agents.values()]
+    .filter(agent => agent.info.role === 'worker' && agent.info.managedWorktree === true &&
+      !unpublishedAgents.has(agent) && !unpublishedRuns.has(owner as Run))
+    .map(agent => ({ runId: agent.info.workerAllocationRunId, agentId: agent.info.id, owner })));
+  return candidates.filter(candidate =>
+    typeof candidate.runId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate.runId) &&
+    candidates.filter(other => other.runId === candidate.runId && other.agentId === candidate.agentId).length === 1 &&
+    families.filter(owner => owner.agents.get(candidate.agentId)?.info.workerAllocationRunId === candidate.runId).length === 1
+  ).map(candidate => ({ runId: candidate.runId!, agentId: candidate.agentId }));
+}
+
 /** Resolve worktree identity solely from unique, published, broker-owned conversation proof. */
 export function managedWorkerAllocationIdentity(input: Caller): { runId: string; agentId: string } | null {
   const caller = exactCaller(input);
@@ -1960,7 +2011,10 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     if (run.transfer) throw new AgentError("PRIME_TRANSFER_IN_PROGRESS: this prime is being compacted/resumed.");
   }
 
-  if (conversationId && (isWorkerConversation(conversationId) || retiredWorkerForConversation(conversationId))) throw new AgentError("Workers must not create workers of their own.");
+  if (conversationId && (isWorkerConversation(conversationId) || retiredWorkerForConversation(conversationId) ||
+      retiredManagedWorkerConversations.has(conversationId))) {
+    throw new AgentError('WORKTREE_OWNER_UNAVAILABLE: retired worker conversations cannot create new prime runs or workers.');
+  }
   if (input.caller.runId && !run && !dormantRunForCaller(input.caller)) throw new AgentsBusyError();
   const becamePrime = run === null;
   let resumedDormant: DormantRun | null = null;
@@ -4622,6 +4676,7 @@ export function resetSwarm(): void {
   for (const dormant of dormantRuns.values()) {
     for (const agent of dormant.agents.values()) {
       if (agent.info.role !== 'worker' || !agent.info.conversationId) continue;
+      if (agent.info.managedWorktree) retiredManagedWorkerConversations.add(agent.info.conversationId);
       retiredWorkers.set(agent.info.conversationId, {
         id: agent.info.id,
         conversationId: agent.info.conversationId,
@@ -4838,6 +4893,8 @@ export interface SwarmSnapshot {
   startedAt: number | null;
   agents: SerializedAgent[];
   dormantRuns?: DormantRunSnapshot[];
+  /** Denial-only managed worker identities after family eviction or explicit Clear. */
+  managedRetiredConversations?: string[];
 }
 
 export function snapshotSwarm(): SwarmSnapshot | null {
@@ -4907,7 +4964,7 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
   const active = [...runs.values()].filter(r =>
     (!unpublishedRuns.has(r) || (includeUnpublished && stageEligible(r))));
   const dormant = [...dormantRuns.values()];
-  if (active.length === 0 && dormant.length === 0) return null;
+  if (active.length === 0 && dormant.length === 0 && retiredManagedWorkerConversations.size === 0) return null;
   // Legacy top-level projection is deliberately empty with multiple owners. Version 6 readers
   // use activeRuns exclusively; retaining a sole-owner projection keeps older diagnostic readers useful.
   const sole = active.length === 1 ? active[0] : null;
@@ -4919,6 +4976,7 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
       ...(r.setupProfileId ? { setupProfileId: r.setupProfileId } : {}), primeConversationId: r.primeConversationId,
       primeRequestId: r.primeRequestId,
       startedAt: r.startedAt, agents: serializeAgents(r.agents, includeUnpublished) })),
+    ...(retiredManagedWorkerConversations.size ? { managedRetiredConversations: [...retiredManagedWorkerConversations] } : {}),
     dormantRuns: dormant.map(h => ({ ...(h.formerRunIds?.length ? { formerRunIds: h.formerRunIds } : {}),
       ...(h.setupProfileId ? { setupProfileId: h.setupProfileId } : {}), primeConversationId: h.primeConversationId, startedAt: h.startedAt,
       primeRequestId: h.primeRequestId,
@@ -4995,6 +5053,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   requestOwnerRecoveryAgain = false;
   runs.clear();
   dormantRuns.clear();
+  retiredManagedWorkerConversations.clear();
   unpublishedRuns.clear();
   activeSpawnStages.clear();
   activeFinishStages.clear();
@@ -5005,6 +5064,14 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   if (snapshot.version !== 4 && snapshot.version !== 5 && snapshot.version !== 6 && snapshot.version !== 7) {
     logInfo('multi-agent: discarded a run saved by an older build — spawn again to start a new one.');
     return;
+  }
+  // These rows deny access; they can never grant worker role, checkout ownership or revival.
+  // Restore them before seven-day history pruning adds any newly evicted managed workers.
+  if (Array.isArray(snapshot.managedRetiredConversations)) {
+    for (const conversationId of snapshot.managedRetiredConversations) {
+      if (typeof conversationId === 'string' && conversationId.length > 0 && conversationId.length <= 512)
+        retiredManagedWorkerConversations.add(conversationId);
+    }
   }
   let repaired = false;
   const occupiedWorkers = new Set<string>();
@@ -5257,6 +5324,7 @@ export function resetAgentsForTests(): void {
   requestOwnerRecoveryAgain = false;
   runs.clear();
   dormantRuns.clear();
+  retiredManagedWorkerConversations.clear();
   archivedAssignments.clear();
   consecutiveWakeFailures.clear();
   pageGenerating.clear();

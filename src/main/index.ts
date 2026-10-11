@@ -54,6 +54,7 @@ import {
   onSwarmPersist,
   onSwarmPersistNow,
   pauseSwarmForDisable,
+  managedWorkerRecoveryIdentities,
   primeFleetIn, repairPrimeConversationAfterRecovery,
   reconcileAgentRequestOwners,
   restoreRetiredWorkers,
@@ -506,7 +507,9 @@ void app.whenReady().then(async () => {
   // checkout even if autoWorktrees has subsequently been turned Off in Settings.
   if (getConfig().roots.length > 0) {
     try {
-      const recovered = await restoreManagedWorktrees(getConfig().roots);
+      // Recovery is authorized only by the durable broker workers loaded above, not by
+      // self-asserting filesystem markers left from unaccepted or pruned allocations.
+      const recovered = await restoreManagedWorktrees(getConfig().roots, managedWorkerRecoveryIdentities());
       logInfo(`worktrees: restored ${recovered.restored.length} worker workspace(s); refused ${recovered.rejected.length} invalid marker(s)`);
     } catch (error) {
       // No marker is accepted on failure; workspace resolution must still require an

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 const project = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/projects.js', () => ({ getSessionProject: project }));
-const swarm = vi.hoisted(() => ({ running: false, managed: false }));
+const swarm = vi.hoisted(() => ({ running: false, managed: false, orphanedWorker: false }));
 const leaseLookup = vi.hoisted(() => vi.fn());
 const leaseValidate = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/worktrees/index.js', () => ({ lookupWorkerWorkspace: leaseLookup, validateWorkerWorkspaceLease: leaseValidate }));
@@ -11,6 +11,7 @@ vi.mock('../src/main/agents.js', async (original) => ({
   ...(await original<typeof import('../src/main/agents.js')>()),
   swarmRunning: () => swarm.running,
   managedWorkerWorktreeRequired: () => swarm.managed,
+  managedWorkerIsolationRequired: async () => swarm.managed || swarm.orphanedWorker,
   managedWorkerAllocationIdentity: () => swarm.managed ? { runId: 'owner-allocation', agentId: 'worker-1' } : null
 }));
 import { resolveCwd, resolveIn } from '../src/main/mcp/kernel.js';
@@ -24,7 +25,7 @@ afterAll(async () => { await removeTempDir(base); });
 beforeEach(() => {
   resetWorkspaces(); project.mockReset(); leaseLookup.mockReset(); leaseValidate.mockReset();
   leaseValidate.mockImplementation(async lease => lease);
-  swarm.running = false; swarm.managed = false;
+  swarm.running = false; swarm.managed = false; swarm.orphanedWorker = false;
 });
 function run<T>(id: string, fn: () => T): T {
   const context: CallContext = { startedAt: Date.now(), transportKey: null, agent: 'prime', caller: { transportKey: null, requestId: null, conversationId: `chat-${id}`, sessionId: id }, outcome: null, evidence: emptyEvidence() };
@@ -105,6 +106,20 @@ it('refuses a required worker checkout when its marker cannot be recovered, even
   leaseLookup.mockReturnValue(null);
   await expect(workerRun('managed', () => resolveIn(roots(), 'file.txt'))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
   await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+});
+
+it('never uses inherited Prime project after the managed worker broker history was evicted', async () => {
+  // The durable exact-session worker origin outlives the broker's finite history.
+  // It is a refusal fence only, not proof that the disappeared lease can be recovered.
+  swarm.orphanedWorker = true;
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  setWorkspaceFor('chat:chat-orphan', { virtual: '/work/a', real: path.join(base, 'a') });
+  leaseLookup.mockReturnValue(null);
+  await expect(workerRun('orphan', () => resolveIn(roots(), 'file.txt'))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  await expect(workerRun('orphan', () => resolveIn(roots(), '/work/a/file.txt'))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  await expect(workerRun('orphan', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, '/work/a')))
+    .rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  expect(project).not.toHaveBeenCalled();
 });
 
 it('blocks a worker relative write and command after its checked-out directory is replaced', async () => {
