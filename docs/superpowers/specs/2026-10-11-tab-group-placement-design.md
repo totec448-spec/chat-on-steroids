@@ -70,7 +70,8 @@ Chromium builds and incognito-only sessions.
 - `chrome.windows.getLastFocused({ windowTypes: ['normal'] })`.
 - The app's own background window (see `storedBackgroundWindow`) and incognito windows are never
   targets.
-- If the last-focused window is excluded, the lowest-id normal, non-incognito window that is not
+- If the last-focused window is excluded (Chrome on macOS can report the app's own window), the
+  eligible window whose tab was used most recently, then the lowest id, among the normal, non-incognito windows that are not
   the background window is used. If there is none, window mode is used.
 - A minimized target is fine: a collapsed group in a minimized window is still invisible.
 
@@ -211,7 +212,7 @@ sends took 11–14 s.
   touched.
 - Target exclusion:
   - the background window and incognito windows are skipped;
-  - the fallback is the lowest-id eligible window;
+  - the fallback is the eligible window whose tab was used most recently, then the lowest id;
   - with none, window mode is used.
 - No `tabGroups` API: window mode.
 - Group gone between calls:

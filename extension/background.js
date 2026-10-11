@@ -1958,7 +1958,9 @@ async function storedBackgroundGroup() {
 }
 /**
  * Where a new group goes: the user's last-focused normal window, never the app's own background
- * window and never an incognito one. Otherwise the lowest such window, otherwise none (window mode).
+ * window and never an incognito one. Chrome can name the app's own window as last-focused
+ * (measured on macOS), so the fallback is the eligible window whose tab was used most recently,
+ * then the lowest id; with none, window mode.
  */
 async function groupTargetWindow() {
   const excluded = (await storedBackgroundWindow())?.id;
@@ -1968,8 +1970,13 @@ async function groupTargetWindow() {
     if (eligible(last)) return last.id;
   } catch { /* No focused window yet; fall through to any eligible one. */ }
   const all = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => []);
-  const [first] = (Array.isArray(all) ? all : []).filter(eligible).sort((a, b) => a.id - b.id);
-  return first?.id ?? null;
+  const candidates = (Array.isArray(all) ? all : []).filter(eligible);
+  if (!candidates.length) return null;
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  const used = id => Math.max(0, ...(Array.isArray(tabs) ? tabs : [])
+    .filter(tab => tab.windowId === id && Number.isFinite(tab.lastAccessed)).map(tab => tab.lastAccessed));
+  const [first] = candidates.sort((a, b) => used(b.id) - used(a.id) || a.id - b.id);
+  return first.id;
 }
 /**
  * One inactive tab in the app's group, creating the group collapsed the first time. Only a group
