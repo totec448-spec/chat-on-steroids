@@ -1668,11 +1668,8 @@ function apply(next: AppState): void {
 
   // The pictures show the tunnel path; only a published URL needs saying in words.
   $('chatgptConn').hidden = openai;
-  $('chatgptConn').replaceChildren(
-    openai
-      ? frag("For the connection, choose ", "Tunnel", " and pick the tunnel you made in step 3.")
-      : frag("For the connection, paste the URL below into ", "MCP server URL", '.')
-  );
+  // The tunnel path needs no words: the pictures show it.
+  $('chatgptConn').replaceChildren(...(openai ? [] : [frag("For the connection, paste the URL below into ", "MCP server URL", '.')]));
 
   // Says plainly whether the connector has ever reached this app, because a
   // FORBIDDEN inside one ChatGPT conversation is not the same as a broken setup.
