@@ -115,6 +115,23 @@ describe('MCP worker spawn with automatic Git isolation', () => {
     expect(snapshotSwarm()).toBeNull();
   });
 
+  it('tells the model to approve the folder above the repository when the repository itself is the approved folder', async () => {
+    // Managed worktrees live beside the repository, inside an approved folder. Without one above it
+    // the spawn is refused; the model needs that reason to tell the user what to change.
+    const defaults = defaultConfig();
+    await saveConfig({ ...defaults, roots: [{ name: 'approved', path: repository }], multiAgent: { ...defaults.multiAgent, enabled: true, autoWorktrees: true } });
+    setWorkspaceFor(`chat:${primeConversation}`, { real: repository, virtual: '/approved' });
+
+    const response = await spawn([{ task: 'Work in an isolated checkout' }]);
+    const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+    expect(response.isError).toBe(true);
+    expect(text).toContain('WORKTREE_STORAGE_UNAVAILABLE');
+    expect(text).toContain('approve the folder that contains this repository');
+    expect(text).toContain('Isolate new workers in Git worktrees');
+    expect(text).not.toContain(temp);
+    expect(snapshotSwarm()).toBeNull();
+  });
+
   it('warns that dirty source changes are absent from committed-base worktrees', async () => {
     selectedGitSource();
     await fs.writeFile(path.join(repository, 'tracked.txt'), 'local uncommitted edit\n');
