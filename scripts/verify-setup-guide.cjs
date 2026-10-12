@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
     assert.equal(ready, true);
     const results = [];
     for (const [width, height, zoom, language, theme] of [
-      [1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'],
+      [1100, 900, 1, 'en', 'dark'], [800, 650, 1, 'en', 'dark'], [1100, 900, 1, 'de', 'dark'],
       [1100, 900, 1.5, 'zh-CN', 'light'], [640, 720, 1, 'zh-CN', 'dark'],
       [800, 650, 1, 'es', 'dark'], [800, 650, 1, 'zh-TW', 'light'],
       [1100, 900, 1, 'ja', 'dark'], [1100, 900, 1.5, 'ja', 'light'], [640, 720, 1, 'ja', 'dark'],
@@ -107,7 +107,8 @@ app.whenReady().then(async () => {
       // Each step's pictures sit in a carousel inside that step; only the open step is on screen.
       const groups = await win.webContents.executeJavaScript(`[...document.querySelectorAll('[data-setup-guide]')]
         .map(host => [host.dataset.setupGuide, host.querySelectorAll('.guide-frame').length]).filter(([, count]) => count > 0)`);
-      assert.ok(groups.length >= 6, 'Setup has its picture guides: ' + JSON.stringify(groups));
+      // Sign-in (two browsers), tunnel, API key and plugin; ChatGPT's Developer mode switch is gone.
+      assert.ok(groups.length >= 5, 'Setup has its picture guides: ' + JSON.stringify(groups));
       for (const [group, count] of groups) {
         for (let index = 0; index < count; index++) {
           const selector = `[data-setup-guide="${group}"]`;
