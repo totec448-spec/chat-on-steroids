@@ -208,7 +208,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
-| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
+| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 | Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
 
@@ -2605,7 +2605,7 @@ extend its deadline. A real canonical final or successful finish report consumes
 **Intent:** deliver one authorized operation to one exact document, survive transport loss,
 and revive only work that remains owed. The bridge never grants arbitrary local tools.
 
-`bridge.ts` owns the paired loopback HTTP boundary on 8765–8769; tests use isolated ports.
+`bridge.ts` owns the paired loopback HTTP boundary on 8765–8769, with Auto's fallback ranges 18765–18769 and 38765–38769; tests use isolated ports.
 `shared/browser-bridge.ts` defines the supported Settings range; `bridge-ports.ts` resolves the
 saved `ui.browserBridgePort` at startup or reconfiguration. Auto tries the established order;
 a fixed choice binds exactly that port. Effective `CLF_BRIDGE_PORTS` retains precedence, including
