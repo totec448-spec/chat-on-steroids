@@ -31,7 +31,7 @@ import type { TurnTrace } from '../shared/turn-trace.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
-import { drawMath, mathExtensions, type MathSlots } from './math.js';
+import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors } from '../shared/markdown-export.js';
@@ -2554,7 +2554,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
       return missing.outerHTML;
     }
   }] });
-  const html = parser.parse(text, { async: false });
+  const html = parser.parse(separateDisplayMath(text), { async: false });
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
   drawMath(box, math);
   if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
