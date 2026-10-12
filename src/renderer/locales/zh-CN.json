@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "在 {0} 中打开 ChatGPT",
   "The extensions page in {0}, with {1} outlined": "{0} 的扩展程序页面，已框出 {1}",
   "Connect the tunnel": "连接隧道",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "应用用这个密钥启动隧道。请立即复制：它只显示一次。"
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "应用用这个密钥启动隧道。请立即复制：它只显示一次。",
+  "Could not read plugin-refresh state": "无法读取插件刷新状态",
+  "Could not reset plugin-refresh state": "无法重置插件刷新状态",
+  "Reset plugin refresh": "重置插件刷新",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "重置会备份无法读取的状态，并允许重新开始自动刷新插件。刷新可能影响现有的 ChatGPT 对话。"
 }

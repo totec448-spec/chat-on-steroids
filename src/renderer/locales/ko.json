@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "{0}에서 ChatGPT 열기",
   "The extensions page in {0}, with {1} outlined": "{0}의 확장 프로그램 페이지({1} 표시)",
   "Connect the tunnel": "터널 연결",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "앱이 이 키로 터널을 시작합니다. 한 번만 표시되니 바로 복사하세요."
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "앱이 이 키로 터널을 시작합니다. 한 번만 표시되니 바로 복사하세요.",
+  "Could not read plugin-refresh state": "플러그인 새로고침 상태를 읽을 수 없습니다",
+  "Could not reset plugin-refresh state": "플러그인 새로고침 상태를 초기화할 수 없습니다",
+  "Reset plugin refresh": "플러그인 새로고침 초기화",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "초기화하면 읽을 수 없는 상태를 백업하고 자동 플러그인 새로고침을 다시 시작할 수 있습니다. 새로고침은 기존 ChatGPT 채팅에 영향을 줄 수 있습니다."
 }

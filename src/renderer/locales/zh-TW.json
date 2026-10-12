@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "在 {0} 中開啟 ChatGPT",
   "The extensions page in {0}, with {1} outlined": "{0} 的擴充功能頁面，已框出 {1}",
   "Connect the tunnel": "連線隧道",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "應用程式會用這個金鑰啟動隧道。請立即複製：它只會顯示一次。"
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "應用程式會用這個金鑰啟動隧道。請立即複製：它只會顯示一次。",
+  "Could not read plugin-refresh state": "無法讀取外掛程式重新整理狀態",
+  "Could not reset plugin-refresh state": "無法重設外掛程式重新整理狀態",
+  "Reset plugin refresh": "重設外掛程式重新整理",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "重設會備份無法讀取的狀態，並允許重新開始自動重新整理外掛程式。重新整理可能影響現有的 ChatGPT 對話。"
 }

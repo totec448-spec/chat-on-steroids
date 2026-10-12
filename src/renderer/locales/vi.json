@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "Mở ChatGPT trong {0}",
   "The extensions page in {0}, with {1} outlined": "Trang tiện ích trong {0}, {1} được đánh dấu",
   "Connect the tunnel": "Kết nối tunnel",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "Ứng dụng dùng khóa này để khởi động tunnel. Hãy sao chép ngay: khóa chỉ hiển thị một lần."
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "Ứng dụng dùng khóa này để khởi động tunnel. Hãy sao chép ngay: khóa chỉ hiển thị một lần.",
+  "Could not read plugin-refresh state": "Không thể đọc trạng thái làm mới plugin",
+  "Could not reset plugin-refresh state": "Không thể đặt lại trạng thái làm mới plugin",
+  "Reset plugin refresh": "Đặt lại làm mới plugin",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Đặt lại sẽ sao lưu trạng thái không đọc được và cho phép khởi động lại việc tự động làm mới plugin. Làm mới có thể ảnh hưởng đến các cuộc trò chuyện ChatGPT hiện có."
 }

@@ -747,6 +747,8 @@ export interface AppState {
   connectorSchemas: Partial<Record<SurfaceId, string>>;
   /** Per surface, the declaration ChatGPT confirmed after a plugin refresh (or found already current). */
   confirmedConnectorSchemas?: Partial<Record<SurfaceId, string>>;
+  /** Read-only ledger health; no stored content or filesystem paths cross IPC. */
+  pluginRefreshUnreadable?: boolean;
   platform: PlatformInfo;
   /** Only packaged Windows builds may change the login item. */
   loginStartupAvailable?: boolean;
