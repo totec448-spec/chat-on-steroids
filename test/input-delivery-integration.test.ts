@@ -2885,7 +2885,15 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
         await bridge.sweepStaleSwarm(now);
         const status = (await post('/status', { openConversations: [conversationId] })).body;
         const repair = status.repairs.find((item: any) => item.conversationId === conversationId);
-        expect(repair?.reason).toBe('goal'); // Existing shared pickup wire reason.
+        // Failed once on Linux CI (2026-10-12) and not since in 192 local runs under load, so a
+        // failure names what the sweep saw instead of only "undefined".
+        const seen = async () => JSON.stringify({
+          minutes, repairs: status.repairs,
+          pickup: (await input.listInputs()).find(item => item.id === row.id)?.pickupRecovery ?? null,
+          state: (await input.listInputs()).find(item => item.id === row.id)?.state,
+          log: (await import('../src/main/logger.js')).getLog().slice(-12).map(entry => entry.message.slice(0, 160))
+        });
+        expect(repair?.reason, repair ? undefined : await seen()).toBe('goal'); // Existing shared pickup wire reason.
         await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
         expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued', text: row.text });
         expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
