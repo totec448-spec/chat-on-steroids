@@ -83,6 +83,7 @@ it('shows a clean checkout with a named worker, safe state, and exact remove ide
   expect(row.querySelectorAll('.worktree-risk')).toHaveLength(0);
   const remove = row.querySelector<HTMLButtonElement>('[data-worktree-remove]')!;
   expect(remove.type).toBe('button');
+  expect(remove.classList.contains('btn-solid')).toBe(true);
   expect(remove.dataset.runId).toBe('f0ebc42e-c880-4701-971e-b1797e568883');
   expect(remove.dataset.agentId).toBe('worker-2');
   expect(remove.getAttribute('aria-label')).toContain('Review API');
