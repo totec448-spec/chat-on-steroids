@@ -2182,5 +2182,6 @@
   "Dictation on Windows": "Windows 上的語音輸入",
   "The microphone button turns your speech into text in the message box, and you send it when you're ready.": "麥克風按鈕會把你的語音轉成訊息框中的文字，準備好後由你傳送。",
   "Rename your connectors": "重新命名連接器",
-  "Chat On Steroids apps you rename in ChatGPT keep working.": "在 ChatGPT 中重新命名的 Chat On Steroids 應用程式會繼續正常運作。"
+  "Chat On Steroids apps you rename in ChatGPT keep working.": "在 ChatGPT 中重新命名的 Chat On Steroids 應用程式會繼續正常運作。",
+  "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "此通道 ID 也設定給了 {0}。每個連接器都需要自己的通道；否則 ChatGPT 會把部分呼叫送到錯誤的連接器，並以 UNKNOWN_TOOL 失敗。"
 }

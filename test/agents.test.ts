@@ -2862,6 +2862,37 @@ describe('restart', () => {
     ]);
   });
 
+  it('names a finished checkout after the spawn task, not after the message that later woke the worker', async () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'Refactor the parser' }] });
+    for (const id of staged.newlyStagedWorkerIds) markStagedWorkerWorktree(staged.runId, id);
+    staged.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    staged.commit();
+    expect(bindConversation('worker-1', 'managed-reused-worker', staged.runId)).toBe(true);
+    sleepWorker('worker-1', 'parser refactored', staged.runId);
+
+    // A follow-up wakes the sleeping worker; its current task becomes that message.
+    sendMessage(prime, 'worker-1', 'please also add tests');
+    expect(swarmStateForCaller(prime).agents.find(agent => agent.id === 'worker-1')?.task).toContain('please also add tests');
+    const revival = pendingWorkerRevivals()[0]!;
+    expect(claimWorkerRevival('worker-1', 'managed-reused-worker')).toBe(true);
+    expect(noteWorkerRevived('worker-1', 'managed-reused-worker', revival.messageIds)).toBe(true);
+    // The woken worker's turn starts: it is working on the follow-up now.
+    expect(noteAgentAlive('managed-reused-worker', 'turn', Date.now() + 1)?.revived).toBe(true);
+    fillContext('managed-reused-worker');
+    finishAgent({ conversationId: 'managed-reused-worker' }, 'tests added');
+
+    expect(managedWorktreeCleanupOffers()).toEqual([
+      expect.objectContaining({ agentId: 'worker-1', reason: 'completed', label: 'Refactor the parser' })
+    ]);
+    const saved = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(managedWorktreeCleanupOffers()).toEqual([
+      expect.objectContaining({ agentId: 'worker-1', label: 'Refactor the parser' })
+    ]);
+  });
+
   it('does not recover failed or unresolved non-revivable managed workers after restart', async () => {
     const staged = stageSpawn({ caller: prime, workers: [
       { task: 'failed browser bootstrap' }, { task: 'ceiling worker awaiting terminal proof' }
