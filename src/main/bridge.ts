@@ -6764,6 +6764,8 @@ export function recoveryHeldByCalls(conversationId: string): boolean {
   const since = grant ? unknownCallHold.get(grant) : undefined;
   return since === undefined || Date.now() - since < UNKNOWN_CALL_HOLD_MS;
 }
+/** How long a provider access limit with no Retry-After holds the silence watch ("wait a few minutes"). */
+export const ACCESS_LIMIT_HOLD_MS = 5 * 60_000;
 export const PRO_SILENCE_MS = 10 * 60_000;
 export const PRO_ACTIVITY_MS = 10 * 60_000;
 /**
@@ -8145,6 +8147,17 @@ async function noteRecoveryObservations(
       const preserveGoalRecovery = !!sessionId && recorded?.conversationId === conversationId &&
         goalActiveFor(conversationId) && grant?.sessionId === sessionId &&
         (!item.turnId || grant.turnId === item.turnId);
+      // A chat whose user wants unfinished work continued keeps its watch too, deferred past the
+      // limit: ChatGPT's Retry-After when it gave one, otherwise a few minutes, as its dialog asks.
+      // Retiring it left a turn that dropped into a limit with no Retry-After stopped for good,
+      // though the page came back minutes later (2026-10-12).
+      const keepForContinue = !preserveGoalRecovery && !!sessionId && recorded?.conversationId === conversationId &&
+        grant?.sessionId === sessionId && (!item.turnId || grant.turnId === item.turnId) &&
+        recoveryInputAllowed(sessionId, conversationId);
+      if (keepForContinue) {
+        grant!.until = Math.max(grant!.until, providerHistoryBackoff(conversationId) ?? item.time + ACCESS_LIMIT_HOLD_MS);
+        continue;
+      }
       if (!preserveGoalRecovery) endActivity(conversationId);
       continue;
     }
