@@ -2769,8 +2769,11 @@ as proof the tab is still there. An idle chat with nothing owed is deliberately 
 Provider access-limit notices preserve only an active Goal/Loop's existing exact session/turn
 recovery grant. They neither renew its deadline nor discard a pending/spent repair or postpone
 Goal pickup. Genuine new work in the same batch keeps its ordinary rearming authority, and an
-accepted terminal boundary still retires its pending repair, including after handout. Ordinary
-chats retain their no-reload behavior for these blocking notices; no new grant comes from a dialog.
+accepted terminal boundary still retires its pending repair, including after handout. A chat
+whose unfinished work the user wants continued (`recoveryInputAllowed`) keeps its existing grant too,
+deferred past the limit: the history Retry-After, or `ACCESS_LIMIT_HOLD_MS` (5 min) without one. Retiring
+it left a turn that dropped into a limit stopped for good (2026-10-12). No reload happens while the
+limit holds, and no new grant comes from a dialog.
 
 | Trigger | Required meaning |
 | --- | --- |
