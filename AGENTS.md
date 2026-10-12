@@ -659,6 +659,14 @@ start reuses the existing single recovery scheduler when the deadline expires. A
 when neither is usable, a 60-second **local fallback** applies instead. This fallback is not
 a claim that ChatGPT supplied a retry deadline. The existing pending-repair and terminal
 pickup-stopped countdowns retain their prior precedence over the generic limit notice.
+Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
+0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
+pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429
+with a longer Retry-After each time. The recorder writes a repeating history-limit notice (one
+that carries `retryAt`) once: an identical one within 30 minutes of the newest `chat_error` is not
+appended again, while the provider access dialog is still recorded again after 30 s. The bridge's
+provider-limit hold still follows every new Retry-After, because it reads the observations, not
+the recording.
 **A chat deleted in ChatGPT** answers its history request and a send into it with HTTP 404 and
 `detail.code: "conversation_deleted"` (measured 2026-10-11; the page then shows a localized notice,
 or moves a reopened tab to its home page). The same wrapper reads that bounded (16 KiB) JSON answer
