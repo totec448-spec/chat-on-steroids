@@ -9,6 +9,13 @@
 // <browser>-<language>-{dev,load}.webp plus manifest.json. Copy both into
 // src/renderer/setup-images/extensions/. Run it when a browser changes its extensions page.
 import { spawn, spawnSync } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
+// Over SSH, every browser start fails a Windows sign-in for the account (no stored credential in
+// that logon). Thirteen languages pass Windows' lockout threshold, and a locked-out account then
+// breaks SSH and auto sign-in for ten minutes (VM 141, 2026-10-12). Run it in the desktop session.
+if (process.env.SSH_CONNECTION && !process.argv.includes('--allow-ssh')) {
+  console.error('Run this in the Windows desktop session (or a scheduled task there), not over SSH: each browser start over SSH fails a Windows sign-in and locks the account.');
+  process.exit(2);
+}
 const out = process.argv[2]; const only = process.argv[3]; fs.mkdirSync(out, { recursive: true });
 const ONLY_LANG = process.argv[4];
 const LANGS = { en: 'en-US', de: 'de', es: 'es', fr: 'fr', ja: 'ja', ko: 'ko', 'pt-BR': 'pt-BR', 'pt-PT': 'pt-PT', ru: 'ru', tr: 'tr', vi: 'vi', 'zh-CN': 'zh-CN', 'zh-TW': 'zh-TW' };
@@ -77,7 +84,9 @@ for (const [name, b] of Object.entries(BROWSERS)) {
       // The whole row the button sits in, with complete neighbours, so nothing is cut at the edges.
       const rowBoxes = await ev(`(()=>{ const all=[]; const walk=r=>{ for (const e of r.querySelectorAll('*')) { all.push(e); if (e.shadowRoot) walk(e.shadowRoot); } }; walk(document); const load=(${loadEl}).getBoundingClientRect(); const near=all.filter(e=>{ const r=e.getBoundingClientRect(); return r.width>0 && r.height>0 && Math.abs((r.y+r.height/2)-(load.y+load.height/2))<14 && r.height<60 && (/BUTTON/.test(e.tagName) || (e.childElementCount===0 && (e.textContent||'').trim().length>2)); }); return near.map(e=>{const r=e.getBoundingClientRect(); return [r.x,r.y,r.width,r.height];}); })()`);
       const loadCrop = name === 'edge'
-        ? crop([loadBox, ...rowBoxes], [22, 22, 44, 22], 560, { x0: 360, x1: b.width })
+        // Edge puts a "Developer options" heading far to the left of its buttons: leave it out,
+        // so the picture stays narrow enough to read at the size Setup shows it.
+        ? crop([loadBox, ...rowBoxes.filter(q => q[0] >= loadBox[0] - 8)], [22, 22, 22, 22], 480, { x0: 360, x1: b.width })
         : crop([loadBox, ...rowBoxes, [loadBox[0], 0, 1, 1]], [0, 22, 20, 24], 560, { x0: 0, x1: b.width });
       await shoot(`${name}-${lang}-load.webp`, loadCrop);
       (manifest[name] ??= {})[lang] = {
