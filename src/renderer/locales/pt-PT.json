@@ -1974,6 +1974,7 @@
   "Background process is no longer running": "O processo em segundo plano já não está em execução",
   "{0} background processes running": "{0} processos em segundo plano em execução",
   "Diagnostics report": "Relatório de diagnóstico",
+  "Choose Update all to retry.": "Selecione «Atualizar tudo» para tentar novamente.",
   "Choose Update all to retry. You can keep using the current app.": "Selecione Atualizar tudo para tentar novamente. Pode continuar a usar a aplicação atual.",
   "Let active chats finish, then reload the companion extension in your browser.": "Aguarde que os chats em curso terminem e recarregue a extensão complementar do navegador.",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Abra o ChatGPT com a extensão complementar do navegador ativada e selecione «Rever configuração».",

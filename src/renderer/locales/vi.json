@@ -1974,6 +1974,7 @@
   "Background process is no longer running": "Tiến trình nền không còn chạy",
   "{0} background processes running": "{0} tiến trình nền đang chạy",
   "Diagnostics report": "Báo cáo chẩn đoán",
+  "Choose Update all to retry.": "Chọn Cập nhật tất cả để thử lại.",
   "Choose Update all to retry. You can keep using the current app.": "Chọn Cập nhật tất cả để thử lại. Bạn có thể tiếp tục dùng ứng dụng hiện tại.",
   "Let active chats finish, then reload the companion extension in your browser.": "Chờ các cuộc trò chuyện đang chạy kết thúc, rồi tải lại tiện ích đồng hành trên trình duyệt.",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Mở ChatGPT khi tiện ích đồng hành trên trình duyệt được bật, rồi chọn Kiểm tra thiết lập.",

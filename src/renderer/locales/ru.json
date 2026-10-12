@@ -1974,6 +1974,7 @@
   "Background process is no longer running": "Фоновый процесс больше не выполняется",
   "{0} background processes running": "{0} фоновых процессов запущено",
   "Diagnostics report": "Диагностический отчёт",
+  "Choose Update all to retry.": "Выберите «Обновить всё», чтобы повторить попытку.",
   "Choose Update all to retry. You can keep using the current app.": "Выберите «Обновить всё», чтобы повторить попытку. Текущим приложением можно продолжать пользоваться.",
   "Let active chats finish, then reload the companion extension in your browser.": "Дождитесь завершения текущих чатов, затем перезагрузите сопутствующее расширение браузера.",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Откройте ChatGPT с включённым сопутствующим расширением браузера и выберите «Проверить настройку».",

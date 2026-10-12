@@ -1974,6 +1974,7 @@
   "Background process is no longer running": "バックグラウンドプロセスはすでに停止しています",
   "{0} background processes running": "{0} 個のバックグラウンドプロセスを実行中",
   "Diagnostics report": "診断レポート",
+  "Choose Update all to retry.": "「まとめて更新」で再試行してください。",
   "Choose Update all to retry. You can keep using the current app.": "「まとめて更新」で再試行してください。現在のアプリは引き続き使用できます。",
   "Let active chats finish, then reload the companion extension in your browser.": "実行中のチャットが終わってから、ブラウザーで連携用拡張機能を再読み込みしてください。",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.": "連携用拡張機能を有効にしてChatGPTを開き、「セットアップを確認」を選んでください。",

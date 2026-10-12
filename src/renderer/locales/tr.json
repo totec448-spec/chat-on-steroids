@@ -1974,6 +1974,7 @@
   "Background process is no longer running": "Arka plan işlemi artık çalışmıyor",
   "{0} background processes running": "{0} arka plan işlemi çalışıyor",
   "Diagnostics report": "Tanılama raporu",
+  "Choose Update all to retry.": "Yeniden denemek için Tümünü güncelle seçeneğini seçin.",
   "Choose Update all to retry. You can keep using the current app.": "Yeniden denemek için Tümünü güncelle seçeneğini seçin. Mevcut uygulamayı kullanmaya devam edebilirsiniz.",
   "Let active chats finish, then reload the companion extension in your browser.": "Devam eden sohbetlerin bitmesini bekleyin, ardından yardımcı tarayıcı eklentisini yeniden yükleyin.",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.": "Yardımcı tarayıcı eklentisi etkinken ChatGPT’yi açın, ardından Kurulumu gözden geçir seçeneğini seçin.",

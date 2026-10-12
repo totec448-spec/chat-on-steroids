@@ -1974,6 +1974,7 @@
   "Background process is no longer running": "后台进程已不再运行",
   "{0} background processes running": "{0} 个后台进程正在运行",
   "Diagnostics report": "诊断报告",
+  "Choose Update all to retry.": "请选择“全部更新”重试。",
   "Choose Update all to retry. You can keep using the current app.": "请选择“全部更新”重试。你可以继续使用当前应用。",
   "Let active chats finish, then reload the companion extension in your browser.": "请等待正在运行的聊天结束，再重新加载浏览器扩展。",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.": "启用浏览器扩展后打开 ChatGPT，然后选择“检查连接设置”。",
