@@ -96,6 +96,19 @@ app.whenReady().then(async () => {
     };
     await js("setLanguage('pt-BR')");
     await capture('extension-waiting-desktop');
+    // Each browser shows its own extensions page in the app's language, or no picture at all.
+    const pictures = () => js(`(async()=>{ const imgs=[...document.querySelectorAll('.ext-picture img')]; await Promise.all(imgs.map(i=>i.decode().catch(()=>{}))); return imgs.map(i=>({src:i.getAttribute('src'),loaded:i.naturalWidth>0&&i.getBoundingClientRect().width>=200})); })()`);
+    const chromePictures = await pictures();
+    assert.equal(chromePictures.length, 2);
+    assert.ok(chromePictures.every(p => p.loaded && /chrome-pt-BR-(dev|load)/.test(p.src)), JSON.stringify(chromePictures));
+    assert.equal(await js('document.getElementById("extensionStepDevWhere").hidden'), true);
+    await js("document.querySelector('[data-external-browser=edge]').click()");
+    const edgePictures = await pictures();
+    assert.equal(edgePictures.length, 2);
+    assert.ok(edgePictures.every(p => p.loaded && /edge-pt-BR-(dev|load)/.test(p.src)), JSON.stringify(edgePictures));
+    assert.equal(await js('document.getElementById("extensionStepDevWhere").hidden'), false);
+    await capture('extension-edge-desktop');
+    await js("document.querySelector('[data-external-browser=chrome]').click()");
     await js("fixture.bridge.externalExtension={present:true,version:'2.1.25',lastSeenAt:Date.now()};paint()");
     assert.equal(await js('document.getElementById("browserContinue").disabled'), true);
     await js("fixture.bridge.externalExtension.version=null;paint()");
@@ -129,6 +142,6 @@ app.whenReady().then(async () => {
     await js("document.getElementById('browserContinue').click();fixture.bridge.externalExtension.present=false;paint()");
     assert.equal(await js('document.getElementById("browserConnectionLost").hidden'), false);
     assert.equal(await js('paint().ready'), false);
-    console.log('PASS: external-only gating, versions, two stages, icons, explicit browser opening, desktop/narrow layouts.');
+    console.log('PASS: external-only gating, versions, two stages, icons, each browser\'s own pictures, explicit browser opening, desktop/narrow layouts.');
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error => { console.error(error); app.exit(1); });
