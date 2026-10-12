@@ -1347,10 +1347,11 @@
             <div class="update-readiness-status">
               <div class="update-readiness-header">
                 <button class="btn update-readiness-toggle" id="updateReadinessToggle" type="button" aria-controls="updateReadinessDetails" aria-expanded="true">
-                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary" role="status">Not checked yet</span>
+                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary">Not checked yet</span>
                 </button>
                 <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="The app may restart. Finish active work before updating.">Update all</button>
               </div>
+              <span class="sr-only" id="updateReadinessAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
               <p id="updateAllError" class="is-warn" role="alert" hidden></p>
             </div>
             <details id="updateReadinessDetails" open>

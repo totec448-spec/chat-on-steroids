@@ -4190,109 +4190,90 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
-`pluginRefreshStatuses()` projects the existing ledger without creating debt, repairing rows or
-waking the browser. Its parsed rows are cached against `durableRevision('plugin-refresh')`;
-owner commits replace the cached snapshot; another committed write to that ledger or a new
-store invalidates the disk read. `confirmedPluginSchemas()` projects these same committed rows
-for Setup, without a second confirmation cache or repair-on-read. Both projections exclude
-other tunnels and unverified earlier unstable-connection runs. Malformed JSON or unreadable
-refresh state cannot be replaced with fresh click authority. Failed reads stay cached for
-state pushes; an explicit check/Restart retries the read, allowing restored evidence to recover.
-The live publication must also belong to the configured tunnel before status, browser hints or
-refresh receipts can use it; a newly published tunnel starts its full grace even with unchanged tools. Projections
-read committed evidence without joining the refresh mutation queue. `AppState.connectorRefresh`
-carries only each currently published surface's
-schema fingerprint, `unknown/current/pending/refreshing/manual/failed` state and optional
-`responding` boolean and a failed phase (`inspection` or `confirmation`); the owner records
-the phase of this attempt before ending a read-only observation, retaining earlier consumed
-click authority. Legacy records without the phase retain their conservative projection.
-No app IDs,
-tools or raw refresh errors leave the owner through this projection. The phase applies only
-to failed evidence for the current publication and is never borrowed from an older schema.
-Activity shows existing updater/connection errors and the safe refresh phase with the next
-explicit action. An Update all failure, including rejected IPC, remains visible across state
-pushes until the user retries; a new check clears that operation error, not connector evidence.
-The operation error and the restart notice remain outside collapsed details. Fully confirmed,
-closed status is one line with a keyboard-operable status toggle and Update all; its restart
-notice remains the button's tooltip and accessible description, and is visible when expanded
-or incomplete. App-authored
-update reasons are localized at the renderer boundary. An inspection failure is named a
-connector check failure, separately from a claimed Refresh whose confirmation failed. Recovery
-guidance points to the connector settings and Activity's Diagnostics report without assuming
-the provider's management page exposes a tool list. Unreadable or invalid refresh state
-keeps its stored contents and directs the user to Activity's Diagnostics report for recovery.
-For that read failure the card exposes the same explicit report action, so it remains reachable
-when the event area has shrunk. Both report buttons join the existing report handler and stay
-disabled during a save; the shortcut does not retry refresh or clear its error.
-Activity's Update status card
-combines it with the updater, bridge and connection owners. All checks pass only after a
-successful release check with no newer app, a live paired extension at the running version,
-and every enabled connector is live, reached by ChatGPT in this run, and confirmed for its
-exact current schema. Enabled macOS Desktop also projects the native backend's existing
-`desktopAccess` verdicts for the selected screen/control capabilities: missing blocks readiness,
-unknown stays unverified, and read-only ignores control consent. Off/empty Desktop and clipboard-only
-use require no native screen/control grant. The card requests no permission itself and preserves
-connector failures alongside permission guidance. A confirmed manual macOS update explains fully
-quitting, replacing the app in `/Applications`, and launching that copy; it never deletes a copy.
-Optional off connectors or ones with no advertised tools do not block
-completion, matching Update all's requested surfaces. Core always remains required. Unknown schema or historical
-connection proof alone never establish full verification. Successful external tool calls under the same live publication
-and tunnel may instead establish **Ready to use; tool definitions not fully verified** when
-there is no known stale/manual/failed refresh. This is operational evidence, never a full-schema
-claim. `kernel.dispatch` captures `beginPluginToolCall` before work and confirms only a non-error
-outer provider result; HTTP ingress excludes self-tests and tunnel probes, and a changed schema,
-reconnect or changed tunnel invalidates a late result. Only fully verified status collapses by
-default; operational but schema-unverified evidence stays expanded. A new version, schema,
-failure or other meaningful component change updates the default expansion; identical pushes,
-timestamp churn and language changes preserve the person's choice. The status line toggles the
-native details with pointer or keyboard input, while Update all stays accessible; a focused
-action is not hidden on a state push. Extension reload guidance applies only when the extension
-is older; a newer extension directs the person to update the app. Activity
-keeps the existing fixed-height page and event-feed scrolling: the event card uses the remaining
-height without an added minimum or page scroll. In a short window, the status details scroll
-inside their card; collapsing them returns height to the event feed.
-Review setup only opens Setup; displaying this card starts no work.
-`update:all` / preload `updateAll()` is explicit consent to check/stage, apply a supported app
-update via normal shutdown, and refresh published connectors once. `update-all.ts` joins
-concurrent presses and commits refresh intent before quitting or opening a manual download. An app update skips the
-old build's bridge/tunnel connection; the next build connects for the saved refresh request.
-It never changes config or
-secrets. macOS/DEB retain their manual download path, and ambiguous/manual provider refreshes
-stay manual. Its receipt (`restarting/manual/checking-connectors`) is not completion evidence.
-The existing refresh rows record paired `requestedVersion/requestedFromVersion` fields,
-`tunnelKey` connection scope, optional `verifiedRun` for unstable connections, and a read-only
-`observe` request. Unscoped legacy or other-profile proof cannot mark the current tunnel verified.
-Explicit requests retain placeholder rows for configured surfaces whose connection failed before
-publication, so the requested target is not lost on quit. The first target publication adopts
-that placeholder once. Rechecking an ambiguous/manual/completed row sets `observe` and hands out
-`PluginRefreshRequest.observeOnly`: the extension may confirm complete matching declarations
-without clicking Refresh. The owner refuses mutating claims even when legacy repair clears
-an impossible click receipt. A mismatch ends the observation; an explicit new check can inspect a
-manually recreated app by its unique connector name and current tunnel rather than a retired app ID.
-Installed discovery on `/settings/plugins-settings` accepts visible native buttons and same-origin
-links to exact `plugin_asdk_app_*` management routes inside the page's `main`. For a uniquely
-resolved surface with account-proven App IDs, native links must name one of those IDs; a provider
-rename need not have reached the learned name yet. A same-named foreign ID cannot be a fallback.
-First enrollment without proven IDs and legacy buttons still match the configured/learned name's
-own leaf. Unknown request names, catalog, external, transcript, extension and hidden-page links do
-not count. Multiple matching rows remain ambiguous and grant no Refresh authority. Native links are
-rechecked after discovery: the same unique visible, connected row must retain its exact href.
-The elected helper carries its request marker into that management URL before reading the
-card; unreadable declarations cannot prevent restoring page custody. Legacy buttons retain
-their existing discovery flow. Each inspection invocation belongs to its starting URL and
-epoch, including through document registration before dispatching a claim or result. Moving
-to another settings URL neither authorizes Refresh nor attributes the old page's failed read.
-Configured names and
-account-proven learned names resolve one surface before settings-page identity is checked;
-renaming does not discard its proven App IDs or the Plugins declaration budget. A name shared
-by different surfaces fails closed during name-only discovery, including collisions with
-configured names. A durably enrolled exact App ID still identifies its management page and
-uses its own proven surface's declaration limits. Initial enrollment and a legitimately
-recreated, proven App ID remain supported.
-The version fields allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
-the new build's schema once, but a later same-build schema change gets no borrowed authority.
-Startup resumes accepted refresh work even with auto-connect off, without another install.
-Extension replacement/reload stays with the existing build-stamp and idle-check owners.
+
+**Read-only readiness projection.** `pluginRefreshStatuses()` and
+`confirmedPluginSchemas()` share committed rows cached against
+`durableRevision('plugin-refresh')`; owner commits replace the cache, and committed
+writes/store replacement invalidate it. Neither projection creates debt, repairs rows,
+joins the mutation queue or wakes the browser. Malformed/unreadable state keeps its
+contents and grants no new click authority; failed reads stay cached until an explicit
+check/Restart retries them. The live publication must belong to the configured tunnel;
+another tunnel or an unverified unstable-connection run contributes no proof. A restored
+publication starts its full tunnel grace even with unchanged tools.
+`AppState.connectorRefresh` exposes the current schema, state
+(`unknown/current/pending/refreshing/manual/failed`), optional `responding` and safe
+failure phase (`inspection/confirmation`), never installed App IDs, tools or private
+refresh errors. Failure phases belong to the current schema; ending an observation
+retains earlier consumed click authority and legacy rows remain conservative.
+
+**Activity contract.** Full completion requires a successful release check, no newer
+app, the live paired extension at the running version, and exact current-schema proof
+for every enabled connector reached by ChatGPT in this run. Core stays required;
+optional off/empty connectors are skipped. Enabled macOS Desktop projects the native
+screen/control verdicts: missing blocks, unknown stays unverified, read-only excludes
+control, and clipboard-only needs no screen/control grant. The card requests no permission.
+Ordinary external tool success may show operational readiness with the full-schema
+caveat. `beginPluginToolCall` captures the publication before dispatch; non-error outer
+results confirm it only if schema/tunnel/connection remain current. Self-tests, tunnel
+probes and known failed/manual refreshes cannot establish readiness.
+Update all errors, including rejected IPC, persist outside details until explicit retry;
+a retry clears only the operation error. Recovery copy localizes owned reasons and
+safe phases, exposes the existing Diagnostics report action for unreadable state,
+and never retries or clears evidence itself. Both report buttons share their existing
+save owner and stay disabled while saving. Completed details collapse by default;
+meaningful owner changes reset the default, while identical pushes, timestamps and
+language changes preserve manual choice and focus. A keyboard button toggles native
+details; its polite live-status sibling updates only for changed text. Restart guidance
+remains visible for incomplete/expanded status and a tooltip/description otherwise.
+Activity keeps the fixed page height and remaining-height event feed; short-window
+details scroll internally. Review setup only navigates. Older extension guidance asks
+for reload; newer extension guidance asks for an app update. Manual macOS guidance
+fully quits, replaces `/Applications` and launches that copy; it never removes a copy.
+
+**Explicit Update all consent.** `update:all` / preload `updateAll()` joins concurrent
+presses, checks/stages the release and commits refresh intent before normal shutdown
+or manual download. It changes no config/secrets; macOS/DEB and provider manual steps
+stay manual. `restarting/manual/checking-connectors` receipts are not completion proof.
+An app update skips the old build's connection. Configured useful surfaces remain
+available through `getStatus()` while disconnected; off/empty optional surfaces are skipped.
+Rows distinguish `tunnelKey` verification scope from explicit request scope and bind
+`requestedVersion/requestedFromVersion`, optional unstable-run `verifiedRun`, and `observe`.
+Unscoped legacy rows keep their App ID, consumed click/manual outcome and schema history;
+only read-only same-App-ID observation with the configured OpenAI Secure Tunnel and
+complete current declarations can migrate them. Manual/temporary tunnels cannot borrow
+a retained OpenAI ID as proof; unscoped history remains unverified without owned scope.
+Configured but unpublished targets retain placeholders, adopted once by the first
+target publication. A new build may adopt its schema once; a later same-build schema
+change cannot borrow that grant. Startup durably consumes one connection attempt per
+explicit request at its exact target version before starting bridge/connection work,
+even with auto-connect off. The selected settings incarnation must remain current before
+reservation and through startup awaits/queued connection execution, including A -> B -> A.
+Late startup handles retire through the connection owner; established health reports return
+to their ordinary connection-generation lifetime. Failure or missing publication cannot repeat that attempt
+on later starts; pressing Update all renews it. Future-version intent waits for that
+version rather than expiring during a delayed manual install. Consumed startup authority
+does not revoke pending browser work on a connection the user opens separately.
+Rechecks of consumed, ambiguous or manual outcomes use `observeOnly`: complete declarations
+may confirm without Refresh; mutating claims stay refused even after click-receipt repair.
+A mismatch ends observation; for scoped rows, an explicit check can inspect a uniquely
+named manually recreated app on the current tunnel. Unscoped legacy migration still
+requires the original App ID and the owned OpenAI scope described above. Extension replacement/reload remains with the
+existing build-stamp and idle owners.
+
+**Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
+and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
+A unique surface with account-proven App IDs accepts only its proven IDs, permitting
+renames before learned names catch up; a same-named foreign ID never falls back.
+First enrollment and legacy buttons use the unique configured/learned name leaf.
+Unknown, catalog, external, transcript, hidden or ambiguous rows grant no authority.
+After awaits, the same unique connected visible link must retain its exact href;
+the elected helper adds its request marker before navigating/reading the card.
+Legacy buttons retain their flow. Each invocation fences its starting URL/epoch,
+including document registration before claim/result dispatch; navigation cannot
+inherit click authority or misattribute an old failed read. Name collisions fail
+closed, while an enrolled exact App ID retains its surface and declaration budget.
+Initial enrollment and a legitimately recreated, proven identity remain supported.
+
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names

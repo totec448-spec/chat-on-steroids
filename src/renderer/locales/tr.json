@@ -2197,7 +2197,7 @@
   "Not enabled": "Etkin değil",
   "Not verified in ChatGPT": "ChatGPT içinde doğrulanmadı",
   "Manual refresh required in ChatGPT": "ChatGPT içinde elle yenileme gerekiyor",
-  "Connector refresh failed": "Bağlayıcı yenileme başarısız",
+  "Connector refresh failed": "Bağlayıcı yenilemesi başarısız",
   "Connector check failed": "Bağlayıcı kontrolü başarısız",
   "Waiting for refresh confirmation": "Yenileme onayı bekleniyor",
   "Refresh needed in ChatGPT": "ChatGPT içinde yenileme gerekiyor",
@@ -2226,7 +2226,7 @@
   "The downloaded update did not match the published checksum.": "İndirilen güncellemenin sağlama toplamı yayımlanan değerle eşleşmedi.",
   "Could not check for updates: HTTP {0}.": "Güncellemeler kontrol edilemedi: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "{0} indirilemedi: HTTP {1}.",
-  "Release {0} does not include {1}.": "{0} sürümü {1} içermiyor.",
+  "Release {0} does not include {1}.": "{0} sürümü {1} dosyasını içermiyor.",
   "The update download returned no data.": "Güncelleme indirilirken veri alınamadı.",
   "Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.": "Kurtarma konusunda yardım almak için Etkinlik bölümünden bir tanılama raporu kaydedin. Kayıtlı durum korundu.",
   "Choose Update all to retry.": "Yeniden denemek için Tümünü güncelle seçeneğini seçin.",
@@ -2239,7 +2239,7 @@
   "In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.": "ChatGPT’nin bağlayıcı ayarlarında bu bağlayıcıyı yenileyin veya yeniden oluşturun, ardından tekrar kontrol etmek için Tümünü güncelle seçeneğini seçin.",
   "Your settings are kept. Manual steps appear in the status list.": "Ayarlarınız korunur. Elle yapılması gereken adımlar durum listesinde gösterilir.",
   "Update all could not finish: {0}": "Tümünü güncelle tamamlanamadı: {0}",
-  "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Devam eden işleri bitirin ve Chat On Steroids’i tamamen kapatın. /Applications içindeki uygulamayı değiştirin ve güncel sürümü bu klasörden açın.",
+  "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Devam eden işleri bitirin ve Chat On Steroids’i tamamen kapatın. /Applications içindeki uygulamayı güncel sürümle değiştirin ve uygulamayı bu klasörden açın.",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "macOS izinlerini kontrol etmek için “Kurulumu gözden geçir”i seçin. Ardından uygulamayı tamamen kapatıp yeniden açın.",
   "Choose Update all to check for updates and update the app.": "Güncellemeleri kontrol edip uygulamayı güncellemek için “Tümünü güncelle”yi seçin."
 }

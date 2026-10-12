@@ -13,13 +13,18 @@ import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, Plug
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
 const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+$/).optional();
-const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), failure: z.enum(['inspection', 'confirmation']).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional(), tunnelKey: z.string().optional(), verifiedRun: z.string().optional(), observe: z.boolean().optional().default(false), requestedVersion, requestedFromVersion: requestedVersion }).refine(row => !!row.requestedVersion === !!row.requestedFromVersion);
+const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), failure: z.enum(['inspection', 'confirmation']).optional(), versionId: z.string().max(200).optional(), failures: z.number().int().nonnegative().optional(), parked: z.boolean().optional(), parkedBy: z.string().max(40).optional(), tunnelKey: z.string().optional(), verifiedRun: z.string().optional(), observe: z.boolean().optional().default(false), requestedVersion, requestedFromVersion: requestedVersion, requestedTunnelKey: z.string().optional(), requestedStartupVersion: requestedVersion }).refine(row => !!row.requestedVersion === !!row.requestedFromVersion);
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
 const publicationScopes = new Map<PluginSurface, string>();
 const responding = new Map<PluginSurface, PluginPublication>();
 const runId = randomUUID();
 const scope = (surface: PluginSurface) => connectorTunnelKey(getConfig(), surface) ?? `unbound:${getConfig().tunnel.kind}:${getConfig().tunnel.profileId ?? 'default'}:${surface}`;
+/** Old builds recorded App ID/click custody, but never the tunnel it belonged to. */
+const legacyIdentity = (row: Row) => row.tunnelKey === undefined && row.appId !== null;
+const requestedHere = (row: Row) => row.requestedVersion === APP_VERSION && (row.requestedTunnelKey ?? row.tunnelKey) === scope(row.surface);
+const requestPending = (row: Row) => row.requestedFromVersion !== APP_VERSION || row.observe ||
+  (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId);
 function currentPublication(surface: PluginSurface): PluginPublication | undefined {
   return publicationScopes.get(surface) === scope(surface) ? publications.get(surface) : undefined;
 }
@@ -195,15 +200,27 @@ export async function authorizedPluginRefreshPublications(automatic: boolean): P
   try {
     const current = await savedRows();
     return pluginRefreshPublications().filter(publication => current.some(row => row.surface === publication.surface &&
-      row.tunnelKey === scope(row.surface) && row.requestedVersion === APP_VERSION && (row.schemaId === publication.schemaId || row.requestedFromVersion !== APP_VERSION)));
+      requestedHere(row) && (legacyIdentity(row) || row.schemaId === publication.schemaId || row.requestedFromVersion !== APP_VERSION)));
   } catch { return []; }
 }
 export async function hasRequestedPluginRefresh(): Promise<boolean> {
   try {
     const current = await savedRows();
-    return current.some(row => row.tunnelKey === scope(row.surface) && row.requestedVersion === APP_VERSION && (row.requestedFromVersion !== APP_VERSION || row.observe ||
-      (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId)));
+    return current.some(row => requestedHere(row) && requestPending(row));
   } catch { return false; }
+}
+/** One connection attempt per accepted round and target build, committed before startup acts. */
+export function consumeRequestedPluginRefreshStartup(currentAuthority: () => boolean = () => true): Promise<boolean> {
+  return serial(async () => {
+    if (!currentAuthority()) return false;
+    const current = await savedRows();
+    if (!currentAuthority()) return false;
+    const pending = current.filter(row => requestedHere(row) && requestPending(row) && row.requestedStartupVersion !== APP_VERSION);
+    if (!pending.length) return false;
+    for (const row of pending) row.requestedStartupVersion = APP_VERSION;
+    await save(current);
+    return true;
+  });
 }
 /** Reading update status must not create refresh debt, repair rows or wake a browser. */
 export function pluginRefreshStatuses(): Promise<Partial<Record<PluginSurface, PluginRefreshStatus>>> {
@@ -261,6 +278,9 @@ function reconcileRows(current: Row[]): boolean {
   for (const publication of publications.values()) {
     if (currentPublication(publication.surface) !== publication) continue;
     const stored = current.find(row => row.surface === publication.surface);
+    // An unknown old tunnel is not a different tunnel. Keep its consumed/manual custody
+    // until the same installed app proves its current tunnel and full declarations.
+    if (stored && legacyIdentity(stored)) continue;
     const found = stored?.tunnelKey === scope(publication.surface) ? stored : undefined;
     if (found?.schemaId === publication.schemaId) {
       if (found.requestedVersion === APP_VERSION && found.requestedFromVersion !== APP_VERSION) {
@@ -279,6 +299,8 @@ function reconcileRows(current: Row[]): boolean {
     if (found?.requestedVersion && (!found.schemaId || found.requestedVersion !== APP_VERSION || found.requestedFromVersion !== APP_VERSION)) {
       next.requestedVersion = found.requestedVersion;
       next.requestedFromVersion = found.requestedVersion === APP_VERSION ? APP_VERSION : found.requestedFromVersion;
+      next.requestedTunnelKey = found.requestedTunnelKey;
+      next.requestedStartupVersion = found.requestedStartupVersion;
     }
     if (stored) current[current.indexOf(stored)] = next; else current.push(next);
     changed = true;
@@ -291,14 +313,16 @@ export function requestPluginRefreshes(version: string, surfaces: PluginSurface[
     const target = requestedVersion.unwrap().parse(version);
     const current = await rows(true);
     reconcileRows(current);
-    for (const surface of surfaces) if (!current.some(row => row.surface === surface && row.tunnelKey === scope(surface))) {
+    for (const surface of surfaces) if (!current.some(row => row.surface === surface && (row.tunnelKey === scope(surface) || legacyIdentity(row)))) {
       const next: Row = { surface, tunnelKey: scope(surface), observe: false, schemaId: '', id: randomUUID(), appId: null, completedSchemaId: null, attempted: false, manual: false };
       const index = current.findIndex(row => row.surface === surface);
       if (index >= 0) current[index] = next; else current.push(next);
     }
     for (const row of current) {
       if (!surfaces.includes(row.surface)) continue;
-      if (target === APP_VERSION && (row.manual || row.attempted || row.completedSchemaId === row.schemaId)) {
+      row.requestedTunnelKey = scope(row.surface);
+      delete row.requestedStartupVersion;
+      if (target === APP_VERSION && (legacyIdentity(row) || row.manual || row.attempted || row.completedSchemaId === row.schemaId)) {
         // A fresh explicit observation may open its own helper after the old one was closed.
         // Keep the consumed click/manual flags: a new page identity grants no new Refresh.
         row.id = randomUUID(); row.observe = true; row.requestedVersion = target; row.requestedFromVersion = APP_VERSION; continue;
@@ -324,7 +348,10 @@ export function pendingPluginRefreshes(automatic = true): Promise<PluginRefreshR
     }
     return current.flatMap(row => {
       const publication = currentPublication(row.surface);
-      return publication && (automatic || row.requestedVersion === APP_VERSION) && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now() && publication.schemaId === row.schemaId && (row.observe || (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId))
+      if (!publication || (!automatic && !requestedHere(row)) || (settling.get(row.surface)?.readyAt ?? 0) > Date.now()) return [];
+      if (legacyIdentity(row)) return row.observe || (!row.error && !row.parked)
+        ? [{ ...structuredClone(publication), id: row.id, appId: row.appId, observeOnly: true }] : [];
+      return row.tunnelKey === scope(row.surface) && publication.schemaId === row.schemaId && (row.observe || (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId))
         ? [{ ...structuredClone(publication), id: row.id, appId: row.observe ? null : row.appId, ...(row.observe ? { observeOnly: true } : {}) }] : [];
     });
   });
@@ -346,17 +373,22 @@ function enrolls(row: Row, publication: PluginPublication, input: Enrollment): b
   if (enrollable(input.tools, publication)) return true;
   return typeof input.tunnelId === 'string' && input.tunnelId.length > 0 && input.ownsTunnel?.(row.surface, input.tunnelId) === true;
 }
-function exact(current: Row[], identity: Identity): Row | undefined {
+function exact(current: Row[], identity: Identity, allowLegacy = false): Row | undefined {
   if (!app.safeParse(identity.appId).success) return;
-  return current.find(row => row.id === identity.id && row.tunnelKey === scope(row.surface) && currentPublication(row.surface)?.schemaId === row.schemaId && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now());
+  return current.find(row => row.id === identity.id && !!currentPublication(row.surface) &&
+    ((allowLegacy && legacyIdentity(row)) || (row.tunnelKey === scope(row.surface) && currentPublication(row.surface)?.schemaId === row.schemaId)) &&
+    (settling.get(row.surface)?.readyAt ?? 0) <= Date.now());
 }
 /** Commit one attempted click before the browser acts. A crash never re-arms it. */
 export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurrent?: boolean }, automatic = true): Promise<boolean> {
   return serial(async () => {
-    const current = await rows(); const row = exact(current, input);
-    if (!row || (!automatic && row.requestedVersion !== APP_VERSION) || !recognizable(input.tools, row.surface)) return false;
-    if (row.observe && input.alreadyCurrent !== true) return false;
-    const observation = row.observe;
+    const current = await rows(); const row = exact(current, input, true);
+    if (!row || (!automatic && !requestedHere(row)) || !recognizable(input.tools, row.surface)) return false;
+    const legacy = legacyIdentity(row), observation = row.observe || legacy;
+    if (observation && input.alreadyCurrent !== true) return false;
+    if (legacy && (row.appId !== input.appId || !input.tunnelId ||
+        scope(row.surface) !== `openai:${getConfig().tunnel.profileId ?? 'default'}:${input.tunnelId}` ||
+        input.ownsTunnel?.(row.surface, input.tunnelId) !== true)) return false;
     if (!observation && (row.attempted || row.manual || row.completedSchemaId === row.schemaId)) return false;
     const publication = publications.get(row.surface)!;
     // Unique-name discovery is initial enrollment only. Stale definitions can still
@@ -365,6 +397,7 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
     if (current.some(other => other !== row && other.appId === input.appId)) return false;
     const isCurrent = matches(input.tools, publication.tools, row.surface);
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
+    if (legacy) { row.tunnelKey = scope(row.surface); row.schemaId = publication.schemaId; }
     row.appId = input.appId; row.attempted = true;
     delete row.error;
     delete row.failure;
@@ -412,12 +445,13 @@ export function completePluginRefresh(input: Identity & { tools: unknown; versio
 export function failPluginRefresh(input: { id: string; error: string }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = current.find(row => row.id === input.id);
-    if (!row || row.tunnelKey !== scope(row.surface) || currentPublication(row.surface)?.schemaId !== row.schemaId || (row.completedSchemaId === row.schemaId && !row.observe)) return false;
+    const legacy = row && legacyIdentity(row);
+    if (!row || !currentPublication(row.surface) || (!legacy && (row.tunnelKey !== scope(row.surface) || currentPublication(row.surface)?.schemaId !== row.schemaId || (row.completedSchemaId === row.schemaId && !row.observe)))) return false;
     // Only claimPluginRefresh records an attempted click. Pre-claim failures remain
     // diagnostic errors, distinct from an ambiguous post-click outcome. Existing
     // maintenance may reobserve the same owned page until a claim actually succeeds.
     // A read-only recheck has no new Refresh click, even if an earlier round did.
-    row.failure = row.observe || !row.attempted || !row.appId ? 'inspection' : 'confirmation';
+    row.failure = legacy || row.observe || !row.attempted || !row.appId ? 'inspection' : 'confirmation';
     row.observe = false;
     row.error = input.error.slice(0, 200);
     row.failures = (row.failures ?? 0) + 1;

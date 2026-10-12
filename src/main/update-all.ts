@@ -1,6 +1,6 @@
 /** One explicit command over the existing updater, connection and refresh owners. */
 import { checkForUpdates, manualDownloadUrl, markInstallOnQuit, updateStatus } from './update.js';
-import { hasRequestedPluginRefresh, requestPluginRefreshes } from './plugin-refresh.js';
+import { consumeRequestedPluginRefreshStartup, requestPluginRefreshes } from './plugin-refresh.js';
 import { startBridge } from './bridge.js';
 import { connect, getStatus } from './connection.js';
 import { getConfig } from './config.js';
@@ -43,10 +43,15 @@ export function updateAll(quit: () => void, openDownload: (url: string) => Promi
   return run;
 }
 
-/** Startup resumes accepted connector work only; it never starts another install. */
+/** One durable startup attempt per accepted connector request; never another install. */
 export async function resumeUpdateRefresh(): Promise<void> {
-  if (!await hasRequestedPluginRefresh()) return;
+  // Config saves replace the tunnel settings object. Preserve that incarnation as well as
+  // its values, so a profile/tunnel A -> B -> A cannot borrow the old startup reservation.
+  const tunnel = getConfig().tunnel, snapshot = JSON.stringify(tunnel);
+  const current = () => getConfig().tunnel === tunnel && JSON.stringify(tunnel) === snapshot;
+  if (!await consumeRequestedPluginRefreshStartup(current) || !current()) return;
   await startBridge();
-  await connect();
-  wakeBrowserWork();
+  if (!current()) return;
+  await connect(current);
+  if (current()) wakeBrowserWork();
 }

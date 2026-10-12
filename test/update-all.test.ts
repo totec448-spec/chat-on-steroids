@@ -5,10 +5,11 @@ import * as configOwner from '../src/main/config.js';
 const newerVersion = APP_VERSION.replace(/\d+$/, value => String(Number(value) + 1));
 
 const owners = vi.hoisted(() => ({ check: vi.fn(), status: vi.fn(), mark: vi.fn(),
-  request: vi.fn(), resume: vi.fn(), bridge: vi.fn(), connect: vi.fn(), wake: vi.fn(), surfaces: vi.fn() }));
+  request: vi.fn(), resume: vi.fn(), requested: vi.fn(), bridge: vi.fn(), connect: vi.fn(), wake: vi.fn(), surfaces: vi.fn() }));
 vi.mock('../src/main/update.js', () => ({ checkForUpdates: owners.check, updateStatus: owners.status,
   markInstallOnQuit: owners.mark, manualDownloadUrl: (version: string) => `https://example.test/${version}` }));
-vi.mock('../src/main/plugin-refresh.js', () => ({ requestPluginRefreshes: owners.request, hasRequestedPluginRefresh: owners.resume }));
+vi.mock('../src/main/plugin-refresh.js', () => ({ requestPluginRefreshes: owners.request,
+  hasRequestedPluginRefresh: owners.requested, consumeRequestedPluginRefreshStartup: owners.resume }));
 vi.mock('../src/main/bridge.js', () => ({ startBridge: owners.bridge }));
 vi.mock('../src/main/connection.js', () => ({ connect: owners.connect, getStatus: () => ({ surfaces: owners.surfaces() }) }));
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: owners.wake }));
@@ -22,6 +23,7 @@ beforeEach(() => {
   owners.check.mockResolvedValue(undefined); owners.request.mockResolvedValue(undefined);
   owners.bridge.mockResolvedValue(true); owners.connect.mockResolvedValue(undefined);
   owners.mark.mockReturnValue(true); owners.resume.mockResolvedValue(false);
+  owners.requested.mockResolvedValue(true);
   owners.surfaces.mockReturnValue([]);
   manual.mockResolvedValue(undefined);
 });
@@ -118,4 +120,49 @@ it('resumes only accepted refresh work after restart, without installing or chan
   await resumeUpdateRefresh();
   expect(owners.bridge).toHaveBeenCalledTimes(1); expect(owners.connect).toHaveBeenCalledTimes(1);
   expect(owners.check).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled();
+});
+it('commits the one startup attempt before starting bridge or connection work', async () => {
+  let release!: (accepted: boolean) => void;
+  owners.resume.mockReturnValueOnce(new Promise<boolean>(resolve => { release = resolve; }));
+  const startup = resumeUpdateRefresh();
+  expect(owners.resume).toHaveBeenCalledTimes(1);
+  expect(owners.bridge).not.toHaveBeenCalled(); expect(owners.connect).not.toHaveBeenCalled();
+  release(true); await startup;
+  expect(owners.bridge).toHaveBeenCalledTimes(1); expect(owners.connect).toHaveBeenCalledTimes(1);
+  expect(owners.requested).not.toHaveBeenCalled();
+});
+it('does not connect or wake after an uncommitted startup reservation', async () => {
+  owners.resume.mockRejectedValueOnce(new Error('Could not save refresh state'));
+  await expect(resumeUpdateRefresh()).rejects.toThrow('Could not save refresh state');
+  expect(owners.bridge).not.toHaveBeenCalled(); expect(owners.connect).not.toHaveBeenCalled(); expect(owners.wake).not.toHaveBeenCalled();
+});
+it('does not connect again on the next startup after an accepted attempt fails', async () => {
+  owners.resume.mockResolvedValueOnce(true);
+  owners.connect.mockRejectedValueOnce(new Error('Tunnel authentication unavailable'));
+  await expect(resumeUpdateRefresh()).rejects.toThrow('Tunnel authentication unavailable');
+  await resumeUpdateRefresh();
+  expect(owners.bridge).toHaveBeenCalledTimes(1); expect(owners.connect).toHaveBeenCalledTimes(1);
+  expect(owners.wake).not.toHaveBeenCalled();
+});
+it.each([
+  { boundary: 'reservation', revisit: false }, { boundary: 'bridge', revisit: false },
+  { boundary: 'reservation', revisit: true }, { boundary: 'bridge', revisit: true }
+])('does not lend a startup reservation to another tunnel while awaiting $boundary (A-B-A=$revisit)', async ({ boundary, revisit }) => {
+  const base = configOwner.getConfig();
+  let config = { ...base, tunnel: { ...base.tunnel, tunnelId: 'tunnel_scope_a', profileEpoch: 1 } };
+  vi.spyOn(configOwner, 'getConfig').mockImplementation(() => config);
+  let release!: () => void, reached!: () => void;
+  const started = new Promise<void>(resolve => { reached = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  if (boundary === 'reservation') owners.resume.mockImplementationOnce(async () => { reached(); await gate; return true; });
+  else {
+    owners.resume.mockResolvedValueOnce(true);
+    owners.bridge.mockImplementationOnce(async () => { reached(); await gate; });
+  }
+  const startup = resumeUpdateRefresh(); await started;
+  config = { ...config, tunnel: { ...config.tunnel, tunnelId: 'tunnel_scope_b', profileEpoch: 2 } };
+  if (revisit) config = { ...config, tunnel: { ...config.tunnel, tunnelId: 'tunnel_scope_a', profileEpoch: 1 } };
+  release(); await startup;
+  expect(owners.connect).not.toHaveBeenCalled(); expect(owners.wake).not.toHaveBeenCalled();
+  if (boundary === 'reservation') expect(owners.bridge).not.toHaveBeenCalled();
 });

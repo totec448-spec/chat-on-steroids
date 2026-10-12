@@ -58,6 +58,48 @@ it('expands operational but schema-unverified evidence and opens the completed c
   expect(details.open).toBe(true);
 });
 
+it('announces readiness outside the disclosure button and keeps its label, focus and translation', async () => {
+  const { initUpdateReadiness, paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  initUpdateReadiness(); const next = state();
+  const toggle = document.getElementById('updateReadinessToggle')!;
+  const summary = document.getElementById('updateReadinessSummary')!;
+  const live = document.querySelector('#updateReadinessCard [role="status"]')!;
+  // Button descendants are presentational in accessibility APIs; the live region must stand alone.
+  expect(live.closest('button, [role="button"], summary, details')).toBeNull();
+  expect(live.getAttribute('aria-live')).toBe('polite');
+  expect(live.getAttribute('aria-atomic')).toBe('true');
+  toggle.focus(); paintUpdateReadiness(next);
+  expect(live.textContent).toBe('All checks passed');
+  expect(summary.textContent).toBe(live.textContent);
+  expect(document.activeElement).toBe(toggle);
+  paintUpdateReadiness(next, 'Network unavailable');
+  expect(live.textContent).toBe('Checks incomplete');
+  expect(summary.textContent).toBe(live.textContent);
+  expect(document.activeElement).toBe(toggle);
+  setLanguage('ja');
+  expect(live.textContent).toBe('確認が完了していません');
+  expect(summary.textContent).toBe(live.textContent);
+});
+
+it('updates the readiness live region for changed status but not identical state pushes', async () => {
+  const { paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
+  const next = state(); paintUpdateReadiness(next);
+  const live = document.querySelector('#updateReadinessCard [role="status"]')!;
+  const changes: MutationRecord[] = [];
+  const observer = new dom.window.MutationObserver(records => changes.push(...records));
+  observer.observe(live, { childList: true, characterData: true, subtree: true });
+  paintUpdateReadiness(structuredClone(next));
+  await Promise.resolve();
+  expect(changes).toHaveLength(0);
+  next.connectorRefresh.core = { schemaId: 'a', state: 'unknown', responding: true };
+  paintUpdateReadiness(next);
+  await Promise.resolve();
+  expect(changes).toHaveLength(1);
+  expect(live.textContent).toBe('Ready to use; tool definitions not fully verified');
+  observer.disconnect();
+});
+
 it('keeps a manual choice through timestamps and language changes, but reopens for a new version or schema', async () => {
   const { initUpdateReadiness, paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
   const { setLanguage } = await import('../src/renderer/i18n.js');

@@ -129,7 +129,10 @@ export function paintUpdateReadiness(next: AppState, operationError: string | nu
   const summary = $('updateReadinessSummary');
   summary.dataset.ready = String(ready);
   summary.dataset.complete = String(ready && !schemaUnchecked);
-  ui(summary, 'textContent', () => ready ? schemaUnchecked ? t('Ready to use; tool definitions not fully verified') : t('All checks passed') : t('Checks incomplete'));
+  const summaryText = () => ready ? schemaUnchecked ? t('Ready to use; tool definitions not fully verified') : t('All checks passed') : t('Checks incomplete');
+  ui(summary, 'textContent', summaryText);
+  const announce = $('updateReadinessAnnounce');
+  if (announce.textContent !== summaryText()) ui(announce, 'textContent', summaryText);
   const details = $<HTMLDetailsElement>('updateReadinessDetails');
   // Compare meaningful owner facts, never translated copy or frequently changing timestamps.
   // A new version/schema/error reopens an incomplete card; identical pushes preserve the choice.

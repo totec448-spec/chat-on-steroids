@@ -2228,7 +2228,7 @@
   "Could not download {0}: HTTP {1}.": "無法下載 {0}：HTTP {1}。",
   "Release {0} does not include {1}.": "版本 {0} 不包含 {1}。",
   "The update download returned no data.": "下載更新時未收到資料。",
-  "Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.": "請從「活動」儲存診斷報告，以取得復原協助。已儲存的狀態已保留。",
+  "Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.": "請從「活動」儲存診斷報告，以取得復原協助。原有狀態已保留。",
   "Choose Update all to retry.": "請選擇「全部更新」重試。",
   "Download link opened. Install the app to continue; your settings are kept.": "已開啟下載連結。安裝應用程式後即可繼續檢查，原有設定會保留。",
   "Connector checks requested. Any remaining steps are shown in Update status.": "已要求檢查連接器。剩餘步驟可在「更新狀態」中查看。",
