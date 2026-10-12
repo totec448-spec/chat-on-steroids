@@ -2936,8 +2936,10 @@
       // the message, under the same request id. Stop is not a reliable witness here (measured
       // 2026-10-11: it was already gone at the tick that saw the message). The app files later calls
       // of that request under the next turn only past an end marked so (#1301). A turn that ended
-      // with its answer is not marked: its trailing calls stay with it.
-      const replacedUnfinished = result.outcome === 'unknown' && bounded.outcome === 'interrupted';
+      // with its answer is not marked: its trailing calls stay with it. Where Fiber answers, its
+      // end_turn is that proof, and interim prose without it is an unfinished answer too (live
+      // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
+      const replacedUnfinished = result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
       finishGeneration(ended, steering || replacedUnfinished ? { ...bounded, continued: true } : bounded, false);
     }
 

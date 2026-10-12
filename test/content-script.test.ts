@@ -8929,6 +8929,33 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
   });
 
+  it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {
+    // 2026-10-12, live: a message sent at 02:20:26 joined the running response, which had already
+    // said "I'll pick up where it stopped…". Stop was gone at the tick that saw the message, and the
+    // interim prose made that turn look answered: it ended completed, unmarked. The request then ran
+    // ten more calls and its final answer, all filed under the ended turn, and the turn the message
+    // opened sat empty until it was called stalled at ten minutes.
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-interim-only', []);
+    live.hook.observe();
+    await settle();
+    await replyFiber([], []);
+    await settle();
+    prose(live.document, section, 'interim-1', "I'll pick up exactly where it stopped.");
+    live.hook.observe();
+    await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    stopGenerating(live.document);
+    userTurn(live.document, 'joined-user', 'also finish the report');
+    live.hook.observe();
+    await settle();
+
+    const ends = emitted(live.sent, 'turn_end').map((entry) => entry.event);
+    expect(ends.map(end => [end.turnId, end.continued])).toEqual([[first, true]]);
+  });
+
   it('keeps an in-flight Fiber scan owned by the generation that requested it', async () => {
     live = await harness();
     startGenerating(live.document);
