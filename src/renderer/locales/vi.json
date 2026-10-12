@@ -2204,5 +2204,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Phần này tách biệt với quyền của plugin, và lời nhắc này không phê duyệt lệnh gọi công cụ nào.",
   "Choose a folder to share — step {0}.": "Chọn thư mục để chia sẻ — bước {0}.",
   "Create a tunnel and paste its ID — step {0}.": "Tạo tunnel và dán ID — bước {0}.",
-  "Add a restricted API key — step {0}.": "Thêm API key hạn chế — bước {0}."
+  "Add a restricted API key — step {0}.": "Thêm API key hạn chế — bước {0}.",
+  "Compact & Resume · waiting for this turn to end": "Compact & Resume · đang chờ lượt này kết thúc",
+  "Compact & Resume · asking ChatGPT for the handoff": "Nén và tiếp tục · đang yêu cầu ChatGPT bàn giao",
+  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "Cuộc trò chuyện này đã vượt giới hạn ngữ cảnh. Yêu cầu bàn giao sẽ được gửi ngay khi lượt này kết thúc.",
+  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Cuộc trò chuyện này đã vượt giới hạn ngữ cảnh. Chat On Steroids đang gửi cho ChatGPT yêu cầu viết bản tóm tắt cho cuộc trò chuyện mới."
 }

@@ -2204,5 +2204,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "C’est distinct des autorisations du plugin, et ce rappel n’approuve aucun appel d’outil.",
   "Choose a folder to share — step {0}.": "Choisissez un dossier à partager — étape {0}.",
   "Create a tunnel and paste its ID — step {0}.": "Créez un tunnel et collez son ID — étape {0}.",
-  "Add a restricted API key — step {0}.": "Ajoutez une clé d'API restreinte — étape {0}."
+  "Add a restricted API key — step {0}.": "Ajoutez une clé d'API restreinte — étape {0}.",
+  "Compact & Resume · waiting for this turn to end": "Compacter et continuer · attente de la fin de ce tour",
+  "Compact & Resume · asking ChatGPT for the handoff": "Compacter et reprendre · demande du relais à ChatGPT",
+  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "Ce chat a dépassé sa limite de contexte. La demande de relais part dès la fin de ce tour.",
+  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Ce chat a dépassé sa limite de contexte. Chat On Steroids envoie à ChatGPT la demande de rédiger le résumé d’un nouveau chat."
 }

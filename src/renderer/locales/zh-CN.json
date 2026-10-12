@@ -2204,5 +2204,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "这与插件的权限设置无关，此提醒也不会批准任何工具调用。",
   "Choose a folder to share — step {0}.": "选择要共享的文件夹 — 第 {0} 步。",
   "Create a tunnel and paste its ID — step {0}.": "创建隧道并粘贴 ID — 第 {0} 步。",
-  "Add a restricted API key — step {0}.": "添加受限 API 密钥 — 第 {0} 步。"
+  "Add a restricted API key — step {0}.": "添加受限 API 密钥 — 第 {0} 步。",
+  "Compact & Resume · waiting for this turn to end": "压缩并继续 · 正在等待本轮结束",
+  "Compact & Resume · asking ChatGPT for the handoff": "压缩并继续 · 正在向 ChatGPT 请求交接",
+  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "此聊天已超出上下文上限。本轮结束后会立即发送交接请求。",
+  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "此聊天已超出上下文上限。Chat On Steroids 正在请求 ChatGPT 为新聊天撰写摘要。"
 }
