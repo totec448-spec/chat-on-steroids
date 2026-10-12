@@ -120,3 +120,19 @@ it('names a chat deleted in ChatGPT and points to a new chat instead of a retry 
     message: 'ChatGPT no longer has this chat, so nothing more can be sent to it.',
     next: 'Start a new chat to continue. This history stays in the app.', resolved: false, reloaded: false });
 });
+
+it('says until when ChatGPT asked to wait, when the notice recorded that time (#1355)', () => {
+  const noticed = new Date(2026, 9, 12, 14, 20).getTime();
+  const sameDay = new Date(2026, 9, 12, 14, 32).getTime();
+  const nextDay = new Date(2026, 9, 13, 0, 5).getTime();
+  const clock = (time: number) => new Date(time).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+  const limited = (retryAt?: number) => chatErrorPresentation(error('ChatGPT temporarily limited access to this conversation history.',
+    { time: noticed, blocking: true, ...(retryAt ? { retryAt } : {}) })).next;
+
+  expect(limited(sameDay)).toBe(`ChatGPT asked to wait until at least ${clock(sameDay)}. After that the app continues by itself. Reloading cannot remove this limit.`);
+  // A wait that ends on another day names the day too.
+  expect(limited(nextDay)).toContain(new Date(nextDay).toLocaleDateString('en', { month: 'short', day: 'numeric' }));
+  expect(limited(nextDay)).toContain(clock(nextDay));
+  // A notice recorded before the time was kept says what it always said.
+  expect(limited()).toBe('Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.');
+});
