@@ -2204,5 +2204,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "これはプラグインの権限設定とは別で、このリマインダーがツール呼び出しを承認することはありません。",
   "Choose a folder to share — step {0}.": "共有するフォルダーを選択してください（手順{0}）。",
   "Create a tunnel and paste its ID — step {0}.": "トンネルを作成し、ID を貼り付けてください（手順{0}）。",
-  "Add a restricted API key — step {0}.": "制限付き API キーを追加してください（手順{0}）。"
+  "Add a restricted API key — step {0}.": "制限付き API キーを追加してください（手順{0}）。",
+  "Compact & Resume · waiting for this turn to end": "圧縮して再開 · このターンの終了を待っています",
+  "Compact & Resume · asking ChatGPT for the handoff": "圧縮して再開 · ChatGPT に引き継ぎを依頼中",
+  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "このチャットはコンテキストの上限を超えました。このターンが終わり次第、引き継ぎの依頼を送信します。",
+  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "このチャットはコンテキストの上限を超えました。Chat On Steroids が新しいチャット用の要約を書くよう ChatGPT に依頼しています。"
 }

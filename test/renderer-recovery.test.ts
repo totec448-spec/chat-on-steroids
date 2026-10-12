@@ -169,3 +169,16 @@ it('offers an action only where the caller supplies one, and explains what the i
   renderRecoveryCountdowns(host, [{ kind: 'silence', deadline: 120_000 }], 0, action);
   expect(host.querySelector('.cancel-reload')).toBeNull();
 });
+
+it('says where an automatic Compact & Resume stands before its request goes out, without a clock (2026-10-12)', () => {
+  // The chat looked idle while the handoff waited; then "waiting for this turn to end" stayed up
+  // over a turn that had already died, with a "Check in" clock that meant nothing to the user.
+  renderRecoveryCountdowns(host, [{ kind: 'compaction', phase: 'waiting', deadline: 120_000 }], 0);
+  expect(host.hidden).toBe(false);
+  expect(host.textContent).toContain('Compact & Resume · waiting for this turn to end');
+  expect(host.textContent).not.toContain('Check in');
+  expect(host.querySelector('.recovery-notice')!.getAttribute('title')).toContain('sent as soon as this turn ends');
+  renderRecoveryCountdowns(host, [{ kind: 'compaction', phase: 'asking', deadline: 120_000 }], 0);
+  expect(host.textContent).toContain('Compact & Resume · asking ChatGPT for the handoff');
+  expect(host.textContent).not.toContain('Check in');
+});
