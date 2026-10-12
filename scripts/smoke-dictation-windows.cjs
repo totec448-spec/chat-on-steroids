@@ -18,7 +18,7 @@ const lines = vm.runInNewContext(embedded[1], Object.create(null));
 const original = lines.join('\r\n');
 // A WAV file can only feed the offline System.Speech fallback, so the modern engine is skipped.
 const script = original
-  .replace('    Add-Type -AssemblyName System.Runtime.WindowsRuntime', "    throw 'A synthetic WAV uses the offline engine'")
+  .replace('\r\n    CompileRecognizer\r\n', "\r\n    throw 'A synthetic WAV uses the offline engine'\r\n")
   .replace('$legacy.SetInputToDefaultAudioDevice()', () => "$legacy.SetInputToWaveFile('" + wave.replace(/'/g, "''") + "')")
   .replace('__COS_PARENT_PID__', String(process.pid))
   .replace('__COS_STOP_FILE__', () => path.join(require('node:os').tmpdir(), `cos-dictation-wav-${process.pid}.stop`));
