@@ -108,9 +108,13 @@ describe('Windows dictation child lifetime', () => {
     const { sender } = startTestSession();
     await mock.handlers.get('dictation:start')!({ sender });
     const script = scriptOf(mock.spawn.mock.calls[0]!);
-    expect(script).toContain('[Windows.Media.SpeechRecognition.SpeechRecognizer,Windows.Media.SpeechRecognition,ContentType=WindowsRuntime]');
-    expect(script).toContain('[Windows.Media.SpeechRecognition.SpeechRecognitionScenario]::Dictation');
-    expect(script).toContain('ContinuousRecognitionSession');
+    // Windows PowerShell cannot subscribe to WinRT events, so the engine runs in C# compiled at start
+    // against the system's own metadata (no SDK), with the recognizer's default dictation topic.
+    expect(script).toContain('CompileAssemblyFromSource($options, $cosRecognizerSource)');
+    expect(script).toContain('\\System32\\WinMetadata\\Windows.Media.winmd');
+    expect(script).toContain('recognizer = new SpeechRecognizer();');
+    expect(script).toContain('session.ResultGenerated += (s, e) => {');
+    expect(script).not.toContain('Constraints.Add');
     expect(script).toContain("Send 'status' 'listening' 'modern'");
     // A blocked microphone would stop the fallback too, so it says where to allow it instead.
     expect(script).toContain("if($hr -eq 0x80070005) { throw 'Windows blocks microphone access");

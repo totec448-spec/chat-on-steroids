@@ -1,7 +1,7 @@
 // Windows smoke test for the real PowerShell recognizer script, without any microphone.
 // Run: node scripts/fixtures/smoke-dictation-parent-windows.cjs
 //
-// 1. The whole production script parses in Windows PowerShell (both engines' setup included).
+// 1. The whole production script parses in Windows PowerShell, and its C# recognizer compiles.
 // 2. With the recognizer setup cut out, the real event loop exits and reports "stopped" when
 //    its parent PID disappears, and again when Stop's file appears.
 const fs = require('node:fs');
@@ -32,6 +32,13 @@ try {
   });
 } finally { fs.rmSync(scriptFile, { force: true }); }
 
+// 1b. The C# recognizer compiles against this Windows' own metadata (what runs before any audio).
+const definitions = original.slice(0, original.indexOf('\r\n$modern = $false'));
+if (!definitions.includes('function CompileRecognizer')) throw new Error('Recognizer definitions not found');
+const compiledOutput = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+  encode(definitions.replace('__COS_PARENT_PID__', String(process.pid)) + "\r\nCompileRecognizer\r\n'compiled'")], { encoding: 'utf8', timeout: 30_000 });
+if (!compiledOutput.includes('compiled')) throw new Error('The recognizer did not compile: ' + compiledOutput.slice(-500));
+
 // 2. Substitute only the recognizer setup. The real while/Wait-Event loop, parent-PID check,
 // Stop file check, cleanup/finally and stdout status are unchanged.
 function loopScript(parentPid, stopFile) {
@@ -39,7 +46,7 @@ function loopScript(parentPid, stopFile) {
     "  $engine = 'fixture'\r\n  Send 'status' 'listening'\r\n")
     .replace('__COS_PARENT_PID__', String(parentPid)).replace('__COS_STOP_FILE__', () => stopFile.replaceAll("'", "''"));
   if (script === original || script.includes('__COS_') || script.includes('SetInputToDefaultAudioDevice') ||
-      script.includes('StartAsync') || !script.includes('Wait-Event -Timeout 1') ||
+      script.includes('[CosDictation]::Start()') || script.includes('RecognizeAsync(') || !script.includes('Wait-Event -Timeout 1') ||
       !script.includes('Get-Process -Id $cosParentPid') || !script.includes('Test-Path -LiteralPath $cosStopFile')) {
     throw new Error('Unsafe or invalid recognizer-loop smoke script');
   }
@@ -92,7 +99,7 @@ function run(name, onListening) {
   const parentGone = await run('parent', ({ parent }) => parent.kill());
   const stopAsked = await run('stop', ({ stopFile }) => { fs.writeFileSync(stopFile, ''); return true; });
   if (parentGone && stopAsked) {
-    console.log('PASS: the recognizer script parses; its loop exits and reports stopped when its parent disappears and on Stop (no microphone used)');
+    console.log('PASS: the recognizer script parses and its C# engine compiles; its loop exits and reports stopped when its parent disappears and on Stop (no microphone used)');
   } else {
     process.exitCode = 1;
   }
