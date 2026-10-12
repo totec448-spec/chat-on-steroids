@@ -1892,6 +1892,14 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .browser-picture-help { grid-column: 1 / -1; margin-top: 0; color: var(--soft); font-size: inherit; }
 .browser-picture-help summary { width: fit-content; cursor: pointer; padding: 4px 0; }
 .browser-picture-help .browser-install-figure { max-width: 680px; margin: 16px 0; }
+/* The browser's own extensions page, cropped to the place to click, with that place outlined. */
+.ext-figure { grid-column: 1 / -1; margin: 10px 0 2px; min-width: 0; }
+.ext-figure[hidden] { display: none; }
+.ext-picture { position: relative; display: inline-block; max-width: min(100%, 560px); line-height: 0;
+  border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.ext-picture img { display: block; max-width: 100%; height: auto; }
+.ext-spot { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 8px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); pointer-events: none; }
 .browser-install-steps b { display: block; padding: 0; line-height: 22px; color: var(--ink); font-weight: 600; }
 .browser-install-steps p { margin: 0; color: var(--soft); line-height: 1.5; }
 .browser-setup .btn-quiet { border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 6px 10px; gap: 8px; width: fit-content; max-width: 100%; white-space: normal; }
@@ -4583,7 +4591,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 }
 
 /*
- * Start the tunnel: the button is the step's picture. It stands at the left of the words, the
+ * Connect the tunnel: the button is the step's picture. It stands at the left of the words, the
  * two centred on each other, so the card is as tall as its content and nothing floats.
  */
 .wizard > .step.is-open > .step-body:has(> .connect-art) {
