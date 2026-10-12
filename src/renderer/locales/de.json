@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "Öffne ChatGPT in {0}",
   "The extensions page in {0}, with {1} outlined": "Die Erweiterungsseite in {0}, {1} ist markiert",
   "Connect the tunnel": "Tunnel verbinden",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "Die App startet damit deinen Tunnel. Kopiere den Schlüssel sofort: Er wird nur einmal angezeigt."
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "Die App startet damit deinen Tunnel. Kopiere den Schlüssel sofort: Er wird nur einmal angezeigt.",
+  "Could not read plugin-refresh state": "Plugin-Refresh-Status konnte nicht gelesen werden",
+  "Could not reset plugin-refresh state": "Plugin-Refresh-Status konnte nicht zurückgesetzt werden",
+  "Reset plugin refresh": "Plugin-Refresh zurücksetzen",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Zurücksetzen sichert den unlesbaren Status und lässt die automatische Plugin-Aktualisierung neu beginnen. Das Aktualisieren kann bestehende ChatGPT-Chats beeinflussen."
 }

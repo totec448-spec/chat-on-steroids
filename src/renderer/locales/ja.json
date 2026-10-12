@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "{0} で ChatGPT を開く",
   "The extensions page in {0}, with {1} outlined": "{0} の拡張機能ページ（{1} を枠で表示）",
   "Connect the tunnel": "トンネルを接続",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "アプリはこのキーでトンネルを開始します。一度しか表示されないため、すぐにコピーしてください。"
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "アプリはこのキーでトンネルを開始します。一度しか表示されないため、すぐにコピーしてください。",
+  "Could not read plugin-refresh state": "プラグイン更新の状態を読み取れませんでした",
+  "Could not reset plugin-refresh state": "プラグイン更新の状態をリセットできませんでした",
+  "Reset plugin refresh": "プラグイン更新をリセット",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "リセットすると、読み取れない状態をバックアップして自動プラグイン更新を再開できます。更新は既存のChatGPTチャットに影響する場合があります。"
 }

@@ -2190,5 +2190,9 @@
   "Open ChatGPT in {0}": "ChatGPT'yi {0}'de açın",
   "The extensions page in {0}, with {1} outlined": "{0} uzantılar sayfası, {1} işaretli",
   "Connect the tunnel": "Tüneli bağlayın",
-  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "Uygulama tünelinizi bu anahtarla başlatır. Anahtarı hemen kopyalayın: yalnızca bir kez gösterilir."
+  "The app uses this key to start your tunnel. Copy it right away: it is shown only once.": "Uygulama tünelinizi bu anahtarla başlatır. Anahtarı hemen kopyalayın: yalnızca bir kez gösterilir.",
+  "Could not read plugin-refresh state": "Eklenti yenileme durumu okunamadı",
+  "Could not reset plugin-refresh state": "Eklenti yenileme durumu sıfırlanamadı",
+  "Reset plugin refresh": "Eklenti yenilemeyi sıfırla",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Sıfırlama, okunamayan durumun yedeğini alır ve otomatik eklenti yenilemenin yeniden başlamasını sağlar. Yenileme mevcut ChatGPT sohbetlerini etkileyebilir."
 }
