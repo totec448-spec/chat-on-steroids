@@ -139,6 +139,13 @@ export function applyTurnIdentity(identity: TurnIdentity, event: Chronological):
   if (event.turnId && event.kind === 'turn_start' && !Object.hasOwn(turns, event.turnId)) {
     identity.timelineTurns = turns = { ...turns, [event.turnId]: { origin, time: event.time,
       ...(identity.nativeQuestion ? { questionId: identity.nativeQuestion.messageId } : {}) } };
+  } else if (event.turnId && event.kind === 'turn_start' && turns[event.turnId]?.endOrigin !== undefined &&
+      origin > turns[event.turnId]!.endOrigin!) {
+    // The turn reopened after an end its page reported too early (the same request kept calling
+    // tools). Held as ended, untagged rows of its reopened stretch (worker reports) had no turn and
+    // were drawn after its final answer (2026-10-12). It is open until its next end.
+    const { endTime: _endTime, endOrigin: _endOrigin, ...open } = turns[event.turnId]!;
+    identity.timelineTurns = turns = { ...turns, [event.turnId]: open };
   } else if (event.turnId && event.kind === 'turn_end' && turns[event.turnId]) {
     const start = turns[event.turnId]!;
     identity.timelineTurns = turns = { ...turns, [event.turnId]: { ...start,
