@@ -1,6 +1,29 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
-const keys = ["App and extension versions differ", "Version not verified", "Core connector", "Not enabled", "Not verified in ChatGPT", "Manual refresh required in ChatGPT", "Connector refresh failed", "Connector check failed", "Waiting for refresh confirmation", "Refresh needed in ChatGPT", "Waiting for a ChatGPT connection", "Verified in ChatGPT", "All checks passed", "Checks incomplete", "Update status", "App, browser extension and ChatGPT connectors.", "Review setup", "Component details", "No tools published", "Tool call succeeded; full tool definitions not verified", "Ready to use; tool definitions not fully verified", "Your settings are kept. Manual steps appear in the status list."];
+const keys = [
+  "App and extension versions differ",
+  "Version not verified",
+  "Core connector",
+  "Not enabled",
+  "Not verified in ChatGPT",
+  "Manual refresh required in ChatGPT",
+  "Connector refresh failed",
+  "Connector check failed",
+  "Waiting for refresh confirmation",
+  "Refresh needed in ChatGPT",
+  "Waiting for a ChatGPT connection",
+  "Verified in ChatGPT",
+  "All checks passed",
+  "Checks incomplete",
+  "Update status",
+  "App, browser extension and ChatGPT connectors.",
+  "Review setup",
+  "Component details",
+  "No tools published",
+  "Tool call succeeded; full tool definitions not verified",
+  "Ready to use; tool definitions not fully verified",
+  "Your settings are kept. Manual steps appear in the status list."
+];
 it.each(["de", "es", "fr", "ja", "ko", "pt-BR", "pt-PT", "ru", "tr", "vi", "zh-CN", "zh-TW"])('publishes the translated update components strings in %s', locale => {
   const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8'));
   for (const key of keys) {
