@@ -214,6 +214,23 @@
 .automation-content > .pane > p.muted { margin: 0; padding: 12px 0 14px; border-top: 1px solid var(--line); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
 .automation-content > .pane > p.muted + .setting { border-top: 1px solid var(--line); }
 .automation-content #swarmList + .step-actions { justify-content: flex-end; margin: 0; padding: 12px 0 4px; border-top: 1px solid var(--line); }
+/* Retained worker checkouts are a separate Settings group, not scrollable agent cards.
+   Every row shares the same content edge, spacing and divider as the other settings. */
+.worktree-cleanup-surface { padding: 4px 18px; gap: 0; overflow: visible; }
+.worktree-cleanup-list { min-width: 0; }
+.worktree-cleanup-section .setting { align-items: center; min-width: 0; }
+.worktree-checkout-copy { min-width: 0; flex: 1 1 18rem; }
+.worktree-checkout-name { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
+.worktree-checkout-status { display: block; margin-top: 4px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
+.worktree-checkout-path { display: block; min-width: 0; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.45; }
+.worktree-checkout-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.worktree-checkout-facts .chip { margin: 0; padding: 3px 8px; border: 1px solid var(--line); font-size: calc(11px * var(--text-scale, 1)); font-weight: 550; line-height: 1.4; }
+.worktree-checkout-facts .worktree-risk { border-color: var(--red-line); background: var(--red-wash); color: var(--red); }
+.worktree-checkout-facts .worktree-commits { background: var(--sunk); color: var(--soft); }
+.worktree-clean-state { color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
+.worktree-checkout-row .worktree-remove-button { margin-left: auto; align-self: center; min-height: 36px; padding: 8px 12px; }
+.worktree-cleanup-empty .setting-text { padding: 4px 0; }
+.worktree-cleanup-empty .setting-text em { margin-top: 4px; }
 .automation-content :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (max-width: 1100px) {
   .app[data-screen='settings'] #chatBody { padding: 36px 24px 52px; }

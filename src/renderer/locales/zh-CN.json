@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "运行已清除 — 可在下方检查工作代理的 Git 检出目录",
   "{0} cleared — its checkout can be reviewed below": "{0} 已清除 — 可在下方检查其检出目录",
   "Isolate new workers in Git worktrees": "在 Git 工作树中隔离新工作代理",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "为 Git 项目的新工作代理分配单独且已授权的工作区和分支。需要授权父文件夹。现有工作代理不受影响；合并到你的分支前必须经过审查。"
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "为 Git 项目的新工作代理分配单独且已授权的工作区和分支。需要授权父文件夹。现有工作代理不受影响；合并到你的分支前必须经过审查。",
+  "Worker checkouts": "工作代理检出目录",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "检查已完成或已清除工作代理的独立 Git 检出目录。其分支和已提交的工作始终保留。",
+  "Review checkouts": "检查检出目录",
+  "Checkouts appear here when reviewed.": "检查后，检出目录将显示在这里。",
+  "Nothing is removed automatically.": "不会自动删除任何内容。",
+  "No checkouts to remove": "没有可删除的检出目录",
+  "Finished or cleared checkouts awaiting review will appear here.": "等待检查的已完成或已清除检出目录将显示在这里。",
+  "Cleared": "已清除",
+  "{0} uncommitted changes": "{0} 项未提交的更改",
+  "Uncommitted changes": "未提交的更改",
+  "Commits only on this branch": "仅此分支上的提交",
+  "Nothing would be lost": "不会丢失本地更改",
+  "Remove checkout…": "删除检出目录…"
 }

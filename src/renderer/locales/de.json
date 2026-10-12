@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "Ausführung gelöscht — Worker-Git-Checkouts können unten überprüft werden",
   "{0} cleared — its checkout can be reviewed below": "{0} gelöscht — sein Checkout kann unten überprüft werden",
   "Isolate new workers in Git worktrees": "Neue Worker in Git-Worktrees isolieren",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Neue Worker in Git-Projekten erhalten einen eigenen freigegebenen Arbeitsbereich und Branch. Dafür muss ein übergeordneter Ordner freigegeben sein. Bestehende Worker bleiben unverändert; die Übernahme in deinen Branch erfordert eine Prüfung."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Neue Worker in Git-Projekten erhalten einen eigenen freigegebenen Arbeitsbereich und Branch. Dafür muss ein übergeordneter Ordner freigegeben sein. Bestehende Worker bleiben unverändert; die Übernahme in deinen Branch erfordert eine Prüfung.",
+  "Worker checkouts": "Worker-Checkouts",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "Separate Git-Checkouts abgeschlossener oder entfernter Worker prüfen. Ihre Branches und committeten Änderungen bleiben immer erhalten.",
+  "Review checkouts": "Checkouts überprüfen",
+  "Checkouts appear here when reviewed.": "Checkouts erscheinen hier nach der Prüfung.",
+  "Nothing is removed automatically.": "Nichts wird automatisch entfernt.",
+  "No checkouts to remove": "Keine Checkouts zum Entfernen",
+  "Finished or cleared checkouts awaiting review will appear here.": "Abgeschlossene oder entfernte Checkouts, die auf Prüfung warten, erscheinen hier.",
+  "Cleared": "Entfernt",
+  "{0} uncommitted changes": "{0} nicht committete Änderungen",
+  "Uncommitted changes": "Nicht committete Änderungen",
+  "Commits only on this branch": "Commits nur auf diesem Branch",
+  "Nothing would be lost": "Es gingen keine lokalen Änderungen verloren",
+  "Remove checkout…": "Checkout entfernen…"
 }

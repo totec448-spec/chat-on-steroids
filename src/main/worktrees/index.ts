@@ -119,6 +119,8 @@ export interface WorkerCleanupOfferPreview {
   /** Virtual root path, safe to project to the renderer. */
   workspace: string;
   branch: string;
+  /** Commit present in this checkout at inspection time; internal only. */
+  headOid: string;
   dirty: boolean;
   ignoredFiles: boolean;
   uniqueCommits: boolean;
@@ -804,7 +806,7 @@ export async function listOfferedWorkerWorktrees(
       const inspected = await inspectWorkerWorkspaceForCleanup(lease);
       result.push({
         runId: lease.runId, agentId: lease.agentId, createdAt: offer.createdAt,
-        reason: offer.reason, workspace: lease.workspace.virtual, branch: inspected.branch,
+        reason: offer.reason, workspace: lease.workspace.virtual, branch: inspected.branch, headOid: inspected.headOid,
         dirty: inspected.trackedChanges.length + inspected.untrackedFiles.length + inspected.ignoredFiles.length > 0 || inspected.changesTruncated,
         ignoredFiles: inspected.ignoredFiles.length > 0,
         uniqueCommits: inspected.hasWorkerCommits && !inspected.branchIntegratedIntoSource,

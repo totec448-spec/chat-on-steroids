@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "執行已清除 — 可在下方檢查工作代理的 Git 簽出目錄",
   "{0} cleared — its checkout can be reviewed below": "{0} 已清除 — 可在下方檢查其簽出目錄",
   "Isolate new workers in Git worktrees": "在 Git 工作樹中隔離新工作代理",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "為 Git 專案的新工作代理配置獨立且已授權的工作區及分支。需要授權父資料夾。現有工作代理不受影響；整合至你的分支前必須經過審查。"
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "為 Git 專案的新工作代理配置獨立且已授權的工作區及分支。需要授權父資料夾。現有工作代理不受影響；整合至你的分支前必須經過審查。",
+  "Worker checkouts": "工作代理簽出目錄",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "檢查已完成或已清除工作代理的獨立 Git 簽出目錄。其分支和已提交的工作一律保留。",
+  "Review checkouts": "檢查簽出目錄",
+  "Checkouts appear here when reviewed.": "檢查後，簽出目錄會顯示在這裡。",
+  "Nothing is removed automatically.": "不會自動刪除任何內容。",
+  "No checkouts to remove": "沒有可刪除的簽出目錄",
+  "Finished or cleared checkouts awaiting review will appear here.": "等待檢查的已完成或已清除簽出目錄會顯示在這裡。",
+  "Cleared": "已清除",
+  "{0} uncommitted changes": "{0} 項未提交的變更",
+  "Uncommitted changes": "未提交的變更",
+  "Commits only on this branch": "僅此分支上的提交",
+  "Nothing would be lost": "不會遺失本機變更",
+  "Remove checkout…": "刪除簽出目錄…"
 }

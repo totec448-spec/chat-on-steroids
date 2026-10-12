@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "Exécution effacée — les espaces Git des agents peuvent être examinés ci-dessous",
   "{0} cleared — its checkout can be reviewed below": "{0} effacé — son espace Git peut être examiné ci-dessous",
   "Isolate new workers in Git worktrees": "Isoler les nouveaux agents dans des worktrees Git",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Chaque nouvel agent d'un projet Git reçoit un espace de travail et une branche distincts et autorisés. Un dossier parent autorisé est nécessaire. Les agents existants ne changent pas ; l'intégration à votre branche exige une vérification."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Chaque nouvel agent d'un projet Git reçoit un espace de travail et une branche distincts et autorisés. Un dossier parent autorisé est nécessaire. Les agents existants ne changent pas ; l'intégration à votre branche exige une vérification.",
+  "Worker checkouts": "Checkouts des agents",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "Examinez les checkouts Git distincts des agents terminés ou supprimés. Leurs branches et modifications validées sont toujours conservées.",
+  "Review checkouts": "Examiner les checkouts",
+  "Checkouts appear here when reviewed.": "Les checkouts apparaîtront ici après examen.",
+  "Nothing is removed automatically.": "Rien n’est supprimé automatiquement.",
+  "No checkouts to remove": "Aucun checkout à supprimer",
+  "Finished or cleared checkouts awaiting review will appear here.": "Les checkouts terminés ou supprimés à examiner apparaîtront ici.",
+  "Cleared": "Supprimé",
+  "{0} uncommitted changes": "{0} modifications non validées",
+  "Uncommitted changes": "Modifications non validées",
+  "Commits only on this branch": "Commits propres à cette branche",
+  "Nothing would be lost": "Aucune modification locale ne serait perdue",
+  "Remove checkout…": "Supprimer le checkout…"
 }

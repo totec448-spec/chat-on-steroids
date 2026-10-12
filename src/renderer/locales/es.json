@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "Se borró la ejecución — puedes revisar abajo los directorios de trabajo Git de los agentes",
   "{0} cleared — its checkout can be reviewed below": "Se borró {0} — puedes revisar abajo su directorio de trabajo",
   "Isolate new workers in Git worktrees": "Aislar nuevos agentes en árboles de trabajo Git",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Los agentes nuevos de proyectos Git reciben un espacio de trabajo y una rama independientes y autorizados. Se necesita una carpeta superior autorizada. Los agentes existentes no cambian; integrar su código en tu rama requiere revisión."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Los agentes nuevos de proyectos Git reciben un espacio de trabajo y una rama independientes y autorizados. Se necesita una carpeta superior autorizada. Los agentes existentes no cambian; integrar su código en tu rama requiere revisión.",
+  "Worker checkouts": "Checkouts de agentes",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "Revisa los checkouts Git independientes de los agentes finalizados o eliminados. Sus ramas y cambios confirmados siempre se conservan.",
+  "Review checkouts": "Revisar checkouts",
+  "Checkouts appear here when reviewed.": "Los checkouts aparecerán aquí al revisarlos.",
+  "Nothing is removed automatically.": "Nada se elimina automáticamente.",
+  "No checkouts to remove": "No hay checkouts que eliminar",
+  "Finished or cleared checkouts awaiting review will appear here.": "Los checkouts finalizados o eliminados pendientes de revisión aparecerán aquí.",
+  "Cleared": "Eliminado",
+  "{0} uncommitted changes": "{0} cambios sin confirmar",
+  "Uncommitted changes": "Cambios sin confirmar",
+  "Commits only on this branch": "Commits exclusivos de esta rama",
+  "Nothing would be lost": "No se perderían cambios locales",
+  "Remove checkout…": "Eliminar checkout…"
 }

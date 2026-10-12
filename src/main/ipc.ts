@@ -1646,6 +1646,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         runId: candidate.runId,
         agentId: candidate.agentId,
         reason: candidate.reason,
+        label: managedWorktreeCleanupOffers().find(offer =>
+          offer.runId === candidate.runId && offer.agentId === candidate.agentId)?.label,
         workspace: candidate.workspace,
         dirty: candidate.dirty,
         ignoredFiles: candidate.ignoredFiles,
@@ -1671,13 +1673,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new Error('Could not verify this worker checkout. No files were removed.');
     }
     if (!candidate) throw new Error('This checkout is missing or has no verified cleanup owner. No files were removed.');
+    // The preview is shown only in the trusted desktop confirmation, not the renderer
+    // or a model-facing tool. List bounded relative paths instead of native paths.
+    const changedFiles = candidate.changes.slice(0, 25).map(name =>
+      `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
     const details = [
       `Checkout: ${candidate.workspace}`,
-      `Worker: ${agentId}`,
-      candidate.dirty ? 'Contains uncommitted or untracked changes.' : 'No uncommitted changes detected.',
-      candidate.ignoredFiles ? 'Contains ignored files that may be important.' : '',
-      candidate.uniqueCommits ? 'Contains worker-only Git commits; its branch will be kept.' : '',
-      'Removing the checkout deletes its working-directory files, including ignored and newly written files. The Git branch is preserved. This action cannot be undone for uncommitted files.'
+      candidate.changes.length
+        ? `${candidate.changes.length} uncommitted/ignored paths would be discarded:`
+        : 'No uncommitted or ignored paths were detected.',
+      ...changedFiles,
+      candidate.changes.length > changedFiles.length || candidate.changesTruncated
+        ? 'Additional paths are not shown; review the checkout before confirming.' : '',
+      candidate.ignoredFiles ? 'Ignored files are included in the removal.' : '',
+      candidate.uniqueCommits ? 'Commits made only on this branch will remain in Git.' : '',
+      'This action removes the entire checkout directory, including tracked working files, ignored files and uncommitted changes. The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'
     ].filter(Boolean).join('\n');
     // Approval is acquired in the trusted main process, not supplied as a boolean by renderer
     // or model. Default is cancellation, even for an apparently clean checkout.
@@ -1692,6 +1702,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       noLink: true
     });
     if (response !== 1) return { removed: false, branchPreserved: true };
+    // A file may have arrived while the native confirmation was open. Refuse a
+    // removal if the user has not reviewed that newer risk state. Do not accept
+    // the pre-dialog approval for a changed checkout or another branch HEAD.
+    let fresh: typeof candidate | undefined;
+    try {
+      fresh = (await listOfferedWorkerWorktrees(getConfig().roots, [offer]))[0];
+    } catch (error) {
+      logInfo(`worktree cleanup reinspection failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not recheck this checkout after confirmation. No files were removed.');
+    }
+    if (!fresh || fresh.workspace !== candidate.workspace || fresh.branch !== candidate.branch ||
+        fresh.headOid !== candidate.headOid || fresh.dirty !== candidate.dirty ||
+        fresh.ignoredFiles !== candidate.ignoredFiles || fresh.uniqueCommits !== candidate.uniqueCommits ||
+        fresh.changesTruncated !== candidate.changesTruncated ||
+        JSON.stringify(fresh.changes) !== JSON.stringify(candidate.changes)) {
+      throw new Error('The checkout changed while its confirmation was open. No files were removed. Review its current contents and try again.');
+    }
     // Root approval and exact broker-offer identity are checked again after user interaction.
     if (!(await persistAgentAuthorityNow())) throw new Error('Cleanup could not reconfirm durable worker retirement. No files were removed.');
     const current = managedWorktreeCleanupOffers().find(entry => entry.runId === runId && entry.agentId === agentId);
