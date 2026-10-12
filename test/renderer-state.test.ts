@@ -2026,6 +2026,22 @@ it('judges Setup from the saved settings on the first paint, and numbers its ste
   expect((doc.getElementById('wizConnect') as HTMLButtonElement).title).toBe('Add a restricted API key — step 5.');
 });
 
+it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's language", async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const moves = (group: string) => [...doc.querySelectorAll(`[data-setup-guide="${group}"] .guide-move-text`)].map(move => move.textContent);
+  expect(moves('signin')).toContain('Click “Log in”');
+  expect(moves('external-browser')).toContain('Click “Log in”');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // ChatGPT's German page says "Anmelden"; the step used to send people looking for "Log in".
+  expect(moves('signin')).toContain('Auf „Anmelden“ klicken');
+  expect(moves('external-browser')).toContain('Auf „Anmelden“ klicken');
+  setLanguage('ja');
+  expect(moves('signin').some(text => text!.includes('「ログイン」'))).toBe(true);
+  setLanguage('en');
+});
+
 it('highlights missing required setup fields while respecting drafts and a stored API key', async () => {
   const mounted = await mountChat();
   const doc = mounted.window.document;
