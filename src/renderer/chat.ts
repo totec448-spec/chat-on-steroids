@@ -4686,7 +4686,7 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
   if (call) return { text: call.title, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
   const thinking = { text: t('Thinking'), icon: '', working: false };
   // A message not yet recorded opens a turn that has done nothing visible so far.
-  if ($('inputQueue').querySelector('.pending-message')) return thinking;
+  if (messageOnItsWay()) return thinking;
   let asked = Number.NEGATIVE_INFINITY;
   for (const event of events) if (event.kind === 'user_message') asked = Math.max(asked, event.time);
   let newest: SessionEvent | undefined;
@@ -4800,15 +4800,18 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   turnWorking = working;
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
-  const pending = !!$('inputQueue').querySelector('.pending-message');
+  const pending = messageOnItsWay();
+  // A page of history read further up ends before the chat does: its newest question is not the one
+  // the running turn answers, so it keeps its own worked line and the live one stays off it.
+  const live = working && timelineReachesEnd();
   const used = new Set<string>();
   // Insert from the end so earlier indices stay valid.
   for (let i = asks.length - 1; i >= 0; i--) {
     const { index, asked } = asks[i]!;
     const latest = i === asks.length - 1;
-    if (latest && working && !pending) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
+    if (latest && live && !pending) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
-    if (seconds === undefined || (latest && working)) continue;
+    if (seconds === undefined || (latest && live)) continue;
     rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
   }
   for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
@@ -4818,9 +4821,33 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   $('chatState').classList.toggle('is-mirrored', !deps.state()?.config.ui.developerMode);
 }
 
-/** A running turn with no row yet: its line waits right after your pending message. */
+/**
+ * A message still on its way to ChatGPT. A failed delivery keeps its notice in the queue until it
+ * is retried or dismissed, but nothing of it is on its way: counting it parked the running turn's
+ * line after the queue for good, below the question it belongs to (measured 2026-10-12).
+ */
+function messageOnItsWay(): boolean {
+  return !!$('inputQueue').querySelector('.pending-message:not(.is-delivery-error)');
+}
+
+/** Whether the loaded rows reach the chat's newest event, as jumpToLatest decides it. */
+function timelineReachesEnd(): boolean {
+  if (historyBefore === null || detailCursor === null) return true;
+  return events.reduce((newest, event) => Math.max(newest, event.seq), 0) + 1 >= detailCursor;
+}
+
+/**
+ * A running turn with no row yet: its line waits right after your pending message.
+ *
+ * `after` re-inserts even nodes that are already there, and every re-insertion restarts the lines'
+ * animations. Repaints run several times a second while a turn works, so a parked line that was
+ * moved each time blinked ("Thinking" restarting about 15 times a second, measured 2026-10-12).
+ */
 function parkTurnStatus(working: boolean): void {
-  if (working) $('inputQueue').after(turnStatusLine, turnNow);
+  if (working) {
+    const queue = $('inputQueue');
+    if (queue.nextElementSibling !== turnStatusLine || turnStatusLine.nextElementSibling !== turnNow) queue.after(turnStatusLine, turnNow);
+  }
   else if (!turnStatusLine.closest('#timeline')) { turnStatusLine.remove(); turnNow.remove(); }
 }
 
