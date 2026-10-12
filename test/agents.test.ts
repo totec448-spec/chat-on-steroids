@@ -4633,14 +4633,9 @@ describe('through the MCP endpoint', () => {
     ]);
 
     const started = Date.now();
-    const shell =
-      process.platform === 'win32'
-        ? `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-        : '/bin/sh';
-    const heldCommand =
-      process.platform === 'win32'
-        ? "Start-Sleep -Milliseconds 750; Write-Output 'held-call-done'"
-        : "sleep 1; printf '%s\\n' held-call-done";
+    // The default shell and Node, not a named Windows PowerShell 5.1: on Windows CI that shell, with
+    // the runner's profile, sometimes printed nothing for the whole 30 s yield (3.3 s when it did not).
+    const heldCommand = `node -e "setTimeout(() => console.log('held-call-done'), 1000)"`;
     const pending = post(
       {
         jsonrpc: '2.0',
@@ -4651,7 +4646,6 @@ describe('through the MCP endpoint', () => {
           arguments: {
             cmd: heldCommand,
             workdir: dir,
-            shell,
             yield_time_ms: 30_000
           }
         }
