@@ -292,6 +292,28 @@ it('reads a DIL answer as the model wrote it, without the escapes its fallback a
   expect(await read('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and \\_after\\_'))
     .toBe('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and _after_');
 });
+it('keeps the LaTeX of a DIL answer as written, while its plain text still loses the escapes (#1342)', async () => {
+  // Recorded from GPT-6 on 2026-10-12. The fallback escapes plain text only: a display formula is a
+  // block between a line "\\[" and a line "\\]", an inline one sits in \\( … \\), and both hold raw
+  // LaTeX. Literal brackets are escaped inside their text line, and literal parentheses never are.
+  // Unescaping the formulas too turned \\[ into [, \\( into (, f\\! into f! and \\\\[10pt] into \\[10pt].
+  const f = fixture();
+  const answer = f.entry.turn.items[2];
+  answer.content = `::chatgpt-content-reference{index="0" source_message_id="${ANSWER}"}`;
+  const read = async (fallbackMarkdown: string) => {
+    answer.contentReferences = [{ type: 'dil', source_message_id: ANSWER, model_dil_v2: { fallbackMarkdown } }];
+    return (await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === ANSWER).rawText;
+  };
+  expect(await read("The Lindhard dielectric function, as discussed in *Solid State Physics* by Ashcroft and Mermin, describes the electronic screening response of a noninteracting electron gas.\n\n\\[\n\\begin{aligned}\n\\varepsilon(\\mathbf{q},\\omega)\n\\\\\n=\n\\\\\n1-\\frac{4\\pi e^2}{q^2}\n\\frac{2}{V}\n\\sum_{\\mathbf{k}}\n\\frac{\nf\\!\\left(\\epsilon_{\\mathbf{k}+\\mathbf{q}}\\right)\n-\nf\\!\\left(\\epsilon_{\\mathbf{k}}\\right)\n}{\n\\epsilon_{\\mathbf{k}+\\mathbf{q}}\n-\n\\epsilon_{\\mathbf{k}}\n-\n\\hbar(\\omega+i0^+)\n}\n\\end{aligned}\n\\]\n\nHere, \\(\\mathbf{q}\\) is the wave vector of the perturbation, with magnitude \\(q=|\\mathbf{q}|\\)\\.\n\n\\[\n\\begin{aligned}\n\\epsilon_{\\mathbf{k}} &= \\frac{\\hbar^2 k^2}{2m}\n\\\\[10pt]\nf(\\epsilon) &= \\frac{1}{e^{(\\epsilon-\\mu)/(k_B T)}+1}\n\\end{aligned}\n\\]\n\n\\[ok\\] 2\\^10 = 1024 a\\_b \\*star\\*"))
+    .toBe("The Lindhard dielectric function, as discussed in *Solid State Physics* by Ashcroft and Mermin, describes the electronic screening response of a noninteracting electron gas.\n\n\\[\n\\begin{aligned}\n\\varepsilon(\\mathbf{q},\\omega)\n\\\\\n=\n\\\\\n1-\\frac{4\\pi e^2}{q^2}\n\\frac{2}{V}\n\\sum_{\\mathbf{k}}\n\\frac{\nf\\!\\left(\\epsilon_{\\mathbf{k}+\\mathbf{q}}\\right)\n-\nf\\!\\left(\\epsilon_{\\mathbf{k}}\\right)\n}{\n\\epsilon_{\\mathbf{k}+\\mathbf{q}}\n-\n\\epsilon_{\\mathbf{k}}\n-\n\\hbar(\\omega+i0^+)\n}\n\\end{aligned}\n\\]\n\nHere, \\(\\mathbf{q}\\) is the wave vector of the perturbation, with magnitude \\(q=|\\mathbf{q}|\\).\n\n\\[\n\\begin{aligned}\n\\epsilon_{\\mathbf{k}} &= \\frac{\\hbar^2 k^2}{2m}\n\\\\[10pt]\nf(\\epsilon) &= \\frac{1}{e^{(\\epsilon-\\mu)/(k_B T)}+1}\n\\end{aligned}\n\\]\n\n[ok] 2^10 = 1024 a_b *star*");
+  // Literal punctuation around formulas, a one-line formula ChatGPT made a block, and $$ … $$, which
+  // ChatGPT itself treats as plain text.
+  expect(await read("The RPA (random phase approximation) costs \\$5 or \\$10, see \\[note 1\\] and {braces} and 50% of a&#124;b, x = 1, a+b, \\#tag, \\~wave\\~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\)\\.\n\n\\[\nE = mc^2\n\\]\n\n\\$\\$\n\\\\int\\_0\\^\\\\infty e\\^,dx = \\\\frac}2\n\\$\\$"))
+    .toBe("The RPA (random phase approximation) costs $5 or $10, see [note 1] and {braces} and 50% of a&#124;b, x = 1, a+b, #tag, ~wave~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\).\n\n\\[\nE = mc^2\n\\]\n\n$$\n\\int_0^\\infty e^,dx = \\frac}2\n$$");
+  // An opening without its closing is not a formula: the text is unescaped as before.
+  expect(await read('Odd \\( left open and \\[ too')).toBe('Odd ( left open and [ too');
+  expect(await read('\\[\nnever closed \\_here\\_')).toBe('[\nnever closed _here_');
+});
 it('requires the final item and successful turn, while retaining exact messages on reload', async () => {
   const f = fixture(); f.entry.turn.items[2].completed = true;
   expect((await f.ask()).turns[0].endMessageId).toBeNull();
