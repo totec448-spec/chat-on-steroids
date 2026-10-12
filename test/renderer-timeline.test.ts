@@ -5167,3 +5167,74 @@ it('opens the next chat at its end after the reader scrolled away from a sent me
   await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'grown', message: text('A new answer'), final: false }]);
   expect(pane.scrollTop).toBe(pane.scrollHeight);
 });
+
+/** Counts how often the running turn's two lines are taken out of the page and put back. */
+function lineMoves(w: JSDOM['window']): { stop: () => number } {
+  let moves = 0;
+  const watched = (node: Node) => node instanceof w.HTMLElement && (node.matches('.turn-status') || node.matches('.turn-now'));
+  const observer = new w.MutationObserver(records => {
+    for (const record of records) for (const node of [...record.addedNodes, ...record.removedNodes]) if (watched(node)) moves++;
+  });
+  observer.observe(w.document.getElementById('timelineContent')!, { childList: true, subtree: true });
+  return { stop: () => { observer.takeRecords().forEach(record => { for (const node of [...record.addedNodes, ...record.removedNodes]) if (watched(node)) moves++; }); observer.disconnect(); return moves; } };
+}
+
+it('keeps the working line under your message while a failed delivery notice stays in the queue (2026-10-12)', async () => {
+  // A failed "continue" kept its notice in the queue. Counted as a message on its way, it parked the
+  // running turn's line after the queue, below the question, and every repaint moved it again.
+  const asked = Date.now() - 12_000;
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-live', message: text('Finish the three steps') }
+  ]);
+  const { w } = app;
+  app.live.inputs.push({ id: 'failed-continue', sessionId: '2026-09-02-test0001', text: 'Continue from where you left off.',
+    mode: 'auto', dueAt: 0, model: null, reasoningEffort: null, state: 'failed', owner: null, createdAt: asked - 60_000,
+    conversationId: 'chat-b', error: 'Not injected: the selected turn ended before an eligible tool call.' });
+  await app.append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message.is-delivery-error')).not.toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
+it('does not move a parked working line on every repaint', async () => {
+  // A turn with no row yet parks its line after the queue; repainting it in place used to re-insert
+  // it each time, restarting its shimmer and Thinking's breathing several times a second.
+  const app = await boot([]);
+  const { w } = app;
+  expect(w.document.querySelector('.turn-status')!.previousElementSibling?.id).toBe('inputQueue');
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+  expect(w.document.querySelector('.turn-status')!.previousElementSibling?.id).toBe('inputQueue');
+});
+
+it("never hangs the running turn's clock under an older question read further up (2026-10-12)", async () => {
+  // Reading a page of history up the chat, its newest loaded question is an old, finished one. The live
+  // "Working for" went right under it, as if that old exchange were still running.
+  const rows = Array.from({ length: 360 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `origin-${i}`, message: text(`Origin row ${i + 1}.`) }));
+  const { w } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => Math.max(400, timeline.querySelectorAll('[data-timeline-key]').length * 20) } });
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    const index = [...timeline.querySelectorAll('[data-timeline-key]')].indexOf(this);
+    const top = index < 0 ? 0 : index * 20 - pane.scrollTop;
+    return { top, bottom: top + 20, height: 20 } as DOMRect;
+  };
+  // At the end the running turn's line sits under the newest question.
+  expect(w.document.querySelector('.turn-status')!.closest('#timeline')).not.toBeNull();
+  for (let index = 0; index < 8 && !timeline.textContent?.includes('Origin row 200.'); index++) {
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+  }
+  expect(timeline.textContent).not.toContain('Origin row 360.');
+  expect(w.document.querySelector('#timeline .turn-status')).toBeNull();
+});

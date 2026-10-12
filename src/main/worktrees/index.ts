@@ -345,7 +345,37 @@ async function statusOf(cwd: string, includeIgnored = false): Promise<DetailedWo
  * Metadata (size/mtime) alone is insufficient: two same-name, same-size edits
  * can have exactly the same mtime on real filesystems.
  */
+async function safeTrackedIndexFlags(root: string): Promise<Buffer> {
+  // Git deliberately hides working-tree edits on paths with assume-unchanged
+  // (lowercase "h") or skip-worktree ("S"/"s"). A clean porcelain status then
+  // cannot prove that deleting the checkout preserves these tracked bytes.
+  // Inspect *every* tracked index record instead of relying on status paths;
+  // refusal is safer than trying to outguess Git's intentionally skipped files.
+  const listed = await runGit(root, ['ls-files', '--cached', '-v', '-z'], MAX_GIT_BYTES);
+  if (listed.code !== 0) {
+    throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNAVAILABLE', 'tracked Git index flags could not be inspected');
+  }
+  // Parse NUL-terminated raw bytes: filenames may contain newlines, tabs or
+  // arbitrary bytes and must not be lossy-decoded when checking index flags.
+  const data = listed.stdout;
+  let offset = 0;
+  while (offset < data.length) {
+    const end = data.indexOf(0, offset);
+    if (end < offset + 3 || data[offset + 1] !== 0x20) {
+      throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNAVAILABLE', 'tracked Git index flag output is incomplete');
+    }
+    // Normal cached records use "H ". Other tags, including lowercase "h"
+    // and "S" / "s", are never safe to remove based on git status alone.
+    if (data[offset] !== 0x48) {
+      throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNSAFE', 'tracked Git files have hidden or unexpected index flags');
+    }
+    offset = end + 1;
+  }
+  return data;
+}
+
 async function cleanupContentFingerprint(root: string, inspected?: DetailedWorkerWorktreeStatus): Promise<string> {
+  const initialIndexFlags = await safeTrackedIndexFlags(root);
   const initial = await statusOf(root, true);
   if (initial.truncated || (inspected && JSON.stringify(initial) !== JSON.stringify(inspected))) {
     throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNAVAILABLE', 'Git status changed or was truncated during cleanup inspection');
@@ -355,6 +385,8 @@ async function cleanupContentFingerprint(root: string, inspected?: DetailedWorke
   const hash = createHash('sha256');
   hash.update('cos-worktree-cleanup-v1\0');
   hash.update(initial.headOid);
+  hash.update('\0tracked-index-flags\0');
+  hash.update(initialIndexFlags);
   hash.update('\0index\0');
   hash.update(index.stdout);
   const entries = new Map<string, 'tracked' | 'untracked' | 'ignored'>();
@@ -470,11 +502,13 @@ async function cleanupContentFingerprint(root: string, inspected?: DetailedWorke
     hash.update(kind + '\0');
     await scan(filename, 0, kind === 'tracked');
   }
-  const [final, finalIndex] = await Promise.all([
-    statusOf(root, true), runGit(root, ['diff', '--cached', '--raw', '-z', 'HEAD', '--'], 1024 * 1024)
+  const [final, finalIndex, finalIndexFlags] = await Promise.all([
+    statusOf(root, true), runGit(root, ['diff', '--cached', '--raw', '-z', 'HEAD', '--'], 1024 * 1024),
+    safeTrackedIndexFlags(root)
   ]);
   if (final.truncated || JSON.stringify(initial) !== JSON.stringify(final) ||
-      finalIndex.code !== 0 || !index.stdout.equals(finalIndex.stdout)) {
+      finalIndex.code !== 0 || !index.stdout.equals(finalIndex.stdout) ||
+      !initialIndexFlags.equals(finalIndexFlags)) {
     throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_CHANGED', 'Git status changed during cleanup fingerprint');
   }
   return hash.digest('hex');
