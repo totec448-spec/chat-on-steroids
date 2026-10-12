@@ -1844,9 +1844,6 @@
   "Skill added to your library": "スキルをライブラリに追加しました",
   "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "アプリがブラウザーを起動するときに使用します。このブラウザーの使用中のプロファイルに連携用拡張機能をインストールし、ChatGPT にサインインしてください。接続済みのタブは、元のブラウザーに残ります。内蔵の Chat On Steroids ブラウザーはインストール不要で、トレイに隠れたまま動作します。",
   "Chat On Steroids browser (built-in)": "Chat On Steroids ブラウザー（内蔵）",
-  "Choose a folder to share — step 2.": "共有するフォルダーを選択してください（手順2）。",
-  "Create a tunnel and paste its ID — step 3.": "トンネルを作成し、ID を貼り付けてください（手順3）。",
-  "Add a restricted API key — step 4.": "制限付き API キーを追加してください（手順4）。",
   "Dismiss": "閉じる",
   "Sign in to ChatGPT": "ChatGPT にサインイン",
   "Sign out of ChatGPT": "ChatGPT からサインアウト",
@@ -2182,5 +2179,8 @@
   "Where the plugin offers permissions: allow all tools": "プラグインに権限設定がある場合: すべてのツールを許可",
   "First tool call: allow it, always for this plugin": "最初のツール呼び出し: このプラグインでは常に許可",
   "Review the action, then allow it, always for this plugin.": "操作内容を確認し、このプラグインでは常に許可してください。",
-  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "これはプラグインの権限設定とは別で、このリマインダーがツール呼び出しを承認することはありません。"
+  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "これはプラグインの権限設定とは別で、このリマインダーがツール呼び出しを承認することはありません。",
+  "Choose a folder to share — step {0}.": "共有するフォルダーを選択してください（手順{0}）。",
+  "Create a tunnel and paste its ID — step {0}.": "トンネルを作成し、ID を貼り付けてください（手順{0}）。",
+  "Add a restricted API key — step {0}.": "制限付き API キーを追加してください（手順{0}）。"
 }
