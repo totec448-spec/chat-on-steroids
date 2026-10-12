@@ -2993,7 +2993,10 @@ Restart restoration must converge on that same committed projection. A persisted
 can outlive a transport command; expiration releases transport, not permission for another
 blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
 six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
-on phase: unsent 2m×5, writing 5m×3, opening 15m×3. These are bounded recovery of one obligation,
+on phase: unsent 2m×5, writing 5m×3, opening 15m×3. While the source turn still works
+(`sessionInputActivity(...).exact`), an unsent ticket spends no pickup and raises no reload: the
+request is sent once that turn ends, and a ticket filed mid-turn used to spend its whole budget on a
+generating page (2026-10-12). These are bounded recovery of one obligation,
 not fresh compaction attempts. After writing 3/3 the sent transaction stays protected with no
 fourth reload; one visible timeline note says it is stuck, and lifetime limits stay terminal. Re-observe the exact page before advancing its state.
 A manual ticket whose frozen source selection is Pro instead gets a one-hour deadline while the
