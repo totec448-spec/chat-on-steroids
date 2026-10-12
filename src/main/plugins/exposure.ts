@@ -4,6 +4,13 @@ import type { Tool } from '@modelcontextprotocol/client';
 // catalog ceiling only as an emergency guard against pathological catalogs.
 export const PLUGIN_MAX_TOOLS = 256;
 export const PLUGIN_MAX_SCHEMA_BYTES = 250000;
+/**
+ * The emergency guard on what one server may declare. It is far above the publication bound: a
+ * server with more tools than ChatGPT gets is installed, publishes what fits, and the user switches
+ * tools off to choose the rest (#1313). It only stops a catalog no one could manage.
+ */
+export const PLUGIN_DISCOVERY_MAX_TOOLS = 2048;
+export const PLUGIN_DISCOVERY_MAX_BYTES = 8 * 1024 * 1024;
 
 export interface PluginExposureSource {
   id: string;
