@@ -4595,6 +4595,14 @@ focus chords support authorized navigation, like clicking or setting that same n
 it is not a general browser automation fallback. Capture/privacy settings and platform permission
 failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
 
+**Connector state publication.** IPC publishes `AppState.connectorRefresh` from the refresh
+owner's read-only committed projection and subscribes to its owner notifications. Schema,
+safe failure phase and optional operational response evidence stay separate; App IDs and
+private diagnostics never enter this state. The MCP HTTP boundary marks real provider
+requests, excluding self-tests/tunnel probes. Only successful outer tool results may complete
+the publication captured before dispatch; in-process calls, failed tools and late results
+cannot establish operational readiness or full-schema verification.
+
 ## 19. Debugging, tests and working here
 
 Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one
