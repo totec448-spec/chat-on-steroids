@@ -2171,5 +2171,16 @@
   "This chat was deleted in ChatGPT. Start a new chat to continue.": "Cuộc trò chuyện này đã bị xóa trong ChatGPT. Hãy bắt đầu cuộc trò chuyện mới để tiếp tục.",
   "Chat deleted in ChatGPT": "Cuộc trò chuyện đã bị xóa trong ChatGPT",
   "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT không còn cuộc trò chuyện này nên không thể gửi thêm gì vào đó.",
-  "Start a new chat to continue. This history stays in the app.": "Hãy bắt đầu cuộc trò chuyện mới để tiếp tục. Lịch sử này vẫn được giữ trong ứng dụng."
+  "Start a new chat to continue. This history stays in the app.": "Hãy bắt đầu cuộc trò chuyện mới để tiếp tục. Lịch sử này vẫn được giữ trong ứng dụng.",
+  "ChatGPT Projects for your projects, workers in their own Git copy, and steadier long runs.": "Dự án ChatGPT cho các dự án của bạn, worker trong bản sao Git riêng và các lượt chạy dài ổn định hơn.",
+  "Projects in ChatGPT": "Dự án trong ChatGPT",
+  "New projects get their own ChatGPT Project, and their new chats open inside it.": "Dự án mới có Dự án ChatGPT riêng, và các cuộc trò chuyện mới của nó mở bên trong đó.",
+  "Background chats in a tab group": "Trò chuyện nền trong một nhóm tab",
+  "Background chats can stay in one collapsed tab group in your browser window instead of their own window.": "Trò chuyện nền có thể nằm trong một nhóm tab thu gọn trong cửa sổ trình duyệt thay vì một cửa sổ riêng.",
+  "Workers in their own Git copy": "Worker trong bản sao Git riêng",
+  "When you turn it on, each new worker gets its own Git worktree and branch, away from your checkout.": "Khi bật, mỗi worker mới có worktree và nhánh Git riêng, tách khỏi bản checkout của bạn.",
+  "Dictation on Windows": "Đọc chính tả trên Windows",
+  "The microphone button turns your speech into text in the message box, and you send it when you're ready.": "Nút micrô chuyển lời nói của bạn thành văn bản trong ô tin nhắn, và bạn gửi khi đã sẵn sàng.",
+  "Rename your connectors": "Đổi tên connector",
+  "Chat On Steroids apps you rename in ChatGPT keep working.": "Các ứng dụng Chat On Steroids bạn đổi tên trong ChatGPT vẫn tiếp tục hoạt động."
 }
