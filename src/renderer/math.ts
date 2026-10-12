@@ -25,6 +25,40 @@ export interface MathSlots { formulas: Array<{ tex: string; display: boolean }> 
 const BLOCK = /^(?:\\\[([\s\S]+?)\\\]|\$\$([\s\S]+?)\$\$)[ \t]*(?:\n|$)/;
 const INLINE = /^(?:\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]|\$\$([^\n]+?)\$\$)/;
 
+/**
+ * Starts a display formula on its own block when ChatGPT opens it on the line right after prose.
+ *
+ * Markdown reads such a line as more of the paragraph, so the formula block never gets its turn,
+ * and a formula line holding only `=` turns the whole paragraph into a large heading (#1342,
+ * 2026-10-12: "\[" lost its backslash and nothing was drawn). A blank line before the opening
+ * `\[` or `$$` keeps list items together and leaves code fences untouched.
+ */
+export function separateDisplayMath(text: string): string {
+  if (!text.includes('\\[') && !text.includes('$$')) return text;
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let fence: string | null = null;
+  // The closer of an open display formula: a `$$` line inside one ends it rather than opening one.
+  let closer: string | null = null;
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    const marker = /^(`{3,}|~{3,})/.exec(trimmed)?.[1];
+    if (closer !== null) {
+      if (trimmed.includes(closer)) closer = null;
+    } else if (marker) {
+      if (fence === null) fence = marker[0]!;
+      else if (marker[0] === fence) fence = null;
+    } else if (fence === null && /^(?:\\\[|\$\$)/.test(trimmed)) {
+      const previous = out.at(-1);
+      if (previous !== undefined && previous.trim() !== '') out.push('');
+      const opener = trimmed.startsWith('$$') ? '$$' : '\\]';
+      if (!trimmed.slice(2).includes(opener)) closer = opener;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** The Marked extensions that set formulas aside for `drawMath`. */
 export function mathExtensions(slots: MathSlots): TokenizerAndRendererExtension[] {
   const slot = (tex: string, display: boolean) => {
