@@ -75,6 +75,11 @@ import { runDiagnostics } from './diagnostics.js';
 import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
+import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
+import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
+import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
+import { unifiedExecManager } from './codex/manager.js';
+import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, expireArmedProjectCreates, getSessionProject, listProjects, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
@@ -249,6 +254,7 @@ const settingsPatch = z.object({
     strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
+    autoWorktrees: z.boolean().optional(),
     endSleepingWorkerProcesses: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
@@ -449,6 +455,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.waitForSubAgents,
         base.multiAgent.waitForSubAgents,
         wanted.multiAgent.waitForSubAgents
+      ),
+      autoWorktrees: pick(
+        current.multiAgent.autoWorktrees ?? false,
+        base.multiAgent.autoWorktrees ?? false,
+        wanted.multiAgent.autoWorktrees ?? false
       ),
       endSleepingWorkerProcesses: pick(
         current.multiAgent.endSleepingWorkerProcesses ?? false,
@@ -1618,6 +1629,133 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The prime's report stays in the main process: the renderer needs the outcome, not
     // the message queued for the prime agent.
     return { cleared: outcome.cleared, reason: outcome.reason, swarm: swarmState() };
+  });
+
+  // Retiring a worker must never silently erase its branch, ignored files or uncommitted
+  // work. The UI offers a review after finished/failed/cleared (including after restart).
+  // Lookup is *on demand*: startup only restores worktrees for still-broker-owned workers.
+  const worktreeCleanupId = z.object({
+    runId: z.string().uuid(),
+    agentId: z.string().regex(/^worker-[1-9][0-9]{0,5}$/)
+  }).strict();
+  handle('swarm:worktreeCleanupList', async (): Promise<WorkerWorktreeCleanupOffer[]> => {
+    try {
+      if (!(await persistAgentAuthorityNow())) throw new Error('worker authority could not be persisted');
+      const candidates = await listOfferedWorkerWorktrees(getConfig().roots, managedWorktreeCleanupOffers());
+      return candidates.map(candidate => ({
+        runId: candidate.runId,
+        agentId: candidate.agentId,
+        reason: candidate.reason,
+        label: managedWorktreeCleanupOffers().find(offer =>
+          offer.runId === candidate.runId && offer.agentId === candidate.agentId)?.label,
+        workspace: candidate.workspace,
+        dirty: candidate.dirty,
+        ignoredFiles: candidate.ignoredFiles,
+        uniqueCommits: candidate.uniqueCommits,
+        changeCount: candidate.changes.length
+      }));
+    } catch (error) {
+      // Native paths from Git failures belong to local logs, never the browser/AI surface.
+      logInfo(`worktree cleanup inspection failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not review retained worker worktrees. Check the local app logs.');
+    }
+  });
+  handle('swarm:worktreeCleanupRemove', async (payload) => {
+    const { runId, agentId } = worktreeCleanupId.parse(payload);
+    if (!(await persistAgentAuthorityNow())) throw new Error('Cleanup could not confirm durable worker retirement. No files were removed.');
+    const offer = managedWorktreeCleanupOffers().find(entry => entry.runId === runId && entry.agentId === agentId);
+    if (!offer) throw new Error('This worker cleanup offer is no longer available. Refresh the list.');
+    let candidate: Awaited<ReturnType<typeof listOfferedWorkerWorktrees>>[number] | undefined;
+    try {
+      candidate = (await listOfferedWorkerWorktrees(getConfig().roots, [offer]))[0];
+    } catch (error) {
+      logInfo(`worktree cleanup preview failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not verify this worker checkout. No files were removed.');
+    }
+    if (!candidate) throw new Error('This checkout is missing or has no verified cleanup owner. No files were removed.');
+    // The native confirmation must describe a complete, byte-verified snapshot.
+    // A bounded/truncated inspection cannot authorize discarding files.
+    if (candidate.changesTruncated || !candidate.contentFingerprint) {
+      throw new Error('Could not safely inspect all contents of this worker checkout. No files were removed.');
+    }
+    // The preview is shown only in the trusted desktop confirmation, not the renderer
+    // or a model-facing tool. List bounded relative paths instead of native paths.
+    const changedFiles = candidate.changes.slice(0, 25).map(name =>
+      `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+    const details = [
+      `Checkout: ${candidate.workspace}`,
+      candidate.changes.length
+        ? `${candidate.changes.length} uncommitted/ignored paths would be discarded:`
+        : 'No uncommitted or ignored paths were detected.',
+      ...changedFiles,
+      candidate.changes.length > changedFiles.length || candidate.changesTruncated
+        ? 'Additional paths are not shown; review the checkout before confirming.' : '',
+      candidate.ignoredFiles ? 'Ignored files are included in the removal.' : '',
+      candidate.uniqueCommits ? 'Commits made only on this branch will remain in Git.' : '',
+      'This action removes the entire checkout directory, including tracked working files, ignored files and uncommitted changes. The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'
+    ].filter(Boolean).join('\n');
+    // Approval is acquired in the trusted main process, not supplied as a boolean by renderer
+    // or model. Default is cancellation, even for an apparently clean checkout.
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Remove worker Git checkout?',
+      message: 'Review the worker checkout before removing it',
+      detail: details,
+      buttons: ['Keep checkout', 'Remove checkout; preserve Git branch'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    if (response !== 1) return { removed: false, branchPreserved: true };
+    // Git's name/size status can stay identical across same-size byte edits.
+    // Compare the complete content fingerprint, including ignored/untracked files.
+    // The manager also checks this fingerprint inside its mutation fence.
+    let fresh: typeof candidate | undefined;
+    try {
+      fresh = (await listOfferedWorkerWorktrees(getConfig().roots, [offer]))[0];
+    } catch (error) {
+      logInfo(`worktree cleanup reinspection failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not recheck this checkout after confirmation. No files were removed.');
+    }
+    if (!fresh || fresh.workspace !== candidate.workspace || fresh.branch !== candidate.branch ||
+        fresh.headOid !== candidate.headOid || fresh.dirty !== candidate.dirty ||
+        fresh.ignoredFiles !== candidate.ignoredFiles || fresh.uniqueCommits !== candidate.uniqueCommits ||
+        fresh.changesTruncated || !fresh.contentFingerprint ||
+        fresh.contentFingerprint !== candidate.contentFingerprint ||
+        JSON.stringify(fresh.changes) !== JSON.stringify(candidate.changes)) {
+      throw new Error('The checkout changed while you were reviewing it. No files were removed.');
+    }
+    // Root approval and exact broker-offer identity are checked again after user interaction.
+    if (!(await persistAgentAuthorityNow())) throw new Error('Cleanup could not reconfirm durable worker retirement. No files were removed.');
+    const current = managedWorktreeCleanupOffers().find(entry => entry.runId === runId && entry.agentId === agentId);
+    if (!current || current.createdAt !== offer.createdAt || current.reason !== offer.reason) {
+      throw new Error('Cleanup ownership changed during confirmation. No files were removed.');
+    }
+    // A cleared worker's child processes do not stop merely because its broker row was
+    // retired. Refuse destructive removal while any tool may still be writing files.
+    if (inFlightToolCalls() > 0) {
+      throw new Error('Local tools are still executing. No worker files were removed.');
+    }
+    try {
+      const result = await disposeOfferedWorkerWorktree(getConfig().roots, current,
+        unifiedExecManager.listProcesses().map(process => process.cwd), candidate.contentFingerprint);
+      if (result.removed && acknowledgeManagedWorktreeCleanupOffer(runId, agentId)) {
+        // The files are already removed at this point. Failure to persist the acknowledgment
+        // is a recoverable stale UI offer, not permission to claim that deletion failed.
+        try {
+          if (!(await persistAgentAuthorityNow())) logInfo('worktree cleanup acknowledgment could not be persisted');
+        } catch (error) {
+          logInfo(`worktree cleanup acknowledgment persistence failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return { removed: result.removed, branchPreserved: !result.branchRemoved };
+    } catch (error) {
+      logInfo(`worktree cleanup removal refused: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof WorkerWorktreeError && error.code === 'WORKTREE_CONTENT_CHANGED') {
+        throw new Error('The checkout changed while you were reviewing it. No files were removed.');
+      }
+      throw new Error('The checkout was not removed safely. Inspect the local app logs for details.');
+    }
   });
 
 

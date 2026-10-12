@@ -8,7 +8,7 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { createAgentPanel } from './agent-panel.js';
+import { createAgentPanel, workerName } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
@@ -60,6 +60,7 @@ import type {
   SessionSummary,
   StoredText,
   SwarmState,
+  WorkerWorktreeCleanupOffer,
   TokenPressure
 } from '../shared/session.js';
 import {
@@ -5101,6 +5102,73 @@ function paintSwarm(state: SwarmState): void {
   $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0 && state.retainedHistory !== true;
 }
 
+/** A presentation of already verified cleanup offers; no marker or filesystem discovery here. */
+export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[], panel: HTMLElement = $('worktreeCleanupList')): void {
+  if (!offers.length) {
+    const empty = el('div', 'setting worktree-cleanup-empty');
+    const message = el('span', 'setting-text');
+    message.append(el('b', '', () => t('No checkouts to remove')), el('em', '', () => t('Finished or cleared checkouts awaiting review will appear here.')));
+    empty.append(message);
+    panel.replaceChildren(empty);
+    return;
+  }
+
+  const rows = offers.map(offer => {
+    const row = el('div', 'setting worktree-checkout-row');
+    const copy = el('div', 'setting-text worktree-checkout-copy');
+    const name = () => workerName(offer.agentId, offer.label);
+    const title = el('b', 'worktree-checkout-name', name);
+    // The technical id is useful for support, but not as the prominent name.
+    title.title = offer.agentId;
+    const meta = el('span', 'worktree-checkout-status', () => offer.reason === 'completed' ? t('Finished')
+      : offer.reason === 'failed' ? t('Failed') : t('Cleared'));
+    const path = el('span', 'worktree-checkout-path', offer.workspace);
+    path.title = offer.workspace;
+    copy.append(title, meta);
+
+    const facts = el('div', 'worktree-checkout-facts');
+    if (offer.dirty) {
+      facts.append(el('span', 'chip worktree-risk', () => offer.changeCount > 1
+        ? t('{0} uncommitted changes', [offer.changeCount]) : t('Uncommitted changes')));
+    }
+    if (offer.ignoredFiles) facts.append(el('span', 'chip worktree-risk', () => t('Ignored files')));
+    if (offer.uniqueCommits) facts.append(el('span', 'chip worktree-commits', () => t('Commits only on this branch')));
+    if (!offer.dirty && !offer.ignoredFiles) {
+      facts.append(el('span', 'worktree-clean-state', () => t('Nothing would be lost')));
+    }
+    copy.append(facts, path);
+
+    // Use the same visible solid action as other Settings controls, not a quiet
+    // text-only link for a destructive workflow.
+    const remove = el('button', 'btn btn-solid worktree-remove-button', () => t('Remove checkout…'));
+    remove.setAttribute('type', 'button');
+    ui(remove, 'aria-label', () => `${t('Remove checkout…')} — ${name()}`);
+    remove.dataset.worktreeRemove = 'true';
+    remove.dataset.runId = offer.runId;
+    remove.dataset.agentId = offer.agentId;
+    row.append(copy, remove);
+    return row;
+  });
+  panel.replaceChildren(...rows);
+}
+
+async function showWorktreeCleanupOffers(): Promise<void> {
+  const review = $<HTMLButtonElement>('worktreeCleanupReview');
+  if (review.disabled) return;
+  const panel = $('worktreeCleanupList');
+  const restoreFocus = document.activeElement === review;
+  review.disabled = true;
+  panel.setAttribute('aria-busy', 'true');
+  try {
+    const offers = await run(api.listWorktreeCleanupOffers());
+    if (offers) paintWorktreeCleanupOffers(offers, panel);
+  } finally {
+    panel.removeAttribute('aria-busy');
+    review.disabled = false;
+    if (restoreFocus && document.activeElement === document.body) review.focus();
+  }
+}
+
 /**
  * The meter's red line, derived from the one threshold the user actually sets.
  *
@@ -5160,6 +5228,7 @@ export function chatSettingsPatch(current: Config): {
       strictChatAllowlist: $<HTMLInputElement>('strictChatAllowlist').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
+      autoWorktrees: $<HTMLInputElement>('autoWorktrees').checked,
       endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
     },
     goal: {
@@ -5564,6 +5633,7 @@ const CHAT_INPUTS = [
   'strictChatAllowlist',
   'recoverAgentTabs',
   'waitForSubAgents',
+  'autoWorktrees',
   'endSleepingWorkerProcesses',
   'autoContinue',
   'goalProvider',
@@ -5663,6 +5733,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('waitForSubAgents'),
     config.multiAgent.waitForSubAgents === true,
     previous?.multiAgent.waitForSubAgents
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('autoWorktrees'),
+    config.multiAgent.autoWorktrees === true,
+    previous?.multiAgent.autoWorktrees
   );
   applyChatChecked(
     $<HTMLInputElement>('endSleepingWorkerProcesses'),
@@ -6914,12 +6989,49 @@ export function initChat(next: Deps): void {
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast(t('Workers cleared'));
+      toast(t('Workers cleared; retained Git checkouts can be reviewed below.'));
     }
   });
 
   // Which of the two things happened is decided in the main process and reported back,
   // so the toast describes the actual outcome rather than the intent of the click.
+  $('worktreeCleanupSection').addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest<HTMLElement>('[data-worktree-review]')) {
+      await showWorktreeCleanupOffers();
+      return;
+    }
+    const worktreeRemove = target.closest<HTMLElement>('[data-worktree-remove]');
+    if (worktreeRemove) {
+      const runId = worktreeRemove.dataset.runId;
+      const agentId = worktreeRemove.dataset.agentId;
+      if (!runId || !agentId) return;
+      const button = worktreeRemove as HTMLButtonElement;
+      if (button.disabled) return;
+      const restoreFocus = document.activeElement === button;
+      const initialActions = [...$('worktreeCleanupList').querySelectorAll<HTMLButtonElement>('[data-worktree-remove]')];
+      const initialIndex = initialActions.indexOf(button);
+      button.disabled = true;
+      try {
+        const result = await run(api.removeWorktreeCleanupOffer(runId, agentId));
+        if (!result) return;
+        toast(result.removed ? t('Worker checkout removed; its Git branch was preserved.') : t('Worker checkout kept.'));
+        await showWorktreeCleanupOffers();
+      } finally {
+        // If confirmation is cancelled or inspection fails, the action stays usable.
+        button.disabled = false;
+        // Refresh replaces the clicked row. Keep keyboard focus in the same group rather
+        // than dropping it to the page body when the focused control is detached.
+        if (restoreFocus && (document.activeElement === button || document.activeElement === document.body ||
+            !document.activeElement?.isConnected)) {
+          const actions = [...$('worktreeCleanupList').querySelectorAll<HTMLButtonElement>('[data-worktree-remove]')];
+          const same = actions.find(action => action.dataset.runId === runId && action.dataset.agentId === agentId);
+          (same ?? actions[Math.min(Math.max(initialIndex, 0), actions.length - 1)] ?? $('worktreeCleanupReview')).focus();
+        }
+      }
+      return;
+    }
+  });
   $('swarmList').addEventListener('click', async (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('[data-clear]');
@@ -6930,9 +7042,9 @@ export function initChat(next: Deps): void {
     paintSwarm(outcome.swarm);
     toast(
       outcome.cleared === 'run'
-        ? t('Run cleared — every worker ended')
+        ? t('Run cleared — worker Git checkouts can be reviewed below')
         : outcome.cleared === 'worker'
-          ? t('{0} cleared — its slot is free', [id])
+          ? t('{0} cleared — its checkout can be reviewed below', [id])
           : t(outcome.reason)
     );
   });

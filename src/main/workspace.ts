@@ -34,6 +34,8 @@ import { currentCall } from './mcp/call-context.js';
 import { requestCorrelation } from './session/correlation.js';
 import { isSkillPath, isSkillVirtualPath } from './skill-access.js';
 import { isContained } from './sandbox.js';
+import { lookupWorkerWorkspace } from './worktrees/index.js';
+import { managedWorkerAllocationIdentity, managedWorkerWorktreeRequired } from './agents.js';
 
 /** How long a learned workspace survives without being used or renewed. */
 const WORKSPACE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -105,6 +107,19 @@ export function currentWorkspace(): Workspace | null {
   const keys = workspaceKeys();
   if (!keys.length) return null;
   prune();
+  // Worker allocation is the broker's immutable identity, independent of its active run id.
+  // On restart the marker can be rebuilt while this ephemeral cwd cache is empty.
+  const required = call ? managedWorkerWorktreeRequired(call.caller) : false;
+  if (required) {
+    const allocation = managedWorkerAllocationIdentity(call!.caller);
+    const lease = allocation && call!.agent === allocation.agentId ? lookupWorkerWorkspace(allocation) : null;
+    if (!lease) {
+      throw new Error('WORKTREE_OWNER_UNAVAILABLE: the required isolated worker checkout has no verified owner. Restore the marker and approved root before using local files or commands.');
+    }
+    const workspace: Workspace = { ...lease.workspace, at: Date.now() };
+    for (const key of keys) workspaces.set(key, { ...workspace });
+    return workspace;
+  }
   let held: Workspace | null = null;
   for (const key of keys) {
     held = workspaces.get(key) ?? null;

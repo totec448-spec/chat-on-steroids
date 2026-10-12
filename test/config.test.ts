@@ -571,6 +571,7 @@ describe('shipped defaults', () => {
     // Waiting for a run's own workers is a workflow preference, not a first-launch exposure
     // decision, so it starts off even where unattributed calls start on.
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
+    expect(loaded.multiAgent.autoWorktrees).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
   });
 
@@ -589,6 +590,7 @@ describe('shipped defaults', () => {
       expect(config.multiAgent.strictChatAllowlist).toBe(false);
       expect(config.multiAgent.recoverAgentTabs).toBe(false);
       expect(config.multiAgent.waitForSubAgents).toBe(false);
+      expect(config.multiAgent.autoWorktrees).toBe(false);
       expect(config.multiAgent.endSleepingWorkerProcesses).toBe(false);
     }
   );
@@ -611,6 +613,7 @@ describe('shipped defaults', () => {
     expect(loaded.multiAgent.strictChatAllowlist).toBe(false);
     expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
+    expect(loaded.multiAgent.autoWorktrees).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
     expect(loaded.readOnly).toBe(true);
   });
@@ -644,6 +647,21 @@ describe('shipped defaults', () => {
       multiAgent: { ...config.multiAgent, globalMaxWorkers: 5 }
     });
     expect((await loadConfig()).multiAgent.globalMaxWorkers).toBe(5);
+  });
+
+  it('requires an explicit opt-in for new worker Git worktrees and persists either choice', async () => {
+    const original = defaultConfig();
+    expect(original.multiAgent.autoWorktrees).toBe(false);
+    await saveConfig({ ...original, multiAgent: { ...original.multiAgent, autoWorktrees: true } });
+    expect((await loadConfig()).multiAgent.autoWorktrees).toBe(true);
+    await saveConfig({ ...original, multiAgent: { ...original.multiAgent, autoWorktrees: false } });
+    expect((await loadConfig()).multiAgent.autoWorktrees).toBe(false);
+
+    // Existing settings written before this opt-in existed must not gain worktree creation.
+    const stored = JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8'));
+    delete stored.multiAgent.autoWorktrees;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(stored), 'utf8');
+    expect((await loadConfig()).multiAgent.autoWorktrees).toBe(false);
   });
 
   it('does not persist obsolete recording-off or age-retention choices', async () => {
