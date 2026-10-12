@@ -10,13 +10,13 @@ Read the [responsible-use notice and provider rules](../README.md#responsible-us
 
 1. **Install and open CoS.** Choose the download for your operating system and CPU.
 2. **Choose what ChatGPT may access.** In **Settings → Workspace**, approve a project folder and review the tool permissions.
-3. **Connect the local tools.** Configure a tunnel in **Settings → Setup**, press **Connect**, then add the **Core** app in ChatGPT under **Plugins → Add → Create MCP App**.
+3. **Connect the local tools.** Configure a tunnel in **Settings → Setup**, press **Connect**, then add the **Core** app in ChatGPT under **Plugins → Add → Add custom MCP server**.
 4. **Load the companion extension.** Press **Open extension folder**. In `chrome://extensions`, enable Developer mode, choose **Load unpacked** and select that folder. Pairing is automatic.
 5. **Start a task.** Choose a project and model in CoS, write your request and send it.
 
 Want screen and keyboard control? Enable **Desktop** permissions and connect its separate app. On macOS, also grant Screen Recording and Accessibility in System Settings.
 
-**After an update:** reload the companion extension and refresh the CoS apps in ChatGPT when prompted. These are two separate steps.
+**After an update:** the companion extension updates itself once no chat is busy. If CoS asks you to refresh its apps in ChatGPT, do so; **Automatic plugin refresh** (Settings → Agents & automation → Browser & history) can do it for you.
 
 ## Tunnel setup
 
@@ -25,10 +25,10 @@ Want screen and keyboard control? Enable **Desktop** permissions and connect its
 1. Create a tunnel in [Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels), in the same workspace you use in ChatGPT.
 2. Create a **Restricted** [API key](https://platform.openai.com/settings/organization/api-keys) with **Tunnels: Read** and **Tunnels: Use**.
 3. Enter the tunnel ID and key in CoS and press **Connect**.
-4. In ChatGPT, open [Plugins](https://chatgpt.com/plugins), click **Add** at the top right and choose **Create MCP App**. Pick **Tunnel** as the connection, select your tunnel and choose **No authentication**. Older ChatGPT versions instead need Developer mode turned on first (**Settings → Security and login**) and show a **+** button. Review and enable the app's actions.
+4. In ChatGPT, open [Plugins](https://chatgpt.com/plugins), click **Add** at the top right and choose **Add custom MCP server**. Under **Connection** pick **Tunnel** and select your tunnel (or paste its ID), set **Authentication** to **No authentication**, tick **I understand and want to continue** and click **Create as a plugin**. Older ChatGPT versions instead need Developer mode turned on first (**Settings → Security and login**) and show a **+** button. Review and enable the app's actions.
 5. Name each app exactly as CoS shows it (for example `Chat On Steroids Core`). You can rename it later in ChatGPT: after its first call, CoS recognizes the app by ChatGPT's app ID, and Setup shows the new name next to the original.
 
-> **No Developer mode switch?** That's expected. Current ChatGPT accounts, including new Plus accounts, create the app from **Plugins → Add → Create MCP App** without it, and file edits and desktop control work as before ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)).
+> **No Developer mode switch?** That's expected. Current ChatGPT accounts, including new Plus accounts, create the app from **Plugins → Add → Add custom MCP server** without it, and file edits and desktop control work as before ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)).
 
 Core, Desktop and Plugins are separate connectors. Configure each surface you enable. Release packages include the pinned, checksum-verified `tunnel-client`.
 
@@ -40,7 +40,7 @@ Core, Desktop and Plugins are separate connectors. Configure each surface you en
 
 ## Browser bridge port
 
-In **Settings → Browser & history → Browser bridge port**, choose **Auto** (default) or
+In **Settings → Agents & automation → Browser & history → Browser bridge port**, choose **Auto** (default) or
 **8765**, **8766**, **8767**, **8768**, **8769**. Auto uses the first available port in that
 order. A fixed choice uses exactly that port. The companion discovers the same supported range.
 
@@ -57,7 +57,7 @@ comma-separated override and port `0` remain available for isolated development/
 ## Background tabs
 
 With **Background chats** on, the tabs the app opens for workers and recovered chats stay in the
-background. **Settings → Browser & history → Background tabs open in** chooses where: **Their own
+background. **Settings → Agents & automation → Browser & history → Background tabs open in** chooses where: **Their own
 minimized window** (default) or **A tab group in your browser window**. The tab group is a collapsed
 "Chat On Steroids" group in the window you used last, and it stays there. The app never selects a
 tab or changes the window you are using. Chrome saves open tab groups automatically. The app's
@@ -106,13 +106,13 @@ them behind, so a caller should treat a refused connection as "not running".
 
 | Connector | What it adds |
 | --- | --- |
-| **Core** | Local files, patches, terminals, generated-file downloads, session history, plans and workers. Available on all supported platforms. |
-| **Desktop** | Screen inspection, mouse, keyboard and clipboard. Windows and macOS; macOS requires explicit enablement and OS permissions. |
+| **Core** | Local files, patches, terminals, saving ChatGPT-generated images, plans and workers. Available on all supported platforms. |
+| **Desktop** | Background browser tabs through the companion on every platform; screen inspection, mouse, keyboard and clipboard on Windows and macOS. macOS requires explicit enablement and OS permissions. |
 | **Plugins** | External MCP tools such as Blender, Playwright and Memory, plus custom local or remote servers. [Plugin guide](plugins.md). |
 
 You choose the approved folders and capabilities. File tools enforce those roots; shell commands run with your normal user privileges. Desktop access applies to the desktop, and external plugins have their own permissions. **Read-only mode** disables writes, command execution and desktop control.
 
-History is stored locally, with recording on and 30-day retention by default. Credentials use the operating system's secure storage. Review permissions before connecting: fresh installs enable Core capabilities and two workers; Windows also starts with Desktop permissions enabled.
+History is recorded locally and kept until you delete a chat; recording can't be turned off. Credentials use the operating system's secure storage. Review permissions before connecting: fresh installs enable Core capabilities and two workers; Windows also starts with Desktop permissions enabled.
 
 [Security policy](../SECURITY.md) · [Tool reference](tool-surface.md) · [Architecture](../AGENTS.md)
 
@@ -120,7 +120,7 @@ History is stored locally, with recording on and 30-day retention by default. Cr
 
 **Session history** belongs to the local session, not a particular ChatGPT tab. The companion records messages and the actual local tool results so the app and the model can read earlier work.
 
-**Compact & Resume** asks for a handoff, starts a fresh provider conversation and rebinds that same session. Task and worker history move with it. In Settings → Continuation prompts, **Handoff prompt** controls what the brief emphasizes; the continuation marker and recovery/provenance framing remain fixed. The shipped prompt prefers a dense roughly 2,000-6,000-token brief for substantial work instead of replaying completed chronology. Automatic compaction uses configured local estimates and eligible live work; Pro models never auto-compact.
+**Compact & Resume** asks for a handoff, starts a fresh provider conversation and rebinds that same session. Task and worker history move with it. In Settings → Continuation prompts, **Handoff prompt** controls what the brief emphasizes; the continuation marker and recovery/provenance framing remain fixed. **Handoff length** (Settings → Agents & automation → Browser & history) sets how much it keeps: **Thorough** (the default, about 10k–30k tokens), **Standard** (4k–10k) or **Short** (2k–6k). Automatic compaction uses configured local estimates and eligible live work; Pro models never auto-compact.
 
 **Workers** keep their conversation when they finish. Send a follow-up to reuse one. The default is two simultaneous workers per family, configurable up to eight. Idle owned tabs can be reused or closed after fresh checks; the durable worker history remains. Drafts, active work and pins are protected.
 
@@ -137,7 +137,7 @@ These continuity features do not grant additional quota or access. Do not use ne
 - **Tunnel rejects the API key or tunnel ID:** check the saved tunnel ID, the selected setup profile, and that its key has Tunnels Read + Use for that tunnel. Extension pairing does not authenticate the tunnel. If Platform offers no matching ChatGPT workspace, retain the exact error for an access investigation; a different tunnel does not establish account eligibility.
 - **ChatGPT blocks a tool for safety:** local permission alone does not prove that ChatGPT accepted or dispatched the call. Inspect the local tool history for the exact request. If no result exists, execution is unconfirmed; do not replay a potentially executed operation or route it through another connector. Keep the task's progress and report the provider's error, selected Chat/Work surface, and app/extension versions without credentials or private content. A plan label alone does not diagnose a provider refusal.
 - **CoS returns `TOOL_DISABLED`:** check Read-only and the named local capability. `CALLER_IDENTITY_REQUIRED` or `WORKER_IDENTITY_LOST` instead concerns exact caller ownership; neither proves that command execution is globally disabled.
-- **Extension version mismatch:** reload the unpacked companion after updating CoS, then reload the ChatGPT page.
+- **Extension version mismatch:** the companion updates itself once no chat is busy. If it stays on the old build, reload it in `chrome://extensions` (Chrome may have loaded it from another folder), then reload the ChatGPT page.
 - **Models missing:** use **Reload ChatGPT models**. The picker reflects availability in your signed-in account.
 - **`UNIDENTIFIED_CALLER`:** use that conversation in the paired browser so the extension can prove its request identity. CoS does not guess from the active tab.
 - **`COMPACTION_IN_PROGRESS`:** let the source chat finish its handoff. Work continues in the replacement conversation.
