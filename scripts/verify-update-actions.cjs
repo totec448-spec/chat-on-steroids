@@ -35,7 +35,7 @@ app.whenReady().then(async () => {
     const js=s=>win.webContents.executeJavaScript(s),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const until=async s=>{const end=Date.now()+10000;while(Date.now()<end){if(await js(s))return;await pause(40);}throw Error('Timeout: '+s);};
     await win.loadURL('http://127.0.0.1:'+server.address().port);await until(`document.getElementById('versionLine').textContent.length>0`);
-    await js(`document.querySelector('#tabs [data-tab="activity"]').click();const d=document.getElementById('updateReadinessDetails');if(d)d.open=true`);await pause(500);
+    await js(`document.querySelector('#tabs [data-tab="activity"]').click();const d=document.getElementById('updateReadinessDetails');if(d)d.open=true`);await until(`!document.querySelector('.toast')`);await pause(100);
     const shot=async name=>fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage()).toPNG());
     await shot((before?'before':'after')+'-'+lang+'.png');
     if(before)return;
@@ -46,7 +46,7 @@ app.whenReady().then(async () => {
     await js(`window.finish({ok:false,error:'Fixture network unavailable'})`);await until(`!document.getElementById('updateAll').disabled`);
     await js('window.push()');assert.equal(await js(`document.getElementById('updateAllError').hidden`),false);
     assert.ok(await js(`document.getElementById('updateAllError').textContent.includes('Fixture network unavailable')`));
-    await pause(500);await shot('retained-error-'+lang+'.png');
+    await until(`!document.querySelector('.toast')`);await pause(100);await shot('retained-error-'+lang+'.png');
     await js(`document.getElementById('updateAll').click();window.finish({ok:true,data:'checking-connectors'})`);await until(`!document.getElementById('updateAll').disabled`);
     assert.equal(await js(`document.getElementById('updateAllError').hidden`),true);assert.deepEqual(await js('window.calls'),['update-all','update-all']);
     console.log('Update action real-Electron checks passed: '+lang);
