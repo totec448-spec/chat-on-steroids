@@ -12327,6 +12327,36 @@ describe('evidence from the page context', () => {
     expect(emitted(live.sent, 'chat_error').at(-1)?.event.retryAt).toBe(observedAt + 31_000);
   });
 
+  it('backs off ChatGPT history Retry after a rate limit instead of pressing it once a minute (2026-10-11)', async () => {
+    // Each press after Retry-After drew another 429 with a longer Retry-After, so a press a minute
+    // kept the limit alive for half an hour. After a limit the presses spread out: 0 s, 2, 4, 8, 15 min.
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const start = live.window.Date.now();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window,
+      origin: 'https://chatgpt.com',
+      data: { type: 'cos-history-rate-limit', conversationId, observedAt: start, retryAt: start + 10_000 }
+    }));
+    await settle();
+    // The first press still comes when ChatGPT said it may.
+    expect(live.hook.recoverConversationLoad(start + 10_001)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 15_002)).toBe(true);
+    // The next ones wait two, then four minutes, where a plain load failure would press every minute.
+    const first = start + 15_002;
+    expect(live.hook.recoverConversationLoad(first + 65_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(first + 124_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(first + 125_001)).toBe(true);
+    const second = first + 125_001;
+    expect(live.hook.recoverConversationLoad(second + 125_001)).toBe(false);
+    expect(live.hook.recoverConversationLoad(second + 245_001)).toBe(true);
+    expect(clicks).toBe(3);
+  });
+
   it('does not press ChatGPT history Retry inside the provider Retry-After window', async () => {
     live = await harness();
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

@@ -644,6 +644,57 @@ describe('automatic worker Git worktrees', () => {
     }
   );
 
+  it.each(['--assume-unchanged', '--skip-worktree'] as const)(
+    'blocks cleanup preview when Git %s hides a tracked change with unchanged size and mtime', async flag => {
+      const lease = await allocate();
+      const tracked = path.join(lease.worktreePath, 'file.txt');
+      const before = await fs.stat(tracked);
+      const offer = { runId: lease.runId, agentId: lease.agentId, createdAt: lease.createdAt, reason: 'cleared' };
+      git(lease.worktreePath, ['update-index', flag, '--', 'file.txt']);
+      await write(tracked, 'edit\n');
+      await fs.utimes(tracked, before.atime, before.mtime);
+      expect((await fs.stat(tracked)).size).toBe(before.size);
+      expect(git(lease.worktreePath, ['status', '--porcelain'])).toBe('');
+      expect(git(lease.worktreePath, ['ls-files', '-v', '--', 'file.txt']).startsWith(
+        flag === '--assume-unchanged' ? 'h ' : 'S '
+      )).toBe(true);
+      resetWorkerWorktreeRegistryForTests();
+
+      const previews = await listOfferedWorkerWorktrees(roots, [offer]);
+      expect(previews).toHaveLength(1);
+      expect(previews[0]).toMatchObject({ contentFingerprint: null, canOfferRemoval: false });
+      expect(await fs.readFile(tracked, 'utf8')).toBe('edit\n');
+      expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    }
+  );
+
+  it.each(['--assume-unchanged', '--skip-worktree'] as const)(
+    'blocks confirmed removal when Git %s is set after content approval', async flag => {
+      const lease = await allocate();
+      const tracked = path.join(lease.worktreePath, 'file.txt');
+      const before = await fs.stat(tracked);
+      const offer = { runId: lease.runId, agentId: lease.agentId, createdAt: lease.createdAt, reason: 'cleared' };
+      resetWorkerWorktreeRegistryForTests();
+      const previews = await listOfferedWorkerWorktrees(roots, [offer]);
+      expect(previews[0]).toMatchObject({ canOfferRemoval: true });
+      const fingerprint = previews[0]?.contentFingerprint;
+      expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
+
+      git(lease.worktreePath, ['update-index', flag, '--', 'file.txt']);
+      await write(tracked, 'edit\n');
+      await fs.utimes(tracked, before.atime, before.mtime);
+      expect((await fs.stat(tracked)).size).toBe(before.size);
+      expect(git(lease.worktreePath, ['status', '--porcelain'])).toBe('');
+      expect(git(lease.worktreePath, ['ls-files', '-v', '--', 'file.txt']).startsWith(
+        flag === '--assume-unchanged' ? 'h ' : 'S '
+      )).toBe(true);
+      await expect(disposeOfferedWorkerWorktree(roots, offer, [], fingerprint!))
+        .rejects.toMatchObject({ code: 'WORKTREE_CONTENT_CHANGED' });
+      expect(await fs.readFile(tracked, 'utf8')).toBe('edit\n');
+      expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    }
+  );
+
   it('fails closed when an ignored directory exceeds bounded content fingerprint limits', async () => {
     await write(path.join(repo, '.gitignore'), 'private-cache/\n');
     await commit(repo, 'ignore large worker cache');

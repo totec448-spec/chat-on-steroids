@@ -62,7 +62,7 @@ import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffor
 import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
-import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
+import { BROWSER_BRIDGE_AUTO_PORTS } from '../shared/browser-bridge.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import type { Config } from '../shared/types.js';
 import type { PluginSurface } from '../shared/plugin-refresh.js';
@@ -236,7 +236,7 @@ import { bindAgentWorkspace } from './workspace.js';
 import { extensionUpdateOffer, prepareExtensionUpdate, shippedExtensionBuild } from './extension-path.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
-export const DEFAULT_PORTS = BROWSER_BRIDGE_PORTS;
+export const DEFAULT_PORTS = BROWSER_BRIDGE_AUTO_PORTS;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Durable settled-turn orphan safety net. */
 export const STALE_SWARM_MS = 2 * 60_000;
@@ -8880,6 +8880,15 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     }
     const schedule = COMPACTION_PICKUPS[phase];
     if (now < watch.nextAt) continue;
+    // The handoff request is sent when the source turn has finished. While that turn still works,
+    // a pickup only reloads a busy page and spends the budget: on 2026-10-12 an automatic ticket
+    // filed mid-turn spent all ten pickups on a generating page, wrote "Trying to reload chat to
+    // recover a handoff request that has not been sent" each time, and gave up (handoff_never_sent)
+    // just after the turn finally ended. Wait for the turn instead, without counting.
+    if (phase === 'asking' && session && sessionInputActivity(session).exact) {
+      watch.nextAt = now + schedule.every;
+      continue;
+    }
     if (watch.attempts >= schedule.attempts) {
       if (phase === 'writing' && !watch.told) {
         // The sent request stays protected and gets no fourth reload, but the person reading
