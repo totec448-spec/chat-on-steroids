@@ -1844,9 +1844,6 @@
   "Skill added to your library": "Skill añadida a tu biblioteca",
   "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Se usa cuando la aplicación abre un navegador. Instala la extensión complementaria e inicia sesión en ChatGPT en el perfil activo de este navegador. Las pestañas ya conectadas permanecen en su navegador. El navegador integrado de Chat On Steroids no necesita instalación y se ejecuta oculto en la bandeja.",
   "Chat On Steroids browser (built-in)": "Navegador de Chat On Steroids (integrado)",
-  "Choose a folder to share — step 2.": "Elige una carpeta para compartir — paso 2.",
-  "Create a tunnel and paste its ID — step 3.": "Crea un túnel y pega su ID — paso 3.",
-  "Add a restricted API key — step 4.": "Agrega una clave de API restringida — paso 4.",
   "Dismiss": "Descartar",
   "Sign in to ChatGPT": "Inicia sesión en ChatGPT",
   "Sign out of ChatGPT": "Cerrar sesión en ChatGPT",
@@ -2204,5 +2201,8 @@
   "Where the plugin offers permissions: allow all tools": "Si el complemento ofrece permisos: permite todas las herramientas",
   "First tool call: allow it, always for this plugin": "Primera llamada a una herramienta: permítela, siempre para este complemento",
   "Review the action, then allow it, always for this plugin.": "Revisa la acción y luego permítela, siempre para este complemento.",
-  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Es independiente de los permisos del complemento, y este aviso no aprueba ninguna llamada a herramientas."
+  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Es independiente de los permisos del complemento, y este aviso no aprueba ninguna llamada a herramientas.",
+  "Choose a folder to share — step {0}.": "Elige una carpeta para compartir — paso {0}.",
+  "Create a tunnel and paste its ID — step {0}.": "Crea un túnel y pega su ID — paso {0}.",
+  "Add a restricted API key — step {0}.": "Agrega una clave de API restringida — paso {0}."
 }

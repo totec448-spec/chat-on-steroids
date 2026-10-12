@@ -1844,9 +1844,6 @@
   "Skill added to your library": "技能已新增到你的技能庫",
   "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "應用程式啟動瀏覽器時使用此選項。請在該瀏覽器的目前設定中安裝配套擴充功能並登入 ChatGPT。已連線的分頁仍保留在原瀏覽器中。內建的 Chat On Steroids 瀏覽器無需安裝，在系統匣中隱藏執行。",
   "Chat On Steroids browser (built-in)": "Chat On Steroids 瀏覽器（內建）",
-  "Choose a folder to share — step 2.": "選擇要共用的資料夾 — 第 2 步。",
-  "Create a tunnel and paste its ID — step 3.": "建立隧道並貼上 ID — 第 3 步。",
-  "Add a restricted API key — step 4.": "新增受限 API 金鑰 — 第 4 步。",
   "Dismiss": "關閉",
   "Sign in to ChatGPT": "登入 ChatGPT",
   "Sign out of ChatGPT": "登出 ChatGPT",
@@ -2204,5 +2201,8 @@
   "Where the plugin offers permissions: allow all tools": "如果外掛程式提供權限設定：允許所有工具",
   "First tool call: allow it, always for this plugin": "首次呼叫工具：允許，並一律允許此外掛程式",
   "Review the action, then allow it, always for this plugin.": "檢查該操作，然後允許，並一律允許此外掛程式。",
-  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "這與外掛程式的權限設定無關，此提醒也不會核准任何工具呼叫。"
+  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "這與外掛程式的權限設定無關，此提醒也不會核准任何工具呼叫。",
+  "Choose a folder to share — step {0}.": "選擇要共用的資料夾 — 第 {0} 步。",
+  "Create a tunnel and paste its ID — step {0}.": "建立隧道並貼上 ID — 第 {0} 步。",
+  "Add a restricted API key — step {0}.": "新增受限 API 金鑰 — 第 {0} 步。"
 }
