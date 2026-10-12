@@ -1840,9 +1840,6 @@
   "Skill added to your library": "스킬을 라이브러리에 추가했습니다",
   "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "앱이 브라우저를 실행할 때 사용합니다. 이 브라우저의 활성 프로필에 보조 확장 프로그램을 설치하고 ChatGPT에 로그인하세요. 이미 연결된 탭은 기존 브라우저에 그대로 유지됩니다. 내장 Chat On Steroids 브라우저는 설치가 필요 없으며 트레이에 숨겨진 채로 실행됩니다.",
   "Chat On Steroids browser (built-in)": "Chat On Steroids 브라우저(내장)",
-  "Choose a folder to share — step 2.": "공유할 폴더를 선택하세요 — 2단계.",
-  "Create a tunnel and paste its ID — step 3.": "터널을 만들고 ID를 붙여넣으세요 — 3단계.",
-  "Add a restricted API key — step 4.": "제한된 API 키를 추가하세요 — 4단계.",
   "Dismiss": "닫기",
   "Sign in to ChatGPT": "ChatGPT에 로그인",
   "Sign out of ChatGPT": "ChatGPT에서 로그아웃",
@@ -2199,5 +2196,8 @@
   "Where the plugin offers permissions: allow all tools": "플러그인에 권한 설정이 있으면: 모든 도구 허용",
   "First tool call: allow it, always for this plugin": "첫 도구 호출: 이 플러그인은 항상 허용",
   "Review the action, then allow it, always for this plugin.": "작업을 확인한 다음 이 플러그인은 항상 허용하세요.",
-  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "이는 플러그인 권한과는 별개이며, 이 알림은 도구 호출을 승인하지 않습니다."
+  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "이는 플러그인 권한과는 별개이며, 이 알림은 도구 호출을 승인하지 않습니다.",
+  "Choose a folder to share — step {0}.": "공유할 폴더를 선택하세요 — {0}단계.",
+  "Create a tunnel and paste its ID — step {0}.": "터널을 만들고 ID를 붙여넣으세요 — {0}단계.",
+  "Add a restricted API key — step {0}.": "제한된 API 키를 추가하세요 — {0}단계."
 }
