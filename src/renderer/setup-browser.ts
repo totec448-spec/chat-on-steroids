@@ -1,6 +1,7 @@
 import { isNewer, type AppState, type ChatBrowser } from '../shared/types.js';
 import { $, run } from './dom.js';
-import { t, ui } from './i18n.js';
+import { onLanguageChange, t, ui } from './i18n.js';
+import { extensionPicture, quoted, renderExtensionPicture } from './extension-pictures.js';
 
 type ExternalBrowser = Exclude<ChatBrowser, 'cos'>;
 const icons = {
@@ -59,6 +60,40 @@ export function initBrowserSetup(actions: {
   let savedBrowser: ChatBrowser | null = null;
   let ready = false;
 
+  let copiedAt = 0;
+  /**
+   * The install steps in the words and pictures of the chosen browser, in the app's language: its own
+   * labels for Developer mode and Load unpacked, and where they are on its page. Repainted on a
+   * language change through ui(), like every other text.
+   */
+  const paintInstallSteps = (label: string): void => {
+    ui($('extensionStepOpen'), 'textContent', () => t('Open the extensions page in {0}', [label]));
+    ui($('extensionStepOpenHint'), 'textContent', () => Date.now() - copiedAt < 60_000
+      ? t('Copied. Paste it into the address bar in {0} and press Enter.', [label])
+      : t('Click the address to copy it, then paste it into the address bar in {0} and press Enter.', [label]));
+    ui($('extensionStepDev'), 'textContent', () => {
+      const picture = extensionPicture(external, 'dev');
+      return t('Turn on {0}', [quoted(picture?.label ?? t('Developer mode'))]);
+    });
+    const where = $('extensionStepDevWhere');
+    where.hidden = external !== 'edge';
+    ui(where, 'textContent', () => external === 'edge' ? t('Edge shows it at the bottom of the left sidebar. In a narrow window, open the ☰ menu first.') : '');
+    ui($('extensionStepLoad'), 'textContent', () => {
+      const picture = extensionPicture(external, 'load');
+      return t('Click {0} and choose the extension folder', [quoted(picture?.label ?? t('Load unpacked'))]);
+    });
+    ui($('extensionStepChatGpt'), 'textContent', () => t('Open ChatGPT in {0}', [label]));
+    const paintPictures = (): void => {
+      const dev = extensionPicture(external, 'dev');
+      const load = extensionPicture(external, 'load');
+      renderExtensionPicture($('extensionPictureDev'), dev, t('The extensions page in {0}, with {1} outlined', [label, quoted(dev?.label ?? t('Developer mode'))]));
+      renderExtensionPicture($('extensionPictureLoad'), load, t('The extensions page in {0}, with {1} outlined', [label, quoted(load?.label ?? t('Load unpacked'))]));
+    };
+    paintPictures();
+  };
+  // The pictures show the browser in the app's language, so a language change repaints them.
+  onLanguageChange(() => { if (current) render(current); });
+
   const render = (state: AppState): { ready: boolean; choosingLocation: boolean } => {
     current = state;
     const browser = state.config.ui.chatBrowser ?? 'chrome';
@@ -100,8 +135,10 @@ export function initBrowserSetup(actions: {
       variant.hidden = variant.dataset.browserVariant !== (cos ? 'cos' : 'extension');
     }
     $<HTMLImageElement>('setupExternalIcon').src = icons[external];
-    $('setupExtensionAddress').textContent = `${external === 'edge' ? 'edge' : external === 'brave' ? 'brave' : 'chrome'}://extensions`;
+    const address = `${external}://extensions`;
+    $('setupExtensionAddress').textContent = address;
     const label = external === 'edge' ? 'Edge' : external === 'brave' ? 'Brave' : 'Chrome';
+    paintInstallSteps(label);
     ui($('setupExternalLabel'), 'textContent', () => t('Use {0} and your existing profile.', [label]));
     ui($('extensionStatus'), 'textContent', () => ready ? (live ? t('Extension connected and up to date') : t('Extension installed and up to date'))
       : outdated ? t('Update your extension')
@@ -156,9 +193,14 @@ export function initBrowserSetup(actions: {
       event.preventDefault(); options[index]!.click(); options[index]!.focus();
     });
   }
-  for (const [id, page] of [['openExtensionSettings', 'extensions'], ['openChatGptBrowser', 'chatgpt']] as const) {
-    $(id).addEventListener('click', () => { void actions.open(external, page); });
-  }
+  // Browsers refuse to open their own extensions page when another program asks (measured with
+  // Chrome and Edge, 2026-10-12): the address is copied and the browser brought up to paste it into.
+  $('openExtensionSettings').addEventListener('click', () => void (async () => {
+    if (await actions.open(external, 'extensions') === false) return;
+    copiedAt = Date.now();
+    if (current) render(current);
+  })());
+  $('openChatGptBrowser').addEventListener('click', () => { void actions.open(external, 'chatgpt'); });
   $('openSelectedChatGpt').addEventListener('click', event => void run(
     (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? window.api.signOutChatGpt() : window.api.openChatGpt()));
   return { render };
