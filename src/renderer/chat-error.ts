@@ -28,6 +28,15 @@ function retryTime(retryAt: number, noticedAt: number): string {
     : `${at.toLocaleDateString(language, { month: 'short', day: 'numeric' })}, ${clock}`;
 }
 
+/**
+ * Notices already seen resolved. Resolution is final (the turn later completed), but the rows that
+ * prove it can lie outside the loaded page: scrolling up dropped them and drew the notice red again,
+ * green once they reloaded, red on the next page (2026-10-12).
+ */
+const resolvedNotices = new Set<string>();
+const RESOLVED_NOTICES_LIMIT = 1000;
+const noticeKey = (error: ChatError): string => `${error.seq}:${error.time}:${error.turnId ?? ''}:${error.message.text}`;
+
 /** Presentation only: never infer send/reload authority from error prose. */
 export function chatErrorPresentation(error: ChatError, history: readonly SessionEvent[] = []) {
   const text = error.message.text.trim();
@@ -80,7 +89,14 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
     if (event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:') &&
         (question || !event.turnId || (!!error.turnId && event.turnId === error.turnId))) repair = event;
   }
-  if (completed > continued) return { title: t('Recovered after interruption'), message, resolved: true, reloaded: false, next: t('This turn later completed. You can continue with a new message.') };
+  // The memory answers only when this page holds no completion of its own; a completion followed
+  // by more work on this page outranks it, as it always did.
+  if (completed && completed <= continued) resolvedNotices.delete(noticeKey(error));
+  if (completed > continued || (!completed && resolvedNotices.has(noticeKey(error)))) {
+    if (resolvedNotices.size >= RESOLVED_NOTICES_LIMIT) resolvedNotices.delete(resolvedNotices.values().next().value!);
+    resolvedNotices.add(noticeKey(error));
+    return { title: t('Recovered after interruption'), message, resolved: true, reloaded: false, next: t('This turn later completed. You can continue with a new message.') };
+  }
   const reloaded = error.blocking !== true && !!repair && /^(?:Reloaded|Reopened) chat\b/.test(repair.message.text);
   const errorReloaded = earlierReload || (reloaded && repair?.message.text.endsWith('an interrupted response.'));
   const reloadPolicy = errorReloaded && error.blocking !== true
