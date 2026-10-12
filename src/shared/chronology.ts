@@ -255,6 +255,14 @@ export function projectTimeline<T extends Chronological>(
     const requestOwner = !entry.turnId && entry.kind === 'tool_call' && entry.source === 'mcp' && entry.call?.attribution === 'request_id'
       ? recordedRequestTurn(requests, entry.call.requestId, entry.call.conversationId) : undefined;
     if (requestOwner) boundary = turns[responseTurnId(turns, requestOwner.turnId)];
+    // A paragraph the page reported only after a newer turn began (a reload re-read it, 23 minutes
+    // late in one run) was positioned at that late write and drawn below the newer turn's work. Its
+    // provider timestamp names the turn it was written in.
+    const written = !boundary && !entry.turnId && entry.kind === 'assistant_message' ? authoredTimeOf(entry) : undefined;
+    if (written !== undefined && starts.some(start => start.time > written && start.origin < positionOf(entry))) {
+      const owner = turnOpenAt(turns, written);
+      if (owner) boundary = turns[owner];
+    }
     if (!boundary && requestOwner === undefined && !entry.turnId && entry.kind !== 'user_message' && entry.kind !== 'assistant_message' && entry.kind !== 'native_image') {
       let low = 0, high = starts.length;
       while (low < high) {

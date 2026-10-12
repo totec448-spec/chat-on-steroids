@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chronological } from '../src/shared/chronology.js';
+import { chronological, projectTimeline } from '../src/shared/chronology.js';
 
 interface Row {
   seq: number;
@@ -350,5 +350,41 @@ describe('the order a recorded turn is read in', () => {
     const output = chronological(rows);
     expect(output.at(-1)?.label).toBe('native final');
     expect(output.findIndex(event => event.label === 'resident interim')).toBeLessThan(output.findIndex(event => event.seq === 5));
+  });
+});
+
+describe('a paragraph the page reported after a newer turn began', () => {
+  /**
+   * Live case (2026-10-12): the successor's first interim paragraph, written at 02:20:06, reached
+   * the app 23 minutes late with no turn, after the next turn had started. Positioned at that late
+   * write, it was drawn below the newer turn's tool rows as if it were that turn's answer.
+   */
+  it('goes back to the turn that was open when ChatGPT wrote it', () => {
+    const at = (minute: number) => Date.parse('2026-10-12T02:00:00Z') + minute * 60_000;
+    const rows: Row[] = [
+      row(900, at(20), 'turn_start', 'a', 'A start'),
+      row(901, at(21), 'tool_call', 'a', 'A tool'),
+      row(950, at(30), 'turn_end', 'a', 'A end'),
+      row(974, at(42), 'user_message', 'b', 'continue'),
+      row(975, at(42), 'turn_start', 'b', 'B start'),
+      row(980, at(43), 'tool_call', 'b', 'B tool'),
+      { ...row(986, at(20.1), 'assistant_message', null, 'late paragraph'), origin: 986, authoredAt: at(20.1), state: 'streaming', final: false },
+      row(990, at(44), 'tool_call', 'b', 'B later tool')
+    ];
+    const turns = { a: { origin: 900, time: at(20), endTime: at(30), endOrigin: 950 }, b: { origin: 975, time: at(42) } };
+    expect(chronological(projectTimeline(rows, turns)).map(entry => entry.label)).toEqual([
+      'A start', 'late paragraph', 'A tool', 'A end', 'B start', 'continue', 'B tool', 'B later tool'
+    ]);
+  });
+
+  it('keeps a paragraph written during the running turn where it was recorded', () => {
+    const at = (minute: number) => Date.parse('2026-10-12T02:00:00Z') + minute * 60_000;
+    const rows: Row[] = [
+      row(975, at(42), 'turn_start', 'b', 'B start'),
+      row(980, at(43), 'tool_call', 'b', 'B tool'),
+      { ...row(986, at(43.5), 'assistant_message', null, 'paragraph'), origin: 986, authoredAt: at(43.5) }
+    ];
+    const projected = projectTimeline(rows, { b: { origin: 975, time: at(42) } });
+    expect((projected.find(entry => entry.label === 'paragraph') as { turnOrigin?: number | null }).turnOrigin).toBeNull();
   });
 });

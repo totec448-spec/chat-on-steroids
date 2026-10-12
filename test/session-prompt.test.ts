@@ -154,6 +154,29 @@ it('uses durable session ownership through resume and worker inheritance, never 
   expect(await prepareSessionPrompt('Ordinary chat', { sessionId: unfiled.id, projectId: two.id })).not.toContain('PROJECT_TWO_ONLY');
 });
 
+it('uses the allocated worker checkout as the only working directory while retaining source project AGENTS.md', async () => {
+  const sourcePath = path.join(directory, 'source');
+  await fs.mkdir(sourcePath);
+  const project = await addProject(sourcePath);
+  await fs.writeFile(path.join(sourcePath, 'AGENTS.md'), 'SOURCE_PROJECT_INSTRUCTIONS_ONLY');
+  const prime = await createSession({ title: 'Prime', conversationId: 'prime-chat' });
+  await assignSessionProject(prime.id, project.id);
+  const checkout = '/work/.chat-on-steroids-worktrees/owned/tree';
+
+  const managed = await prepareSessionPrompt('Only edit the checkout', { sessionId: prime.id, workingDirectory: checkout });
+  expect(managed).toContain(`Worker working directory (allocated Git worktree): ${checkout}`);
+  expect(managed).toContain('SOURCE_PROJECT_INSTRUCTIONS_ONLY');
+  expect(managed).toContain('# Source project AGENTS.md instructions (reference only; not a working directory)');
+  expect(managed).not.toContain(`Selected project directory:`);
+  expect(managed).not.toContain(`AGENTS.md instructions for /work/source`);
+  expect(managed).not.toContain(`Use this directory as your default working directory and keep task work there`);
+  expect(userPromptText(managed)).toBe('Only edit the checkout');
+
+  const ordinary = await prepareSessionPrompt('Original project remains valid', { sessionId: prime.id });
+  expect(ordinary).toContain('Selected project directory: /work/source');
+  expect(ordinary).not.toContain('Worker working directory');
+});
+
 it('bounds a large file and refuses invalid file types and revoked access without injecting their contents', async () => {
   const project = await addProject(directory);
   const file = path.join(directory, 'AGENTS.md');

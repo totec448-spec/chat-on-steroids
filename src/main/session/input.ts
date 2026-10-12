@@ -660,6 +660,21 @@ function append(current: InputEntry[], entry: InputEntry, stackDirect = false): 
     return (!row.companionInputId || retained.has(row.companionInputId)) && (!root || retained.has(root.id));
   }), ...active, ...current.filter(row => !retained.has(row.id) && active.some(root => sameDelivery(root, row) || root.id === row.companionInputId)), entry];
 }
+/**
+ * Whether a message of yours must reach this chat through ChatGPT's composer, never a tool result.
+ *
+ * On a model that is not Pro, text inside a tool result never reached the model (#1231). Measured
+ * 2026-10-12 on GPT-6 Thinking: while the page kept closing a turn whose request kept calling tools,
+ * four messages in a row were folded into tool results, never appeared in the conversation and were
+ * not acted on as the user's words. Pro turns, images and attachments keep the tool path.
+ */
+function composerOnlyText(entry: Pick<InputEntry, 'images' | 'attachments' | 'attachmentDelivery' | 'toolImages'> & Parameters<typeof manualInput>[0],
+  session: Pick<SessionSummary, 'conversationId' | 'selectedModel'> | null | undefined): boolean {
+  const selection = session?.selectedModel;
+  return manualInput(entry) && !entry.images?.length && !entry.attachments?.length && !entry.toolImages?.length &&
+    !!session?.conversationId && selection?.conversationId === session.conversationId && !!selection.model &&
+    !isProModel(selection.model, selection.reasoningEffort);
+}
 async function target(entry: InputEntry): Promise<string | null> {
   if (entry.purpose === 'decision') {
     if (entry.conversationId && isChatBlocked(entry.conversationId)) throw new Error('Unblock this helper conversation before sending');
@@ -731,6 +746,11 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     // turn takes one, the explicit choice goes through the composer too. Files keep the tool path.
     if (input.delivery === 'tool' && !input.attachmentDelivery && !input.attachments?.length && !input.images?.length &&
         input.mode === 'auto' && !finishOwner && !input.stages?.length && policy?.directTurn) delete input.delivery;
+    // Not a Pro turn and no direct turn to join: the text waits for the composer instead.
+    if (!finishOwner && !input.stages?.length && composerOnlyText({ ...input, mode: input.mode }, requestedSession)) {
+      if (input.delivery === 'tool') delete input.delivery;
+      if (policy?.canInject) policy = { ...policy, canInject: false };
+    }
     const toolDelivery = input.delivery === 'tool' || input.attachmentDelivery === 'tool';
     if (toolDelivery) {
       const turnId = policy?.directTurn?.id ?? policy?.injectionTurnId;
@@ -1721,6 +1741,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
       // A message for the running turn goes through the composer only: in a tool result the model
       // never saw it (#1231). If the page cannot take it, it is sent once the turn has ended.
       if (entry.directTurn && entry.state === 'queued') return entry;
+      if (entry.state === 'queued' && entry.delivery !== 'tool' && composerOnlyText(entry, session)) return entry;
       // ChatGPT may reuse one request id for the whole server turn. Receipt follows
       // the actual invocation start, never a change in that grouping id.
       const received = toolInputReceipt(entry, sessionId, conversationId, startedAt);

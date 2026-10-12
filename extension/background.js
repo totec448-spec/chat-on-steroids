@@ -27,7 +27,9 @@ import './i18n.js';
 
 const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null;
 
-const PORTS = [8765, 8766, 8767, 8768, 8769];
+// The app's Auto order (src/shared/browser-bridge.ts): the primary range, then two fallback ranges
+// for when Windows reserves 8765-8769 (#1314). Refused local ports fail at once, so scanning is cheap.
+const PORTS = [8765, 8766, 8767, 8768, 8769, 18765, 18766, 18767, 18768, 18769, 38765, 38766, 38767, 38768, 38769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** A journal receipt follows durable session writes, which can outlast an ordinary read. */

@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
-  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })) },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })), showMessageBox: vi.fn(async () => ({ response: 0 })) },
   shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   nativeTheme: { themeSource: 'system' },
   safeStorage: {
@@ -596,6 +596,7 @@ afterAll(async () => {
 beforeEach(async () => {
   currentWindow = null;
   vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] });
+  vi.mocked(dialog.showMessageBox).mockReset().mockResolvedValue({ response: 0 } as never);
   nativeTheme.themeSource = 'system';
   vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(true);
   vi.mocked(shell.openPath).mockReset().mockResolvedValue('');
@@ -2129,4 +2130,118 @@ it('saves a diagnostics report through the renderer channel without personal det
   expect(report).toMatch(/open '~[\\/]<p:[0-9a-f]{4}>[\\/]<p:[0-9a-f]{4}>\.xlsx'/);
   for (const personal of ['home-jane', 'Acme', 'invoice', 'jane@example.com', 'Quarterly tax return']) expect(report).not.toContain(personal);
   expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
+});
+
+describe('native worker checkout cleanup confirmation', () => {
+  const offer = {
+    runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    agentId: 'worker-1',
+    createdAt: 1723456789000,
+    reason: 'cleared' as const,
+    label: 'Review API'
+  };
+  const preview = {
+    ...offer,
+    workspace: '/approved/.chat-on-steroids-worktrees/owned/checkout',
+    branch: 'cos/worker-1',
+    headOid: 'a'.repeat(40),
+    dirty: true,
+    ignoredFiles: false,
+    uniqueCommits: false,
+    changes: ['M tracked.txt'],
+    blockers: ['tracked-changes'],
+    canOfferRemoval: false,
+    hasWorkerCommits: false,
+    branchIntegratedIntoSource: true,
+    trackedChangesCount: 1,
+    untrackedFilesCount: 0,
+    ignoredFilesCount: 0,
+    changesTruncated: false,
+    contentFingerprint: 'f'.repeat(64)
+  };
+  const invoke = (channel: string, payload?: unknown) => handlers.get(channel)!(null, payload) as Promise<any>;
+
+  async function withPreview(run: (spies: {
+    list: ReturnType<typeof vi.spyOn>;
+    dispose: ReturnType<typeof vi.spyOn>;
+  }) => Promise<void>): Promise<void> {
+    const agents = await import('../src/main/agents.js');
+    const worktrees = await import('../src/main/worktrees/index.js');
+    const offers = vi.spyOn(agents, 'managedWorktreeCleanupOffers').mockReturnValue([offer]);
+    const acknowledge = vi.spyOn(agents, 'acknowledgeManagedWorktreeCleanupOffer').mockReturnValue(true);
+    const list = vi.spyOn(worktrees, 'listOfferedWorkerWorktrees').mockResolvedValue([preview] as never);
+    const dispose = vi.spyOn(worktrees, 'disposeOfferedWorkerWorktree').mockResolvedValue({
+      removed: true, branchRemoved: false, branch: preview.branch, changes: []
+    });
+    try { await run({ list, dispose }); }
+    finally {
+      dispose.mockRestore();
+      list.mockRestore();
+      acknowledge.mockRestore();
+      offers.mockRestore();
+    }
+  }
+
+  it('sends only UI-safe summary data and defaults to keeping the checkout', async () => {
+    await withPreview(async ({ dispose }) => {
+      const listing = await invoke('swarm:worktreeCleanupList');
+      expect(listing).toMatchObject({ ok: true, data: [expect.objectContaining({ agentId: offer.agentId, dirty: true })] });
+      expect(JSON.stringify(listing)).not.toContain(preview.contentFingerprint);
+      expect(JSON.stringify(listing)).not.toContain(preview.headOid);
+      expect(JSON.stringify(listing)).not.toContain(preview.changes[0]);
+      expect(await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId }))
+        .toEqual({ ok: true, data: { removed: false, branchPreserved: true } });
+      expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+        defaultId: 0, cancelId: 0, buttons: ['Keep checkout', 'Remove checkout; preserve Git branch']
+      }));
+      expect(dispose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('rejects a same-path, same-status and same-size content edit made while the dialog is open', async () => {
+    await withPreview(async ({ list, dispose }) => {
+      // A fingerprint is the sole differing field; Git status/path/count and file sizes
+      // would all still look the same to the existing IPC comparison.
+      list.mockResolvedValueOnce([preview] as never)
+        .mockResolvedValueOnce([{ ...preview, contentFingerprint: 'e'.repeat(64) }] as never);
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      const result = await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+      expect(result).toEqual({ ok: false, error: 'The checkout changed while you were reviewing it. No files were removed.' });
+      expect(list).toHaveBeenCalledTimes(2);
+      expect(dispose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('refuses missing/truncated fingerprints and unreadable post-dialog inspections', async () => {
+    await withPreview(async ({ list, dispose }) => {
+      list.mockResolvedValueOnce([{ ...preview, contentFingerprint: null }] as never);
+      expect((await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId })).ok).toBe(false);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      list.mockResolvedValueOnce([{ ...preview, changesTruncated: true }] as never);
+      expect((await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId })).ok).toBe(false);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      list.mockResolvedValueOnce([preview] as never).mockResolvedValueOnce([] as never);
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      expect((await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId })).error)
+        .toBe('The checkout changed while you were reviewing it. No files were removed.');
+      expect(dispose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('passes the approved fingerprint to the manager, including its last-moment mismatch guard', async () => {
+    const { WorkerWorktreeError } = await import('../src/main/worktrees/index.js');
+    await withPreview(async ({ dispose }) => {
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      const accepted = await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+      expect(accepted).toEqual({ ok: true, data: { removed: true, branchPreserved: true } });
+      expect(dispose).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({
+        runId: offer.runId, agentId: offer.agentId
+      }), expect.any(Array), preview.contentFingerprint);
+
+      dispose.mockRejectedValueOnce(new WorkerWorktreeError('WORKTREE_CONTENT_CHANGED', 'file bytes changed after approval'));
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      const refused = await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+      expect(refused).toEqual({ ok: false, error: 'The checkout changed while you were reviewing it. No files were removed.' });
+    });
+  });
 });

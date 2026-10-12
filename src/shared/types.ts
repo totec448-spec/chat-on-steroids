@@ -351,6 +351,11 @@ export interface MultiAgentSettings {
    */
   waitForSubAgents?: boolean;
   /**
+   * Opt into an isolated Git worktree and branch for each newly spawned worker.
+   * Defaults to Off. Existing managed workers keep their exact workspace if toggled Off.
+   */
+  autoWorktrees?: boolean;
+  /**
    * Reclaim only terminal processes owned by an exactly identified worker that has remained
    * sleeping beyond the runtime-retention threshold. Off by default; durable worker/chat
    * identity and history are never reclaimed by this switch.

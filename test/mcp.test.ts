@@ -2111,6 +2111,19 @@ describe('bounded output', () => {
     expect(textOf(top)).toMatch(/The nearest existing folder is \/workspace; it contains: .*d src, .*f notes\.txt/);
   });
 
+  it('points a path built under the wrong root at the root it names, and lists nothing else', async () => {
+    // 2026-10-12, live: with roots /downloads and /voxelcraft a model read
+    // /downloads/.Dev-projects/voxelcraft/shared/adventure.ts. The hint listed the user's Downloads
+    // folder, unrelated to the project, instead of naming the file it was after.
+    ctx.roots = [{ name: 'downloads', path: outside }, { name: 'workspace', path: approved }];
+    const reply = await core('tools/call', { name: 'read', arguments: { paths: ['/downloads/projects/workspace/src/app.ts'] } });
+    const text = textOf(reply);
+    expect(failed(reply)).toBe(true);
+    expect(text).toContain('Did you mean /workspace/src/app.ts?');
+    expect(text).not.toContain('passwords.txt');
+    expect(text).not.toContain('nearest existing folder');
+  });
+
   it('reads a per-path line range spelled as path:start-end', async () => {
     // Four reads in the recorded sessions asked for several ranges of one file this way and
     // were refused for the colon; the spelling is now the range it was meant to be, and a

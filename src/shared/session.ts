@@ -897,6 +897,12 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 export interface AgentInfo {
   /** Broker owner projection. IDs such as worker-1 are local to this incarnation. */
   runId?: string;
+  /** Immutable broker allocation identity; survives a sleeping family's new incarnation. */
+  workerAllocationRunId?: string;
+  /** Durable requirement for a marker-proven Git worktree; never fall back to the prime cwd. */
+  managedWorktree?: boolean;
+  /** Cleanup acknowledgment; does not remove the durable isolation requirement. */
+  managedWorktreeCleaned?: boolean;
   primeConversationId?: string;
   id: string;
   role: AgentRole;
@@ -1098,6 +1104,27 @@ export interface ClearAgentResult {
   cleared: 'run' | 'worker' | 'none';
   reason: string;
   swarm: SwarmState;
+}
+
+/** A user-reviewable cleanup offer, not filesystem or worker-execution authority. */
+export interface WorkerWorktreeCleanupOffer {
+  runId: string;
+  agentId: string;
+  reason: string;
+  /** User-facing job name; older stored checkout offers may not have one. */
+  label?: string;
+  /** Approved-root virtual path only; never expose a native filesystem path. */
+  workspace: string;
+  dirty: boolean;
+  ignoredFiles: boolean;
+  uniqueCommits: boolean;
+  /** Count only: ignored/untracked native filenames stay within the main process. */
+  changeCount: number;
+}
+
+export interface WorkerWorktreeCleanupResult {
+  removed: boolean;
+  branchPreserved: boolean;
 }
 
 // ---------------------------------------------------------------- helpers

@@ -2936,8 +2936,10 @@
       // the message, under the same request id. Stop is not a reliable witness here (measured
       // 2026-10-11: it was already gone at the tick that saw the message). The app files later calls
       // of that request under the next turn only past an end marked so (#1301). A turn that ended
-      // with its answer is not marked: its trailing calls stay with it.
-      const replacedUnfinished = result.outcome === 'unknown' && bounded.outcome === 'interrupted';
+      // with its answer is not marked: its trailing calls stay with it. Where Fiber answers, its
+      // end_turn is that proof, and interim prose without it is an unfinished answer too (live
+      // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
+      const replacedUnfinished = result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
       finishGeneration(ended, steering || replacedUnfinished ? { ...bounded, continued: true } : bounded, false);
     }
 
@@ -12205,8 +12207,17 @@
    */
   const LOAD_FAILURE_SETTLE_MS = 5_000;
   const LOAD_FAILURE_BACKOFF_MS = [0, 15_000, 30_000, 60_000];
+  /*
+   * Once ChatGPT has said it is limiting this history, a press a minute is what keeps the limit
+   * alive: measured 2026-10-11, each press after Retry-After drew another 429 with a longer
+   * Retry-After (11 s → 47 s) and the chat stayed unreadable for half an hour. The first press
+   * still comes when ChatGPT said it may; the ones after it back off further, to one every 15
+   * minutes, and still never stop.
+   */
+  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000];
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
+  let loadFailureLimited = false;
   let loadFailureRoute = null;
   let loadFailureToldAt = 0;
   function recoverConversationLoad(now = Date.now()) {
@@ -12216,19 +12227,21 @@
       loadFailureToldAt = 0;
       loadFailureSince = 0;
       loadFailureRetries = 0;
+      loadFailureLimited = false;
     }
     // The provider has already told this exact history read when it may be tried again.
     // Do not spend the page's own Retry button inside that window: each click is another
     // history request and can extend the throttle. Once Retry-After expires, the
     // established settle/backoff logic below resumes unchanged.
     if (pendingHistoryRateLimit?.conversationId === route) {
+      loadFailureLimited = true;
       if (pendingHistoryRateLimit.retryAt > now) return false;
       pendingHistoryRateLimit = null;
     }
     const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
     if (!retry) {
       loadFailureSince = 0;
-      if (CLF_DOM.turns().length) loadFailureRetries = 0;
+      if (CLF_DOM.turns().length) { loadFailureRetries = 0; loadFailureLimited = false; }
       return false;
     }
     // Whoever presses Retry here, the tab may leave this chat for ChatGPT's home page. Say so first,
@@ -12238,8 +12251,8 @@
       void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
     if (!loadFailureSince) loadFailureSince = now;
-    const wait = LOAD_FAILURE_SETTLE_MS +
-      LOAD_FAILURE_BACKOFF_MS[Math.min(loadFailureRetries, LOAD_FAILURE_BACKOFF_MS.length - 1)];
+    const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
+    const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
     loadFailureRetries++;
     loadFailureSince = now;

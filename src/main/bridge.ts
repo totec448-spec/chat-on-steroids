@@ -62,7 +62,7 @@ import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffor
 import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
-import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
+import { BROWSER_BRIDGE_AUTO_PORTS } from '../shared/browser-bridge.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import type { Config } from '../shared/types.js';
 import type { PluginSurface } from '../shared/plugin-refresh.js';
@@ -172,6 +172,7 @@ import { ownCoreHint,
   pendingWorkerSpawns,
   primeConversationGone,
   primeConversation,
+  workerBootstrapWorktreeIdentity,
   requestWorkerRevivals,
   rollbackWorkerRevivalClaim,
   releaseQuiescentRun,
@@ -193,6 +194,7 @@ import { ownCoreHint,
   workerRevivalDeliveredSince,
   type WorkerRevival
 } from './agents.js';
+import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from './worktrees/index.js';
 import {
   abortContinuation,
   abortContinuationNow,
@@ -234,7 +236,7 @@ import { bindAgentWorkspace } from './workspace.js';
 import { extensionUpdateOffer, prepareExtensionUpdate, shippedExtensionBuild } from './extension-path.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
-export const DEFAULT_PORTS = BROWSER_BRIDGE_PORTS;
+export const DEFAULT_PORTS = BROWSER_BRIDGE_AUTO_PORTS;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Durable settled-turn orphan safety net. */
 export const STALE_SWARM_MS = 2 * 60_000;
@@ -4521,13 +4523,38 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
     }
     const described = describe(command, client, claimedSummary);
-    if (described.text && command.spec.type === 'worker') {
-      // A newly spawned worker gets setup once. Revival and Compact & Resume
-      // carry their own continuation text without repeating executor setup.
-      const sourceConversation = primeConversation(command.spec.runId);
-      const source = sourceConversation ? await findSessionByConversation(sourceConversation, { requireUnique: true }) : null;
-      const sessionId = source?.conversationId === sourceConversation ? source?.id : undefined;
-      described.text = await prepareSessionPrompt(described.text, { sessionId });
+    if (described.text && (command.spec.type === 'worker' || command.spec.type === 'revive')) {
+      // The broker knows whether this *exact* worker was allocated an isolated checkout.
+      // Its allocation id survives a restart or a new active run incarnation, unlike the
+      // current run id or the display-only worker slot name.
+      let allocation: { runId: string; agentId: string } | null;
+      try {
+        allocation = workerBootstrapWorktreeIdentity(command.spec.runId, command.spec.agent);
+      } catch {
+        return json(res, 409, { error: 'worker_identity_changed' }, origin);
+      }
+      let workingDirectory: string | undefined;
+      if (allocation) {
+        const lease = lookupWorkerWorkspace(allocation);
+        if (!lease) return json(res, 409, { error: 'worker_worktree_unavailable' }, origin);
+        try {
+          workingDirectory = (await validateWorkerWorkspaceLease(lease, getConfig().roots)).workspace.virtual;
+        } catch {
+          return json(res, 409, { error: 'worker_worktree_unavailable' }, origin);
+        }
+      }
+      if (command.spec.type === 'worker') {
+        // New workers read the source project's AGENTS.md, but when a worktree is allocated
+        // only that verified checkout may be presented as their working directory.
+        const sourceConversation = primeConversation(command.spec.runId);
+        const source = sourceConversation ? await findSessionByConversation(sourceConversation, { requireUnique: true }) : null;
+        const sessionId = source?.conversationId === sourceConversation ? source?.id : undefined;
+        described.text = await prepareSessionPrompt(described.text, { sessionId, workingDirectory });
+      } else if (workingDirectory) {
+        // Revivals carry the prime's latest user-authored message, without repeating Core or
+        // source AGENTS. Reassert the same checkout after a restart or worker reuse.
+        described.text += `\n\n(Chat On Steroids worker working directory: ${workingDirectory}. Keep worker task changes in this allocated Git worktree; the source project only supplies instructions.)`;
+      }
     }
     if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
     const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
@@ -8853,6 +8880,15 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     }
     const schedule = COMPACTION_PICKUPS[phase];
     if (now < watch.nextAt) continue;
+    // The handoff request is sent when the source turn has finished. While that turn still works,
+    // a pickup only reloads a busy page and spends the budget: on 2026-10-12 an automatic ticket
+    // filed mid-turn spent all ten pickups on a generating page, wrote "Trying to reload chat to
+    // recover a handoff request that has not been sent" each time, and gave up (handoff_never_sent)
+    // just after the turn finally ended. Wait for the turn instead, without counting.
+    if (phase === 'asking' && session && sessionInputActivity(session).exact) {
+      watch.nextAt = now + schedule.every;
+      continue;
+    }
     if (watch.attempts >= schedule.attempts) {
       if (phase === 'writing' && !watch.told) {
         // The sent request stays protected and gets no fourth reload, but the person reading

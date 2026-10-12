@@ -178,6 +178,8 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   // Off: waiting for a run's own workers before its next automatic step is a deliberate choice.
   // A chat that delegated nothing, and a chat with no run, never wait either way.
   waitForSubAgents: false,
+  // Off by default on both fresh and migrated installs: Git workspace creation is opt-in.
+  autoWorktrees: false,
   // Off: ending an OS process is a real side effect even though the worker identity survives.
   // The user must opt in before sleeping-worker runtime maintenance can terminate anything.
   endSleepingWorkerProcesses: false
@@ -411,6 +413,7 @@ const configSchema = z.object({
       strictChatAllowlist: z.boolean().optional().default(DEFAULT_MULTI_AGENT.strictChatAllowlist ?? false),
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
       waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false),
+      autoWorktrees: z.boolean().optional().default(DEFAULT_MULTI_AGENT.autoWorktrees ?? false),
       endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false)
     })
     .optional()
@@ -422,6 +425,7 @@ const configSchema = z.object({
       strictChatAllowlist: DEFAULT_MULTI_AGENT.strictChatAllowlist ?? false,
       recoverAgentTabs: DEFAULT_MULTI_AGENT.recoverAgentTabs,
       waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false,
+      autoWorktrees: DEFAULT_MULTI_AGENT.autoWorktrees ?? false,
       endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false
     }),
   // An empty model id is repaired rather than rejected: the id is free text from a

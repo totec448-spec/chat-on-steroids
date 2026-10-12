@@ -8929,6 +8929,33 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
   });
 
+  it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {
+    // 2026-10-12, live: a message sent at 02:20:26 joined the running response, which had already
+    // said "I'll pick up where it stopped…". Stop was gone at the tick that saw the message, and the
+    // interim prose made that turn look answered: it ended completed, unmarked. The request then ran
+    // ten more calls and its final answer, all filed under the ended turn, and the turn the message
+    // opened sat empty until it was called stalled at ten minutes.
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-interim-only', []);
+    live.hook.observe();
+    await settle();
+    await replyFiber([], []);
+    await settle();
+    prose(live.document, section, 'interim-1', "I'll pick up exactly where it stopped.");
+    live.hook.observe();
+    await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    stopGenerating(live.document);
+    userTurn(live.document, 'joined-user', 'also finish the report');
+    live.hook.observe();
+    await settle();
+
+    const ends = emitted(live.sent, 'turn_end').map((entry) => entry.event);
+    expect(ends.map(end => [end.turnId, end.continued])).toEqual([[first, true]]);
+  });
+
   it('keeps an in-flight Fiber scan owned by the generation that requested it', async () => {
     live = await harness();
     startGenerating(live.document);
@@ -12325,6 +12352,36 @@ describe('evidence from the page context', () => {
     await settle();
     expect(emitted(live.sent, 'chat_error')).toHaveLength(2);
     expect(emitted(live.sent, 'chat_error').at(-1)?.event.retryAt).toBe(observedAt + 31_000);
+  });
+
+  it('backs off ChatGPT history Retry after a rate limit instead of pressing it once a minute (2026-10-11)', async () => {
+    // Each press after Retry-After drew another 429 with a longer Retry-After, so a press a minute
+    // kept the limit alive for half an hour. After a limit the presses spread out: 0 s, 2, 4, 8, 15 min.
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const start = live.window.Date.now();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window,
+      origin: 'https://chatgpt.com',
+      data: { type: 'cos-history-rate-limit', conversationId, observedAt: start, retryAt: start + 10_000 }
+    }));
+    await settle();
+    // The first press still comes when ChatGPT said it may.
+    expect(live.hook.recoverConversationLoad(start + 10_001)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 15_002)).toBe(true);
+    // The next ones wait two, then four minutes, where a plain load failure would press every minute.
+    const first = start + 15_002;
+    expect(live.hook.recoverConversationLoad(first + 65_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(first + 124_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(first + 125_001)).toBe(true);
+    const second = first + 125_001;
+    expect(live.hook.recoverConversationLoad(second + 125_001)).toBe(false);
+    expect(live.hook.recoverConversationLoad(second + 245_001)).toBe(true);
+    expect(clicks).toBe(3);
   });
 
   it('does not press ChatGPT history Retry inside the provider Retry-After window', async () => {

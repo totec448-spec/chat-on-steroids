@@ -116,16 +116,21 @@ function reconcileExecRequestOwner(owner: RequestCorrelation): void {
   if (changed) publishBackgroundExecChange();
 }
 
-/** A request id temporarily owns ordinary terminal state until exact session proof arrives. */
+/**
+ * A request id temporarily owns ordinary terminal state until exact session proof arrives.
+ *
+ * This is custody, not admission: whether an unattributed call may run at all is decided before
+ * the handler. Recording the request also when unattributed calls are blocked keeps the process
+ * reachable for its own chat once proof lands (live 2026-10-12: a first exec_command that beat its
+ * proof by a second was stored with no owner, and the same chat's write_stdin was refused).
+ */
 export function executionPrincipal(
   requestId: string | null | undefined,
-  sessionId: string | null | undefined,
-  allowUnattributed: boolean
+  sessionId: string | null | undefined
 ): string | null {
   const exact = provenSession(requestId ?? null, sessionId ?? null);
   if (exact) return exact;
-  if (allowUnattributed && requestId) return requestPrincipal(requestId);
-  return null;
+  return requestId ? requestPrincipal(requestId) : null;
 }
 
 function processIdsOwnedBy(principal: string): Set<number> {

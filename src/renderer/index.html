@@ -1017,6 +1017,14 @@
 
                   <label class="setting">
                     <span class="setting-text">
+                      <b>Isolate new workers in Git worktrees</b>
+                      <em>When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.</em>
+                    </span>
+                    <input id="autoWorktrees" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
                       <b>End background processes of workers asleep for more than 30 minutes</b>
                       <em>The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.</em>
                     </span>
@@ -1028,6 +1036,20 @@
                     <button class="btn" id="swarmReset" type="button">Clear workers</button>
                   </div>
                 </div>
+                <section id="worktreeCleanupSection" class="worktree-cleanup-section" aria-labelledby="worktreeCleanupTitle">
+                  <header class="settings-section-head automation-section-head">
+                    <div>
+                      <h2 id="worktreeCleanupTitle" class="settings-section-title">Worker checkouts</h2>
+                      <p>Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.</p>
+                    </div>
+                    <button class="btn btn-solid" id="worktreeCleanupReview" type="button" data-worktree-review="true" aria-controls="worktreeCleanupList">Review checkouts</button>
+                  </header>
+                  <div class="settings-surface pane worktree-cleanup-surface">
+                    <div id="worktreeCleanupList" class="worktree-cleanup-list" aria-live="polite" aria-relevant="additions removals text">
+                      <div class="setting worktree-cleanup-empty"><span class="setting-text"><b>Checkouts appear here when reviewed.</b><em>Nothing is removed automatically.</em></span></div>
+                    </div>
+                  </div>
+                </section>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Keep the turn open</h2><p>Control plan generation and what happens near the end of a turn.</p></div></header>
                 <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>

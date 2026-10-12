@@ -8,7 +8,7 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { createAgentPanel } from './agent-panel.js';
+import { createAgentPanel, workerName } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
@@ -31,7 +31,7 @@ import type { TurnTrace } from '../shared/turn-trace.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
-import { drawMath, mathExtensions, type MathSlots } from './math.js';
+import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors } from '../shared/markdown-export.js';
@@ -60,6 +60,7 @@ import type {
   SessionSummary,
   StoredText,
   SwarmState,
+  WorkerWorktreeCleanupOffer,
   TokenPressure
 } from '../shared/session.js';
 import {
@@ -2553,7 +2554,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
       return missing.outerHTML;
     }
   }] });
-  const html = parser.parse(text, { async: false });
+  const html = parser.parse(separateDisplayMath(text), { async: false });
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
   drawMath(box, math);
   if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
@@ -4686,7 +4687,7 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
   if (call) return { text: call.title, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
   const thinking = { text: t('Thinking'), icon: '', working: false };
   // A message not yet recorded opens a turn that has done nothing visible so far.
-  if ($('inputQueue').querySelector('.pending-message')) return thinking;
+  if (messageOnItsWay()) return thinking;
   let asked = Number.NEGATIVE_INFINITY;
   for (const event of events) if (event.kind === 'user_message') asked = Math.max(asked, event.time);
   let newest: SessionEvent | undefined;
@@ -4800,15 +4801,18 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   turnWorking = working;
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
-  const pending = !!$('inputQueue').querySelector('.pending-message');
+  const pending = messageOnItsWay();
+  // A page of history read further up ends before the chat does: its newest question is not the one
+  // the running turn answers, so it keeps its own worked line and the live one stays off it.
+  const live = working && timelineReachesEnd();
   const used = new Set<string>();
   // Insert from the end so earlier indices stay valid.
   for (let i = asks.length - 1; i >= 0; i--) {
     const { index, asked } = asks[i]!;
     const latest = i === asks.length - 1;
-    if (latest && working && !pending) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
+    if (latest && live && !pending) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
-    if (seconds === undefined || (latest && working)) continue;
+    if (seconds === undefined || (latest && live)) continue;
     rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
   }
   for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
@@ -4818,9 +4822,33 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   $('chatState').classList.toggle('is-mirrored', !deps.state()?.config.ui.developerMode);
 }
 
-/** A running turn with no row yet: its line waits right after your pending message. */
+/**
+ * A message still on its way to ChatGPT. A failed delivery keeps its notice in the queue until it
+ * is retried or dismissed, but nothing of it is on its way: counting it parked the running turn's
+ * line after the queue for good, below the question it belongs to (measured 2026-10-12).
+ */
+function messageOnItsWay(): boolean {
+  return !!$('inputQueue').querySelector('.pending-message:not(.is-delivery-error)');
+}
+
+/** Whether the loaded rows reach the chat's newest event, as jumpToLatest decides it. */
+function timelineReachesEnd(): boolean {
+  if (historyBefore === null || detailCursor === null) return true;
+  return events.reduce((newest, event) => Math.max(newest, event.seq), 0) + 1 >= detailCursor;
+}
+
+/**
+ * A running turn with no row yet: its line waits right after your pending message.
+ *
+ * `after` re-inserts even nodes that are already there, and every re-insertion restarts the lines'
+ * animations. Repaints run several times a second while a turn works, so a parked line that was
+ * moved each time blinked ("Thinking" restarting about 15 times a second, measured 2026-10-12).
+ */
 function parkTurnStatus(working: boolean): void {
-  if (working) $('inputQueue').after(turnStatusLine, turnNow);
+  if (working) {
+    const queue = $('inputQueue');
+    if (queue.nextElementSibling !== turnStatusLine || turnStatusLine.nextElementSibling !== turnNow) queue.after(turnStatusLine, turnNow);
+  }
   else if (!turnStatusLine.closest('#timeline')) { turnStatusLine.remove(); turnNow.remove(); }
 }
 
@@ -5074,6 +5102,73 @@ function paintSwarm(state: SwarmState): void {
   $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0 && state.retainedHistory !== true;
 }
 
+/** A presentation of already verified cleanup offers; no marker or filesystem discovery here. */
+export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[], panel: HTMLElement = $('worktreeCleanupList')): void {
+  if (!offers.length) {
+    const empty = el('div', 'setting worktree-cleanup-empty');
+    const message = el('span', 'setting-text');
+    message.append(el('b', '', () => t('No checkouts to remove')), el('em', '', () => t('Finished or cleared checkouts awaiting review will appear here.')));
+    empty.append(message);
+    panel.replaceChildren(empty);
+    return;
+  }
+
+  const rows = offers.map(offer => {
+    const row = el('div', 'setting worktree-checkout-row');
+    const copy = el('div', 'setting-text worktree-checkout-copy');
+    const name = () => workerName(offer.agentId, offer.label);
+    const title = el('b', 'worktree-checkout-name', name);
+    // The technical id is useful for support, but not as the prominent name.
+    title.title = offer.agentId;
+    const meta = el('span', 'worktree-checkout-status', () => offer.reason === 'completed' ? t('Finished')
+      : offer.reason === 'failed' ? t('Failed') : t('Cleared'));
+    const path = el('span', 'worktree-checkout-path', offer.workspace);
+    path.title = offer.workspace;
+    copy.append(title, meta);
+
+    const facts = el('div', 'worktree-checkout-facts');
+    if (offer.dirty) {
+      facts.append(el('span', 'chip worktree-risk', () => offer.changeCount > 1
+        ? t('{0} uncommitted changes', [offer.changeCount]) : t('Uncommitted changes')));
+    }
+    if (offer.ignoredFiles) facts.append(el('span', 'chip worktree-risk', () => t('Ignored files')));
+    if (offer.uniqueCommits) facts.append(el('span', 'chip worktree-commits', () => t('Commits only on this branch')));
+    if (!offer.dirty && !offer.ignoredFiles) {
+      facts.append(el('span', 'worktree-clean-state', () => t('Nothing would be lost')));
+    }
+    copy.append(facts, path);
+
+    // Use the same visible solid action as other Settings controls, not a quiet
+    // text-only link for a destructive workflow.
+    const remove = el('button', 'btn btn-solid worktree-remove-button', () => t('Remove checkout…'));
+    remove.setAttribute('type', 'button');
+    ui(remove, 'aria-label', () => `${t('Remove checkout…')} — ${name()}`);
+    remove.dataset.worktreeRemove = 'true';
+    remove.dataset.runId = offer.runId;
+    remove.dataset.agentId = offer.agentId;
+    row.append(copy, remove);
+    return row;
+  });
+  panel.replaceChildren(...rows);
+}
+
+async function showWorktreeCleanupOffers(): Promise<void> {
+  const review = $<HTMLButtonElement>('worktreeCleanupReview');
+  if (review.disabled) return;
+  const panel = $('worktreeCleanupList');
+  const restoreFocus = document.activeElement === review;
+  review.disabled = true;
+  panel.setAttribute('aria-busy', 'true');
+  try {
+    const offers = await run(api.listWorktreeCleanupOffers());
+    if (offers) paintWorktreeCleanupOffers(offers, panel);
+  } finally {
+    panel.removeAttribute('aria-busy');
+    review.disabled = false;
+    if (restoreFocus && document.activeElement === document.body) review.focus();
+  }
+}
+
 /**
  * The meter's red line, derived from the one threshold the user actually sets.
  *
@@ -5133,6 +5228,7 @@ export function chatSettingsPatch(current: Config): {
       strictChatAllowlist: $<HTMLInputElement>('strictChatAllowlist').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
+      autoWorktrees: $<HTMLInputElement>('autoWorktrees').checked,
       endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
     },
     goal: {
@@ -5537,6 +5633,7 @@ const CHAT_INPUTS = [
   'strictChatAllowlist',
   'recoverAgentTabs',
   'waitForSubAgents',
+  'autoWorktrees',
   'endSleepingWorkerProcesses',
   'autoContinue',
   'goalProvider',
@@ -5636,6 +5733,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('waitForSubAgents'),
     config.multiAgent.waitForSubAgents === true,
     previous?.multiAgent.waitForSubAgents
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('autoWorktrees'),
+    config.multiAgent.autoWorktrees === true,
+    previous?.multiAgent.autoWorktrees
   );
   applyChatChecked(
     $<HTMLInputElement>('endSleepingWorkerProcesses'),
@@ -6887,12 +6989,49 @@ export function initChat(next: Deps): void {
     const state = await run(api.resetSwarm());
     if (state) {
       paintSwarm(state);
-      toast(t('Workers cleared'));
+      toast(t('Workers cleared; retained Git checkouts can be reviewed below.'));
     }
   });
 
   // Which of the two things happened is decided in the main process and reported back,
   // so the toast describes the actual outcome rather than the intent of the click.
+  $('worktreeCleanupSection').addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest<HTMLElement>('[data-worktree-review]')) {
+      await showWorktreeCleanupOffers();
+      return;
+    }
+    const worktreeRemove = target.closest<HTMLElement>('[data-worktree-remove]');
+    if (worktreeRemove) {
+      const runId = worktreeRemove.dataset.runId;
+      const agentId = worktreeRemove.dataset.agentId;
+      if (!runId || !agentId) return;
+      const button = worktreeRemove as HTMLButtonElement;
+      if (button.disabled) return;
+      const restoreFocus = document.activeElement === button;
+      const initialActions = [...$('worktreeCleanupList').querySelectorAll<HTMLButtonElement>('[data-worktree-remove]')];
+      const initialIndex = initialActions.indexOf(button);
+      button.disabled = true;
+      try {
+        const result = await run(api.removeWorktreeCleanupOffer(runId, agentId));
+        if (!result) return;
+        toast(result.removed ? t('Worker checkout removed; its Git branch was preserved.') : t('Worker checkout kept.'));
+        await showWorktreeCleanupOffers();
+      } finally {
+        // If confirmation is cancelled or inspection fails, the action stays usable.
+        button.disabled = false;
+        // Refresh replaces the clicked row. Keep keyboard focus in the same group rather
+        // than dropping it to the page body when the focused control is detached.
+        if (restoreFocus && (document.activeElement === button || document.activeElement === document.body ||
+            !document.activeElement?.isConnected)) {
+          const actions = [...$('worktreeCleanupList').querySelectorAll<HTMLButtonElement>('[data-worktree-remove]')];
+          const same = actions.find(action => action.dataset.runId === runId && action.dataset.agentId === agentId);
+          (same ?? actions[Math.min(Math.max(initialIndex, 0), actions.length - 1)] ?? $('worktreeCleanupReview')).focus();
+        }
+      }
+      return;
+    }
+  });
   $('swarmList').addEventListener('click', async (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('[data-clear]');
@@ -6903,9 +7042,9 @@ export function initChat(next: Deps): void {
     paintSwarm(outcome.swarm);
     toast(
       outcome.cleared === 'run'
-        ? t('Run cleared — every worker ended')
+        ? t('Run cleared — worker Git checkouts can be reviewed below')
         : outcome.cleared === 'worker'
-          ? t('{0} cleared — its slot is free', [id])
+          ? t('{0} cleared — its checkout can be reviewed below', [id])
           : t(outcome.reason)
     );
   });

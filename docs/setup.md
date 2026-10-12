@@ -42,7 +42,9 @@ Core, Desktop and Plugins are separate connectors. Configure each surface you en
 
 In **Settings → Agents & automation → Browser & history → Browser bridge port**, choose **Auto** (default) or
 **8765**, **8766**, **8767**, **8768**, **8769**. Auto uses the first available port in that
-order. A fixed choice uses exactly that port. The companion discovers the same supported range.
+order and, when all five are taken, the fallback ranges **18765–18769** and **38765–38769**
+(Windows can reserve whole blocks of ports for Hyper-V, WSL2 or Docker). A fixed choice uses
+exactly that port. The companion scans every port Auto may choose.
 
 If the selected port is occupied, the save is rejected and the previous choice and working
 bridge remain active. If a saved port is occupied when CoS starts, the app stays open with the

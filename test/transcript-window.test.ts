@@ -51,7 +51,11 @@ describe('transcript pagination across recovered turns', () => {
     const [projected] = projectTimeline([row], turns);
     expect(projected).toMatchObject(row);
     expect(projected?.turnId).toBeUndefined();
-    expect(projected?.turnOrigin).toBeNull();
+    // Reported only after the second turn began, it is drawn in the turn ChatGPT wrote it in rather
+    // than below the second turn's work; that is presentation, not ownership.
+    expect(projected?.turnOrigin).toBe(2);
+    const unreported: Chronological = { seq: 41, origin: 6, kind: 'assistant_message', time: 300, authoredAt: 110 };
+    expect(projectTimeline([unreported], turns)[0]?.turnOrigin).toBeNull();
   });
 
   it('keeps unowned backfill and post-turn notices outside a partially loaded generation', () => {
