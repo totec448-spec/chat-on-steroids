@@ -11,7 +11,7 @@ Read the [responsible-use notice and provider rules](../README.md#responsible-us
 1. **Install and open CoS.** Choose the download for your operating system and CPU.
 2. **Choose what ChatGPT may access.** In **Settings → Workspace**, approve a project folder and review the tool permissions.
 3. **Connect the local tools.** Configure a tunnel in **Settings → Setup**, press **Connect**, then add the **Core** app in ChatGPT under **Plugins → Add → Add custom MCP server**.
-4. **Load the companion extension.** Press **Open extension folder**. In `chrome://extensions`, enable Developer mode, choose **Load unpacked** and select that folder. Pairing is automatic.
+4. **Load the companion extension.** Open your browser's extensions page (`chrome://extensions`, `edge://extensions` or `brave://extensions`; Setup copies the address for you, because browsers only open these pages from their own address bar). Turn on **Developer mode** (in Edge, at the bottom of the left sidebar), click **Load unpacked** and select the folder that **Open extension folder** shows. Pairing is automatic.
 5. **Start a task.** Choose a project and model in CoS, write your request and send it.
 
 Want screen and keyboard control? Enable **Desktop** permissions and connect its separate app. On macOS, also grant Screen Recording and Accessibility in System Settings.
