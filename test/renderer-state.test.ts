@@ -1964,19 +1964,41 @@ it('preserves optional Desktop disclosures and inline screenshots across status 
   field.querySelector('summary')!.click();
   const guide = doc.querySelector('[data-setup-guide="tunnel"]')!;
   expect(guide.querySelectorAll('img')).toHaveLength(2);
-  expect(doc.querySelectorAll('[data-setup-guide="developer"] img')).toHaveLength(1);
+  // ChatGPT no longer has a Developer mode switch: no guide for one.
+  expect(doc.querySelector('[data-setup-guide="developer"]')).toBeNull();
   expect(doc.querySelectorAll('[data-setup-guide="plugin"] img')).toHaveLength(4);
   // Each picture's places are the step's numbered moves.
   expect([...guide.querySelectorAll('.guide-move')].map(move => move.textContent)).toEqual(
-    ['1Name it', '2Pick your ChatGPT workspace', '3Click Create', '4Copy the tunnel ID']);
+    ['1Name it', '2Pick your ChatGPT workspace', '3Click “Create”', '4Copy the tunnel ID']);
   const image = guide.querySelector('img')!;
   mounted.push(structuredClone(state));
   expect(field.open).toBe(true);
   expect(guide.querySelector('img')).toBe(image);
-  expect(image.src).toContain('tunnel-create.png');
+  expect(image.src).toContain('tunnel-create-en');
   expect(mounted.calls).toEqual([]);
   mounted.push(structuredClone(state));
   expect(field.open).toBe(true);
+});
+
+it("shows ChatGPT's own screens and words in the app's language, and the Platform's English ones", async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const moves = (group: string) => [...doc.querySelectorAll(`[data-setup-guide="${group}"] .guide-move, #pluginMoves .guide-move`)]
+    .filter(move => group !== 'plugin' || move.closest('#pluginMoves')).map(move => move.querySelector('.guide-move-text')!.textContent);
+  const pictures = (group: string) => [...doc.querySelectorAll<HTMLImageElement>(`[data-setup-guide="${group}"] img`)].map(img => img.getAttribute('src'));
+  expect(moves('plugin').slice(0, 5)).toEqual(['“Add” → “Add custom MCP server”', 'Paste the name exactly', '“Tunnel”, then your tunnel ID',
+    '“No authentication”', '“I understand and want to continue”, then “Create as a plugin”']);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // ChatGPT's German menu and dialog, quoted the German way; rebuilt without a reload.
+  expect(moves('plugin').slice(0, 5)).toEqual(['„Hinzufügen“ → „Benutzerdefinierten MCP-Server hinzufügen“', 'Den Namen exakt einfügen',
+    '„Tunnel“, dann deine Tunnel-ID', '„Keine Authentifizierung“', '„Ich habe das verstanden und möchte weitermachen“, dann „Als Plugin erstellen“']);
+  expect(pictures('plugin').slice(0, 2).every(src => /plugin-(add|new)-de/.test(src!))).toBe(true);
+  expect(doc.querySelectorAll('#pluginMoves .guide-moves')).toHaveLength(1);
+  // The OpenAI Platform is English: its pictures and labels stay English, translated around them.
+  expect(moves('tunnel')).toContain('Auf „Create“ klicken');
+  expect(pictures('key').every(src => /api-key-(create|tunnels)-en/.test(src!))).toBe(true);
+  setLanguage('en');
 });
 
 it('highlights missing required setup fields while respecting drafts and a stored API key', async () => {
