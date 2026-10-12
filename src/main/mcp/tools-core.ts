@@ -2240,6 +2240,8 @@ const MISSING_PATH_LISTING = 40;
  */
 async function nearestFolderListing(roots: Root[], requested: string, err: unknown): Promise<string> {
   if (!(err instanceof SandboxError) || !err.message.startsWith('Not found:')) return '';
+  const meant = await pathUnderNamedRoot(roots, requested);
+  if (meant) return `\nDid you mean ${meant}? It exists under the approved root of that name.`;
   let candidate = requested;
   for (let depth = 0; depth < 8; depth++) {
     const parent = candidate.replace(/[\\/]+[^\\/]+[\\/]*$/, '');
@@ -2264,6 +2266,29 @@ async function nearestFolderListing(roots: Root[], requested: string, err: unkno
     }
   }
   return '';
+}
+
+/**
+ * A missing path that names another approved root further down, where the rest exists.
+ *
+ * Live 2026-10-12: with roots `/downloads` and `/voxelcraft`, a model read
+ * `/downloads/.Dev-projects/voxelcraft/shared/adventure.ts`, the project's disk path under the
+ * wrong root. The listing that followed showed the user's Downloads folder, unrelated to the
+ * project, instead of the file it was after.
+ */
+async function pathUnderNamedRoot(roots: Root[], requested: string): Promise<string | null> {
+  const segments = requested.split(/[\\/]+/).filter(Boolean);
+  for (let index = 1; index < segments.length - 1; index++) {
+    const root = roots.find(entry => entry.name.toLowerCase() === segments[index]!.toLowerCase());
+    if (!root) continue;
+    const candidate = `/${[root.name, ...segments.slice(index + 1)].join('/')}`;
+    try {
+      return (await resolveIn(roots, candidate, { access: 'read' })).virtual;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /**
