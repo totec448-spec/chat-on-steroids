@@ -4816,6 +4816,10 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
     rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
   }
   for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
+  // A long turn pushes its question out of the loaded rows: every row left is that turn's work, so its
+  // line heads them, where the question would put it. Parked after the queue it sat under the newest
+  // action and jumped back up whenever the question was loaded again (2026-10-12).
+  if (live && !pending && asks.length === 0 && (historyBefore !== null || totalEvents > events.length) && rows.length > 0) { rows.unshift(turnStatusLine); rows.push(turnNow); }
   const inTimeline = rows.includes(turnStatusLine);
   if (!inTimeline) parkTurnStatus(working);
   if (working && status) paintTurnStatus(status);
