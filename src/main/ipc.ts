@@ -76,7 +76,7 @@ import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFa
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
-import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree } from './worktrees/index.js';
+import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
 import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
@@ -1673,6 +1673,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new Error('Could not verify this worker checkout. No files were removed.');
     }
     if (!candidate) throw new Error('This checkout is missing or has no verified cleanup owner. No files were removed.');
+    // The native confirmation must describe a complete, byte-verified snapshot.
+    // A bounded/truncated inspection cannot authorize discarding files.
+    if (candidate.changesTruncated || !candidate.contentFingerprint) {
+      throw new Error('Could not safely inspect all contents of this worker checkout. No files were removed.');
+    }
     // The preview is shown only in the trusted desktop confirmation, not the renderer
     // or a model-facing tool. List bounded relative paths instead of native paths.
     const changedFiles = candidate.changes.slice(0, 25).map(name =>
@@ -1702,9 +1707,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       noLink: true
     });
     if (response !== 1) return { removed: false, branchPreserved: true };
-    // A file may have arrived while the native confirmation was open. Refuse a
-    // removal if the user has not reviewed that newer risk state. Do not accept
-    // the pre-dialog approval for a changed checkout or another branch HEAD.
+    // Git's name/size status can stay identical across same-size byte edits.
+    // Compare the complete content fingerprint, including ignored/untracked files.
+    // The manager also checks this fingerprint inside its mutation fence.
     let fresh: typeof candidate | undefined;
     try {
       fresh = (await listOfferedWorkerWorktrees(getConfig().roots, [offer]))[0];
@@ -1715,9 +1720,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!fresh || fresh.workspace !== candidate.workspace || fresh.branch !== candidate.branch ||
         fresh.headOid !== candidate.headOid || fresh.dirty !== candidate.dirty ||
         fresh.ignoredFiles !== candidate.ignoredFiles || fresh.uniqueCommits !== candidate.uniqueCommits ||
-        fresh.changesTruncated !== candidate.changesTruncated ||
+        fresh.changesTruncated || !fresh.contentFingerprint ||
+        fresh.contentFingerprint !== candidate.contentFingerprint ||
         JSON.stringify(fresh.changes) !== JSON.stringify(candidate.changes)) {
-      throw new Error('The checkout changed while its confirmation was open. No files were removed. Review its current contents and try again.');
+      throw new Error('The checkout changed while you were reviewing it. No files were removed.');
     }
     // Root approval and exact broker-offer identity are checked again after user interaction.
     if (!(await persistAgentAuthorityNow())) throw new Error('Cleanup could not reconfirm durable worker retirement. No files were removed.');
@@ -1732,7 +1738,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }
     try {
       const result = await disposeOfferedWorkerWorktree(getConfig().roots, current,
-        unifiedExecManager.listProcesses().map(process => process.cwd));
+        unifiedExecManager.listProcesses().map(process => process.cwd), candidate.contentFingerprint);
       if (result.removed && acknowledgeManagedWorktreeCleanupOffer(runId, agentId)) {
         // The files are already removed at this point. Failure to persist the acknowledgment
         // is a recoverable stale UI offer, not permission to claim that deletion failed.
@@ -1745,6 +1751,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       return { removed: result.removed, branchPreserved: !result.branchRemoved };
     } catch (error) {
       logInfo(`worktree cleanup removal refused: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof WorkerWorktreeError && error.code === 'WORKTREE_CONTENT_CHANGED') {
+        throw new Error('The checkout changed while you were reviewing it. No files were removed.');
+      }
       throw new Error('The checkout was not removed safely. Inspect the local app logs for details.');
     }
   });

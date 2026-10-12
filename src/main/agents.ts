@@ -1909,7 +1909,10 @@ export function managedWorkerIsolationRequired(input: Caller): boolean {
 }
 
 /**
- * A marker may be restored only if the accepted broker still owns the original allocation.
+ * A marker may be restored only if the accepted broker still owns a worker that could execute.
+ * Retained terminal rows remain isolation fences and cleanup offers, never startup leases.
+ * A non-revivable sleeper can still finish its original turn only with the exact durable
+ * turn/request authority captured when it was parked at the context ceiling.
  * This projection never reconstructs ownership from marker filenames, display slots or
  * recorded sessions. Duplicate/corrupt allocation identities are excluded fail-closed.
  */
@@ -1918,6 +1921,12 @@ export function managedWorkerRecoveryIdentities(): Array<{ runId: string; agentI
   const candidates = families.flatMap(owner => [...owner.agents.values()]
     .filter(agent => agent.info.role === 'worker' && agent.info.managedWorktree === true &&
       !cleanupAcknowledged(agent.info) &&
+      managedAllocationAgentPattern.test(agent.info.id) &&
+      (occupiesSlot(agent.info.state) ||
+        (agent.info.state === 'sleeping' && (agent.info.revivable === true ||
+          (agent.info.silenceParked === true && Boolean(agent.info.conversationId) &&
+            Boolean(agent.info.silenceRecoveryTurnId) &&
+            Number.isFinite(agent.info.silenceRecoveryRequestOriginMax))))) &&
       !unpublishedAgents.has(agent) && !unpublishedRuns.has(owner as Run))
     .map(agent => ({ runId: agent.info.workerAllocationRunId, agentId: agent.info.id, owner })));
   return candidates.filter(candidate =>
