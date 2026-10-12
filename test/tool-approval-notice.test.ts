@@ -23,7 +23,7 @@ it('keeps the real reminder in the ChatGPT step of Setup and only shows once aft
   expect([...document.querySelectorAll('#pluginMoves .guide-move')].at(-1)?.textContent).toContain('always for this plugin');
   const image = [...permanent.querySelectorAll('img')].at(-1)!;
   expect(image.src).toContain('tool-approval.jpg');
-  expect(createHash('sha256').update(readFileSync('src/renderer/setup-images/tool-approval.jpg')).digest('hex')).toBe('cec727494000b9bfd87352e9248f448ddc54c042a19ffbd3b20acad8dccdb83f');
+  expect(createHash('sha256').update(readFileSync('src/renderer/setup-images/tool-approval.jpg')).digest('hex')).toBe('0cfa0aa71e896eb5201253e565442fa792c3e60070adcaffd7033167c546ef87');
   const dialog = document.querySelector('.tool-approval-dialog') as HTMLDialogElement;
   expect(dialog.open).toBe(false); opening(); expect(dialog.open).toBe(true);
   expect(window.localStorage.getItem('cos.tool-approval-notice.v1')).toBeNull();

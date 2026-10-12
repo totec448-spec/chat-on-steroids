@@ -2001,6 +2001,31 @@ it("shows ChatGPT's own screens and words in the app's language, and the Platfor
   setLanguage('en');
 });
 
+it('judges Setup from the saved settings on the first paint, and numbers its steps as the rail does', async () => {
+  // A finished setup: tunnel saved and key stored. The first paint read the tunnel field before it
+  // was filled from the settings, so Setup looked unfinished and Connect was disabled until the
+  // next state update.
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe('tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  expect(doc.getElementById('setupBadge')!.hidden).toBe(true);
+  expect((doc.getElementById('wizConnect') as HTMLButtonElement).disabled).toBe(false);
+
+  // The hints name the step by its place in the rail: Tunnel is 4 and API key 5 since Access joined.
+  const rail = [...doc.querySelectorAll<HTMLElement>('.setup-rail [data-rail-step]')].map(button => button.dataset.railStep);
+  expect(rail.indexOf('tunnel') + 1).toBe(4);
+  const noTunnel = structuredClone(mounted.state);
+  noTunnel.config.tunnel.tunnelId = '';
+  mounted.push(noTunnel);
+  (doc.getElementById('tunnelId') as HTMLInputElement).value = '';
+  mounted.push(structuredClone(noTunnel));
+  expect((doc.getElementById('wizConnect') as HTMLButtonElement).title).toBe('Create a tunnel and paste its ID — step 4.');
+  const noKey = structuredClone(mounted.state);
+  noKey.hasApiKey = false;
+  mounted.push(noKey);
+  expect((doc.getElementById('wizConnect') as HTMLButtonElement).title).toBe('Add a restricted API key — step 5.');
+});
+
 it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's language", async () => {
   const mounted = await mountChat();
   const doc = mounted.window.document;
