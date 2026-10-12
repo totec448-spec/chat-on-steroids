@@ -665,8 +665,8 @@ Once a chat's history has been limited, the page's Retry presses after Retry-Aft
 0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
 pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429
 with a longer Retry-After each time. The recorder writes a repeating history-limit notice (one
-that carries `retryAt`) once: an identical one within 30 minutes of the newest `chat_error` is not
-appended again, while the provider access dialog is still recorded again after 30 s. The bridge's
+that carries `retryAt`) once: an identical one within 30 minutes of the newest blocking `chat_error`
+is not appended again (a passing failure in between, such as a stream 404, does not repeat it), while the provider access dialog is still recorded again after 30 s. The bridge's
 provider-limit hold still follows every new Retry-After, because it reads the observations, not
 the recording.
 **A chat deleted in ChatGPT** answers its history request and a send into it with HTTP 404 and
