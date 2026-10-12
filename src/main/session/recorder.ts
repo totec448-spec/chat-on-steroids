@@ -2364,11 +2364,12 @@ async function recordChatObservationsNow(
         const recent = await readRecentEvents(sessionId, 32, { kinds: ['chat_error'], maxBytes: 256 * 1024 });
         // A history limit that keeps answering the same way is one notice, not one per retry: on
         // 2026-10-11 a throttled history wrote eight identical blocking notices in eight minutes. The
-        // same limit is said again only after another error came in between, or after half an hour.
-        // Only the history limit (it carries its Retry-After): the provider access dialog keeps
-        // being recorded again after 30 s, as before.
+        // same limit is said again only after another blocking error came in between, or after half an
+        // hour. A passing transport failure (a stream 404) does not change the limit, and repeating it
+        // after each one still stacked the same notice (2026-10-12). Only the history limit (it carries
+        // its Retry-After): the provider access dialog keeps being recorded again after 30 s, as before.
         const newest = recent.reduce<SessionEvent | undefined>((latest, event) =>
-          event.kind === 'chat_error' && (!latest || event.seq > latest.seq) ? event : latest, undefined);
+          event.kind === 'chat_error' && event.blocking === true && (!latest || event.seq > latest.seq) ? event : latest, undefined);
         if (item.blocking === true && Number.isFinite(item.retryAt) && newest?.kind === 'chat_error' && newest.blocking === true &&
             item.time - newest.time <= 30 * 60_000 &&
             chatErrorMessageKey(newest.message.text, newest.recoverable === true) === text) continue;
