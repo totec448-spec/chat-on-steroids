@@ -93,8 +93,11 @@ app.whenReady().then(async () => {
   const { createServer } = await import('vite');
   const server = await createServer({ configFile: false, logLevel: 'error', root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0, hmr: false },
     plugins: [{ name: 'readme-fixture', configureServer(vite) { vite.middlewares.use('/fixture.html', async (_req, res) => {
-      const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace('</body>', '<script type="module">' + fixture + '</script></body>');
+      // The production page without its entry script, which the fixture replaces.
+      const entry = '<script type="module" src="./main.ts"></script>';
+      const page = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
+      if (page.split(entry).length !== 2) throw new Error('index.html has exactly one entry script');
+      const html = page.replace(entry, '').replace('</body>', '<script type="module">' + fixture + '</script></body>');
       res.setHeader('Content-Type', 'text/html'); res.end(await vite.transformIndexHtml('/fixture.html', html));
     }); } }] });
   let win;
