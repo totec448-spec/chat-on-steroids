@@ -2184,6 +2184,7 @@
   "Rename your connectors": "커넥터 이름 변경",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "ChatGPT에서 이름을 바꾼 Chat On Steroids 앱도 계속 작동합니다.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "이 터널 ID는 {0}에도 설정되어 있습니다. 커넥터마다 자체 터널이 필요합니다. 그렇지 않으면 ChatGPT가 일부 호출을 잘못된 커넥터로 보내 UNKNOWN_TOOL로 실패합니다.",
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT가 최소 {0}까지 기다리라고 요청했습니다. 그 후에는 앱이 자동으로 계속합니다. 새로 고침으로는 이 제한을 해제할 수 없습니다.",
   "Update check failed": "업데이트 확인 실패",
   "Downloading {0}": "{0} 다운로드 중",
   "Ready to install {0}": "{0} 설치 준비 완료",

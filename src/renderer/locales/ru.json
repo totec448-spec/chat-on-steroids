@@ -2184,6 +2184,7 @@
   "Rename your connectors": "Переименование коннекторов",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "Приложения Chat On Steroids, переименованные в ChatGPT, продолжают работать.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "Этот ID туннеля также указан для {0}. Каждому коннектору нужен свой туннель, иначе ChatGPT отправляет часть вызовов не тому коннектору, и они завершаются ошибкой UNKNOWN_TOOL.",
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT попросил подождать как минимум до {0}. После этого приложение продолжит само. Перезагрузка не снимает это ограничение.",
   "Update check failed": "Не удалось проверить обновления",
   "Downloading {0}": "Загрузка {0}",
   "Ready to install {0}": "Готово к установке {0}",

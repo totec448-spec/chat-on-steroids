@@ -2184,6 +2184,7 @@
   "Rename your connectors": "重命名连接器",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "在 ChatGPT 中重命名的 Chat On Steroids 应用会继续正常工作。",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "此隧道 ID 也设置给了 {0}。每个连接器都需要自己的隧道；否则 ChatGPT 会把部分调用发到错误的连接器，并以 UNKNOWN_TOOL 失败。",
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT 要求至少等到 {0}。之后应用会自行继续。重新加载无法解除此限制。",
   "Update check failed": "更新检查失败",
   "Downloading {0}": "正在下载 {0}",
   "Ready to install {0}": "可以安装 {0}",

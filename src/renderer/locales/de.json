@@ -2184,6 +2184,7 @@
   "Rename your connectors": "Connectoren umbenennen",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "Chat On Steroids-Apps, die du in ChatGPT umbenennst, funktionieren weiter.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "Diese Tunnel-ID ist auch für {0} eingetragen. Jeder Connector braucht einen eigenen Tunnel, sonst schickt ChatGPT manche Aufrufe an den falschen Connector und sie scheitern mit UNKNOWN_TOOL.",
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT hat darum gebeten, mindestens bis {0} zu warten. Danach macht die App von selbst weiter. Neu laden hebt dieses Limit nicht auf.",
   "Update check failed": "Update-Prüfung fehlgeschlagen",
   "Downloading {0}": "{0} wird heruntergeladen",
   "Ready to install {0}": "{0} ist zur Installation bereit",

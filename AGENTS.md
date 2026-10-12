@@ -4422,6 +4422,11 @@ null instead of describing a different chat than `session`. Start and stop are s
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
 
+A recorded `chat_error` for a blocking history limit keeps `retryAt`: the first Retry-After
+deadline ChatGPT gave (same bounds as the bridge's hold: after the notice, within 24 h). It is
+display data for the timeline card and the control API's event projection; the live hold
+(`providerHistoryBackoff`) follows each newer deadline and stays the only authority.
+
 `GET /v1/sessions/{id}/events/stream` (`control-stream.ts`) pushes a session's events as
 Server-Sent Events. It is the paged read repeated: every frame is a row `…/events?from=` would
 return, read through `streamEvents` under the same heavy-read limit, with `id` = `seq` so

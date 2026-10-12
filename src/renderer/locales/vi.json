@@ -2184,6 +2184,7 @@
   "Rename your connectors": "Đổi tên connector",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "Các ứng dụng Chat On Steroids bạn đổi tên trong ChatGPT vẫn tiếp tục hoạt động.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "ID tunnel này cũng được đặt cho {0}. Mỗi connector cần tunnel riêng; nếu không, ChatGPT sẽ gửi một số lệnh gọi đến sai connector và chúng thất bại với UNKNOWN_TOOL.",
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT yêu cầu chờ ít nhất đến {0}. Sau đó ứng dụng sẽ tự tiếp tục. Tải lại không gỡ được giới hạn này.",
   "Update check failed": "Không thể kiểm tra bản cập nhật",
   "Downloading {0}": "Đang tải {0}",
   "Ready to install {0}": "Sẵn sàng cài đặt {0}",
