@@ -4622,6 +4622,18 @@ consumes that reservation durably and uses the settings-incarnation predicate. A
 explains the connection exception and possible restart, retains errors until explicit retry,
 and disables the action while its IPC receipt is outstanding.
 
+**Activity component status.** The card projects existing updater, companion, connector and
+native macOS permission owners. Full completion needs a successful release check, no newer
+app, a paired live extension at the running version, and exact current schemas for required
+enabled connectors reached this run. Core is required; off/empty optional connectors skip.
+Successful tools may show operational readiness with a schema caveat, never erase failed or
+manual checks. Missing macOS grants block; unknown stays unverified and reads request no grant.
+Failure and recovery stay visible outside native details. Identical pushes preserve disclosure
+choice/focus; meaningful owner changes reopen attention. A keyboard button controls native
+details and a separate polite live region announces changed status. The card keeps the event
+feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
+save owner with both buttons disabled during saving, and does not retry updates.
+
 ## 19. Debugging, tests and working here
 
 Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one

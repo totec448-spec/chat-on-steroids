@@ -4,6 +4,8 @@ import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
+import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js';
+import { updateErrorText } from './update-error.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -132,11 +134,6 @@ const GROUPS: Group[] = [
 
 let state: AppState | null = null;
 let updateAllError: string | null = null;
-function paintUpdateOperation(): void {
-  const error = $('updateAllError');
-  error.hidden = !updateAllError;
-  ui(error, 'textContent', () => updateAllError ? t('Update all could not finish: {0}', [t(updateAllError)]) + '\n' + t('Choose Update all to retry.') : '');
-}
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1502,7 +1499,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
-  paintUpdateOperation();
+  paintUpdateReadiness(next, updateAllError);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
 
   // ---- health numbers and facts
@@ -2455,6 +2452,8 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
+initUpdateReadiness();
+$('updateReviewSetup').addEventListener('click', () => showTab('setup'));
 const updateAllButton = $<HTMLButtonElement>('updateAll');
 updateAllButton.addEventListener('click', async () => {
   if (updateAllButton.disabled) return;
@@ -2462,10 +2461,10 @@ updateAllButton.addEventListener('click', async () => {
   updateAllButton.setAttribute('aria-busy', 'true');
   ui(updateAllButton, 'textContent', () => t('Updating…'));
   updateAllError = null;
-  paintUpdateOperation();
+  if (state) paintUpdateReadiness(state, updateAllError);
   try {
     const reply = await api.updateAll();
-    if (!reply.ok) { updateAllError = reply.error; toast(t(reply.error)); return; }
+    if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
@@ -2477,10 +2476,9 @@ updateAllButton.addEventListener('click', async () => {
     updateAllButton.disabled = false;
     updateAllButton.removeAttribute('aria-busy');
     ui(updateAllButton, 'textContent', () => t('Update all'));
-    paintUpdateOperation();
+    if (state) paintUpdateReadiness(state, updateAllError);
   }
 });
-
 
 /**
  * Install the update that is already downloaded.
@@ -2524,16 +2522,20 @@ for (const id of ['copyLog', 'copyLogText']) {
 }
 
 // One file for a bug report; the main process removes personal details and shows the saved file.
-$('saveDiagnosticsReport').addEventListener('click', async () => {
-  const button = $<HTMLButtonElement>('saveDiagnosticsReport');
-  button.disabled = true;
+const diagnosticsButtons = [$<HTMLButtonElement>('saveDiagnosticsReport'), $<HTMLButtonElement>('updateDiagnosticsReport')];
+async function saveDiagnosticsReport(): Promise<void> {
+  if (diagnosticsButtons.some(button => button.disabled)) return;
+  for (const button of diagnosticsButtons) button.disabled = true;
   try {
     const result = await run(api.saveDiagnosticsReport());
     if (result?.saved) toast(t('Diagnostics report saved as {0}. Read it before you share it.', [result.name]));
+  } catch (error) {
+    toast(t(error instanceof Error ? error.message : String(error)));
   } finally {
-    button.disabled = false;
+    for (const button of diagnosticsButtons) button.disabled = false;
   }
-});
+}
+for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());

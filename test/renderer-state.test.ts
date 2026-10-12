@@ -2300,7 +2300,7 @@ it('runs Update all once on explicit click and keeps it busy across state pushes
   const { window: w, state, push } = await mountChat({}, [], { updateAll });
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
   expect(button).not.toBeNull();
-  expect(w.document.querySelector('.update-actions')!.textContent).toContain('asked before the app restarts');
+  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('asked before the app restarts');
   expect(button.getAttribute('aria-describedby')).toBe('updateAllNotice');
   button.click(); button.click(); push(structuredClone(state));
   expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
@@ -2323,6 +2323,83 @@ it.each(['reply', 'transport'])('retains the update command %s error across stat
   expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
   expect(w.document.getElementById('updateAllError')!.textContent).toContain('Network unavailable');
   expect(updateAll).toHaveBeenCalledTimes(1);
+});
+
+it('reports update readiness only from checked versions and current connector evidence', async () => {
+  const { window: w, state, push } = await mountChat();
+  const ready = structuredClone(state);
+  ready.update.checkedAt = Date.now();
+  ready.bridge = { ...ready.bridge, paired: true, present: true, extensionVersion: ready.update.current };
+  ready.status = { ...ready.status, state: 'connected', surfaces: [{ id: 'core', connectorName: 'Chat On Steroids Core', optional: false,
+    available: true, state: 'live', detail: '', description: 'Core connector', cardSummary: 'Files and terminal', localUrl: null, publicUrl: null,
+    lastRequestAt: Date.now(), lastToolCallAt: null, tools: ['read'] }] };
+  ready.connectorSchemas = { core: 'schema-a' };
+  ready.connectorRefresh = { core: { schemaId: 'schema-a', state: 'current' } };
+  const summary = () => w.document.getElementById('updateReadinessSummary')!;
+  push(ready);
+  expect(summary()?.dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(ready.update.current);
+  expect(w.document.querySelector('[data-update-part="extension"]')!.textContent).toContain(ready.update.current);
+
+  const notReady = [
+    (s: any) => { s.update.checkedAt = null; },
+    (s: any) => { s.update.stage = 'failed'; },
+    (s: any) => { s.update.latest = '2.0.3'; s.update.stage = 'ready'; },
+    (s: any) => { s.bridge.present = false; },
+    (s: any) => { s.bridge.paired = false; },
+    (s: any) => { s.bridge.extensionVersion = null; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.1'; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.3'; },
+    (s: any) => { s.status.state = 'offline'; },
+    (s: any) => { s.status.surfaces[0].state = 'error'; },
+    (s: any) => { s.status.surfaces[0].lastRequestAt = null; s.status.surfaces[0].proof = { requestAt: Date.now() }; },
+    (s: any) => { s.connectorRefresh = {}; },
+    (s: any) => { s.connectorRefresh.core.schemaId = 'old-schema'; },
+    (s: any) => { s.connectorRefresh.core.state = 'refreshing'; },
+    (s: any) => { s.status.surfaces = []; }
+  ];
+  for (const change of notReady) {
+    const next = structuredClone(ready); change(next); push(next);
+    expect(summary().dataset.ready).toBe('false');
+    expect(summary().textContent).not.toBe('All checks passed');
+  }
+  const working = structuredClone(ready);
+  working.connectorRefresh = { core: { schemaId: 'schema-a', state: 'unknown', responding: true } };
+  push(working);
+  expect(summary().dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('Ready to use; tool definitions not fully verified');
+  expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(true);
+  push(ready);
+  const optionalOff = structuredClone(ready);
+  optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
+  push(optionalOff);
+  expect(summary().dataset.ready).toBe('true');
+  expect(w.document.querySelector('[data-update-part="desktop"]')!.textContent).toContain('Not enabled');
+  const emptyPlugins = structuredClone(ready);
+  emptyPlugins.status.surfaces.push({ ...ready.status.surfaces[0], id: 'plugins', connectorName: 'Plugins', optional: true, tools: [], lastRequestAt: null } as any);
+  emptyPlugins.connectorSchemas.plugins = 'empty-schema';
+  emptyPlugins.connectorRefresh.plugins = { schemaId: 'empty-schema', state: 'pending' };
+  push(emptyPlugins);
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.textContent).toContain('No tools published');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.textContent).not.toContain('Not enabled');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.classList.contains('is-skipped')).toBe(true);
+  const enabledPlugins = structuredClone(emptyPlugins);
+  enabledPlugins.status.surfaces.at(-1)!.tools = ['plugin_tool'];
+  push(enabledPlugins);
+  expect(summary().dataset.ready).toBe('false');
+  const emptyCore = structuredClone(ready);
+  emptyCore.status.surfaces[0].tools = [];
+  emptyCore.connectorRefresh = {};
+  push(emptyCore);
+  expect(summary().dataset.ready).toBe('false');
+  push(ready);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(summary().textContent).toBe('すべての確認が完了しました');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain('最新版です');
+  setLanguage('en');
 });
 
 it('reports a staged update in the Activity line and the header bar', async () => {
