@@ -57,9 +57,22 @@ for (const [name, b] of Object.entries(BROWSERS)) {
       const devCrop = name === 'edge' ? crop([devTarget], [30, 46, 30, 34], 360, { x0: 0, x1: b.width }) : crop([devTarget], [24, 18, 30, 210], 440, { x0: 0, x1: b.width });
       await shoot(`${name}-${lang}-dev.webp`, devCrop);
       // Switch it on the way the page itself does, then find Load unpacked.
-      await ev(`(${find.toggle}).click()`); await sleep(1500);
       const loadEl = name === 'edge' ? `(${FIND})(e=>/BUTTON/.test(e.tagName) && !!(e.innerText||e.textContent||'').trim() && e.getBoundingClientRect().width>0 && e.getBoundingClientRect().y < 160 && e.getBoundingClientRect().x > 500)` : `(${FIND})(e=>e.id==='loadUnpacked')`;
-      const loadBox = await ev(box(loadEl)); const loadLabel = await ev(`((${loadEl}).innerText||(${loadEl}).textContent||'').trim()`);
+      // A real mouse click, the way a person switches it: Brave ignores a scripted click(). The button
+      // appears only once Developer mode is on, so wait for it to have a size, clicking again if needed.
+      const clickToggle = async () => {
+        const [x, y, w, h] = await ev(box(find.toggle));
+        for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', { type, x: x + w / 2, y: y + h / 2, button: 'left', clickCount: 1 });
+      };
+      await clickToggle();
+      let loadBox = [0, 0, 0, 0];
+      for (let wait = 0; wait < 30 && !(loadBox?.[2] > 0); wait++) {
+        await sleep(200);
+        loadBox = await ev(box(loadEl));
+        if (wait === 15 && !(loadBox?.[2] > 0)) await clickToggle();
+      }
+      if (!(loadBox?.[2] > 0)) throw new Error('Load unpacked did not appear after turning on Developer mode');
+      const loadLabel = await ev(`((${loadEl}).innerText||(${loadEl}).textContent||'').trim()`);
       LOG('load', JSON.stringify(loadBox), JSON.stringify(loadLabel));
       // The whole row the button sits in, with complete neighbours, so nothing is cut at the edges.
       const rowBoxes = await ev(`(()=>{ const all=[]; const walk=r=>{ for (const e of r.querySelectorAll('*')) { all.push(e); if (e.shadowRoot) walk(e.shadowRoot); } }; walk(document); const load=(${loadEl}).getBoundingClientRect(); const near=all.filter(e=>{ const r=e.getBoundingClientRect(); return r.width>0 && r.height>0 && Math.abs((r.y+r.height/2)-(load.y+load.height/2))<14 && r.height<60 && (/BUTTON/.test(e.tagName) || (e.childElementCount===0 && (e.textContent||'').trim().length>2)); }); return near.map(e=>{const r=e.getBoundingClientRect(); return [r.x,r.y,r.width,r.height];}); })()`);

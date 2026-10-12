@@ -1925,6 +1925,12 @@ it('walks the extension install in the chosen browser\'s own words and pictures,
   expect(opened).toEqual([['edge', 'extensions']]);
   expect(text('extensionStepOpenHint')).toBe('Copied. Paste it into the address bar in Edge and press Enter.');
 
+  // Brave has its own captures.
+  (document.querySelector('[data-external-browser="brave"]') as HTMLButtonElement).click();
+  expect(text('setupExtensionAddress')).toBe('brave://extensions');
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('brave-en-dev');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('brave-en-load');
+
   // In German, Chrome's German page and Chrome's German words, quoted the German way.
   (document.querySelector('[data-external-browser="chrome"]') as HTMLButtonElement).click();
   const { setLanguage } = await import('../src/renderer/i18n.js');
