@@ -12,7 +12,6 @@ const keys = [
   "Download link opened. Install the app to continue; your settings are kept.",
   "Connector checks requested. Any remaining steps are shown in Update status.",
   "Update all could not finish: {0}",
-  "Choose Update all to retry.",
   "Update check failed",
   "Downloading {0}",
   "Ready to install {0}",
