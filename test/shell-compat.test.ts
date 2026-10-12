@@ -245,6 +245,24 @@ it('outlines commentary whose own message is readable too, while recording that 
   expect(turn.trace).toContainEqual({ kind: 'say', text: 'I will inspect the project.', done: true });
   expect(turn.messages.map((m: any) => m.rawText)).toContain('I will inspect the project.');
 });
+it('records a sentence GPT-6 writes inside the working group while the turn runs, as commentary', async () => {
+  // Live 2026-10-12: GPT-6 nests each interim sentence in the reasoning group as an assistant message
+  // (phase final_answer, completed, text in its DIL fallback). Only the outline read it: the canonical
+  // message arrived when the turn ended or the page reloaded, 15 to 23 minutes late.
+  const f = fixture();
+  f.entry.turn.items[1].items.push({ type: 'assistant-message', messageId: OTHER, phase: 'final_answer', completed: true,
+    content: `::chatgpt-content-reference{index="0" source_message_id="${OTHER}"}`,
+    contentReferences: [{ type: 'dil', source_message_id: OTHER, model_dil_v2: { fallbackMarkdown: 'Now editing `a.txt`.' } }] });
+  const turn = (await f.ask()).turns[0];
+  expect(turn.messages.find((m: any) => m.rawMessageId === OTHER)?.rawText).toBe('Now editing `a.txt`.');
+  // An interim sentence never ends the turn, whatever phase it carries.
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect((await f.ask()).turns[0].endMessageId).toBe(ANSWER);
+  // The same message hoisted to the top level is read once, and the scan stays readable.
+  f.entry.turn.items.splice(2, 0, { ...f.entry.turn.items[1].items.at(-1) });
+  const hoisted = (await f.ask()).turns[0];
+  expect(hoisted.messages.filter((m: any) => m.rawMessageId === OTHER)).toHaveLength(1);
+});
 it('reads a DIL answer as the Markdown the page falls back to, not as its content reference', async () => {
   const f = fixture();
   const answer = f.entry.turn.items[2];
