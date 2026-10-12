@@ -9932,6 +9932,39 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {
+    // A throttled history answered every retry with the same limit: eight identical blocking notices
+    // stacked up in eight minutes. One notice says it; the hold still follows each new Retry-After.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [
+        { kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('history-limit-repeat')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      const limit = 'ChatGPT temporarily rate-limited loading this conversation history.';
+      let retryAt = 0;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt) await vi.advanceTimersByTimeAsync(60_000);
+        retryAt = Date.now() + 30_000 + attempt * 1000;
+        await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt, text: limit }]);
+      }
+      const session = (await findSessionByConversation(PRIME))!;
+      const { readRecentEvents } = await import('../src/main/session/store.js');
+      const notices = async () => (await readRecentEvents(session.id, 50, { kinds: ['chat_error'] })).filter(event => event.kind === 'chat_error' && event.message.text === limit);
+      expect(await notices()).toHaveLength(1);
+      // Whichever hold shows, its deadline is the newest Retry-After, though only one notice was written.
+      expect((await sessionControlsFor(session.id)).recovery?.map(hold => hold.deadline)).toEqual([retryAt]);
+      // Another error in between makes the next limit a new notice again.
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, text: 'Something else failed' }]);
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now() + 1, turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt: Date.now() + 30_000, text: limit }]);
+      expect(await notices()).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('refuses a pre-existing repair handout while a newer history Retry-After is active', async () => {
     vi.useFakeTimers();
     try {
