@@ -1,3 +1,4 @@
+import { promises as fs } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
@@ -16,6 +17,22 @@ afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); aw
 const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
+it.each(['malformed', 'null', 'invalid', 'duplicate'] as const)('preserves a %s ledger without creating new refresh authority', async kind => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(request)).toBe(true);
+  const saved = await readDurable('plugin-refresh') as object[];
+  const broken = kind === 'malformed' ? '{"private":"fixture-only"' : kind === 'null' ? 'null'
+    : JSON.stringify(kind === 'duplicate' ? [...saved, ...saved] : [{ surface: 'private-invalid' }]);
+  const file = `${directory}/state/plugin-refresh.json`;
+  await fs.writeFile(file, broken); resetPluginRefreshForTests(); publish();
+  await expect(pendingPluginRefreshes()).rejects.toThrow(/^Could not read plugin-refresh state$/);
+  await expect(claim(request)).rejects.toThrow(/^Could not read plugin-refresh state$/);
+  expect(await fs.readFile(file, 'utf8')).toBe(broken);
+  // An independently restored receipt remains consumed; the failed read did not rearm it.
+  await fs.writeFile(file, JSON.stringify(saved));
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  expect(await claim(request)).toBe(false);
+});
 it('debounces only changed declarations for twenty seconds and fences stale claims', async () => {
   publish(); const old = (await pendingPluginRefreshes())[0]!;
   const change = (description: string) => publishPluginSurface('core', 'Chat On Steroids Core', '1', 'Instructions', [{ ...tools[0]!, description }]);

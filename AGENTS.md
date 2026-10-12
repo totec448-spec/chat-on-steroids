@@ -175,7 +175,8 @@ service-worker lifetime, and local session vs frontend id are recurring sources 
 guarantee. `writeDurableNow()` is the required barrier before an acknowledged control transition
 or browser side effect. Per-file queues allow independent writes; cross-file semantic ordering
 must be explicit in the caller. Missing/corrupt auxiliary state logs and reads as null so the app
-can start; restore may only reconstruct facts from independent durable proof.
+can start; authority ledgers can opt into strict reads, where only a missing file is empty
+and unreadable data throws a generic error. Restore may only reconstruct facts from independent durable proof.
 
 ## 3. Intent, current source and evidence
 
@@ -4194,6 +4195,12 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+
+Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid rows,
+duplicate surfaces and I/O failures leave the ledger intact and reject new work with
+`Could not read plugin-refresh state`; parser contents stay private. A missing file still
+allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
+
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
