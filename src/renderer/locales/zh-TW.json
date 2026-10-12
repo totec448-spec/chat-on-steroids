@@ -1058,7 +1058,6 @@
   "Download link opened. Install the app to continue; your settings are kept.": "已開啟下載連結。安裝應用程式後即可繼續檢查，原有設定會保留。",
   "Connector checks requested. Any remaining steps are shown in Update status.": "已要求檢查連接器。剩餘步驟可在「更新狀態」中查看。",
   "Update all could not finish: {0}": "無法完成全部更新：{0}",
-  "Choose Update all to retry.": "請選擇「全部更新」重試。",
   "Update check failed": "更新檢查失敗",
   "Downloading {0}": "正在下載 {0}",
   "Ready to install {0}": "可以安裝 {0}",

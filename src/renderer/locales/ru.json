@@ -864,7 +864,6 @@
   "Download link opened. Install the app to continue; your settings are kept.": "Открыта ссылка для скачивания. Установите приложение, чтобы продолжить; настройки сохранятся.",
   "Connector checks requested. Any remaining steps are shown in Update status.": "Запрошена проверка коннекторов. Оставшиеся действия показаны в разделе «Состояние обновления».",
   "Update all could not finish: {0}": "Не удалось завершить операцию «Обновить всё»: {0}",
-  "Choose Update all to retry.": "Выберите «Обновить всё», чтобы повторить попытку.",
   "Update check failed": "Не удалось проверить обновления",
   "Downloading {0}": "Загрузка {0}",
   "Ready to install {0}": "Готово к установке {0}",

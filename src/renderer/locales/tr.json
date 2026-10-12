@@ -864,7 +864,6 @@
   "Download link opened. Install the app to continue; your settings are kept.": "İndirme bağlantısı açıldı. Devam etmek için uygulamayı yükleyin; ayarlarınız korunur.",
   "Connector checks requested. Any remaining steps are shown in Update status.": "Bağlayıcıların kontrol edilmesi istendi. Kalan adımlar Güncelleme durumu bölümünde gösterilir.",
   "Update all could not finish: {0}": "Tümünü güncelle tamamlanamadı: {0}",
-  "Choose Update all to retry.": "Yeniden denemek için Tümünü güncelle seçeneğini seçin.",
   "Update check failed": "Güncelleme kontrolü başarısız",
   "Downloading {0}": "{0} indiriliyor",
   "Ready to install {0}": "{0} yüklenmeye hazır",
