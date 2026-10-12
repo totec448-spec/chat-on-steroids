@@ -8,16 +8,6 @@ type Shot = { src: string; spots: Spot[] };
 
 // Only reviewed, redacted captures belong here: placeholders stand in for every name, address and id.
 const guides: Record<string, Shot[]> = {
-  extension: [
-    { src: new URL('./setup-images/browser-extensions.png', import.meta.url).href, spots: [
-      { text: 'Turn on Developer mode.', box: [85, 3, 14, 18] }
-    ] }
-  ],
-  'extension-load': [
-    { src: new URL('./setup-images/browser-extensions.png', import.meta.url).href, spots: [
-      { text: 'Load the extension', box: [2, 25, 12.5, 15] }
-    ] }
-  ],
   signin: [
     { src: new URL('./setup-images/cos-browser-sign-in.png', import.meta.url).href, spots: [
       // Two places side by side: the pins take opposite corners so neither covers the other.
