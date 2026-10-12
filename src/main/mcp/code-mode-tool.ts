@@ -4,6 +4,7 @@ import { guard, failIdentity, type SurfaceRegistrar, type ToolResult } from './k
 import { codeModeSchema, runCodeMode, CODE_MODE_LIMITS, type CodeModeTool, type CodeModeOptions } from './code-mode-runtime.js';
 import { toolDeclaration } from './tool-declarations.js';
 import { SURFACES, surfaceDefinition, type SurfaceId } from './surfaces.js';
+import { connectorsSharingTunnel } from '../../shared/tunnel-ids.js';
 
 /** Contract checked against OpenAI Codex 634ebc1865c6ac840ed3ba118f040d527bf4b55d,
  * code-mode-protocol/src/description.rs and core/src/tools/code_mode/execute_spec.rs.
@@ -32,10 +33,7 @@ export function unknownToolReferences(code: string, available: readonly string[]
 
 /** Connectors whose configured Secure Tunnel ID equals this connector's. */
 function sharedTunnelConnectors(surface: SurfaceId): SurfaceId[] {
-  const tunnel = getConfig().tunnel;
-  const ids: Record<SurfaceId, string> = { core: tunnel.tunnelId ?? '', desktop: tunnel.desktopTunnelId ?? '', plugins: tunnel.pluginsTunnelId ?? '' };
-  const own = ids[surface].trim();
-  return own ? (Object.keys(ids) as SurfaceId[]).filter(other => other !== surface && ids[other].trim() === own) : [];
+  return connectorsSharingTunnel(getConfig().tunnel, surface);
 }
 
 /**
