@@ -51,7 +51,9 @@ const expectedPlist = {
   LSApplicationCategoryType: 'public.app-category.developer-tools',
   LSMinimumSystemVersion: '13.0',
   NSScreenCaptureUsageDescription:
-    'Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.'
+    'Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.',
+  NSLocalNetworkUsageDescription:
+    'Chat On Steroids connects to devices and services on your local network when you run approved tools or commands.'
 };
 for (const [key, expected] of Object.entries(expectedPlist)) {
   const actual = plistValue(key);

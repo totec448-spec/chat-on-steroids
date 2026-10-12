@@ -221,6 +221,13 @@ it('outlines a running turn in ChatGPT\'s order: sentences, this app\'s calls, r
   expect(JSON.stringify(trace)).not.toContain('PRIVATE_HIDDEN_GROUP');
   expect(JSON.stringify(trace)).not.toContain('NEVER_COPY_TOOL_ARGS');
 });
+it('names the user message that opened each turn, so its outline is filed under the right one (#1301)', async () => {
+  const f = fixture();
+  expect((await f.ask()).turns[0].question).toBe(USER);
+  // A turn whose first item is not a user message names none.
+  f.entry.turn.items.shift();
+  expect((await f.ask()).turns[0].question).toBeUndefined();
+});
 it('says what a running turn is doing with the open thought ChatGPT shows, and nothing once it ends', async () => {
   const f = fixture();
   // Observed 2026-10-08: the group's activeReasoning is the status line until the round closes.

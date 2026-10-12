@@ -52,4 +52,6 @@ export interface ProjectFileSaveResult {
 export interface ProjectFilesChanged {
   projectId: string;
   directory: string;
+  /** The native handle was lost; re-admit the visible directories through the sandbox. */
+  watchLost?: boolean;
 }

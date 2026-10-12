@@ -54,6 +54,17 @@ The dropdown is disabled and explains the override; unrelated Settings changes r
 Remove the override from the launch environment and restart CoS to use this selector. The existing
 comma-separated override and port `0` remain available for isolated development/tests.
 
+## Background tabs
+
+With **Background chats** on, the tabs the app opens for workers and recovered chats stay in the
+background. **Settings → Browser & history → Background tabs open in** chooses where: **Their own
+minimized window** (default) or **A tab group in your browser window**. The tab group is a collapsed
+"Chat On Steroids" group in the window you used last, and it stays there. The app never selects a
+tab or changes the window you are using. Chrome saves open tab groups automatically. The app's
+group closes with its last chat, so it isn't kept, but if you close that window while app chats are
+open, Chrome may keep the group in its saved groups, where you can delete it. Browsers without tab
+groups use the window.
+
 ## Local control API
 
 **Settings → General → For developers → Local control API** (off by default) lets an agent running on

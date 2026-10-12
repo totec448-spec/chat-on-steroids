@@ -1,4 +1,5 @@
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
+import type { DictationEvent } from '../shared/dictation.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
@@ -94,6 +95,16 @@ export interface SessionDetail {
 }
 
 const api = {
+  /** System.Speech is available only through Windows PowerShell. */
+  dictationSupported: process.platform === 'win32',
+  /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
+  startDictation: () => call<{ status: 'starting' }>('dictation:start'),
+  stopDictation: () => call<void>('dictation:stop'),
+  onDictationEvent: (listener: (event: DictationEvent) => void): (() => void) => {
+    const wrapped = (_event: unknown, value: DictationEvent): void => listener(value);
+    ipcRenderer.on('dictation:event', wrapped);
+    return () => ipcRenderer.removeListener('dictation:event', wrapped);
+  },
   terminalCreate: (id: string, projectId: string | null, cols: number, rows: number) => call<WorkspaceTerminalInfo>('workspaceTerminal:request', { action: 'create', id, projectId, cols, rows }),
   terminalWrite: (id: string, data: string) => call<void>('workspaceTerminal:request', { action: 'write', id, data }),
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
@@ -248,6 +259,7 @@ const api = {
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
+  retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),

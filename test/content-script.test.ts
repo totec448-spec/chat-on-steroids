@@ -1821,8 +1821,11 @@ describe('desktop input delivery and helper ownership', () => {
     ['a malformed path', { path: 'https://evil.example/', name: 'Chat On Steroids Core' }, null]
   ])('mentions %s on a desktop-delivered prompt (#861)', async (_case, report, expected) => {
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
+        core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins' } }),
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed() } })
     });
+    await settle();
     if (report) live.window.dispatchEvent(new live.window.MessageEvent('message', {
       source: live.window as unknown as Window, origin: 'https://chatgpt.com', data: { type: 'cos-core-mention', ...report } }));
     live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
@@ -1900,6 +1903,62 @@ describe('desktop input delivery and helper ownership', () => {
     adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
     expect(mentions).toEqual([expected]);
+  });
+
+  it('takes no Core for its own while the app has not named it', async () => {
+    // Seen live (2026-10-11): a suffixed computer's fresh tab got the plugin list before the app's
+    // names, matched the plain "Chat On Steroids Core" (the other computer's) and reported it as
+    // its own. The worker remembered it under this computer's name, and a later Compact & Resume
+    // bootstrap mentioned the other computer's Core, whose sandbox refused the chat's calls.
+    const asks: any[] = [];
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0 }),
+      core_plugin: (message: unknown) => { asks.push(message); return { ok: true, data: {} }; },
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed() } })
+    });
+    await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com', data: { type: 'cos-core-mention', path: null, name: null,
+        candidates: [{ name: 'Chat On Steroids Core', path: 'app://asdk_app_mac1111' },
+          { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win2222' }], pluginList: true } }));
+    await settle();
+    expect(asks).toEqual([]);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'unnamed-core-receipt', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(mentions).toEqual([null]);
+    expect(asks).toEqual([]);
+  });
+
+  it('does not mention a remembered Core that another app id has been proven against', async () => {
+    // A sighting remembered under this computer's name before the fix above can name the other
+    // computer's app. The app's proven Core id outranks it.
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
+        core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' },
+        connectorApps: { core: [{ appId: 'asdk_app_win2222', linkId: 'link_w', name: 'Chat On Steroids Core (Windows)' }], desktop: [], plugins: [] },
+        ownCoreApp: { appId: 'asdk_app_mac1111', name: 'Chat On Steroids Core (Windows)' } }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed() } })
+    });
+    await settle();
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'poisoned-core-receipt', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(mentions).toEqual([null]);
   });
 
   it('hands the proven connector apps to fiber.js with every scan', async () => {
@@ -1989,6 +2048,8 @@ describe('desktop input delivery and helper ownership', () => {
     // a person's request for a picture; every other message keeps the mention (setting on).
     const core = { path: 'app://asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', name: 'Chat On Steroids Core' };
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
+        core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins' } }),
       activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [], mentionCore: true } }),
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.response ? { ok: true } : { input: claimed({ ...extra }) } })
     });
@@ -4194,7 +4255,10 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
         rawText: 'Checking ownership.',
         renderedHtml: '<p>Checking ownership.</p>'
       }],
-      activities: [{ messageId: 'thought-late-owner-0', label: 'Inspecting ownership' }]
+      activities: [{ messageId: 'thought-late-owner-0', label: 'Inspecting ownership' }],
+      // #1301: the outline names the user message that opened its page turn.
+      trace: [{ kind: 'say', text: 'Checking ownership.', done: false }],
+      question: 'q-late-owner'
     };
     await replyFiber([], [descriptor]);
     await live.hook.flush();
@@ -4222,6 +4286,7 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(emitted(live.sent, 'assistant_message').at(-1)!.event.turnId).toBe(opened);
     expect(emitted(live.sent, 'page_tool').at(-1)!.event.turnId).toBe(opened);
     expect(emitted(live.sent, 'tool_evidence').at(-1)!.event.turnId).toBe(opened);
+    expect(emitted(live.sent, 'turn_trace').at(-1)!.event).toMatchObject({ turnId: opened, question: 'q-late-owner' });
   });
 
   it('publishes one stable native activity id and revises only its label', async () => {
@@ -8672,7 +8737,9 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends).toHaveLength(1);
     expect(ends[0]).toMatchObject({
       outcome: 'interrupted',
-      detail: 'a new user message replaced the unfinished turn'
+      detail: 'a new user message replaced the unfinished turn',
+      // ChatGPT carries an unfinished answer on past a message sent into it (#1301).
+      continued: true
     });
   });
 
@@ -8739,7 +8806,9 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends[0]!.turnId).toBe(firstGeneration);
     expect(ends[0]).toMatchObject({
       outcome: 'interrupted',
-      detail: 'a new user message replaced the unfinished turn'
+      detail: 'a new user message replaced the unfinished turn',
+      // ChatGPT carries an unfinished answer on past a message sent into it (#1301).
+      continued: true
     });
   });
 
@@ -8824,6 +8893,23 @@ describe('a stop button that goes missing while the turn is still running', () =
     const stalled = emitted(live.sent, 'chat_error').filter(row => /ten minutes/.test(String(row.event.text)));
     expect(stalled, kind === 'steered' ? 'live steered work was reported stalled' : 'unrelated work hid a stall')
       .toHaveLength(kind === 'steered' ? 0 : 1);
+  });
+
+  it('marks the end of a turn a message steered as continued (#1301)', async () => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        userAnchors: [{ seq: 1, time: 1_787_165_090_500, messageId: 'm-older-user' }] } })
+    });
+    userTurn(live.document, 'older-user', 'the question before', { sent: false });
+    await live.hook.pullActivity();
+    userTurn(live.document, 'steer-first', 'run the import', { sent: false });
+    startGenerating(live.document, { send: false });
+    for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
+    const first = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    // Typed while it works: Stop never goes away, and ChatGPT carries the answer on.
+    userTurn(live.document, 'steer-second', 'also keep the tag', { sent: false });
+    for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
+    expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
   });
 
   it('keeps an in-flight Fiber scan owned by the generation that requested it', async () => {
@@ -15508,6 +15594,52 @@ describe('the fresh chat the app opened', () => {
     await settle();
   });
 
+  it('mentions this install\'s own Core on the bootstrap before its first status reply', async () => {
+    // Seen live (2026-10-11): a computer with a suffix shares its ChatGPT account with another
+    // computer. Its resume tab sent the bootstrap before status arrived, matched the plain
+    // "Chat On Steroids Core" (the other computer's) and the new chat called that computer's tools.
+    let releaseStatus: () => void = () => undefined;
+    const statusHeld = new Promise((resolve) => {
+      releaseStatus = () => resolve({ connected: true, paired: true, port: 8765, pending: 0 });
+    });
+    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
+    let releaseRedeem: () => void = () => undefined;
+    const redeemHeld = new Promise((resolve) => {
+      releaseRedeem = () => resolve({
+        ok: true,
+        command: { id: 'cmd-own-core', type: 'resume', text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nthe brief', agent: null },
+        identity: { connectorNames: names, connectorApps: { core: [], desktop: [], plugins: [] }, ownCoreApp: null }
+      });
+    });
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-own-core',
+      {
+        status: () => statusHeld,
+        redeem: () => redeemHeld,
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          dom.reconfigure({ url: 'https://chatgpt.com/c/12121212-3434-5656-7878-909090909091' });
+        });
+      }
+    );
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com', data: { type: 'cos-core-mention', path: null, name: null,
+        candidates: [{ name: 'Chat On Steroids Core', path: 'app://asdk_app_mac1111' },
+          { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win2222' }], pluginList: true } }));
+    releaseRedeem();
+    await settle(200);
+    await settle();
+    expect(mentions).toEqual([{ path: 'app://asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' }]);
+    releaseStatus();
+    await settle();
+  });
+
   it('redeems the one command its URL names and crosses the durable destination fence', async () => {
     let submitted = '';
     live = await harness(
@@ -18276,6 +18408,78 @@ describe('one live isolated-world recorder per document', () => {
     expect(oldControl!.isConnected).toBe(false);
     expect(live.document.querySelector('[data-clf-composer]')).toBeNull();
     expect(live.listenerCounts()).toEqual({ runtime: 0, storage: 0 });
+  });
+
+  /** A Web Locks stand-in: `held` lists the locks whose callback promise has not settled yet. */
+  function fakeLocks() {
+    const held: string[] = [];
+    const request = vi.fn((name: string, callback: () => unknown) => {
+      held.push(name);
+      return Promise.resolve(callback()).then(() => { held.splice(held.indexOf(name), 1); });
+    });
+    return { request, held };
+  }
+  const withLocks = (locks: unknown) => (_document: Document, dom: JSDOM) => {
+    Object.defineProperty(dom.window.navigator, 'locks', { value: locks, configurable: true });
+  };
+
+  it('holds one uniquely named Web Lock when the worker says the tab sits in the app group (#128)', async () => {
+    const locks = fakeLocks();
+    live = await harness(undefined, { register_document: () => ({ ok: true, keepAwake: true }) }, withLocks(locks));
+    await settle();
+    expect(live.sent.some(message => message.type === 'register_document')).toBe(true);
+    expect(locks.request).toHaveBeenCalledTimes(1);
+    expect(locks.request.mock.calls[0]![0]).toMatch(/^chat-on-steroids-keep-awake-[a-z0-9]{8,}$/);
+    expect(locks.held).toHaveLength(1);
+  });
+
+  it('holds no lock for a tab outside the app group (#128)', async () => {
+    const locks = fakeLocks();
+    live = await harness(undefined, {}, withLocks(locks));
+    await settle();
+    expect(live.sent.some(message => message.type === 'register_document')).toBe(true);
+    expect(locks.request).not.toHaveBeenCalled();
+  });
+
+  it('takes and releases the keep-awake lock on the worker\'s word, once each (#128)', async () => {
+    const locks = fakeLocks();
+    live = await harness(undefined, {}, withLocks(locks));
+    await settle();
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: true });
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: true });
+    expect(locks.request).toHaveBeenCalledTimes(1);
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: false })).resolves.toEqual({ ok: true, held: false });
+    await settle();
+    expect(locks.held).toHaveLength(0);
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: true });
+    expect(locks.request).toHaveBeenCalledTimes(2);
+    expect(locks.request.mock.calls[1]![0]).not.toBe(locks.request.mock.calls[0]![0]);
+  });
+
+  it('answers without a lock where the browser has no Web Locks (#128)', async () => {
+    live = await harness(undefined, {}, withLocks(undefined));
+    await settle();
+    await expect(live.runtimeMessage({ type: 'clf-keep-awake', on: true })).resolves.toEqual({ ok: true, held: false });
+  });
+
+  it('passes on an app the response stream names for this chat, once per request (#1305)', async () => {
+    live = await harness();
+    await settle();
+    const chat = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const sighting = { requestId: '11111111-2222-4333-8444-555555555555', appId: 'asdk_app_6ac261da', linkId: 'link_6ac26253', appName: 'Chat On Steroids Core' };
+    const publish = (conversationId: string, sightings: unknown[]) => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-app-sighting', conversationId, sightings }
+    }));
+    publish(chat, [sighting]); await settle();
+    publish(chat, [sighting]); await settle();
+    // Another chat's stream, a malformed id or a foreign page says nothing about this one.
+    publish('bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', [{ ...sighting, requestId: '22222222-2222-4333-8444-555555555555' }]); await settle();
+    publish(chat, [{ ...sighting, requestId: '33333333-2222-4333-8444-555555555555', appId: 'not-an-app' }]); await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', { source: live.window as unknown as Window, origin: 'https://evil.example',
+      data: { type: 'cos-app-sighting', conversationId: chat, sightings: [{ ...sighting, requestId: '44444444-2222-4333-8444-555555555555' }] } }));
+    await settle(); await live.hook.flush(); await settle();
+    expect(emitted(live.sent, 'app_sightings').map(row => row.event.apps)).toEqual([[sighting]]);
   });
 
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
@@ -22933,5 +23137,108 @@ describe('releasing a handoff click ChatGPT never received (page)', () => {
     await pull;
     await drain();
     expect(releases).toEqual([]);
+  });
+});
+
+/** #1176: the helper page creates a new CoS project's native ChatGPT Project through ChatGPT's own dialog. */
+describe('creating a native ChatGPT Project', () => {
+  const request = { id: 'aaaaaaaa-1111-4222-8333-444444444444', name: 'my-app' };
+  const nativeId = `g-p-${'f'.repeat(32)}`;
+  const shown = (node: Element) => { (node as HTMLElement).getClientRects = () => [{ width: 100, height: 20 }] as unknown as DOMRectList; };
+  function nativeDialog(document: Document, dom: JSDOM, created = true, landsOn = nativeId) {
+    const button = document.createElement('button');
+    button.setAttribute('data-app-action-sidebar-project-create', ''); button.setAttribute('aria-label', 'Adicionar novo projeto');
+    shown(button); document.body.append(button);
+    button.addEventListener('click', () => {
+      const dialog = document.createElement('div');
+      dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
+      dialog.innerHTML = '<form><input id="chatgpt-project-name" name="project-name" type="text"><button type="submit" disabled>Criar projeto</button></form>';
+      shown(dialog); document.body.append(dialog);
+      const input = dialog.querySelector('input')!, submit = dialog.querySelector('button')!;
+      input.addEventListener('input', () => { submit.disabled = !input.value; });
+      submit.addEventListener('click', event => {
+        event.preventDefault();
+        if (!created) return;
+        dialog.remove();
+        dom.reconfigure({ url: `https://chatgpt.com/g/${landsOn}/project` });
+      });
+    });
+  }
+
+  it('claims, arms before the click, and reports only the id of the Project page ChatGPT opens', async () => {
+    const reports: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/?cos-project-create=${request.id}`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    }, (document, dom) => nativeDialog(document, dom));
+    expect(await live.runtimeMessage({ type: 'clf-project-create', request })).toEqual({ ok: true });
+    expect(reports.map(row => row.action)).toEqual(['claim', 'arm', 'done']);
+    expect(reports[2]).toMatchObject({ id: request.id, chatgptId: nativeId });
+    expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toMatchObject({ safe: true });
+  });
+
+  it('fails the claimed request, before anything is armed, when ChatGPT shows no New project control', async () => {
+    const reports: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/?cos-project-create=${request.id}`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    });
+    const created = live.runtimeMessage({ type: 'clf-project-create', request });
+    await settle(21_000);
+    expect(await created).toEqual({ ok: false });
+    expect(reports.map(row => row.action)).toEqual(['claim', 'fail']);
+  });
+
+  it.each(['root', 'project'] as const)('claims a new chat of a linked project only on that Project page (%s)', async page => {
+    const inputId = 'cccccccc-1111-4222-8333-444444444444';
+    const project = `g-p-${'1'.repeat(32)}`;
+    const url = page === 'root' ? `https://chatgpt.com/?cos-input=${inputId}#cos-input=${inputId}`
+      : `https://chatgpt.com/g/${project}-my-app/project?cos-input=${inputId}#cos-input=${inputId}`;
+    live = await harness(url, { desktop_input: () => ({ ok: true, data: { input: null } }) });
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    await settle(200);
+    const claims = live.sent.filter(message => message.type === 'desktop_input' && message.requiresAuthorization);
+    if (page === 'root') expect(claims).toEqual([]);
+    else expect(claims).toEqual([expect.objectContaining({ id: inputId, conversationId: null, project })]);
+  });
+
+  it("never takes a Project the sidebar already listed for the new one", async () => {
+    const known = `g-p-${'2'.repeat(32)}`;
+    const reports: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/?cos-project-create=${request.id}`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    }, (document, dom) => {
+      const link = document.createElement('a'); link.href = `/g/${known}-old/project`; link.textContent = 'Old project';
+      document.body.append(link);
+      nativeDialog(document, dom, true, known);
+    });
+    const created = live.runtimeMessage({ type: 'clf-project-create', request });
+    await settle(21_000);
+    expect(await created).toEqual({ ok: false });
+    expect(reports.map(row => row.action)).toEqual(['claim', 'arm', 'fail']);
+  });
+
+  it('clicks the native control once more when the first click opens no dialog, before arming anything', async () => {
+    const reports: Array<Record<string, any>> = [];
+    let clicks = 0;
+    live = await harness(`https://chatgpt.com/?cos-project-create=${request.id}`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    }, (document, dom) => {
+      nativeDialog(document, dom);
+      const control = document.querySelector('[data-app-action-sidebar-project-create]')!;
+      control.addEventListener('click', event => { if (++clicks === 1) event.stopImmediatePropagation(); }, true);
+    });
+    const created = live.runtimeMessage({ type: 'clf-project-create', request });
+    await settle(9_000);
+    expect(await created).toEqual({ ok: true });
+    expect(clicks).toBe(2);
+    expect(reports.map(row => row.action)).toEqual(['claim', 'arm', 'done']);
+  });
+
+  it('does nothing on a page that is not the helper for that exact request', async () => {
+    const reports: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/?cos-project-create=bbbbbbbb-1111-4222-8333-444444444444`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    }, (document, dom) => nativeDialog(document, dom));
+    expect(await live.runtimeMessage({ type: 'clf-project-create', request })).toEqual({ ok: false });
+    expect(reports).toEqual([]);
   });
 });

@@ -70,15 +70,30 @@ app.whenReady().then(async () => {
       await until(`document.getElementById('updateReadinessSummary').dataset.ready==='true'`);
       assert.equal(await js(`document.querySelectorAll('.update-readiness .check.is-ok').length`),3);
       assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),false,'Completed status is compact');
+      assert.ok(await js(`document.querySelector('.update-readiness').getBoundingClientRect().height`) < 100,'Completed status uses one compact row');
       assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return r.height>0&&b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Update all remains visible and receives pointer input');
       if(lang==='en') await shot('compact-'+theme+'.png');
-      await js(`document.querySelector('#updateReadinessDetails > summary').click()`);
+      await js(`document.getElementById('updateReadinessSummary').click()`);
+      assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'The compact status line opens the full card');
       const geometry = await js(`(()=>{const c=document.querySelector('.update-readiness'),a=document.getElementById('updateReviewSetup').getBoundingClientRect();
         return {clipped:[...c.querySelectorAll('strong,p,button')].some(e=>e.scrollWidth>e.clientWidth+1),sideways:c.scrollWidth>c.clientWidth,bottom:a.bottom,height:c.getBoundingClientRect().height,title:document.getElementById('updateReadinessTitle').textContent}})()`);
       assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<600,JSON.stringify(geometry));
       if (lang==='ja') assert.equal(geometry.title,'更新状況');
       await shot('ready-'+lang+'-'+theme+'.png');
     }
+    await open('lang=en');
+    await js(`document.getElementById('updateReadinessToggle').focus()`);
+    win.webContents.focus();
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'});
+    win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
+    win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
+    await until(`document.getElementById('updateReadinessDetails').open`);
+    assert.equal(await js(`document.getElementById('updateReadinessToggle').getAttribute('aria-expanded')`),'true');
+    await js(`window.fixturePush(structuredClone(window.fixtureState))`);
+    assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'Identical pushes preserve manual expansion');
+    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core={schemaId:'schema-a',state:'unknown',responding:true};window.fixturePush(next)})()`);
+    assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'Operational but unverified schemas need attention');
+    await pause(600); await shot('schema-unverified-expanded-en.png');
     win.setContentSize(700,850);
     for (const lang of ['en','ja']) {
       await open('lang='+lang);
@@ -176,6 +191,20 @@ app.whenReady().then(async () => {
       await js(macState());
       const catalog = lang==='en' ? null : JSON.parse(fs.readFileSync(path.join(root,'src/renderer/locales',lang+'.json'),'utf8'));
       const copy = key => catalog ? catalog[key] : key;
+      // A live inspection failure must remain explicit even if a tool call worked.
+      // The provider's current management page need not display a tool list.
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core={schemaId:'schema-a',state:'failed',failure:'inspection',responding:true};window.fixturePush(next)})()`);
+      const inspectionCopy = await js(`document.querySelector('[data-update-part="core"]').textContent`);
+      assert.ok(inspectionCopy.includes(copy('Connector check failed')),lang+' inspection is not called a failed Refresh');
+      assert.ok(inspectionCopy.includes(copy("Open this connector's settings in ChatGPT, then choose Update all to recheck. If the check still fails, save a Diagnostics report from Activity.")),lang+' current management settings and diagnostic guidance');
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false',lang+' successful use cannot erase failed inspection');
+      assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true);
+      assert.equal(await js(`(()=>{const c=document.querySelector('.update-readiness');return c.scrollWidth<=c.clientWidth+1&&[...c.querySelectorAll('p,button')].every(e=>e.scrollWidth<=e.clientWidth+1)})()`),true,lang+' inspection copy is not horizontally clipped');
+      assert.deepEqual(await js('window.mutations'),[],'Displaying inspection failure never retries');
+      if(lang==='en'){await pause(200);await shot('inspection-failure-max-text-en.png');}
+      await js(`(()=>{const next=structuredClone(window.fixtureMacState);next.bridge.extensionVersion='99.0.1';window.fixturePush(next)})()`);
+      assert.ok(await js(`document.querySelector('[data-update-part="extension"]').textContent.includes(${JSON.stringify(copy('Choose Update all to check for updates and update the app.'))})`),lang+' newer extension directs the person to update the app');
+      await js(`window.fixturePush(window.fixtureMacState)`);
       assert.ok(await js(`document.querySelector('[data-update-part="app"]').textContent.includes(${JSON.stringify(copy('Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.'))})`),lang+' manual replacement instructions');
       assert.ok(await js(`document.querySelector('[data-update-part="desktop"]').textContent.includes(${JSON.stringify(copy('Choose Review setup to check macOS permissions, then fully quit and reopen the app.'))})`),lang+' permission instructions');
       assert.equal(await js(`document.querySelector('[data-update-part="desktop"]').classList.contains('is-bad')`),true);
@@ -198,6 +227,8 @@ app.whenReady().then(async () => {
         document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'Could not read plugin-refresh state'})`);
       await until(`!document.getElementById('updateAll').disabled`);
       await until(`!document.querySelector('.toast')`);
+      assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'A new failure expands the card');
+      await js(`document.getElementById('updateReadinessToggle').click()`);
       const accessible=await js(`(()=>{const card=document.querySelector('.update-readiness'),b=document.getElementById('updateAll'),r=b.getBoundingClientRect(),e=document.getElementById('updateAllError'),n=document.getElementById('updateAllNotice'),d=document.getElementById('updateReadinessDetails');return {closed:!d.open,visible:e.checkVisibility(),outside:!d.contains(e)&&!d.contains(n),errorBottom:e.getBoundingClientRect().bottom,buttonVisible:r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)),sideways:card.scrollWidth>card.clientWidth+1,clipped:[...card.querySelectorAll('p,button')].filter(x=>x.checkVisibility()&&x.scrollWidth>x.clientWidth+1).map(x=>x.id),text:e.textContent,viewport:innerHeight}})()`);
       assert.ok(accessible.closed&&accessible.visible&&accessible.outside&&accessible.buttonVisible&&!accessible.sideways&&!accessible.clipped.length&&accessible.errorBottom<=accessible.viewport,lang+': '+JSON.stringify(accessible));
       assert.ok(!accessible.text.includes('Could not read plugin-refresh state'),lang+' authored diagnostic is translated');

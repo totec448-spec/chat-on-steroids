@@ -46,15 +46,7 @@ export class ProjectFileWatchSet {
     this.projectId = projectId;
     const desired = new Set(unique.map(directory => `${projectId}\0${directory}`));
 
-    for (const [key, existing] of this.watched) {
-      if (!desired.has(key)) {
-        existing.watcher.close();
-        this.watched.delete(key);
-        const timer = this.timers.get(key);
-        if (timer) clearTimeout(timer);
-        this.timers.delete(key);
-      }
-    }
+    for (const key of this.watched.keys()) if (!desired.has(key)) this.retire(key);
 
     for (const directory of unique) {
       if (generation !== this.generation || this.projectId !== projectId) return;
@@ -64,27 +56,31 @@ export class ProjectFileWatchSet {
       try {
         target = await projectFileTarget(projectId, directory, { allowRoot: true });
       } catch {
+        if (generation !== this.generation || this.projectId !== projectId) return;
         // An expanded folder may disappear between a parent rename event and this resync.
         // The parent listing refresh will prune it; a missing watch is safer than guessing.
-        if (existing) { existing.watcher.close(); this.watched.delete(key); }
+        if (existing && this.watched.get(key) === existing) this.retire(key);
         continue;
       }
       if (generation !== this.generation || this.projectId !== projectId) return;
-      if (target.kind !== 'directory') continue;
+      if (target.kind !== 'directory') { this.retire(key); continue; }
       if (existing?.real === target.real) continue;
-      if (existing) { existing.watcher.close(); this.watched.delete(key); }
+      if (existing) this.retire(key);
 
       let watcher: FSWatcher;
       try {
-        watcher = this.watchFactory(target.real, () => this.schedule(projectId, directory));
+        watcher = this.watchFactory(target.real, () => {
+          if (this.watched.get(key)?.watcher === watcher) this.schedule(projectId, directory);
+        });
       } catch {
         continue;
       }
       watcher.on('error', () => {
         if (this.watched.get(key)?.watcher !== watcher) return;
-        watcher.close();
-        this.watched.delete(key);
-        this.schedule(projectId, directory);
+        this.retire(key);
+        // A missing watch cannot pass schedule()'s live-watch check. Tell its owner
+        // once so Files invalidates its admission signature and revalidates the path.
+        this.changed({ projectId, directory, watchLost: true });
       });
       if (generation !== this.generation || this.projectId !== projectId || !desired.has(key)) {
         watcher.close();
@@ -109,6 +105,14 @@ export class ProjectFileWatchSet {
       this.timers.delete(key);
       if (this.projectId === projectId && this.watched.has(key)) this.changed({ projectId, directory });
     }, CHANGE_DEBOUNCE_MS));
+  }
+
+  private retire(key: string): void {
+    this.watched.get(key)?.watcher.close();
+    this.watched.delete(key);
+    const timer = this.timers.get(key);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(key);
   }
 
   private closeAll(): void {

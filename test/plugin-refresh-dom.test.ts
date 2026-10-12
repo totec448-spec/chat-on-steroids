@@ -220,6 +220,40 @@ it('refuses a same-named app once another app id is proven for that connector', 
   api.setConnectorApps({ core: [{ appId: 'asdk_app_other', linkId: null, name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
   expect(await api.pluginRefreshView('Chat On Steroids Core', [tool])).toBeNull();
 });
+it.each(['legacy', 'native'])('retains proven identity when the request itself uses the renamed name (%s)', async route => {
+  const fixture = route === 'native' ? settingsPage() : page();
+  const connector = 'connector' in fixture ? fixture.connector : fixture.props.connector;
+  const api = fixture.api; connector.name = 'Renamed';
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_other', name: 'Renamed' }], desktop: [], plugins: [] });
+  expect(await api.pluginRefreshView('Renamed', [tool])).toBeNull();
+  // A legitimately recreated connector becomes usable when its own ID is proven.
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_other', name: 'Renamed' },
+    { appId: 'asdk_app_synthetic', name: 'Renamed' }], desktop: [], plugins: [] });
+  expect(await api.pluginRefreshView('Renamed', [tool])).toMatchObject({ appId: 'asdk_app_synthetic' });
+});
+it('refuses a name shared by different proven surfaces rather than guessing one', async () => {
+  const { api, props } = page(); props.connector.name = 'Renamed';
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Renamed' }],
+    desktop: [{ appId: 'asdk_app_desktop', name: 'Renamed' }], plugins: [] });
+  expect(await api.pluginRefreshView('Renamed', [tool])).toBeNull();
+  expect(api.pluginInstalledButtons('Renamed')).toBeNull();
+  expect(await api.pluginRefreshView('Renamed', [tool], 'asdk_app_synthetic')).toMatchObject({ appId: 'asdk_app_synthetic' });
+  expect(await api.pluginRefreshView('Renamed', [tool], 'asdk_app_desktop')).toBeNull();
+  props.connector.name = 'Chat On Steroids Desktop';
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: props.connector.name }], desktop: [], plugins: [] });
+  expect(await api.pluginRefreshView(props.connector.name, [tool])).toBeNull();
+});
+it('retains the Plugins declaration budget after a proven rename', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Renamed Plugins';
+  connector.actions = Array.from({ length: 118 }, (_, i) => ({ name: `plugin_tool_${i}`, description: `Tool ${i}`,
+    description_model: '', params: tool.inputSchema }));
+  api.setConnectorApps({ core: [], desktop: [], plugins: [{ appId: connector.id, name: connector.name }] });
+  expect((await api.pluginRefreshView(connector.name)).tools).toHaveLength(118);
+  connector.name = 'Chat On Steroids Core';
+  api.setConnectorApps({ core: [], desktop: [], plugins: [{ appId: connector.id, name: connector.name }] });
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+  expect((await api.pluginRefreshView(connector.name, [], connector.id)).tools).toHaveLength(118);
+});
 it('finds a renamed connector\'s installed row by its proven current name', () => {
   const { api } = page(); const panel = dom.window.document.querySelector('section')!;
   panel.setAttribute('aria-labelledby', 'settings-trigger-Erweiterungen');

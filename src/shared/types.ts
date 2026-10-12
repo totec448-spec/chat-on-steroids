@@ -141,6 +141,8 @@ export interface UiPrefs {
   /** Maintenance may reuse existing tabs but cannot open helpers or missing chats. */
   browserOnly?: boolean;
   backgroundChats?: boolean;
+  /** Where background tabs go: the app's minimized window, or a collapsed tab group in the user's window (#128). */
+  backgroundPlacement?: 'window' | 'group';
   browserBridgePort?: import('./browser-bridge.js').BrowserBridgePort;
   /** Opt-in browser automation for changed connector tool schemas. */
   autoRefreshPlugins?: boolean;

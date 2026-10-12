@@ -2703,11 +2703,15 @@ var CLF_DOM = (() => {
     return changed;
   }
   const connectorApps = () => ownApps.map(app => ({ ...app }));
-  /** The proven apps of the surface that a configured connector name belongs to (renames keep the id). */
+  /** Configured and learned names select one surface; renames never discard its proven IDs. */
   function provenAppsFor(connectorName) {
     const at = connectorNames().indexOf(connectorName);
-    if (at < 0) return [];
-    const surface = ['core', 'desktop', 'plugins'][at];
+    const surfaces = new Set(ownApps.filter(app => app.name === connectorName).map(app => app.surface));
+    if (at >= 0) surfaces.add(['core', 'desktop', 'plugins'][at]);
+    // A learned name can collide with another surface's learned or configured name.
+    // That ambiguity is not permission to fall back to name-only enrollment.
+    if (surfaces.size > 1) return null;
+    const surface = [...surfaces][0];
     return ownApps.filter(app => app.surface === surface);
   }
   /** This install's three names, or the plain ones while the app has not said. */
@@ -2717,7 +2721,12 @@ var CLF_DOM = (() => {
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
-    const externalPlugins = pluginsConnectorName(connectorName);
+    // A durable exact-ID request already identifies its connector even when names collide.
+    // Use that ID's proven surface for limits too, rather than borrowing another surface's name.
+    const identified = expectedAppId ? ownApps.filter(app => app.appId === expectedAppId) : [];
+    const proven = identified.length ? identified : provenAppsFor(connectorName);
+    if (proven === null && !expectedAppId) return null;
+    const externalPlugins = proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2745,12 +2754,14 @@ var CLF_DOM = (() => {
    */
   function ownSnapshot(snapshot, connectorName) {
     const proven = provenAppsFor(connectorName);
-    return proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName;
+    return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
   function pluginInstalledButtons(connectorName) {
     // The installed list shows only names. A renamed connector shows its proven current name; the
     // page opened from the row is then checked by app id (ownSnapshot), so a name match is no proof.
-    const names = [connectorName, ...provenAppsFor(connectorName).map(app => app.name).filter(Boolean)];
+    const proven = provenAppsFor(connectorName);
+    if (proven === null) return null;
+    const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
     const named = node => names.includes(text(node));
     return safe(() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
@@ -3300,6 +3311,65 @@ var CLF_DOM = (() => {
     });
   }
 
+  /**
+   * ChatGPT's own "new Project" control in its sidebar, or null.
+   *
+   * Located by the attribute ChatGPT's sidebar action carries, not by its label, which is in the
+   * account's language (measured 2026-10-10: `data-app-action-sidebar-project-create`, labelled
+   * "Adicionar novo projeto" on a pt-BR account). Exactly one shown control, or nothing.
+   */
+  function projectCreateControl() {
+    return safe(() => {
+      const shown = [...document.querySelectorAll('button[data-app-action-sidebar-project-create]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
+      return shown.length === 1 ? shown[0] : null;
+    }, null);
+  }
+
+  /**
+   * Opens ChatGPT's collapsed sidebar once so its New project control can show. A narrow window
+   * unmounts the sidebar, and the control lives only there.
+   */
+  function revealSidebar() {
+    return safe(() => {
+      const toggles = [...document.querySelectorAll('button[data-testid="open-sidebar-button"][aria-expanded="false"]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
+      if (toggles.length !== 1) return false;
+      toggles[0].click();
+      return true;
+    }, false);
+  }
+
+  /** Every Project the page links to right now, by id: the account's Projects ChatGPT lists. */
+  function projectIdsShown() {
+    return safe(() => [...new Set([...document.querySelectorAll('a[href]')]
+      .map(link => projectHomeId(new URL(link.href, location.href).pathname)).filter(Boolean))], []);
+  }
+
+  /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
+  function projectCreateForm() {
+    return safe(() => {
+      const dialogs = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+        .filter(node => node.querySelector('input#chatgpt-project-name') && node.getClientRects().length > 0);
+      if (dialogs.length !== 1) return null;
+      const input = dialogs[0].querySelector('input#chatgpt-project-name');
+      const submits = [...dialogs[0].querySelectorAll('button[type="submit"]')];
+      return input && submits.length === 1 ? { dialog: dialogs[0], input, submit: submits[0] } : null;
+    }, null);
+  }
+
+  /** Types a Project name the way React sees a person typing it. */
+  function fillProjectName(input, name) {
+    return safe(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) return false;
+      input.focus();
+      setter.call(input, name);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return input.value === name;
+    }, false);
+  }
+
   async function newChatControl(stillCurrent = () => true) {
     const shown = node => node && !node.closest(OWN_SURFACES) && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const link = (root = document) => [...root.querySelectorAll('a[data-testid="create-new-chat-button"][data-sidebar-item="true"][href="/"]')].find(shown) || null;
@@ -3338,6 +3408,11 @@ var CLF_DOM = (() => {
     prepareChatModelSurface,
     modelPickerReadable,
     newChatControl,
+    projectCreateControl,
+    projectCreateForm,
+    revealSidebar,
+    projectIdsShown,
+    fillProjectName,
     projectHomeId,
     enterProject,
     visibleModelSelection,

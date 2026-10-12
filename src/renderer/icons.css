@@ -78,6 +78,7 @@
 .ph.ph-magnifying-glass::before { content: '\e30c'; }
 .ph.ph-magnifying-glass-minus::before { content: '\e30e'; }
 .ph.ph-magnifying-glass-plus::before { content: '\e310'; }
+.ph.ph-microphone::before { content: '\e326'; }
 .ph.ph-monitor::before { content: '\e32e'; }
 .ph.ph-palette::before { content: '\e6c8'; }
 .ph.ph-paw-print::before { content: '\e648'; }

@@ -211,6 +211,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
+| Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
 
 Keep evidence levels separate in all reports: **source → tests → build → package → installed
 payload → live browser/device/provider behavior**. Passing one level does not prove the next.
@@ -887,6 +888,38 @@ chats receive no project file. Missing AGENTS is fine; an unsafe/unreadable/bina
 preparation visibly. Full prompt budgeting and
 hidden framing are described in §6.
 
+### Native ChatGPT Project for a new CoS project (#1176)
+
+One-way, CoS-owned and only for projects created after this existed: `addProject` gives a new row
+`chatgpt: { state: 'requested' }`; an existing, restored or older row never gets one. The link
+grants no filesystem permission and is never derived from a name. States (`ChatgptProjectLink`):
+`requested` and `claimed` are before any click, so nothing exists remotely; `creating` is written
+before the click that creates the Project (`armProjectCreate`); from there it ends `linked` (the
+id ChatGPT shows on the new Project's own page, reported by the page that armed it) or
+`uncertain` (the app's own timer, `PROJECT_CREATE_ARMED_MS`, also swept at start). `failed` is a
+failure before the click, or a linked Project ChatGPT no longer opens. `uncertain` and `failed`
+are never retried on their own: only the project's "Retry ChatGPT Project" menu item asks again,
+and for `uncertain` it warns that a second Project may result.
+
+The browser does it (`inspectProjectCreates` in background.js): one request at a time in one
+foreground helper tab `https://chatgpt.com/?cos-project-create=<request>` (the dialog needs a
+laid-out page; the person just added the project, so it also runs under `browserOnly`). The page
+(`createChatgptProject`) claims first, opens a collapsed sidebar once, clicks ChatGPT's own control
+(`button[data-app-action-sidebar-project-create]`, labelled in the account's language), types the
+folder name into `input#chatgpt-project-name`, arms, submits, and takes the id only from the
+Project page ChatGPT opens by itself, and only one the sidebar did not list before the click. The
+helper is closed once its request is no longer pending and it proves it holds nothing; a closed
+helper is reopened at most every 2 minutes.
+
+A new chat of a linked project (`pendingBrowserInputs` adds `project`) opens on
+`/g/<id>/project?cos-input=…#cos-input=…`, never by borrowing a tab (ChatGPT's New chat is the
+root); the page claims only on that exact Project home and names it, and `/input/claim` refuses
+anything else. While the Project is being created, or could not be, the message is held and its
+row says so ("Creating this project in ChatGPT…", or the unavailable line pointing at Retry). A
+deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
+`gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
+An opening remembers its Project, so a retry's new Project gets its own tab.
+
 ## 10. Files, terminal, patches and images
 
 **Intent:** provide a predictable coding loop without requiring a Codex installation or launching
@@ -1158,6 +1191,12 @@ plain names. ChatGPT records a connector's calls under the exact name typed (cal
   its own apps, that sighting supplies the mention. Without it a worker's first message went out with
   no mention, and in a shared workspace ChatGPT routed its calls to the other computer's plain Core
   (seen live, 2026-10-07). Only the page's own list counts as the `core_plugin` report.
+- Before a page has the app's names, nothing matches by name: the plain default would be the other
+  computer's Core on a suffixed install. A tab the app opened runs its command before its first
+  `status`, so its Compact & Resume bootstrap mentioned the other computer's Core and the new chat
+  called that computer's tools (seen live, 2026-10-11). The worker's `redeem` reply therefore carries
+  `identity: { connectorNames, connectorApps, ownCoreApp }` with a command, and the page applies it
+  as it would `status`. A proven Core id also outranks a remembered sighting.
 - Plugin refresh treats any "Chat On Steroids Plugins (…)" as the Plugins kind for its action limits.
 - Worker protocol text (the brief and wake-up messages) names this install's exact Core when a
   suffix is set, and the "no run" refusal names the Core that answered: a worker told only "the
@@ -2343,7 +2382,8 @@ Selecting a chat in the app (`sessions:followTab`, preload `followSessionTab`) w
 chats on hands its conversation to the same extensions as `follow`: only the newest selection,
 only to a browser that already has the chat open, and it lapses after 10 s. The extension makes
 that tab the selected one in its Background chats window. That never focuses the window, opens a
-tab or touches the user's own windows (#1249).
+tab or touches the user's own windows (#1249). With `backgroundPlacement: 'group'` the app sends no
+follow and the extension ignores one (#128).
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
@@ -2364,6 +2404,21 @@ its fiber-stamped `<img>` already loaded and answers `{ data: base64 }` or `{ er
 app requires a decodable PNG, JPEG or WebP of at most 25 MB, writes a `.part` file beside the
 destination and hard-links it into place, so an existing name is never replaced, and answers the
 tool within 60 s. No URL, cookie or credential leaves the page.
+
+In tab-group mode (#128) the extension keeps the group's id in `chrome.storage.session`
+(`chatBackgroundGroup`) and mirrors it to local storage (`chatBackgroundGroupMirror`); a mirrored id is
+trusted only while the group still carries the title "Chat On Steroids", and `onStartup` drops the
+mirror. After a browser restart only an exactly titled group in a normal window whose every tab the
+app owns is adopted again. Group mode's reconcile never moves or regroups tabs. Only a group the app
+just created is collapsed, and every grouped tab is created inactive. A group that vanishes during
+placement is retried once, then the tab moves to the minimized window. When the last app tab closes,
+Chrome deletes the group and its auto-saved copy. Browsers without `chrome.tabGroups` use the window.
+Chrome freezes a collapsed group's tabs within seconds (2 of 7 sends stalled on Chrome 154), so every
+page in the app's group holds a Web Lock (`chat-on-steroids-keep-awake-<random>`), which Chrome's
+freezing rules exempt: `register_document` answers `keepAwake`, and `clf-keep-awake { on }` from
+the maintenance pass and the `groupId` change event turns it on or off per document (told state in
+session storage `keepAwakeTabs`). A grouped page frozen before it could take the lock gets the group
+expanded; once all hold their locks the worker collapses it again unless the active tab is in it.
 
 Browser-only preferences suppress automatic opening as defined by their owner. Background
 operations reuse a suitable existing window unchanged. If a new background window is actually
@@ -3448,6 +3503,19 @@ of appearance controls.
 
 ### Renderer and IPC
 
+The Windows composer dictation control uses `preload/index.ts`'s fixed
+`dictationSupported`, `startDictation`, `stopDictation` and
+`onDictationEvent` methods. `main/dictation.ts` alone owns a Windows
+`System.Speech.Recognition` child process and sends validated
+`shared/dictation.ts` events (`status`, `partial`, `final`, `error`) to
+its originating `webContents`. Only an explicit microphone click starts it;
+the renderer owns the current composer draft, stops on manual edits/navigation,
+and never sends recognized text automatically. A normal Stop grants 650ms for
+final recognition; app `before-quit` kills the child synchronously, and the
+PowerShell event loop checks the owning app's PID each second so a crashed/killed
+app cannot leave an orphan recording. No audio enters IPC or storage;
+macOS/Linux hide this Windows-only control.
+
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
 `@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
 alone picks its glyph; static markup names the glyph class. `--ico` sizes the layout box and
@@ -3625,7 +3693,20 @@ read after a reload sends its outline too, which is how recaps that arrived late
 The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
 `sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
 beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
-(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. A DIL reply whose
+(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows.
+
+A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
+of its own but keeps the answer's one MCP request id across it. The page ends the local turn there
+and sends `turn_end` with `continued: true` when a message steered it (Stop stayed) or replaced it
+while it was unfinished (no answer yet; Stop can already be gone at that tick). A turn that ended
+with its answer is never marked. Past a `continued` end, a call of that request that *started*
+after the end is filed under the turn that began then, and the request's ownership moves there
+(`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);
+a late result of a call that started before the end stays with the earlier turn (`turnOpenAt`).
+Each shell turn descriptor names the user message that opened it (`question`, fiber.js
+`shellQuestion`); content.js sends it with `turn_trace`, and `writeTurnTrace` refuses an outline
+whose question differs from the turn's recorded question (`timelineTurns[turnId].questionId`), so
+the moment the page switches turns cannot file the newer answer's outline under the earlier turn. A DIL reply whose
 `content` is only `::chatgpt-content-reference{…}` naming itself is read as the `fallbackMarkdown`
 of that one `dil` reference (`shellItemText`), so its recorded text is the reply rather than the
 directive. In that Markdown the timeline shows an `entity` widget as its name in bold and drops
@@ -3872,6 +3953,13 @@ With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` 
 The `+` popover must receive real pointer input above any active tool header.
 The bottom dock has no generic shortcut screen or second tool tab strip; Terminal owns its own
 tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
+Project Files watches only the visible project's expanded directories. An `fs.watch` error
+retires its exact handle and pending debounce timer, then emits `ProjectFilesChanged` with
+`watchLost: true`; the renderer clears its cached watch signature and re-admits the visible
+directories through the normal project sandbox. Ordinary changes remain debounced, and
+callbacks or asynchronous validations from retired watcher generations may not affect newer
+watchers.
+
 Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
 does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
 dock. The layout control group sits at the right end of the title bar (`.app-topbar`) and orders
@@ -4054,8 +4142,14 @@ to failed evidence for the current publication and is never borrowed from an old
 Activity shows existing updater/connection errors and the safe refresh phase with the next
 explicit action. An Update all failure, including rejected IPC, remains visible across state
 pushes until the user retries; a new check clears that operation error, not connector evidence.
-The operation error and the restart notice remain outside collapsed details. App-authored
-update reasons are localized at the renderer boundary; unreadable or invalid refresh state
+The operation error and the restart notice remain outside collapsed details. Fully confirmed,
+closed status is one line with a keyboard-operable status toggle and Update all; its restart
+notice remains the button's tooltip and accessible description, and is visible when expanded
+or incomplete. App-authored
+update reasons are localized at the renderer boundary. An inspection failure is named a
+connector check failure, separately from a claimed Refresh whose confirmation failed. Recovery
+guidance points to the connector settings and Activity's Diagnostics report without assuming
+the provider's management page exposes a tool list. Unreadable or invalid refresh state
 keeps its stored contents and directs the user to Activity's Diagnostics report for recovery.
 For that read failure the card exposes the same explicit report action, so it remains reachable
 when the event area has shrunk. Both report buttons join the existing report handler and stay
@@ -4077,8 +4171,13 @@ and tunnel may instead establish **Ready to use; tool definitions not fully veri
 there is no known stale/manual/failed refresh. This is operational evidence, never a full-schema
 claim. `kernel.dispatch` captures `beginPluginToolCall` before work and confirms only a non-error
 outer provider result; HTTP ingress excludes self-tests and tunnel probes, and a changed schema,
-reconnect or changed tunnel invalidates a late result. Completed status collapses its details
-while keeping Update all accessible; a focused action is not hidden on a state push. Activity
+reconnect or changed tunnel invalidates a late result. Only fully verified status collapses by
+default; operational but schema-unverified evidence stays expanded. A new version, schema,
+failure or other meaningful component change updates the default expansion; identical pushes,
+timestamp churn and language changes preserve the person's choice. The status line toggles the
+native details with pointer or keyboard input, while Update all stays accessible; a focused
+action is not hidden on a state push. Extension reload guidance applies only when the extension
+is older; a newer extension directs the person to update the app. Activity
 keeps the existing fixed-height page and event-feed scrolling: the event card uses the remaining
 height without an added minimum or page scroll. In a short window, the status details scroll
 inside their card; collapsing them returns height to the event feed.
@@ -4103,7 +4202,13 @@ manually recreated app by its unique connector name and current tunnel rather th
 Installed discovery on `/settings/plugins-settings` accepts visible native buttons and same-origin
 links to exact `plugin_asdk_app_*` management routes inside the page's `main`. The connector name
 must match its own leaf; catalog, external, transcript, extension and hidden-page links do not count.
-Multiple matching rows remain ambiguous and grant no Refresh authority.
+Multiple matching rows remain ambiguous and grant no Refresh authority. Configured names and
+account-proven learned names resolve one surface before settings-page identity is checked;
+renaming does not discard its proven App IDs or the Plugins declaration budget. A name shared
+by different surfaces fails closed during name-only discovery, including collisions with
+configured names. A durably enrolled exact App ID still identifies its management page and
+uses its own proven surface's declaration limits. Initial enrollment and a legitimately
+recreated, proven App ID remain supported.
 The version fields allow exact-version, exact-schema claims when automatic refresh is off; an app update may adopt
 the new build's schema once, but a later same-build schema change gets no borrowed authority.
 Startup resumes accepted refresh work even with auto-connect off, without another install.
@@ -4120,6 +4225,10 @@ list (`mode=plugins`) without this install's Core takes the proof back (POST `/c
 Connector identity (`connector-identity.ts`): ChatGPT keeps a connector's `asdk_app_…`/`link_…`
 ids across a rename. The kernel notes each served request id per surface (memory only, 4096,
 24 h); the page reports `app_sightings` (request id, app id, link id, app name from result rows);
+a first turn of a new chat can show no tool rows to the page (#1305), so usage.js also reads the
+tool result message in the response stream (`invoked_resource.resource_uri` of an
+`api_tool.call_tool` result with its `request_id`) and posts `cos-app-sighting`, which content.js
+forwards as the same `app_sightings`, once per request id, only for the chat the tab shows;
 only a served request id teaches that surface's app (at most 4 per surface, durable). `/status`
 publishes `connectorApps`. Model-facing text uses `liveConnectorName` (proven name, else the
 configured one); protected-resource `resource_name` and the Setup card's Name row stay on

@@ -2112,6 +2112,15 @@
    * does not already know, and the app places its recorded calls in rounds by tool and order
    * (renderer/timeline-rounds.ts), never by an id. Hidden groups and transient reasoning stay out.
    */
+  /**
+   * The user message that opened a shell turn, by ChatGPT's id (#1301). A message the user sends
+   * into a running answer opens a turn of its own in ChatGPT's model, while the request id of the
+   * answer runs on; the app files each turn's outline only under the local turn that message opened.
+   */
+  function shellQuestion(shell) {
+    const first = shell?.entry?.turn?.items?.[0];
+    return first?.type === 'user-message' ? str(first.messageId) || str(first.serverMessageId) || null : null;
+  }
   function shellTurnTrace(shell) {
     const out = [], budget = { remaining: MAX_TRACE_TEXT };
     for (const item of shell.entry.turn.items) {
@@ -2377,7 +2386,8 @@
           activities,
           thoughtNotifications: nativeActivities.notifications,
           images: generatedImages,
-          ...(trace.length ? { trace } : {})
+          ...(trace.length ? { trace } : {}),
+          ...(shellQuestion(shell) ? { question: shellQuestion(shell) } : {})
         };
         // The isolated-world renderer needs to know which visible section this exact Fiber
         // turn descriptor came from. Remember the desired ephemeral scan index now and apply

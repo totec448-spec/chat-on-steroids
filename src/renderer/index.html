@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
+    <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
     <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
@@ -1040,9 +1041,10 @@
                   <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the companion from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Background tabs open in</b><em>The group stays collapsed in the window you used last. Chrome saves open tab groups automatically; the app's group closes with its last chat, so it is not kept. If you close that window while app chats are open, Chrome may keep the group in its saved groups, where you can delete it. Browsers without tab groups use a window.</em></span><select id="backgroundPlacement"><option value="window">Their own minimized window</option><option value="group">A tab group in your browser window</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT, so a permission change reaches it without a manual refresh.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
-                  <p class="muted">Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
+                  <p class="muted">Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
                   <label class="setting"><span class="setting-text"><b>Show durations in ChatGPT</b><em>Uses the same preference as the extension popup.</em></span><input id="browserDurations" type="checkbox" disabled /></label>
                   <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
@@ -1255,6 +1257,7 @@
                     </div>
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
+                  <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
@@ -1302,6 +1305,7 @@
                 </div>
               </div>
               <p id="composerStatus" role="status" aria-live="polite"></p>
+              <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>
@@ -1314,10 +1318,15 @@
             <h1>Activity</h1>
             <p>Recent local events and failures.</p>
           </header>
-          <section class="card update-readiness" aria-labelledby="updateReadinessTitle">
+          <section class="card update-readiness" id="updateReadinessCard" aria-labelledby="updateReadinessTitle">
             <h2 id="updateReadinessTitle">Update status</h2>
             <div class="update-readiness-status">
-              <p id="updateReadinessSummary" role="status"></p>
+              <div class="update-readiness-header">
+                <button class="btn update-readiness-toggle" id="updateReadinessToggle" type="button" aria-controls="updateReadinessDetails" aria-expanded="true">
+                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary" role="status">Not checked yet</span>
+                </button>
+                <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="The app may restart. Finish active work before updating.">Update all</button>
+              </div>
               <p id="updateAllError" class="is-warn" role="alert" hidden></p>
             </div>
             <details id="updateReadinessDetails" open>
@@ -1330,7 +1339,6 @@
             <div class="update-readiness-actions">
               <p class="muted" id="updateAllNotice">The app may restart. Finish active work before updating.</p>
               <div class="update-readiness-buttons">
-                <button class="btn btn-solid" id="updateAll" type="button">Update all</button>
                 <button class="btn" id="updateDiagnosticsReport" type="button" hidden>Diagnostics report</button>
               </div>
             </div>

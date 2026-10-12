@@ -1379,6 +1379,20 @@ it('restores a rejected focused port and prevents an unrelated queued save from 
   expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
 });
 
+it('saves the background placement from its settings control and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const placement = w.document.getElementById('backgroundPlacement') as HTMLSelectElement;
+  expect(placement.value).toBe('window'); // older config has no field
+  expect([...placement.options].map(option => option.value)).toEqual(['window', 'group']);
+  placement.value = 'group';
+  placement.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.backgroundPlacement).toBe('group');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, backgroundPlacement: 'window' } } });
+  expect(placement.value).toBe('window');
+});
+
 it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
@@ -2324,7 +2338,7 @@ it('reports update readiness only from checked versions and current connector ev
   push(working);
   expect(summary().dataset.ready).toBe('true');
   expect(summary().textContent).toBe('Ready to use; tool definitions not fully verified');
-  expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(false);
+  expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(true);
   push(ready);
   const optionalOff = structuredClone(ready);
   optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
@@ -2408,7 +2422,7 @@ it('uses live macOS permission verdicts only for the enabled Desktop capabilitie
   connectorFailure.connectorRefresh.desktop = { schemaId: 'desktop-a', state: 'failed', failure: 'inspection' };
   push(connectorFailure);
   expect(desktop().textContent).toContain('Could not inspect the installed connector');
-  expect(desktop().textContent).toContain('Open this connector in ChatGPT');
+  expect(desktop().textContent).toContain("Open this connector's settings in ChatGPT");
   expect(desktop().textContent).toContain('check macOS permissions');
   expect(update).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled();
 });
@@ -2485,7 +2499,9 @@ it('shows update failure causes and next steps without using stale connector dia
   next.connectorRefresh = { core: { schemaId: 'current', state: 'failed', failure: 'inspection' } };
   push(next);
   expect(row('core')).toContain('Could not inspect');
-  expect(row('core')).toContain('tool list');
+  expect(row('core')).toContain('Connector check failed');
+  expect(row('core')).toContain("settings in ChatGPT");
+  expect(row('core')).toContain('Diagnostics report');
   next.connectorRefresh.core.failure = 'confirmation'; push(next);
   expect(row('core')).toContain('Could not confirm');
   next.connectorRefresh.core.schemaId = 'old'; push(next);
@@ -2516,6 +2532,8 @@ it.each(['reply', 'transport'])('keeps an Update all %s failure visible across p
   expect(error.hidden).toBe(false);
   expect(error.textContent).toContain('Network unavailable');
   expect(error.textContent).toContain('Update all to retry');
+  expect(details.open).toBe(true);
+  details.open = false; // A new failure asks for attention; the person can still collapse it.
   expect(details.open).toBe(false);
   expect(details.contains(error)).toBe(false);
   expect(details.contains(w.document.getElementById('updateAllNotice'))).toBe(false);

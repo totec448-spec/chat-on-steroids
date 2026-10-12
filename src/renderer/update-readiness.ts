@@ -1,4 +1,5 @@
 import type { AppState } from '../shared/types.js';
+import { isNewer } from '../shared/types.js';
 import { $, el } from './dom.js';
 import { t, ui } from './i18n.js';
 import { updateErrorNextStep, updateErrorText } from './update-error.js';
@@ -23,7 +24,8 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
     : update.latest ? (update.stage === 'ready' ? t('Ready to install {0}', [update.latest]) : t('Install {0} manually', [update.latest]))
     : appReady ? t('Up to date') : t('Not checked yet');
   const extensionReady = bridge.running && bridge.paired && bridge.present && bridge.extensionVersion === update.current;
-  const extensionMismatch = !!bridge.extensionVersion && bridge.extensionVersion !== update.current;
+  const extensionOlder = !!bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion);
+  const appOlder = !!bridge.extensionVersion && isNewer(bridge.extensionVersion, update.current);
   const connectionFailed = ['offline', 'auth-failed', 'tunnel-unavailable'].includes(status.state);
   const rows: ReadinessRow[] = [
     { id: 'app', label: 'Chat On Steroids', status: appReady ? 'pass' : update.stage === 'failed' ? 'fail' : 'not-run',
@@ -37,8 +39,9 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
         (extensionReady ? t('Connected') : !bridge.present || !bridge.paired ? t('Not connected') :
           bridge.extensionVersion ? t('App and extension versions differ') : t('Version not verified')),
       reason: !bridge.running ? bridge.error ?? undefined : undefined,
-      nextStep: extensionReady ? undefined : extensionMismatch
+      nextStep: extensionReady ? undefined : extensionOlder
         ? t('Let active chats finish, then reload the companion extension in your browser.')
+        : appOlder ? t('Choose Update all to check for updates and update the app.')
         : t('Open ChatGPT with the companion extension enabled, then choose Review setup.') }
   ];
   const surfaces = status.surfaces ?? [];
@@ -61,7 +64,7 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
       : !sameSchema ? t('Not verified in ChatGPT')
       : functional && !verified && refresh?.state === 'unknown' ? t('Tool call succeeded; full tool definitions not verified')
       : refresh?.state === 'manual' ? t('Manual refresh required in ChatGPT')
-      : refresh?.state === 'failed' ? t('Connector refresh failed')
+      : refresh?.state === 'failed' ? t(refresh.failure === 'inspection' ? 'Connector check failed' : 'Connector refresh failed')
       : refresh?.state === 'refreshing' ? t('Waiting for refresh confirmation')
       : refresh?.state === 'pending' ? t('Refresh needed in ChatGPT')
       : refresh?.state !== 'current' ? t('Not verified in ChatGPT')
@@ -76,7 +79,7 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
       : sameSchema && refresh?.state === 'manual'
         ? t("In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.")
       : sameSchema && refresh?.state === 'failed'
-        ? t('Open this connector in ChatGPT and check its tool list, then choose Update all to recheck.')
+        ? t("Open this connector's settings in ChatGPT, then choose Update all to recheck. If the check still fails, save a Diagnostics report from Activity.")
       : sameSchema && refresh?.state === 'refreshing'
         ? t('Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.')
       : sameSchema && refresh?.state === 'current'
@@ -102,18 +105,54 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
   return rows;
 }
 
+/** Native details owns the person's choice; this only synchronizes its compact presentation. */
+function syncDisclosure(): void {
+  const details = $<HTMLDetailsElement>('updateReadinessDetails');
+  const compact = $('updateReadinessSummary').dataset.complete === 'true' && !details.open;
+  $('updateReadinessCard').classList.toggle('is-compact', compact);
+  $('updateReadinessTitle').hidden = compact;
+  $('updateAllNotice').hidden = compact;
+  $('updateReadinessToggle').setAttribute('aria-expanded', String(details.open));
+}
+
+export function initUpdateReadiness(): void {
+  const details = $<HTMLDetailsElement>('updateReadinessDetails');
+  details.addEventListener('toggle', syncDisclosure);
+  $('updateReadinessToggle').addEventListener('click', () => { details.open = !details.open; syncDisclosure(); });
+}
+
 export function paintUpdateReadiness(next: AppState, operationError: string | null = null): void {
   const rows = updateReadiness(next);
-  const ready = !operationError && rows.every(row => row.status === 'pass' || row.status === 'skipped');
+  const busy = $('updateAll').getAttribute('aria-busy') === 'true';
+  const ready = !operationError && !busy && rows.every(row => row.status === 'pass' || row.status === 'skipped');
   const schemaUnchecked = rows.some(row => row.schemaUnchecked);
   const summary = $('updateReadinessSummary');
   summary.dataset.ready = String(ready);
+  summary.dataset.complete = String(ready && !schemaUnchecked);
   ui(summary, 'textContent', () => ready ? schemaUnchecked ? t('Ready to use; tool definitions not fully verified') : t('All checks passed') : t('Checks incomplete'));
   const details = $<HTMLDetailsElement>('updateReadinessDetails');
-  if (details.dataset.ready !== String(ready)) {
-    if (!ready || !details.contains(document.activeElement)) details.open = !ready;
-    details.dataset.ready = String(ready);
+  // Compare meaningful owner facts, never translated copy or frequently changing timestamps.
+  // A new version/schema/error reopens an incomplete card; identical pushes preserve the choice.
+  const signature = JSON.stringify([
+    operationError, busy, next.update.current, next.update.latest, next.update.stage, next.update.error,
+    next.update.checkedAt != null, next.bridge.extensionVersion, next.bridge.running, next.bridge.paired,
+    next.bridge.present, next.bridge.error, next.status.state,
+    next.status.state !== 'connected' ? next.status.detail : null,
+    rows.map(row => [row.id, row.status, !!row.schemaUnchecked]),
+    (next.status.surfaces ?? []).map(surface => [surface.id, surface.connectorName,
+      next.connectorSchemas?.[surface.id], next.connectorRefresh?.[surface.id]?.schemaId,
+      next.connectorRefresh?.[surface.id]?.state, next.connectorRefresh?.[surface.id]?.failure,
+      surface.state === 'live' ? null : surface.detail]),
+    rows.some(row => row.id === 'desktop' && row.status !== 'skipped') && next.platform?.family === 'macos'
+      ? [next.config.capabilities.screen && next.desktopAccess?.screen,
+        next.config.capabilities.control && !next.config.readOnly && next.desktopAccess?.accessibility] : null
+  ]);
+  if (details.dataset.state !== signature) {
+    const needsAttention = !ready || schemaUnchecked;
+    if (needsAttention || !details.contains(document.activeElement)) details.open = needsAttention;
+    details.dataset.state = signature;
   }
+  syncDisclosure();
   summary.classList.toggle('is-ok', ready);
   const error = $('updateAllError');
   error.hidden = !operationError;
