@@ -18,7 +18,7 @@ import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState }
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
 import { liveConnectorName } from './mcp/surfaces.js';
-import { workerBrief } from '../shared/worker-brief.js';
+import { workerBrief, workerOwnTask } from '../shared/worker-brief.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
@@ -381,6 +381,8 @@ export interface ManagedWorktreeCleanupOffer {
   agentId: string;
   reason: 'completed' | 'failed' | 'cleared' | 'evicted';
   createdAt: number;
+  /** Human-readable job name retained after the broker row is cleared or evicted. */
+  label?: string;
 }
 const managedWorktreeCleanupHistory = new Map<string, ManagedWorktreeCleanupOffer>();
 const managedAllocationRunPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -402,6 +404,12 @@ function cleanupOfferKey(identity: { runId: string; agentId: string }): string {
   return `${identity.runId}:${identity.agentId}`;
 }
 
+/** A task-first row label, even when a worker was spawned without a custom label. */
+function cleanupDisplayLabel(info: AgentInfo): string {
+  const title = info.label && info.label !== info.id ? info.label : workerOwnTask(info.task);
+  return (title?.split(/[\r\n]/, 1)[0]?.trim() || info.label || info.id).slice(0, 160);
+}
+
 /** Preserve accepted cleanup authority before the last owner row is removed. */
 function retireManagedWorktreeCleanupOffers(agents: Iterable<Agent>, reason: 'cleared' | 'evicted'): void {
   for (const agent of agents) {
@@ -415,7 +423,8 @@ function retireManagedWorktreeCleanupOffers(agents: Iterable<Agent>, reason: 'cl
     }
     const existing = managedWorktreeCleanupHistory.get(key);
     managedWorktreeCleanupHistory.set(key, {
-      ...identity, reason, createdAt: existing?.createdAt ?? Date.now()
+      ...identity, reason, createdAt: existing?.createdAt ?? Date.now(),
+      label: cleanupDisplayLabel(agent.info) || existing?.label
     });
   }
   // Preserve every pending authorization until an explicit cleanup acknowledgement exists.
@@ -4975,7 +4984,8 @@ function collectManagedWorktreeCleanupOffers(groups: readonly (readonly Serializ
     candidates.set(key, [...(candidates.get(key) ?? []), {
       ...identity,
       reason: info.state === 'finished' ? 'completed' : 'failed',
-      createdAt: info.finishedAt ?? info.sleptAt ?? Date.now()
+      createdAt: info.finishedAt ?? info.sleptAt ?? Date.now(),
+      label: cleanupDisplayLabel(info)
     }]);
   }
   // A duplicated restored identity cannot grant cleanup authorization by either record.
@@ -5214,7 +5224,12 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
           !managedAllocationRunPattern.test(offer.runId) || !managedAllocationAgentPattern.test(offer.agentId) ||
           !['completed', 'failed', 'cleared', 'evicted'].includes(offer.reason) ||
           !Number.isFinite(offer.createdAt) || offer.createdAt <= 0) continue;
-      const normalized = { ...offer, runId: offer.runId.toLowerCase() };
+      const normalized: ManagedWorktreeCleanupOffer = {
+        runId: offer.runId.toLowerCase(), agentId: offer.agentId, reason: offer.reason,
+        createdAt: offer.createdAt,
+        ...(typeof offer.label === 'string' && offer.label.length <= 160 && offer.label.trim()
+          ? { label: offer.label } : {})
+      };
       const key = cleanupOfferKey(normalized);
       if (seen.has(key)) {
         managedWorktreeCleanupHistory.delete(key);

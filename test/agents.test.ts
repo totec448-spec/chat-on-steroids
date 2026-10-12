@@ -2849,7 +2849,7 @@ describe('restart', () => {
     fillContext(conversationId);
     expect(swarmStateForCaller(prime).agents.find(agent => agent.id === 'worker-1')?.state).toBe('finished');
     const offer = resolveManagedWorktreeCleanupOffer(staged.runId, 'worker-1');
-    expect(offer).toMatchObject({ runId: staged.runId, agentId: 'worker-1', reason: 'completed' });
+    expect(offer).toMatchObject({ runId: staged.runId, agentId: 'worker-1', reason: 'completed', label: 'retain checkout until terminal' });
     expect(offer?.createdAt).toEqual(expect.any(Number));
   });
 
@@ -2877,7 +2877,7 @@ describe('restart', () => {
   });
 
   it('retains cleanup offers for cleared worktree workers and unbound accepted allocations across restart', async () => {
-    const staged = stageSpawn({ caller: prime, workers: [{ task: 'never starts browser chat' }] });
+    const staged = stageSpawn({ caller: prime, context: 'Shared safety instructions for everyone', workers: [{ task: 'never starts browser chat' }] });
     markStagedWorkerWorktree(staged.runId, 'worker-1');
     staged.prepareDurability();
     expect(await persistCriticalSwarmNow()).toBe(true);
@@ -2885,7 +2885,7 @@ describe('restart', () => {
     expect(managedWorktreeCleanupOffers()).toEqual([]);
     expect(clearAgent('worker-1', staged.runId).cleared).toBe('worker');
     const offer = resolveManagedWorktreeCleanupOffer(staged.runId, 'worker-1');
-    expect(offer).toMatchObject({ reason: 'cleared', runId: staged.runId, agentId: 'worker-1' });
+    expect(offer).toMatchObject({ reason: 'cleared', runId: staged.runId, agentId: 'worker-1', label: 'never starts browser chat' });
 
     resetSwarm();
     expect(managedWorkerRecoveryIdentities()).toEqual([]);

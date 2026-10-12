@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "Çalıştırma temizlendi — çalışan Git çalışma kopyaları aşağıda incelenebilir",
   "{0} cleared — its checkout can be reviewed below": "{0} temizlendi — çalışma kopyası aşağıda incelenebilir",
   "Isolate new workers in Git worktrees": "Yeni çalışanları Git çalışma ağaçlarında yalıt",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git projelerinde yeni çalışanlara ayrı ve onaylı bir çalışma alanı ile dal atanır. Onaylı bir üst klasör gerekir. Mevcut çalışanlar etkilenmez; dalınıza birleştirmeden önce inceleme gereklidir."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git projelerinde yeni çalışanlara ayrı ve onaylı bir çalışma alanı ile dal atanır. Onaylı bir üst klasör gerekir. Mevcut çalışanlar etkilenmez; dalınıza birleştirmeden önce inceleme gereklidir.",
+  "Worker checkouts": "Çalışan çalışma kopyaları",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "Tamamlanan veya temizlenen çalışanların ayrı Git çalışma kopyalarını inceleyin. Dalları ve commit edilmiş çalışmaları her zaman korunur.",
+  "Review checkouts": "Çalışma kopyalarını incele",
+  "Checkouts appear here when reviewed.": "İncelenen çalışma kopyaları burada görünür.",
+  "Nothing is removed automatically.": "Hiçbir şey otomatik olarak silinmez.",
+  "No checkouts to remove": "Kaldırılacak çalışma kopyası yok",
+  "Finished or cleared checkouts awaiting review will appear here.": "İnceleme bekleyen tamamlanmış veya temizlenmiş çalışma kopyaları burada görünür.",
+  "Cleared": "Temizlendi",
+  "{0} uncommitted changes": "{0} commit edilmemiş değişiklik",
+  "Uncommitted changes": "Commit edilmemiş değişiklikler",
+  "Commits only on this branch": "Yalnızca bu daldaki commit'ler",
+  "Nothing would be lost": "Yerel değişiklikler kaybolmaz",
+  "Remove checkout…": "Çalışma kopyasını kaldır…"
 }

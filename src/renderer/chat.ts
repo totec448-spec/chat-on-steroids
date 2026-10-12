@@ -8,7 +8,7 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { createAgentPanel } from './agent-panel.js';
+import { createAgentPanel, workerName } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
@@ -60,6 +60,7 @@ import type {
   SessionSummary,
   StoredText,
   SwarmState,
+  WorkerWorktreeCleanupOffer,
   TokenPressure
 } from '../shared/session.js';
 import {
@@ -5068,48 +5069,72 @@ function paintSwarm(state: SwarmState): void {
       })
     );
   }
-  // Worker branches and ignored/uncommitted files are never discarded merely because a
-  // worker finished or the user cleared its row. Offer review at a stable, discoverable
-  // place even when all worker history has disappeared after Clear workers. Discovery runs
-  // only when clicked, not on every UI refresh or at application startup.
-  const cleanup = el('div', 'hint worktree-cleanup-review');
-  const review = el('button', 'btn btn-quiet', t('Review retained worker checkouts'));
-  review.dataset.worktreeReview = 'true';
-  cleanup.append(review);
-  list.append(cleanup);
   // Usable whenever there is a run to clear, not only while a worker is still going.
   // Gating on `running` left finished-but-present swarm state with no way out, which is
   // exactly the state a user wants to clear before starting the next run.
   $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0 && state.retainedHistory !== true;
 }
 
-async function showWorktreeCleanupOffers(): Promise<void> {
-  const panel = $('swarmList').querySelector<HTMLElement>('.worktree-cleanup-review');
-  if (!panel) return;
-  const offers = await run(api.listWorktreeCleanupOffers());
-  if (!offers) return;
-  const results = el('div', 'worktree-cleanup-offers');
-  if (!offers.length) results.append(el('p', 'hint', t('No retained worker checkouts are awaiting cleanup.')));
-  for (const offer of offers) {
-    const row = el('div', 'agent');
-    row.append(el('b', '', `${offer.agentId} · ${offer.reason}`));
-    row.append(el('p', 'hint', offer.workspace));
-    const notes = [
-      offer.dirty ? t('Uncommitted or untracked files') : null,
-      offer.ignoredFiles ? t('Ignored files') : null,
-      offer.uniqueCommits ? t('Worker-only Git commits') : null,
-      offer.changeCount ? t('{0} changed paths', [offer.changeCount]) : null
-    ].filter((item): item is string => item !== null);
-    if (notes.length) row.append(el('p', 'hint is-warn', notes.join(' · ')));
-    const remove = el('button', 'btn btn-quiet', t('Review removal…'));
+/** A presentation of already verified cleanup offers; no marker or filesystem discovery here. */
+export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[], panel: HTMLElement = $('worktreeCleanupList')): void {
+  if (!offers.length) {
+    const empty = el('div', 'setting worktree-cleanup-empty');
+    const message = el('span', 'setting-text');
+    message.append(el('b', '', () => t('No checkouts to remove')), el('em', '', () => t('Finished or cleared checkouts awaiting review will appear here.')));
+    empty.append(message);
+    panel.replaceChildren(empty);
+    return;
+  }
+
+  const rows = offers.map(offer => {
+    const row = el('div', 'setting worktree-checkout-row');
+    const copy = el('div', 'setting-text worktree-checkout-copy');
+    const name = () => workerName(offer.agentId, offer.label);
+    const title = el('b', 'worktree-checkout-name', name);
+    // The technical id is useful for support, but not as the prominent name.
+    title.title = offer.agentId;
+    const meta = el('span', 'worktree-checkout-status', () => offer.reason === 'completed' ? t('Finished')
+      : offer.reason === 'failed' ? t('Failed') : t('Cleared'));
+    const path = el('span', 'worktree-checkout-path', offer.workspace);
+    path.title = offer.workspace;
+    copy.append(title, meta);
+
+    const facts = el('div', 'worktree-checkout-facts');
+    if (offer.dirty) {
+      facts.append(el('span', 'chip worktree-risk', () => offer.changeCount
+        ? t('{0} uncommitted changes', [offer.changeCount]) : t('Uncommitted changes')));
+    }
+    if (offer.ignoredFiles) facts.append(el('span', 'chip worktree-risk', () => t('Ignored files')));
+    if (offer.uniqueCommits) facts.append(el('span', 'chip worktree-commits', () => t('Commits only on this branch')));
+    if (!offer.dirty && !offer.ignoredFiles) {
+      facts.append(el('span', 'worktree-clean-state', () => t('Nothing would be lost')));
+    }
+    copy.append(facts, path);
+
+    const remove = el('button', 'btn worktree-remove-button', () => t('Remove checkout…'));
+    remove.setAttribute('type', 'button');
+    ui(remove, 'aria-label', () => `${t('Remove checkout…')} — ${name()}`);
     remove.dataset.worktreeRemove = 'true';
     remove.dataset.runId = offer.runId;
     remove.dataset.agentId = offer.agentId;
-    row.append(remove);
-    results.append(row);
+    row.append(copy, remove);
+    return row;
+  });
+  panel.replaceChildren(...rows);
+}
+
+async function showWorktreeCleanupOffers(): Promise<void> {
+  const review = $<HTMLButtonElement>('worktreeCleanupReview');
+  if (review.disabled) return;
+  const restoreFocus = document.activeElement === review;
+  review.disabled = true;
+  try {
+    const offers = await run(api.listWorktreeCleanupOffers());
+    if (offers) paintWorktreeCleanupOffers(offers);
+  } finally {
+    review.disabled = false;
+    if (restoreFocus && document.activeElement === document.body) review.focus();
   }
-  panel.querySelector('.worktree-cleanup-offers')?.remove();
-  panel.append(results);
 }
 
 /**
@@ -6938,7 +6963,7 @@ export function initChat(next: Deps): void {
 
   // Which of the two things happened is decided in the main process and reported back,
   // so the toast describes the actual outcome rather than the intent of the click.
-  $('swarmList').addEventListener('click', async (event) => {
+  $('worktreeCleanupSection').addEventListener('click', async (event) => {
     const target = event.target as HTMLElement;
     if (target.closest<HTMLElement>('[data-worktree-review]')) {
       await showWorktreeCleanupOffers();
@@ -6949,12 +6974,34 @@ export function initChat(next: Deps): void {
       const runId = worktreeRemove.dataset.runId;
       const agentId = worktreeRemove.dataset.agentId;
       if (!runId || !agentId) return;
-      const result = await run(api.removeWorktreeCleanupOffer(runId, agentId));
-      if (!result) return;
-      toast(result.removed ? t('Worker checkout removed; its Git branch was preserved.') : t('Worker checkout kept.'));
-      await showWorktreeCleanupOffers();
+      const button = worktreeRemove as HTMLButtonElement;
+      if (button.disabled) return;
+      const restoreFocus = document.activeElement === button;
+      const initialActions = [...$('worktreeCleanupList').querySelectorAll<HTMLButtonElement>('[data-worktree-remove]')];
+      const initialIndex = initialActions.indexOf(button);
+      button.disabled = true;
+      try {
+        const result = await run(api.removeWorktreeCleanupOffer(runId, agentId));
+        if (!result) return;
+        toast(result.removed ? t('Worker checkout removed; its Git branch was preserved.') : t('Worker checkout kept.'));
+        await showWorktreeCleanupOffers();
+      } finally {
+        // If confirmation is cancelled or inspection fails, the action stays usable.
+        button.disabled = false;
+        // Refresh replaces the clicked row. Keep keyboard focus in the same group rather
+        // than dropping it to the page body when the focused control is detached.
+        if (restoreFocus && (document.activeElement === button || document.activeElement === document.body ||
+            !document.activeElement?.isConnected)) {
+          const actions = [...$('worktreeCleanupList').querySelectorAll<HTMLButtonElement>('[data-worktree-remove]')];
+          const same = actions.find(action => action.dataset.runId === runId && action.dataset.agentId === agentId);
+          (same ?? actions[Math.min(Math.max(initialIndex, 0), actions.length - 1)] ?? $('worktreeCleanupReview')).focus();
+        }
+      }
       return;
     }
+  });
+  $('swarmList').addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('[data-clear]');
     const id = button?.dataset.clear;
     if (!id) return;

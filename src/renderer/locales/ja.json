@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "実行をクリアしました — ワーカーの Git チェックアウトは以下で確認できます",
   "{0} cleared — its checkout can be reviewed below": "{0} をクリアしました — チェックアウトは以下で確認できます",
   "Isolate new workers in Git worktrees": "新しいワーカーを Git ワークツリーで分離する",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git プロジェクトの新しいワーカーには、承認済みの独立した作業領域とブランチを割り当てます。承認済みの親フォルダーが必要です。既存のワーカーには影響せず、ブランチへの統合にはレビューが必要です。"
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git プロジェクトの新しいワーカーには、承認済みの独立した作業領域とブランチを割り当てます。承認済みの親フォルダーが必要です。既存のワーカーには影響せず、ブランチへの統合にはレビューが必要です。",
+  "Worker checkouts": "ワーカーのチェックアウト",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "終了またはクリアされたワーカーの独立した Git チェックアウトを確認します。ブランチとコミット済みの変更は常に保持されます。",
+  "Review checkouts": "チェックアウトを確認",
+  "Checkouts appear here when reviewed.": "確認すると、ここにチェックアウトが表示されます。",
+  "Nothing is removed automatically.": "自動的には削除されません。",
+  "No checkouts to remove": "削除するチェックアウトはありません",
+  "Finished or cleared checkouts awaiting review will appear here.": "確認待ちの終了済みまたはクリア済みチェックアウトはここに表示されます。",
+  "Cleared": "クリア済み",
+  "{0} uncommitted changes": "未コミットの変更 {0} 件",
+  "Uncommitted changes": "未コミットの変更",
+  "Commits only on this branch": "このブランチだけのコミット",
+  "Nothing would be lost": "ローカルの変更は失われません",
+  "Remove checkout…": "チェックアウトを削除…"
 }

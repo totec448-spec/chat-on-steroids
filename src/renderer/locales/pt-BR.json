@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "Execução removida — os checkouts Git dos workers podem ser revisados abaixo",
   "{0} cleared — its checkout can be reviewed below": "{0} removido — seu checkout pode ser revisado abaixo",
   "Isolate new workers in Git worktrees": "Isolar novos workers em worktrees do Git",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Novos workers de projetos Git recebem um workspace e uma branch separados e aprovados. É necessária uma pasta superior aprovada. Os workers existentes não mudam; a integração à sua branch exige revisão."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Novos workers de projetos Git recebem um workspace e uma branch separados e aprovados. É necessária uma pasta superior aprovada. Os workers existentes não mudam; a integração à sua branch exige revisão.",
+  "Worker checkouts": "Checkouts dos workers",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "Revise os checkouts Git separados dos workers concluídos ou removidos. As branches e alterações já commitadas são sempre preservadas.",
+  "Review checkouts": "Revisar checkouts",
+  "Checkouts appear here when reviewed.": "Os checkouts aparecem aqui após a revisão.",
+  "Nothing is removed automatically.": "Nada é removido automaticamente.",
+  "No checkouts to remove": "Nenhum checkout para remover",
+  "Finished or cleared checkouts awaiting review will appear here.": "Checkouts concluídos ou removidos aguardando revisão aparecerão aqui.",
+  "Cleared": "Removido",
+  "{0} uncommitted changes": "{0} alterações não commitadas",
+  "Uncommitted changes": "Alterações não commitadas",
+  "Commits only on this branch": "Commits exclusivos desta branch",
+  "Nothing would be lost": "Nenhuma alteração local seria perdida",
+  "Remove checkout…": "Remover checkout…"
 }

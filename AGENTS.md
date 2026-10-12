@@ -899,6 +899,11 @@ never automatic: the main process must obtain explicit user confirmation, rechec
 approved root and Git/marker ownership, and preserve the Git branch/committed work. Checkout
 removal can discard ignored/uncommitted files; do not conflate a clean `git status` with safe
 implicit deletion. Sleeping/revivable workers retain their worktree for follow-up tasks.
+The checkout review belongs in its own Settings section, separate from live workers: a grouped
+list with task-first names, plain status, secondary virtual paths, explicit data-at-risk labels,
+and a real removal button. Never place physical paths in this UI, nest a second scroll pane, or
+suggest that branch commits are deleted. The main-process confirmation must identify the data
+that could be lost, default to Keep, and be shown before any destructive action.
 Missing, corrupt or conflicting marker/identity evidence must fail closed rather than silently
 resolve an isolated worker to the prime's project; reviewing changes and integrating branches
 remain explicit steps.

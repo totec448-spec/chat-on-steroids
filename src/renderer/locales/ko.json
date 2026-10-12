@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "실행을 지웠습니다 — 워커 Git 체크아웃은 아래에서 검토할 수 있습니다",
   "{0} cleared — its checkout can be reviewed below": "{0}을(를) 지웠습니다 — 체크아웃은 아래에서 검토할 수 있습니다",
   "Isolate new workers in Git worktrees": "새 워커를 Git 워크트리로 격리",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git 프로젝트의 새 워커에게 승인된 별도 작업 공간과 브랜치를 할당합니다. 승인된 상위 폴더가 필요합니다. 기존 워커는 변경되지 않으며, 브랜치에 통합하려면 검토가 필요합니다."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Git 프로젝트의 새 워커에게 승인된 별도 작업 공간과 브랜치를 할당합니다. 승인된 상위 폴더가 필요합니다. 기존 워커는 변경되지 않으며, 브랜치에 통합하려면 검토가 필요합니다.",
+  "Worker checkouts": "워커 체크아웃",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "완료되거나 정리된 워커의 별도 Git 체크아웃을 검토합니다. 브랜치와 커밋된 작업은 항상 보존됩니다.",
+  "Review checkouts": "체크아웃 검토",
+  "Checkouts appear here when reviewed.": "검토한 체크아웃이 여기에 표시됩니다.",
+  "Nothing is removed automatically.": "자동으로 삭제되는 항목은 없습니다.",
+  "No checkouts to remove": "삭제할 체크아웃 없음",
+  "Finished or cleared checkouts awaiting review will appear here.": "검토를 기다리는 완료 또는 정리된 체크아웃이 여기에 표시됩니다.",
+  "Cleared": "정리됨",
+  "{0} uncommitted changes": "커밋되지 않은 변경 {0}개",
+  "Uncommitted changes": "커밋되지 않은 변경",
+  "Commits only on this branch": "이 브랜치에만 있는 커밋",
+  "Nothing would be lost": "로컬 변경 사항은 손실되지 않습니다",
+  "Remove checkout…": "체크아웃 삭제…"
 }

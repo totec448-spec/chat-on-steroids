@@ -1111,6 +1111,8 @@ export interface WorkerWorktreeCleanupOffer {
   runId: string;
   agentId: string;
   reason: string;
+  /** User-facing job name; older stored checkout offers may not have one. */
+  label?: string;
   /** Approved-root virtual path only; never expose a native filesystem path. */
   workspace: string;
   dirty: boolean;

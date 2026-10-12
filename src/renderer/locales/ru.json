@@ -2160,5 +2160,18 @@
   "Run cleared — worker Git checkouts can be reviewed below": "Запуск удалён — рабочие копии Git воркеров можно проверить ниже",
   "{0} cleared — its checkout can be reviewed below": "{0} удалён — его рабочую копию можно проверить ниже",
   "Isolate new workers in Git worktrees": "Изолировать новых воркеров в рабочих деревьях Git",
-  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Новый воркер Git-проекта получает отдельную разрешённую рабочую папку и ветку. Необходим доступ к родительской папке. Существующие воркеры не затрагиваются; для слияния с вашей веткой требуется проверка."
+  "When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.": "Новый воркер Git-проекта получает отдельную разрешённую рабочую папку и ветку. Необходим доступ к родительской папке. Существующие воркеры не затрагиваются; для слияния с вашей веткой требуется проверка.",
+  "Worker checkouts": "Рабочие копии воркеров",
+  "Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.": "Просмотрите отдельные рабочие копии Git завершённых или удалённых воркеров. Их ветки и зафиксированные изменения всегда сохраняются.",
+  "Review checkouts": "Проверить рабочие копии",
+  "Checkouts appear here when reviewed.": "После проверки рабочие копии появятся здесь.",
+  "Nothing is removed automatically.": "Ничего не удаляется автоматически.",
+  "No checkouts to remove": "Нет рабочих копий для удаления",
+  "Finished or cleared checkouts awaiting review will appear here.": "Завершённые или удалённые рабочие копии, ожидающие проверки, появятся здесь.",
+  "Cleared": "Удалён",
+  "{0} uncommitted changes": "Незафиксированных изменений: {0}",
+  "Uncommitted changes": "Незафиксированные изменения",
+  "Commits only on this branch": "Коммиты только в этой ветке",
+  "Nothing would be lost": "Локальные изменения не будут потеряны",
+  "Remove checkout…": "Удалить рабочую копию…"
 }
