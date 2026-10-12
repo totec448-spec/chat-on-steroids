@@ -248,11 +248,7 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
 /** One stable owner for the running model turn, upgraded lazily when page proof arrives. */
 function execPrincipal(): string | null {
   const caller = currentCaller();
-  return executionPrincipal(
-    caller.requestId,
-    caller.sessionId ?? null,
-    currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls
-  );
+  return executionPrincipal(caller.requestId, caller.sessionId ?? null);
 }
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
@@ -1486,7 +1482,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               // Only a trusted worktree error code crosses the model-facing boundary.
               logWarn(`multi-agent: worker allocation failed: ${error instanceof Error ? error.message : String(error)}`);
               const code = error instanceof WorkerWorktreeError ? error.code : 'WORKTREE_ALLOCATION_FAILED';
-              throw new Error(`${code}: isolated Git checkout allocation failed; see local app logs for details. The worker spawn was rolled back.`);
+              // A fixed, path-free reason the user can act on may cross; any other stays in the log.
+              const hint = code === 'WORKTREE_STORAGE_UNAVAILABLE'
+                ? 'Worker checkouts are kept next to the repository, inside an approved folder, so the approved folder must contain the repository rather than be it. Ask the user to approve the folder that contains this repository, or to turn off "Isolate new workers in Git worktrees" in Settings.'
+                : 'See local app logs for details.';
+              throw new Error(`${code}: isolated Git checkout allocation failed. ${hint} The worker spawn was rolled back.`);
             }
             throw error;
           }
