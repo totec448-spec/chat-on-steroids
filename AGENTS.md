@@ -4220,6 +4220,16 @@ Explicit request primitives bind `requestedVersion`, `requestedFromVersion`, req
 and optional first schema, retain claimed/manual custody, and reserve at most one durable startup
 attempt per accepted round. These primitives do not change automatic preferences or install apps.
 
+| Receipt | Readiness evidence | Refresh authority |
+| --- | --- | --- |
+| Missing or foreign scope | Unknown | No borrowed grant |
+| Current unclaimed debt | Pending | One durable claim before a click |
+| Claimed, not confirmed | Refreshing or failed | No second click |
+| Manual or ended observation | Manual or failed | Read-only recheck only |
+| Unscoped legacy identity | Unknown or scoped migration failure | Same App ID, tunnel and full declarations to migrate |
+| Scoped full confirmation | Current; unstable transports require this process | No additional click |
+| Future-version intent | Wait for the exact build; reserve startup once durably | No grant to the old build |
+
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
