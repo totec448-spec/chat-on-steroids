@@ -1302,6 +1302,28 @@ describe('every link the window offers', () => {
     }
   });
 
+  it("hands Setup's extensions address over by clipboard, because browsers ignore their own pages from outside", async () => {
+    const { clipboard } = await import('electron');
+    const write = vi.spyOn(clipboard, 'writeText');
+    try {
+      for (const browser of ['chrome', 'edge', 'brave'] as const) {
+        write.mockClear();
+        vi.mocked(openInPreferredBrowser).mockClear();
+        expect(await handlers.get('browser:setupOpen')!(null, { browser, page: 'extensions' })).toEqual({ ok: true, data: true });
+        expect(write).toHaveBeenCalledWith(`${browser}://extensions`);
+        // Only a blank tab to paste into: the browser would open its internal page as a new tab instead.
+        expect(openInPreferredBrowser).toHaveBeenCalledWith('about:blank', { browser, reveal: true });
+      }
+      write.mockClear();
+      vi.mocked(openInPreferredBrowser).mockClear();
+      await handlers.get('browser:setupOpen')!(null, { browser: 'edge', page: 'chatgpt' });
+      expect(openInPreferredBrowser).toHaveBeenCalledWith('https://chatgpt.com/', { browser: 'edge', reveal: true });
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it('serializes non-Error throws into a real IPC error string', async () => {
     vi.mocked(shell.openExternal).mockRejectedValueOnce('Windows shell refused the request');
     const reply = (await handlers.get('link:open')!(null, {
