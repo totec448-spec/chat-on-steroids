@@ -35,6 +35,8 @@ import type {
   SessionEvent,
   SessionSummary,
   ClearAgentResult,
+  WorkerWorktreeCleanupOffer,
+  WorkerWorktreeCleanupResult,
   SwarmState,
   TokenPressure
 } from '../shared/session.js';
@@ -367,6 +369,11 @@ const api = {
   // Clearing the prime ends the run; clearing a worker frees that slot. Which of the two
   // happened comes back in the result — the renderer does not decide it.
   clearAgent: (id: string, runId?: string) => call<ClearAgentResult>('swarm:clearAgent', { id, runId }),
+  /** Review only. Scans retained broker-owned checkouts on demand, never at app startup. */
+  listWorktreeCleanupOffers: () => call<WorkerWorktreeCleanupOffer[]>('swarm:worktreeCleanupList'),
+  /** Main process asks the user for explicit approval before discarding checkout files. */
+  removeWorktreeCleanupOffer: (runId: string, agentId: string) =>
+    call<WorkerWorktreeCleanupResult>('swarm:worktreeCleanupRemove', { runId, agentId }),
 
   onStateChanged: (listener: (state: AppState) => void): (() => void) => {
     const wrapped = (_event: unknown, state: AppState): void => listener(state);
