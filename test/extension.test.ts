@@ -5855,7 +5855,10 @@ it.each([
   ['assistant-error', { ok: true, draft: false, streaming: false, assistantError: false }, 0],
   ['assistant-error', { ok: true, draft: false, streaming: false }, 1],
   ['assistant-error', null, 1],
-  ['silence', { ok: true, draft: false, streaming: true }, 1]
+  ['silence', { ok: true, draft: false, streaming: true }, 1],
+  // 2026-10-12: a silent chat still showing ChatGPT's transport error is left for Stop + Continue.
+  ['silence', { ok: true, draft: false, streaming: true, assistantError: true }, 0],
+  ['silence', { ok: true, draft: false, streaming: false, assistantError: false }, 1]
 ])('for reason %s and page status %j reloads %i time(s)', async (reason, status, reloads) => {
   const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}`, discarded: false, frozen: false };
@@ -5873,8 +5876,9 @@ it.each([
   await repair([{ conversationId, token: `stream-${reason}`, reason, suspended: false }], {});
   expect(reload).toHaveBeenCalledTimes(reloads);
   const reported = call.mock.calls.map((args: unknown[]) => String(args[0]));
-  if (reason === 'assistant-error' && status?.ok === true && status.streaming !== true &&
-      'assistantError' in status && status.assistantError === false) {
+  if ((reason === 'assistant-error' && status?.ok === true && status.streaming !== true &&
+      'assistantError' in status && status.assistantError === false) ||
+      (reason === 'silence' && status?.ok === true && 'assistantError' in status && status.assistantError === true)) {
     expect(reported.some((url) => url.includes('repaired=') && url.includes('repairAction=preserved'))).toBe(true);
     expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(0);
   } else {

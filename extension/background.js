@@ -3497,6 +3497,21 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
+      if (target && reason === 'silence') {
+        // A silent chat whose page still shows ChatGPT's own transport error ("Connection
+        // interrupted. Waiting for the complete answer", a delivery timeout) is not helped by a
+        // reload: on 2026-10-12 each such reload left the prime on the same card or ran into
+        // ChatGPT's history limit ("this conversation could not be loaded"), while Stop and a
+        // Continue got it working at once. The app files that Continue when this repair is
+        // confirmed, and its delivery presses Stop first when ChatGPT still shows it, so the
+        // page is left as it is.
+        const status = await tabReply(target.id, { type: 'clf-page-status' },
+          documentId ? { documentId } : undefined);
+        if (status?.ok === true && status.assistantError === true) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved`);
+          continue;
+        }
+      }
       if (target && reason === 'no-tab') {
         // A no-tab repair exists to give the chat a tab. When it has one again by now, it is
         // usually the tab a worker wake or another command just opened for it, and reloading that
