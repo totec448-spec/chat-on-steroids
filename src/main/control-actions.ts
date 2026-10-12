@@ -5,12 +5,13 @@ import { projectInput, RequestError } from './control-reads.js';
 import { logInfo } from './logger.js';
 import { deliveryProof, listInputs, sessionInputPolicy } from './session/input.js';
 import type { InputArgs, InputEntry } from './session/input.js';
+import { getProject } from './projects.js';
 import { readSession } from './session/read-model.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
 
 /**
- * The action routes of the local control API: send a message to an existing chat, and cancel
- * one that has not been handed over.
+ * The action routes of the local control API: send a message to an existing chat or start a new
+ * chat with it, and cancel one that has not been handed over.
  *
  * There is no new send path. A message goes through `sendDesktopInput`, the same entry the
  * composer uses, and is cancelled through `cancelDesktopInput`; the outbox stays the only owner
@@ -38,12 +39,16 @@ const lowerUuid = z.string().uuid().refine((value) => value === value.toLowerCas
 const sendBody = z
   .object({
     id: lowerUuid,
-    sessionId: z.string().regex(/^[0-9a-z-]{8,64}$/),
+    // Without a session the message starts a new chat (#1349), whose id is the message id.
+    sessionId: z.string().regex(/^[0-9a-z-]{8,64}$/).optional(),
+    // The project a new chat starts in. An existing chat keeps the one it has.
+    projectId: lowerUuid.optional(),
     text: z.string().max(MAX_TEXT).refine((value) => value.trim().length > 0, 'text is empty'),
     // Consent to a send that would stop the answer ChatGPT is writing right now.
     interrupt: z.boolean().optional()
   })
-  .strict();
+  .strict()
+  .refine((body) => body.sessionId === undefined || body.projectId === undefined, { path: ['projectId'], message: 'a project belongs to a new chat' });
 
 const cancelBody = z.object({}).strict();
 
@@ -100,28 +105,35 @@ async function send(rawBody: unknown): Promise<ActionReply> {
   // compares the whole request, `dueAt` included, and a retry a moment later would not match.
   const existing = await find(body.id);
   if (existing) {
-    if (existing.purpose === 'decision' || existing.sessionId !== body.sessionId || existing.text !== text) {
+    // A new chat's first message is filed under its own id.
+    if (existing.purpose === 'decision' || existing.sessionId !== (body.sessionId ?? body.id) || existing.text !== text) {
       throw new RequestError(409, 'id_conflict', 'this id belongs to a different message');
     }
     const replay: ControlApiSendResult = { input: projectInput(existing), replayed: true };
     return { status: 200, body: replay };
   }
 
-  const session = await readSession(body.sessionId);
-  if (!session) throw new RequestError(404, 'session_not_found');
-  await controllable(body.sessionId);
-  if (!session.conversationId) throw new RequestError(409, 'no_chat', 'this session has no ChatGPT chat to send to');
+  if (body.sessionId === undefined) {
+    if (body.projectId !== undefined && !(await getProject(body.projectId))) throw new RequestError(404, 'project_not_found');
+  } else {
+    const session = await readSession(body.sessionId);
+    if (!session) throw new RequestError(404, 'session_not_found');
+    await controllable(body.sessionId);
+    if (!session.conversationId) throw new RequestError(409, 'no_chat', 'this session has no ChatGPT chat to send to');
 
-  // A send into an answer being written ends that part of the turn: ChatGPT continues with the
-  // message. That is a decision for the caller, not a default.
-  const interrupting = !!(await sessionInputPolicy(body.sessionId)).directTurn;
-  if (interrupting && body.interrupt !== true) {
-    throw new RequestError(409, 'would_interrupt', 'the chat is answering; pass interrupt:true to send into that answer');
+    // A send into an answer being written ends that part of the turn: ChatGPT continues with the
+    // message. That is a decision for the caller, not a default.
+    const interrupting = !!(await sessionInputPolicy(body.sessionId)).directTurn;
+    if (interrupting && body.interrupt !== true) {
+      throw new RequestError(409, 'would_interrupt', 'the chat is answering; pass interrupt:true to send into that answer');
+    }
   }
 
   const input: InputArgs = {
     id: body.id,
-    sessionId: body.sessionId,
+    // The outbox opens a chat for a message without a session, exactly as the composer's New chat does.
+    sessionId: body.sessionId ?? null,
+    ...(body.projectId !== undefined ? { projectId: body.projectId } : {}),
     text,
     mode: 'auto',
     dueAt: Date.now(),
@@ -143,7 +155,7 @@ async function send(rawBody: unknown): Promise<ActionReply> {
     await cancelDesktopInput(row.id);
     throw new RequestError(409, 'would_interrupt', 'the chat began answering while the message was being admitted; it was withdrawn');
   }
-  logInfo('control API: message ' + row.id + ' admitted for session ' + body.sessionId);
+  logInfo('control API: message ' + row.id + (body.sessionId === undefined ? ' admitted as a new chat' : ' admitted for session ' + body.sessionId));
   // Admitted, not delivered: the row is durable, and delivery is read from GET /v1/inputs.
   const reply: ControlApiSendResult = { input: projectInput(row), replayed: false };
   return { status: 202, body: reply };
