@@ -1891,7 +1891,7 @@ it('requires external installation before choosing the built-in browser and sign
   expect(mounted.calls.at(-1)?.ui?.chatBrowser).toBe('edge');
 });
 
-it('walks the extension install in the chosen browser\'s own words and pictures, never another browser\'s', async () => {
+it('walks the extension install in each browser\'s own words and pictures', async () => {
   const opened: Array<[string, string]> = [];
   const mounted = await mountChat({}, [], { openSetupBrowser: (browser: string, page: string) => { opened.push([browser, page]); return Promise.resolve({ ok: true, data: true }); } });
   const text = (id: string) => document.getElementById(id)!.textContent;
@@ -1910,13 +1910,13 @@ it('walks the extension install in the chosen browser\'s own words and pictures,
   expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('chrome-en-load');
   expect(document.querySelector<HTMLElement>('#extensionPictureDev .ext-spot')!.style.left).toBe('63.7%');
 
-  // Edge has no capture yet: no picture at all rather than Chrome's, and the hint for its sidebar.
+  // Edge's own page, laid out differently (the switch sits in its sidebar), with the hint for where.
   (document.querySelector('[data-external-browser="edge"]') as HTMLButtonElement).click();
   expect(text('setupExtensionAddress')).toBe('edge://extensions');
   expect(text('extensionStepOpen')).toBe('Open the extensions page in Edge');
-  expect(document.getElementById('extensionPictureDev')!.hidden).toBe(true);
-  expect(img('extensionPictureDev')).toBeNull();
-  expect(img('extensionPictureLoad')).toBeNull();
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('edge-en-dev');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('edge-en-load');
+  expect(img('extensionPictureLoad')!.alt).toBe('The extensions page in Edge, with “Load unpacked” outlined');
   expect(document.getElementById('extensionStepDevWhere')!.hidden).toBe(false);
   expect(text('extensionStepOpenHint')).toBe('Click the address to copy it, then paste it into the address bar in Edge and press Enter.');
   // Browsers ignore their own pages from the command line, so the app copies the address.
@@ -1938,6 +1938,10 @@ it('walks the extension install in the chosen browser\'s own words and pictures,
   expect(text('extensionStepDev')).toBe('Schalte „Entwicklermodus“ ein');
   expect(text('extensionStepLoad')).toBe('Klicke auf „Entpackte Erweiterung laden“ und wähle den Erweiterungsordner');
   expect(img('extensionPictureDev')!.getAttribute('src')).toContain('chrome-de-dev');
+  // Edge words the same button differently in German.
+  (document.querySelector('[data-external-browser="edge"]') as HTMLButtonElement).click();
+  expect(text('extensionStepLoad')).toBe('Klicke auf „Entpackte Dateien laden“ und wähle den Erweiterungsordner');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('edge-de-load');
   setLanguage('en');
 });
 
