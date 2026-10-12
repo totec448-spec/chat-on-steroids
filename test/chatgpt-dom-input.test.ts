@@ -1243,6 +1243,39 @@ describe('native image readiness', () => {
 });
 
 
+describe('transport failures in Portuguese', () => {
+  // Measured 2026-10-12 on a pt-BR account: a send ChatGPT could not deliver showed this alert with
+  // its Retry button, and the dropped answer "Conexão interrompida…". Read only in English, neither
+  // was a failure, so the undelivered message counted as sent and nothing retried it.
+  it('recognises the delivery timeout alert with its localized Retry', () => {
+    const alert = document.createElement('div');
+    alert.setAttribute('role', 'alert');
+    alert.innerHTML = '<p>A entrega da mensagem atingiu o tempo limite. Tente novamente.</p><button>Tentar novamente</button>';
+    document.body.append(alert);
+    expect(api.errors()).toEqual([expect.objectContaining({ recoverable: true })]);
+    alert.remove();
+  });
+
+  it('recognises the interrupted-connection card by its Retry control', () => {
+    const card = document.createElement('div');
+    card.innerHTML = '<p>Conexão interrompida. Aguardando a resposta completa </p><button>Tentar novamente</button>';
+    document.body.append(card);
+    expect(api.errors()).toEqual([
+      expect.objectContaining({ text: 'Conexão interrompida. Aguardando a resposta completa', recoverable: true })
+    ]);
+    card.remove();
+  });
+
+  it('still ignores other Portuguese announcements', () => {
+    const alert = document.createElement('div');
+    alert.setAttribute('role', 'alert');
+    alert.textContent = 'Configurações salvas';
+    document.body.append(alert);
+    expect(api.errors()).toEqual([]);
+    alert.remove();
+  });
+});
+
 describe('transport-card scan cost', () => {
   it('skips hundreds of sidebar buttons without reading innerText and still finds the real card', () => {
     const sidebar = document.createElement('nav');
