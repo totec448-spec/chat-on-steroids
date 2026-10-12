@@ -29,7 +29,7 @@ Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS u
   - Actions go through the same outbox as the composer, are refused without the second switch before any request body is read, and never resend a message whose delivery is unconfirmed. A send connects the app and opens the chat in your browser as the composer would, and a model that reads the message can act under the permissions you have granted, so treat the token, with that switch on, as the ability to speak in your chats. Turning the API off turns actions off, and turning it on again leaves them off.
   - It never returns MCP paths, tunnel ids, plugin configuration or credentials from the app's own state. Chat, tool and log text has known credential shapes (API keys, common vendor tokens, bearer headers, JWTs, URL passwords, private keys) masked and is length-capped, but anything else you typed into a chat is returned as recorded. Treat the token like access to your history.
 - Stored API/bridge credentials use Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, a secure desktop secret store on Linux). Linux `basic_text` is refused; normal Activity logs are redacted, capped and memory-only.
-- Session recording is separate durable local history. It is on for fresh installs and can be disabled.
+- Session recording is separate durable local history. It is always on, and history is kept until you delete a chat.
 
 ## Provider rules and responsible use
 

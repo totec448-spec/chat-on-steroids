@@ -5101,7 +5101,7 @@ export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[],
 
     const facts = el('div', 'worktree-checkout-facts');
     if (offer.dirty) {
-      facts.append(el('span', 'chip worktree-risk', () => offer.changeCount
+      facts.append(el('span', 'chip worktree-risk', () => offer.changeCount > 1
         ? t('{0} uncommitted changes', [offer.changeCount]) : t('Uncommitted changes')));
     }
     if (offer.ignoredFiles) facts.append(el('span', 'chip worktree-risk', () => t('Ignored files')));
@@ -5126,12 +5126,15 @@ export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[],
 async function showWorktreeCleanupOffers(): Promise<void> {
   const review = $<HTMLButtonElement>('worktreeCleanupReview');
   if (review.disabled) return;
+  const panel = $('worktreeCleanupList');
   const restoreFocus = document.activeElement === review;
   review.disabled = true;
+  panel.setAttribute('aria-busy', 'true');
   try {
     const offers = await run(api.listWorktreeCleanupOffers());
-    if (offers) paintWorktreeCleanupOffers(offers);
+    if (offers) paintWorktreeCleanupOffers(offers, panel);
   } finally {
+    panel.removeAttribute('aria-busy');
     review.disabled = false;
     if (restoreFocus && document.activeElement === document.body) review.focus();
   }

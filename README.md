@@ -46,20 +46,20 @@ This notice states the project's intended use; it does not certify compliance or
 ## Get started
 
 1. **Install CoS** and approve your project folder in **Settings → Workspace**.
-2. **Connect Core** through **Settings → Setup** and add it in ChatGPT under **Plugins → Add → Create MCP App**. [Tunnel setup →](docs/setup.md#tunnel-setup)
+2. **Connect Core** through **Settings → Setup** and add it in ChatGPT under **Plugins → Add → Add custom MCP server**. [Tunnel setup →](docs/setup.md#tunnel-setup)
 3. **Load the companion extension.** Click **Open extension folder**, then **Load unpacked** in Chrome’s extension settings. Pairing is automatic.
 4. **Choose a model, write your task and send.**
 
 <details>
 <summary>Requirements &amp; installation notes</summary>
 
-Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome 116+, current Edge or Brave, plus a ChatGPT account/workspace that can create custom MCP apps (availability depends on your plan and workspace policy). [Check account availability](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
+Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome 125+, current Edge or Brave, plus a ChatGPT account/workspace that can create custom MCP apps (availability depends on your plan and workspace policy). [Check account availability](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
 
 - **Unsigned beta:** Windows is not publisher-signed; macOS is unsigned and unnotarized. Verify the package against the release checksums. Because of that, macOS asks once after each update for your login password so the new version can open its saved keys ("chat-on-steroids Safe Storage"); choose **Always Allow**. Until you answer, chats and the browser connection wait, and the app says so.
 - **Linux:** a Secret Service keyring is required. Prefer the DEB; when unprivileged user namespaces are disabled, the AppImage launcher can fall back to <code>--no-sandbox</code>.
 - **Permissions:** choose your approved folders and review capabilities before connecting. Fresh installs enable Core capabilities and two workers; Windows also enables Desktop permissions. Shell commands run with your normal user privileges.
 - **Languages:** English, German, Spanish, French, Korean, Portuguese (Brazil and Portugal), Russian, Turkish, Vietnamese, Japanese, and Simplified and Traditional Chinese. Choose one in **Appearance → Language**.
-- **After updating:** reload the companion extension and refresh the CoS apps in ChatGPT when prompted.
+- **After updating:** the companion extension updates itself once no chat is busy. If CoS asks you to refresh its apps in ChatGPT, do so; **Automatic plugin refresh** in Settings can do it for you.
 
 </details>
 

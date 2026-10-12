@@ -3858,6 +3858,12 @@ const HANDLERS = {
     if (connectorNames?.core) await rememberOwnCoreApp({ appId: message.appId, name: connectorNames.core });
     return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
   },
+  // A page read ChatGPT's own `conversation_deleted` answer for this chat (usage.js).
+  async conversation_deleted(message, _sender, source) {
+    const conversationId = String(message.conversationId || '').toLowerCase();
+    if (!ownsDocument(source) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(conversationId)) return { ok: false };
+    return call('/conversation-deleted', { method: 'POST', body: JSON.stringify({ conversationId }) });
+  },
   async usage_observation(message, _sender, source) {
     if (!ownsDocument(source) || !Array.isArray(message.rows) || message.rows.length > 80) return { ok: false };
     const body = JSON.stringify({ rows: message.rows, observedAt: message.observedAt });
@@ -4707,6 +4713,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'project_create',
     'core_plugin',
     'load_failure',
+    'conversation_deleted',
     'usage_observation',
     'events',
     'bind',

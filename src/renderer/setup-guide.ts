@@ -52,13 +52,13 @@ const guides: Record<string, Shot[]> = {
   ],
   plugin: [
     { src: new URL('./setup-images/plugin-add.png', import.meta.url).href, spots: [
-      { text: 'Add → Create MCP App', box: [8.7, 70.1, 82.6, 16] }
+      { text: 'Add → Add custom MCP server', box: [6, 71.5, 88, 15] }
     ] },
     { src: new URL('./setup-images/plugin-new.png', import.meta.url).href, spots: [
-      { text: 'Paste the name exactly', box: [3.3, 20, 93.3, 5.2] },
-      { text: 'Tunnel, then your tunnel ID', box: [3.3, 38.7, 93.3, 15.1] },
-      { text: 'No authentication', box: [3.3, 59.4, 93.3, 5.1] },
-      { text: 'Accept, then Create', box: [84.3, 92, 12.4, 5.3] }
+      { text: 'Paste the name exactly', box: [3.3, 19.5, 93.3, 5] },
+      { text: 'Tunnel, then your tunnel ID', box: [3.3, 40.7, 93.3, 14.2] },
+      { text: 'No authentication', box: [3.3, 60.4, 93.3, 5] },
+      { text: 'Accept, then Create as a plugin', box: [71.2, 92.2, 25.4, 5] }
     ] },
     // So tasks are not paused for approval: the plugin's own permissions page, in ChatGPT's words.
     { src: new URL('./setup-images/plugin-permissions.png', import.meta.url).href, spots: [
