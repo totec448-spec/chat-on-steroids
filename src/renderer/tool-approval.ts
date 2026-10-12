@@ -13,7 +13,7 @@ function notice(): HTMLElement {
   image.alt = t('Example of a ChatGPT tool approval prompt');
   card.append(image,
     el('p', '', () => t('Review the action, then open Allow → Always allow.')),
-    el('p', 'muted tool-approval-footnote', () => t('Separate from Plugins → Allow all actions. This reminder does not approve a tool call.')));
+    el('p', 'muted tool-approval-footnote', () => t('Separate from Plugins → Allow all tools. This reminder does not approve a tool call.')));
   return card;
 }
 

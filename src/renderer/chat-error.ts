@@ -1,6 +1,6 @@
 import type { SessionEvent } from '../shared/session.js';
 import { positionOf } from '../shared/chronology.js';
-import { chatErrorMessageKey } from '../shared/chat-error.js';
+import { chatErrorMessageKey, CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { t } from './i18n.js';
 
 type ChatError = Extract<SessionEvent, { kind: 'chat_error' }>;
@@ -23,6 +23,9 @@ export function duplicateChatErrors(history: readonly SessionEvent[]): Set<numbe
 /** Presentation only: never infer send/reload authority from error prose. */
 export function chatErrorPresentation(error: ChatError, history: readonly SessionEvent[] = []) {
   const text = error.message.text.trim();
+  if (text === CONVERSATION_DELETED) return { title: t('Chat deleted in ChatGPT'),
+    message: t('ChatGPT no longer has this chat, so nothing more can be sent to it.'),
+    next: t('Start a new chat to continue. This history stays in the app.'), resolved: false, reloaded: false };
   const thinking = text === 'Thinking failed';
   const stalled = text.startsWith('No visible progress for ten minutes.');
   const title = thinking ? t('Thinking failed') : stalled ? t('Response stalled') : t('ChatGPT reported a problem');

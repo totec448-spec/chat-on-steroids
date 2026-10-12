@@ -4,7 +4,7 @@ Chat On Steroids is a Windows/macOS/Linux beta maintained by one person. Bug rep
 
 ## Before a pull request
 
-For anything non-trivial, open an issue first so the intended behavior is clear. Security problems must be reported privately through [`SECURITY.md`](SECURITY.md), not as an issue or PR.
+No separate issue is needed: describe the problem and the change in the PR. For anything beyond a small fix, open a draft PR early and agree on the behavior there before building it out. Security problems must be reported privately through [`SECURITY.md`](SECURITY.md), not as an issue or PR.
 
 Keep changes narrow. Preserve existing permission, identity and recovery behavior unless the issue specifically requires changing it. Avoid unrelated formatting, generated output, local debugging material and private data. In screenshots, logs and examples, replace real usernames, local paths, chat text, IDs and credentials with obvious placeholders such as `C:\Users\you\project` or `/home/you/project`.
 

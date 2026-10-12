@@ -1171,6 +1171,27 @@ describe('ChatGPT\'s plugin list as proof', () => {
   });
 });
 
+describe('a chat deleted in ChatGPT', () => {
+  it('passes conversation_deleted to the app only from a current ChatGPT document, with one exact chat id', async () => {
+    const posted: unknown[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/conversation-deleted') posted.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, ended: 0 });
+      }
+    });
+    const chat = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
+    expect((await worker.send({ type: 'conversation_deleted', conversationId: chat }, 2, '')).ok).toBe(false);
+    await worker.registerTab(1);
+    expect((await worker.send({ type: 'conversation_deleted', conversationId: 'not-a-chat' }, 1)).ok).toBe(false);
+    expect((await worker.send({ type: 'conversation_deleted', conversationId: chat, extra: 'dropped' }, 1)).ok).toBe(true);
+    expect(posted).toEqual([{ conversationId: chat.toLowerCase() }]);
+  });
+});
+
 describe('this install\'s Core app for fresh tabs (#1086)', () => {
   it('hands a redeeming page this install\'s Core identity with its command', async () => {
     // A tab the app opened runs its command before its first status reply, so the command
