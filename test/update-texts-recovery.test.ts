@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 const keys = [
+  "Choose Update all to retry.",
   "Choose Update all to retry. You can keep using the current app.",
   "Let active chats finish, then reload the companion extension in your browser.",
   "Open ChatGPT with the companion extension enabled, then choose Review setup.",
