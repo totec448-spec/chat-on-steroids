@@ -910,6 +910,8 @@ export interface AgentInfo {
   label: string;
   /** Spawn brief, or a bounded inbox preview for the current reused assignment. */
   task: string;
+  /** The job's name from the spawn brief, kept when a wake replaces `task`; display only. */
+  jobTitle?: string;
   /**
    * Requested reasoning level for this worker's chat, or null to inherit the default.
    *

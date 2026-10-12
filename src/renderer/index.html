@@ -668,6 +668,7 @@
                       spellcheck="false"
                       placeholder="tunnel_0123456789abcdef0123456789abcdef"
                     />
+                    <p class="hint is-required" id="tunnelIdShared" role="status" hidden></p>
                   </div>
                   <!-- Desktop is a second connector in ChatGPT, so on this method it needs a
                        second tunnel of its own. Hidden unless desktop permissions are on, so
@@ -682,6 +683,7 @@
                         spellcheck="false"
                         placeholder="tunnel_0123456789abcdef0123456789abcdef"
                       />
+                      <p class="hint is-required" id="desktopTunnelIdShared" role="status" hidden></p>
                       <p class="hint">
                         Screen and mouse/keyboard control are a separate connector, so they need a
                         second tunnel. Create another one and paste its ID here. Leave it empty to
