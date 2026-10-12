@@ -2294,37 +2294,6 @@ it('says nothing about being current until the check has actually answered', asy
 /**
  * A staged update is not "up to date", and it is not a failure either.
  */
-it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
-  let resolve!: (reply: any) => void;
-  const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));
-  const { window: w, state, push } = await mountChat({}, [], { updateAll });
-  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
-  expect(button).not.toBeNull();
-  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('asked before the app restarts');
-  expect(button.getAttribute('aria-describedby')).toBe('updateAllNotice');
-  button.click(); button.click(); push(structuredClone(state));
-  expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
-  expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
-  resolve({ ok: false, error: 'Network unavailable' });
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
-  expect(button.textContent).toBe('Update all');
-  button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
-  resolve({ ok: true, data: 'manual' });
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
-  expect(w.document.body.textContent).toContain('Download link opened. Install the app to continue');
-});
-
-it.each(['reply', 'transport'])('retains the update command %s error across state pushes', async kind => {
-  const updateAll = vi.fn(() => kind === 'reply' ? Promise.resolve({ ok: false, error: 'Network unavailable' }) : Promise.reject(new Error('Network unavailable')));
-  const { window: w, state, push } = await mountChat({}, [], { updateAll });
-  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
-  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
-  push(structuredClone(state));
-  expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
-  expect(w.document.getElementById('updateAllError')!.textContent).toContain('Network unavailable');
-  expect(updateAll).toHaveBeenCalledTimes(1);
-});
-
 it('reports update readiness only from checked versions and current connector evidence', async () => {
   const { window: w, state, push } = await mountChat();
   const ready = structuredClone(state);
@@ -2400,6 +2369,263 @@ it('reports update readiness only from checked versions and current connector ev
   expect(summary().textContent).toBe('すべての確認が完了しました');
   expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain('最新版です');
   setLanguage('en');
+});
+
+it('uses live macOS permission verdicts only for the enabled Desktop capabilities in update readiness', async () => {
+  const update = vi.fn(), connect = vi.fn(), request = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { updateAll: update, connect, requestDesktopAccessibility: request });
+  const ready = structuredClone(state);
+  ready.platform = { family: 'macos', name: 'macOS', desktopAutomation: true };
+  ready.config.readOnly = false;
+  ready.config.capabilities.screen = ready.config.capabilities.control = true;
+  ready.update.checkedAt = 1;
+  ready.bridge = { ...ready.bridge, paired: true, present: true, extensionVersion: ready.update.current };
+  ready.status = { ...ready.status, state: 'connected', surfaces: ['core', 'desktop'].map(id => ({ id, connectorName: id,
+    optional: id === 'desktop', available: true, state: 'live', detail: '', description: id, cardSummary: id,
+    localUrl: null, publicUrl: null, lastRequestAt: 1, lastToolCallAt: 1, tools: [id === 'core' ? 'read' : 'screen_capture'] })) };
+  ready.connectorSchemas = { core: 'core-a', desktop: 'desktop-a' };
+  ready.connectorRefresh = { core: { schemaId: 'core-a', state: 'current' }, desktop: { schemaId: 'desktop-a', state: 'current' } };
+  ready.desktopAccess = { screen: 'granted', accessibility: 'granted', checkedAt: 1, error: null };
+  const summary = () => w.document.getElementById('updateReadinessSummary')!;
+  const desktop = () => w.document.querySelector('[data-update-part="desktop"]')!;
+  push(ready); expect(summary().dataset.ready).toBe('true');
+  const missing = structuredClone(ready);
+  missing.desktopAccess.screen = missing.desktopAccess.accessibility = 'missing';
+  push(missing);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().classList.contains('is-bad')).toBe(true);
+  expect(desktop().textContent).toContain('Screen Recording: required');
+  expect(desktop().textContent).toContain('Accessibility: required');
+  expect(desktop().textContent).toContain('Choose Review setup to check macOS permissions');
+  const unverified = structuredClone(ready); delete unverified.desktopAccess;
+  push(unverified);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().classList.contains('is-not-run')).toBe(true);
+  expect(desktop().textContent).toContain('Screen Recording: unknown');
+  const screenOnly = structuredClone(missing); screenOnly.config.readOnly = true;
+  push(screenOnly);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().textContent).not.toContain('Accessibility: required');
+  screenOnly.desktopAccess.screen = 'granted'; push(screenOnly);
+  expect(summary().dataset.ready).toBe('true');
+  const controlOnly = structuredClone(missing); controlOnly.config.capabilities.screen = false;
+  push(controlOnly);
+  expect(summary().dataset.ready).toBe('false');
+  expect(desktop().textContent).not.toContain('Screen Recording: required');
+  const clipboardOnly = structuredClone(controlOnly); clipboardOnly.config.capabilities.control = false;
+  push(clipboardOnly); expect(summary().dataset.ready).toBe('true');
+  const off = structuredClone(missing); off.status.surfaces[1].state = 'off';
+  push(off); expect(summary().dataset.ready).toBe('true');
+  const windows = structuredClone(missing); windows.platform.family = 'windows';
+  push(windows); expect(summary().dataset.ready).toBe('true');
+  const connectorFailure = structuredClone(missing);
+  connectorFailure.connectorRefresh.desktop = { schemaId: 'desktop-a', state: 'failed', failure: 'inspection' };
+  push(connectorFailure);
+  expect(desktop().textContent).toContain('Could not inspect the installed connector');
+  expect(desktop().textContent).toContain("Open this connector's settings in ChatGPT");
+  expect(desktop().textContent).toContain('check macOS permissions');
+  expect(update).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled();
+});
+
+it('explains replacement and the launch location only for a confirmed manual macOS app update', async () => {
+  const update = vi.fn(), connect = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { updateAll: update, connect });
+  const manual = structuredClone(state);
+  manual.platform = { family: 'macos', name: 'macOS', desktopAutomation: true };
+  manual.update = { ...manual.update, latest: '99.0.0', stage: 'idle', checkedAt: 1 };
+  const app = () => w.document.querySelector('[data-update-part="app"]')!;
+  push(manual);
+  expect(app().textContent).toContain('Install 99.0.0 manually');
+  expect(app().textContent).toContain('fully quit Chat On Steroids');
+  expect(app().textContent).toContain('/Applications');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(app().textContent).toContain('完全に終了');
+  expect(app().textContent).toContain('/Applications');
+  setLanguage('en');
+  for (const change of [
+    (s: any) => { s.platform.family = 'windows'; },
+    (s: any) => { s.platform.family = 'linux'; },
+    (s: any) => { s.update.latest = null; },
+    (s: any) => { s.update.stage = 'checking'; },
+    (s: any) => { s.update.stage = 'ready'; },
+    (s: any) => { s.update.stage = 'failed'; s.update.error = 'Network unavailable'; }
+  ]) {
+    const other = structuredClone(manual); change(other); push(other);
+    expect(app().textContent).not.toContain('/Applications');
+  }
+  expect(app().textContent).toContain('Choose Update all to retry');
+  expect(update).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled();
+});
+
+it('keeps update readiness actions stable and does not start update or connection work on pushes', async () => {
+  const installUpdate = vi.fn(), connect = vi.fn(), refreshUpdate = vi.fn(), updateAll = vi.fn();
+  const { window: w, state, push } = await mountChat({}, [], { installUpdate, connect, refreshUpdate, updateAll });
+  const button = w.document.getElementById('updateReviewSetup') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  button.focus(); push(structuredClone(state));
+  expect(w.document.activeElement).toBe(button);
+  expect(installUpdate).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(refreshUpdate).not.toHaveBeenCalled();
+  expect(updateAll).not.toHaveBeenCalled();
+  button.click();
+  expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
+});
+
+it('shows update failure causes and next steps without using stale connector diagnostics', async () => {
+  const { window: w, state, push } = await mountChat();
+  const next = structuredClone(state) as any;
+  const core = { id: 'core', connectorName: 'Core', description: 'Core', cardSummary: 'Files and terminal',
+    optional: false, available: true, state: 'live', detail: '', tools: ['read'], localUrl: null,
+    publicUrl: null, lastRequestAt: null, lastToolCallAt: null };
+  next.update = { ...next.update, stage: 'failed', error: 'GitHub returned 503' };
+  next.bridge = { ...next.bridge, running: true, paired: true, present: false, extensionVersion: '0.0.1' };
+  next.status = { ...next.status, state: 'offline', detail: 'Network unavailable',
+    surfaces: [{ ...core, state: 'error', detail: 'Network unavailable' }] };
+  const row = (id: string) => w.document.querySelector(`[data-update-part="${id}"]`)!.textContent!;
+  push(next);
+  expect(row('app')).toContain('GitHub returned 503');
+  expect(row('app')).toContain('current app');
+  expect(row('extension')).toContain('active chats');
+  expect(row('core')).toContain('Network unavailable');
+  expect(row('core')).toContain('Review setup');
+  next.status.surfaces = []; push(next);
+  expect(row('core')).toContain('Network unavailable');
+  expect(w.document.querySelector('[data-update-part="core"]')!.classList.contains('is-bad')).toBe(true);
+  next.status.detail = ''; push(next);
+  expect(row('core')).toContain('Review setup');
+  next.status.surfaces = [{ ...core }];
+  next.status.state = 'connected'; next.status.surfaces[0].state = 'live';
+  next.connectorSchemas = { core: 'current' };
+  next.connectorRefresh = { core: { schemaId: 'current', state: 'failed', failure: 'inspection' } };
+  push(next);
+  expect(row('core')).toContain('Could not inspect');
+  expect(row('core')).toContain('Connector check failed');
+  expect(row('core')).toContain("settings in ChatGPT");
+  expect(row('core')).toContain('Diagnostics report');
+  next.connectorRefresh.core.failure = 'confirmation'; push(next);
+  expect(row('core')).toContain('Could not confirm');
+  next.connectorRefresh.core = { schemaId: 'current', state: 'failed', failure: 'migration', responding: true }; push(next);
+  expect(row('core')).toContain('Connector check failed');
+  expect(row('core')).toContain('saved connector');
+  expect(row('core')).toContain('refresh this existing connector');
+  expect(row('core')).not.toContain('recreate');
+  expect(w.document.querySelector('[data-update-part="core"]')!.classList.contains('is-bad')).toBe(true);
+  expect(w.document.getElementById('updateReadinessSummary')!.dataset.ready).toBe('false');
+  next.connectorRefresh.core.failure = 'confirmation';
+  next.connectorRefresh.core.schemaId = 'old'; push(next);
+  expect(row('core')).not.toContain('Could not confirm');
+  next.connectorRefresh.core = { schemaId: 'current', state: 'manual' }; push(next);
+  expect(row('core')).toContain("ChatGPT's connector settings");
+  expect(row('core')).toContain('refresh or recreate');
+  expect(row('core')).toContain('Update all to recheck');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(row('core')).toContain('更新または作り直し');
+  expect(row('core')).toContain('まとめて更新');
+  setLanguage('en');
+});
+
+it.each(['reply', 'transport'])('keeps an Update all %s failure visible across pushes until explicit retry', async kind => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn().mockImplementationOnce(() => kind === 'reply'
+    ? Promise.resolve({ ok: false, error: 'Network unavailable' }) : Promise.reject(new Error('Network unavailable')))
+    .mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const details = w.document.getElementById('updateReadinessDetails') as HTMLDetailsElement;
+  details.open = false;
+  button.click();
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  const error = w.document.getElementById('updateAllError')!;
+  expect(error.hidden).toBe(false);
+  expect(error.textContent).toContain('Network unavailable');
+  expect(error.textContent).toContain('Update all to retry');
+  expect(details.open).toBe(true);
+  details.open = false; // A new failure asks for attention; the person can still collapse it.
+  expect(details.open).toBe(false);
+  expect(details.contains(error)).toBe(false);
+  expect(details.contains(w.document.getElementById('updateAllNotice'))).toBe(false);
+  push(structuredClone(state));
+  expect(error.hidden).toBe(false);
+  expect(details.open).toBe(false);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  button.click();
+  expect(error.hidden).toBe(true);
+  resolve({ ok: true, data: 'checking-connectors' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(error.hidden).toBe(true);
+});
+
+it('translates updater reasons and retained recovery guidance when the language changes', async () => {
+  const updateAll = vi.fn().mockResolvedValue({ ok: false, error: 'Could not read plugin-refresh state' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const next = structuredClone(state);
+  next.update.stage = 'failed'; next.update.error = 'Update check failed';
+  push(next);
+  expect(w.document.querySelector('[data-update-part="app"] .is-warn')!.textContent).toBe(t('Update check failed'));
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+  const error = w.document.getElementById('updateAllError')!;
+  expect(error.textContent).not.toContain('Could not read plugin-refresh state');
+  expect(error.textContent).toContain(t('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'));
+  setLanguage('ja');
+  expect(error.textContent).toContain('診断レポート');
+  expect(w.document.querySelector('[data-update-part="app"] .is-warn')!.textContent).toBe('更新の確認に失敗しました');
+  push(next);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  expect(error.hidden).toBe(false);
+  setLanguage('en');
+});
+
+it.each(['cancelled', 'failed', 'transport'])('offers the existing diagnostics action after an unreadable-state failure and keeps a %s report from retrying updates', async outcome => {
+  let finish!: (reply: any) => void;
+  let reject!: (error: Error) => void;
+  const saveDiagnosticsReport = vi.fn(() => new Promise((done, fail) => { finish = done; reject = fail; }));
+  const updateAll = vi.fn().mockResolvedValueOnce({ ok: false, error: 'Could not read plugin-refresh state' })
+    .mockResolvedValueOnce({ ok: true, data: 'checking-connectors' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll, saveDiagnosticsReport });
+  const update = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const shortcut = w.document.getElementById('updateDiagnosticsReport') as HTMLButtonElement;
+  const original = w.document.getElementById('saveDiagnosticsReport') as HTMLButtonElement;
+  expect(shortcut.hidden).toBe(true);
+  update.click(); await vi.waitFor(() => expect(update.disabled).toBe(false));
+  expect(shortcut.hidden).toBe(false);
+  shortcut.click(); original.click();
+  expect(saveDiagnosticsReport).toHaveBeenCalledTimes(1);
+  expect(shortcut.disabled).toBe(true); expect(original.disabled).toBe(true);
+  push(structuredClone(state));
+  expect(shortcut.disabled).toBe(true);
+  if (outcome === 'transport') reject(new Error('Fixture report transport error'));
+  else finish(outcome === 'cancelled' ? { ok: true, data: { saved: false } } : { ok: false, error: 'Fixture report error' });
+  await vi.waitFor(() => expect(shortcut.disabled).toBe(false));
+  expect(original.disabled).toBe(false);
+  expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  update.click(); await vi.waitFor(() => expect(update.disabled).toBe(false));
+  expect(shortcut.hidden).toBe(true);
+  expect(saveDiagnosticsReport).toHaveBeenCalledTimes(1);
+});
+
+it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('asked before the app restarts');
+  expect(button.getAttribute('aria-describedby')).toBe('updateAllNotice');
+  button.click(); button.click(); push(structuredClone(state));
+  expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
+  resolve({ ok: false, error: 'Network unavailable' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(button.textContent).toBe('Update all');
+  button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
+  resolve({ ok: true, data: 'manual' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(w.document.body.textContent).toContain('Download link opened. Install the app to continue');
 });
 
 it('reports a staged update in the Activity line and the header bar', async () => {

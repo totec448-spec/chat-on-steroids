@@ -41,6 +41,14 @@ it.each(['2.1.33', '2.1.34', '2.1.35', null])('guides extension %s in the correc
   } else expect(row.nextStep).toContain('Review setup');
 });
 
+it.each(['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'])('names the actual update action in the %s recovery guidance', async locale => {
+  const { updateReadiness } = await import('../src/renderer/update-readiness.js');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage(locale as Parameters<typeof setLanguage>[0]);
+  const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8'));
+  const next = state(); next.bridge.extensionVersion = '2.1.35';
+  expect(updateReadiness(next).find(row => row.id === 'extension')!.nextStep).toContain(catalog['Update all']);
+});
 
 it('expands operational but schema-unverified evidence and opens the completed card from its status line', async () => {
   const { initUpdateReadiness, paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
@@ -62,7 +70,7 @@ it('expands operational but schema-unverified evidence and opens the completed c
 
 it('announces readiness outside the disclosure button and keeps its label, focus and translation', async () => {
   const { initUpdateReadiness, paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
-  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
   initUpdateReadiness(); const next = state();
   const toggle = document.getElementById('updateReadinessToggle')!;
   const summary = document.getElementById('updateReadinessSummary')!;
@@ -80,7 +88,7 @@ it('announces readiness outside the disclosure button and keeps its label, focus
   expect(summary.textContent).toBe(live.textContent);
   expect(document.activeElement).toBe(toggle);
   setLanguage('ja');
-  expect(live.textContent).toBe(t('Checks incomplete'));
+  expect(live.textContent).toBe('確認が完了していません');
   expect(summary.textContent).toBe(live.textContent);
 });
 
@@ -152,10 +160,10 @@ it('distinguishes an inspection failure from a failed refresh without hiding it 
   expect(updateReadiness(next).find(row => row.id === 'core')!.detail).toBe('Connector refresh failed');
 });
 
-it('keeps the setup action exact when the interface language changes', async () => {
+it('uses the Korean setup action exactly once in the connection recovery guidance', async () => {
   const { updateReadiness } = await import('../src/renderer/update-readiness.js');
-  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('ko'); const next = state(); next.status.state = 'auth-failed';
   const row = updateReadiness(next).find(row => row.id === 'core')!;
-  expect(row.nextStep).toBe(t('Choose Review setup to check the connection, then choose Update all to retry.'));
+  expect(row.nextStep).toBe('연결 설정 확인에서 연결을 확인한 후 모두 업데이트를 선택하여 다시 시도하세요.');
 });
