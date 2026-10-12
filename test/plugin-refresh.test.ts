@@ -73,6 +73,74 @@ it('preserves a legacy click across schema changes and ends a mismatched read-on
   await requestPluginRefreshes(APP_VERSION);
   expect((await pendingPluginRefreshes(false))[0]).toMatchObject({ appId, observeOnly: true });
 });
+it.each(['claimed', 'manual', 'completed'] as const)('shows failed legacy %s rechecks without borrowing verification or another refresh click', async state => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  let tunnel = { ...original.tunnel, kind: 'openai' as const, tunnelId };
+  const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel }));
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    if (state === 'manual') await requireManualPluginRefresh({ ...first, appId, connectorName: first.connectorName,
+      tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual outcome' });
+    else {
+      expect(await claim(first)).toBe(true);
+      if (state === 'completed') expect(await completePluginRefresh({ ...first, appId, tools })).toBe(true);
+    }
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    const declarations = [{ ...tools[0]!, description: 'New contract' }];
+    publish('2', declarations);
+    await requestPluginRefreshes(APP_VERSION);
+    const observation = (await pendingPluginRefreshes(false))[0]!;
+    expect(observation).toMatchObject({ appId, observeOnly: true });
+    expect(await claim(observation)).toBe(false);
+    expect(await failPluginRefresh({ id: observation.id, error: 'Private failed observation' })).toBe(true);
+    const saved = await readDurable('plugin-refresh');
+    const wakes = wake.mock.calls.length;
+    expect((await pluginRefreshStatuses()).core).toMatchObject({ schemaId: observation.schemaId, state: 'failed', failure: 'migration' });
+    expect(await readDurable('plugin-refresh')).toEqual(saved); expect(wake.mock.calls.length).toBe(wakes);
+    expect(JSON.stringify(await pluginRefreshStatuses())).not.toContain('Private');
+    expect(confirmedPluginSchemas()).toEqual({});
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    expect(await rearmPluginRefresh('core')).toBe(false);
+    expect((saved as any[])[0]).toMatchObject({ appId, attempted: state !== 'manual', manual: state === 'manual' });
+    expect((saved as any[])[0].tunnelKey).toBeUndefined();
+    beginPluginToolCall('core')();
+    expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', responding: true });
+    resetPluginRefreshForTests(); publish('2', declarations);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('failed');
+    tunnel = { ...tunnel, tunnelId: 'tunnel_other00000001' }; publish('2', declarations);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    expect(await failPluginRefresh({ id: observation.id, error: 'Foreign connection failure' })).toBe(false);
+    tunnel = { ...tunnel, tunnelId }; publish('2', declarations);
+    publish('3', [{ ...tools[0]!, description: 'Later contract' }]);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    expect(await failPluginRefresh({ id: observation.id, error: 'Stale declaration failure' })).toBe(false);
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    await requestPluginRefreshes(APP_VERSION);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    const retry = (await pendingPluginRefreshes(false))[0]!;
+    expect(retry).toMatchObject({ appId, observeOnly: true });
+    expect(await claim(retry)).toBe(false);
+    expect(await claimPluginRefresh({ ...retry, appId: 'asdk_app_foreign', connectorName: retry.connectorName,
+      tools: retry.tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true }, false)).toBe(false);
+    expect(await claimPluginRefresh({ ...retry, appId, connectorName: retry.connectorName,
+      tools: retry.tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true }, false)).toBe(true);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+  } finally { get.mockRestore(); }
+});
+it('binds a disconnected legacy recheck to its first live schema without migrating its receipt', async () => {
+  publish(); const first = (await pendingPluginRefreshes())[0]!; expect(await claim(first)).toBe(true);
+  const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+  await writeDurableNow('plugin-refresh', legacy);
+  unpublishPluginSurface('core');
+  await requestPluginRefreshes(APP_VERSION, ['core']);
+  publish('new', [{ ...tools[0]!, description: 'New contract' }]);
+  const observation = (await pendingPluginRefreshes(false))[0]!;
+  expect(observation).toMatchObject({ appId, observeOnly: true });
+  expect(await failPluginRefresh({ id: observation.id, error: 'Definitions differ' })).toBe(true);
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', failure: 'migration' });
+  expect((await readDurable('plugin-refresh') as any[])[0].tunnelKey).toBeUndefined();
+});
 it.each(['manual', 'cloudflared'] as const)('never binds an old Secure Tunnel observation to a current %s publication', async replacement => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
   let kind: 'openai' | 'manual' | 'cloudflared' = 'openai';

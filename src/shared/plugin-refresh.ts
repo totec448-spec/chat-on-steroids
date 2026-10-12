@@ -6,7 +6,7 @@ export interface PluginRefreshStatus {
   /** Successful provider tool call under this live publication; not a full-schema claim. */
   responding?: boolean;
   /** Failed phase only; private provider diagnostics stay in the refresh owner. */
-  failure?: 'inspection' | 'confirmation';
+  failure?: 'inspection' | 'confirmation' | 'migration';
 }
 export interface PluginToolSchema {
   name: string;

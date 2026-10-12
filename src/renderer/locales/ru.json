@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Дождитесь подтверждения. Если оно не появится, откройте этот коннектор в ChatGPT и выберите «Обновить всё» для повторной проверки.",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "Запустите инструмент через этот коннектор в ChatGPT, чтобы подтвердить соединение.",
   "No tools published": "Нет опубликованных инструментов",
-  "The app may restart. Finish active work before updating.": "Возможен перезапуск. Завершите текущие задачи перед обновлением.",
   "The downloaded update could not be confirmed for installation.": "Не удалось проверить загруженное обновление для установки.",
   "The saved connector update state could not be read.": "Не удалось прочитать сохранённое состояние обновления коннекторов.",
   "The release information has no valid version number.": "В информации о выпуске нет допустимого номера версии.",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "Не удалось завершить операцию «Обновить всё»: {0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Завершите текущие задачи и полностью закройте Chat On Steroids. Замените приложение в /Applications и откройте обновлённую версию из этой папки.",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Выберите «Проверить настройку», чтобы проверить разрешения macOS. Затем полностью закройте приложение и откройте его снова.",
-  "Choose Update all to check for updates and update the app.": "Выберите «Обновить всё», чтобы проверить наличие обновлений и обновить приложение."
+  "Choose Update all to check for updates and update the app.": "Выберите «Обновить всё», чтобы проверить наличие обновлений и обновить приложение.",
+  "Restart to install the update?": "Перезапустить для установки обновления?",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids закроется и запустится снова. Работающие чаты, агенты и команды могут быть прерваны.",
+  "Keep working": "Продолжить работу",
+  "Restart and install": "Перезапустить и установить",
+  "Update postponed. You can keep working.": "Обновление отложено. Можно продолжить работу.",
+  "You will be asked before the app restarts. Finish active work before installing.": "Перед перезапуском появится запрос подтверждения. Завершите текущую работу перед установкой.",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "После обновления приложение один раз подключится для проверки коннекторов, даже если автоматическое подключение отключено.",
+  "Could not verify the saved connector against the current tool definitions.": "Не удалось сверить сохранённый коннектор с текущими определениями инструментов.",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "Обновите существующий коннектор в ChatGPT, затем выберите «Обновить всё» для проверки. Если Refresh недоступен, сохраните диагностический отчёт в Activity."
 }

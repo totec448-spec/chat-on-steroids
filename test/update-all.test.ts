@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SurfaceStatus, UpdateStatus } from '../src/shared/types.js';
 import { APP_VERSION } from '../src/main/version.js';
 import * as configOwner from '../src/main/config.js';
+import { faultGate } from './helpers.js';
 const newerVersion = APP_VERSION.replace(/\d+$/, value => String(Number(value) + 1));
 
 const owners = vi.hoisted(() => ({ check: vi.fn(), status: vi.fn(), mark: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock('../src/main/bridge.js', () => ({ startBridge: owners.bridge }));
 vi.mock('../src/main/connection.js', () => ({ connect: owners.connect, getStatus: () => ({ surfaces: owners.surfaces() }) }));
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: owners.wake }));
 const { updateAll, resumeUpdateRefresh } = await import('../src/main/update-all.js');
-const quit = vi.fn(), manual = vi.fn();
+const quit = vi.fn(), manual = vi.fn(), confirmRestart = vi.fn();
 let status: UpdateStatus;
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,13 +27,14 @@ beforeEach(() => {
   owners.requested.mockResolvedValue(true);
   owners.surfaces.mockReturnValue([]);
   manual.mockResolvedValue(undefined);
+  confirmRestart.mockResolvedValue(true);
 });
 afterEach(() => { vi.restoreAllMocks(); });
 it('joins double clicks and persists connector intent before the normal installer shutdown', async () => {
   status.latest = newerVersion; status.stage = 'ready';
   let release!: () => void;
   owners.check.mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
-  const first = updateAll(quit, manual), second = updateAll(quit, manual);
+  const first = updateAll(quit, manual, confirmRestart), second = updateAll(quit, manual, confirmRestart);
   expect(first).toBe(second); expect(quit).not.toHaveBeenCalled();
   release(); expect(await first).toBe('restarting');
   expect(owners.check).toHaveBeenCalledTimes(1);
@@ -41,7 +43,7 @@ it('joins double clicks and persists connector intent before the normal installe
   expect(quit).toHaveBeenCalledTimes(1); expect(manual).not.toHaveBeenCalled();
 });
 it('refreshes connected components even when the app is already current', async () => {
-  expect(await updateAll(quit, manual)).toBe('checking-connectors');
+  expect(await updateAll(quit, manual, confirmRestart)).toBe('checking-connectors');
   expect(owners.bridge).toHaveBeenCalledTimes(1); expect(owners.connect).toHaveBeenCalledTimes(1);
   expect(owners.request).toHaveBeenCalledExactlyOnceWith(APP_VERSION, ['core']);
   expect(owners.wake).toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
@@ -49,14 +51,14 @@ it('refreshes connected components even when the app is already current', async 
 it('applies a staged app update without requiring a working connector connection', async () => {
   status.latest = newerVersion; status.stage = 'ready';
   owners.connect.mockRejectedValue(new Error('Tunnel authentication unavailable'));
-  expect(await updateAll(quit, manual)).toBe('restarting');
+  expect(await updateAll(quit, manual, confirmRestart)).toBe('restarting');
   expect(owners.bridge).not.toHaveBeenCalled(); expect(owners.connect).not.toHaveBeenCalled();
   expect(owners.request).toHaveBeenCalledExactlyOnceWith(newerVersion, ['core']);
   expect(quit).toHaveBeenCalledTimes(1);
 });
 it('opens the supported manual app download without pretending to install it', async () => {
   status.latest = newerVersion;
-  expect(await updateAll(quit, manual)).toBe('manual');
+  expect(await updateAll(quit, manual, confirmRestart)).toBe('manual');
   expect(manual).toHaveBeenCalledExactlyOnceWith(`https://example.test/${newerVersion}`);
   expect(owners.request).toHaveBeenCalledExactlyOnceWith(newerVersion, ['core']);
   expect(quit).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled();
@@ -65,36 +67,55 @@ it('opens a manual app update even when the old bridge and tunnel cannot start',
   status.latest = newerVersion;
   owners.bridge.mockRejectedValue(new Error('Bridge unavailable'));
   owners.connect.mockRejectedValue(new Error('Tunnel unavailable'));
-  expect(await updateAll(quit, manual)).toBe('manual');
+  expect(await updateAll(quit, manual, confirmRestart)).toBe('manual');
   expect(manual).toHaveBeenCalledExactlyOnceWith(`https://example.test/${newerVersion}`);
   expect(owners.bridge).not.toHaveBeenCalled(); expect(owners.connect).not.toHaveBeenCalled();
   expect(quit).not.toHaveBeenCalled();
 });
-it('does not quit or grant browser work after a failed release check', async () => {
-  status.stage = 'failed'; status.error = 'Network unavailable';
-  await expect(updateAll(quit, manual)).rejects.toThrow('Network unavailable');
-  expect(owners.request).not.toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
+it.each([null, newerVersion])('checks the running connectors while retaining a failed release check (last known release=%s)', async latest => {
+  status.stage = 'failed'; status.error = 'Network unavailable'; status.latest = latest;
+  await expect(updateAll(quit, manual, confirmRestart)).rejects.toThrow('Network unavailable');
+  expect(owners.bridge).toHaveBeenCalledTimes(1); expect(owners.connect).toHaveBeenCalledTimes(1);
+  expect(owners.request).toHaveBeenCalledExactlyOnceWith(APP_VERSION, ['core']);
+  expect(owners.wake).toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
+  expect(manual).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled(); expect(confirmRestart).not.toHaveBeenCalled();
+  expect(status).toMatchObject({ stage: 'failed', error: 'Network unavailable' });
   status.stage = 'idle';
-  await expect(updateAll(quit, manual)).resolves.toBe('checking-connectors');
+  status.latest = null;
+  await expect(updateAll(quit, manual, confirmRestart)).resolves.toBe('checking-connectors');
+});
+it('waits for restart approval after downloading, joins concurrent presses and keeps working on cancel', async () => {
+  owners.check.mockImplementationOnce(async () => { status.latest = newerVersion; status.stage = 'ready'; });
+  const approval = faultGate();
+  confirmRestart.mockImplementationOnce(async () => { await approval.hold(); return false; });
+  const first = updateAll(quit, manual, confirmRestart);
+  await approval.entered;
+  expect(updateAll(quit, manual, confirmRestart)).toBe(first);
+  expect(confirmRestart).toHaveBeenCalledExactlyOnceWith(newerVersion);
+  expect(owners.request).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
+  approval.release(); expect(await first).toBe('cancelled');
+  expect(owners.request).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
+  expect(await updateAll(quit, manual, confirmRestart)).toBe('restarting');
+  expect(confirmRestart).toHaveBeenCalledTimes(2); expect(quit).toHaveBeenCalledTimes(1);
 });
 it('does not quit when durable authorization cannot be committed or no installer remains', async () => {
   status.latest = newerVersion; status.stage = 'ready';
   owners.request.mockRejectedValueOnce(new Error('Disk full'));
-  await expect(updateAll(quit, manual)).rejects.toThrow('Disk full');
+  await expect(updateAll(quit, manual, confirmRestart)).rejects.toThrow('Disk full');
   expect(owners.mark).not.toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
   owners.mark.mockReturnValue(false);
-  await expect(updateAll(quit, manual)).rejects.toThrow(/downloaded update/i);
+  await expect(updateAll(quit, manual, confirmRestart)).rejects.toThrow(/downloaded update/i);
   expect(quit).not.toHaveBeenCalled();
 });
 it('commits authorization before opening a manual download and permits retry after an open failure', async () => {
   status.latest = newerVersion;
   owners.request.mockRejectedValueOnce(new Error('Disk full'));
-  await expect(updateAll(quit, manual)).rejects.toThrow('Disk full');
+  await expect(updateAll(quit, manual, confirmRestart)).rejects.toThrow('Disk full');
   expect(manual).not.toHaveBeenCalled();
   manual.mockRejectedValueOnce(new Error('Browser unavailable'));
-  await expect(updateAll(quit, manual)).rejects.toThrow('Browser unavailable');
+  await expect(updateAll(quit, manual, confirmRestart)).rejects.toThrow('Browser unavailable');
   expect(owners.request.mock.invocationCallOrder[1]).toBeLessThan(manual.mock.invocationCallOrder[0]!);
-  await expect(updateAll(quit, manual)).resolves.toBe('manual');
+  await expect(updateAll(quit, manual, confirmRestart)).resolves.toBe('manual');
   expect(manual).toHaveBeenCalledTimes(2);
   expect(quit).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled();
 });
@@ -108,10 +129,10 @@ it.each([
   vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind, desktopTunnelId, pluginsTunnelId } });
   const surface = (id: SurfaceStatus['id'], available = true, tools = ['tool']): Pick<SurfaceStatus, 'id' | 'available' | 'tools'> => ({ id, available, tools });
   owners.surfaces.mockReturnValue([surface('core'), surface('desktop'), surface('plugins')]);
-  await updateAll(quit, manual);
+  await updateAll(quit, manual, confirmRestart);
   expect(owners.request).toHaveBeenLastCalledWith(newerVersion, expected);
   owners.surfaces.mockReturnValue([surface('core'), surface('desktop', false), surface('plugins', true, [])]);
-  await updateAll(quit, manual);
+  await updateAll(quit, manual, confirmRestart);
   expect(owners.request).toHaveBeenLastCalledWith(newerVersion, ['core']);
 });
 it('resumes only accepted refresh work after restart, without installing or changing settings', async () => {

@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "確認が完了するまでお待ちください。完了しない場合はChatGPTでこのコネクターを開き、「まとめて更新」で再確認してください。",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "ChatGPTでこのコネクターのツールを実行し、接続を確認してください。",
   "No tools published": "公開ツールなし",
-  "The app may restart. Finish active work before updating.": "アプリが再起動する場合があります。実行中の処理を終えてから更新してください。",
   "The downloaded update could not be confirmed for installation.": "ダウンロードした更新ファイルがインストール可能か確認できませんでした。",
   "The saved connector update state could not be read.": "保存されたコネクターの更新状態を読み取れませんでした。",
   "The release information has no valid version number.": "リリース情報に有効なバージョン番号がありません。",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "まとめて更新を完了できませんでした：{0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "実行中の処理を終え、Chat On Steroidsを完全に終了してください。/Applications内のアプリを置き換え、そこから更新後のアプリを開いてください。",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "「セットアップを確認」でmacOSの権限を確認し、アプリを完全に終了してから開き直してください。",
-  "Choose Update all to check for updates and update the app.": "「まとめて更新」で更新の有無を確認し、アプリを更新してください。"
+  "Choose Update all to check for updates and update the app.": "「まとめて更新」で更新の有無を確認し、アプリを更新してください。",
+  "Restart to install the update?": "更新をインストールするために再起動しますか？",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids は終了して再起動します。実行中のチャット、エージェント、コマンドが中断されることがあります。",
+  "Keep working": "作業を続ける",
+  "Restart and install": "再起動してインストール",
+  "Update postponed. You can keep working.": "更新を延期しました。作業を続けられます。",
+  "You will be asked before the app restarts. Finish active work before installing.": "再起動する前に確認します。インストール前に実行中の作業を終えてください。",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "更新後はコネクタの確認を完了するため、自動接続がオフでも一度だけ接続します。",
+  "Could not verify the saved connector against the current tool definitions.": "保存済みのコネクタが現在のツール定義と一致するか確認できませんでした。",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "ChatGPT で既存のコネクタをリフレッシュし、その後「まとめて更新」で再確認してください。Refresh が使えない場合は、Activity から診断レポートを保存してください。"
 }

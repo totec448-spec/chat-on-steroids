@@ -64,7 +64,7 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
       : !sameSchema ? t('Not verified in ChatGPT')
       : functional && !verified && refresh?.state === 'unknown' ? t('Tool call succeeded; full tool definitions not verified')
       : refresh?.state === 'manual' ? t('Manual refresh required in ChatGPT')
-      : refresh?.state === 'failed' ? t(refresh.failure === 'inspection' ? 'Connector check failed' : 'Connector refresh failed')
+      : refresh?.state === 'failed' ? t(refresh.failure !== 'confirmation' ? 'Connector check failed' : 'Connector refresh failed')
       : refresh?.state === 'refreshing' ? t('Waiting for refresh confirmation')
       : refresh?.state === 'pending' ? t('Refresh needed in ChatGPT')
       : refresh?.state !== 'current' ? t('Not verified in ChatGPT')
@@ -73,11 +73,14 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
     const reason = off ? undefined : !connected ? (surfaceFailed || status.state === 'disconnected') && connectionDetail ? t(connectionDetail) : undefined
       : sameSchema && refresh?.state === 'failed' ? refresh.failure === 'inspection'
         ? t('Could not inspect the installed connector in ChatGPT.')
+        : refresh.failure === 'migration' ? t('Could not verify the saved connector against the current tool definitions.')
         : refresh.failure === 'confirmation' ? t('Could not confirm the current connector tool definitions in ChatGPT.') : undefined : undefined;
     const nextStep = off || verified ? undefined : !connected
       ? t('Choose Review setup to check the connection, then choose Update all to retry.')
       : sameSchema && refresh?.state === 'manual'
         ? t("In ChatGPT's connector settings, refresh or recreate this connector, then choose Update all to recheck.")
+      : sameSchema && refresh?.state === 'failed' && refresh.failure === 'migration'
+        ? t('In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.')
       : sameSchema && refresh?.state === 'failed'
         ? t("Open this connector's settings in ChatGPT, then choose Update all to recheck. If the check still fails, save a Diagnostics report from Activity.")
       : sameSchema && refresh?.state === 'refreshing'

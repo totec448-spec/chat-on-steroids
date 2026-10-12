@@ -4207,9 +4207,13 @@ another tunnel or an unverified unstable-connection run contributes no proof. A 
 publication starts its full tunnel grace even with unchanged tools.
 `AppState.connectorRefresh` exposes the current schema, state
 (`unknown/current/pending/refreshing/manual/failed`), optional `responding` and safe
-failure phase (`inspection/confirmation`), never installed App IDs, tools or private
+failure phase (`inspection/confirmation/migration`), never installed App IDs, tools or private
 refresh errors. Failure phases belong to the current schema; ending an observation
-retains earlier consumed click authority and legacy rows remain conservative.
+retains earlier consumed click authority. An explicit legacy check binds `requestedSchemaId`
+and its requested tunnel to the current publication (or adopts the first live publication).
+Its ended failure projects `failed/migration`, with manual refresh guidance for the existing
+connector; it proves no schema or installation scope and grants no click. A different tunnel
+or later schema cannot borrow the failure, and a fresh read-only check hides the old diagnostic.
 
 **Activity contract.** Full completion requires a successful release check, no newer
 app, the live paired extension at the running version, and exact current-schema proof
@@ -4229,18 +4233,27 @@ save owner and stay disabled while saving. Completed details collapse by default
 meaningful owner changes reset the default, while identical pushes, timestamps and
 language changes preserve manual choice and focus. A keyboard button toggles native
 details; its polite live-status sibling updates only for changed text. Restart guidance
-remains visible for incomplete/expanded status and a tooltip/description otherwise.
+stays in the button's tooltip/accessibility description and native approval dialog,
+without a redundant warning taking height from recovery actions.
 Activity keeps the fixed page height and remaining-height event feed; short-window
 details scroll internally. Review setup only navigates. Older extension guidance asks
 for reload; newer extension guidance asks for an app update. Manual macOS guidance
 fully quits, replaces `/Applications` and launches that copy; it never removes a copy.
 
 **Explicit Update all consent.** `update:all` / preload `updateAll()` joins concurrent
-presses, checks/stages the release and commits refresh intent before normal shutdown
+presses and checks/stages the release. A ready installer asks for native restart approval
+in the selected interface language, defaulting to Keep working. Cancellation returns
+`cancelled` without committing refresh intent or selecting installer shutdown. Approval
+commits refresh intent before normal shutdown
 or manual download. It changes no config/secrets; macOS/DEB and provider manual steps
-stay manual. `restarting/manual/checking-connectors` receipts are not completion proof.
-An app update skips the old build's connection. Configured useful surfaces remain
+stay manual. `restarting/manual/checking-connectors/cancelled` receipts are not completion proof.
+An app update skips the old build's connection. A failed release check instead requests
+connector checks at the running version, including when a previous `latest` is retained;
+it neither quits nor opens a download, and preserves the updater/operation failure. Configured useful surfaces remain
 available through `getStatus()` while disconnected; off/empty optional surfaces are skipped.
+Activity explains that updating connects once even with auto-connect off. The restart dialog
+warns that running chats, agents and commands may be interrupted; its approval is acquired
+only after staging, and `markInstallOnQuit(expectedVersion)` still rejects changed artifacts.
 Rows distinguish `tunnelKey` verification scope from explicit request scope and bind
 `requestedVersion/requestedFromVersion`, optional unstable-run `verifiedRun`, and `observe`.
 Unscoped legacy rows keep their App ID, consumed click/manual outcome and schema history;
@@ -4264,6 +4277,16 @@ A mismatch ends observation; for scoped rows, an explicit check can inspect a un
 named manually recreated app on the current tunnel. Unscoped legacy migration still
 requires the original App ID and the owned OpenAI scope described above. Extension replacement/reload remains with the
 existing build-stamp and idle owners.
+
+| Update/check boundary | Visible outcome | Authority retained |
+| --- | --- | --- |
+| Legacy receipt without a failed current check | Unknown | Original App ID and consumed/manual outcome only. |
+| Explicit legacy check fails for this tunnel/schema | Failed migration; manually refresh the existing connector | No verification scope or new Refresh click. |
+| Tunnel/schema changes after that check | Unknown | No borrowed diagnostic or schema proof. |
+| Same App ID proves owned tunnel and full current definitions | Current | Read-only migration; no physical Refresh. |
+| Release check fails | App failure plus independent running-build connector checks | No installation or future-build grant. |
+| Ready update is declined | Cancelled; keep working | No update intent or installer shutdown. |
+| Ready update is approved | Restart after durable intent and exact-version installer fence | One startup connection attempt at the target build. |
 
 **Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.

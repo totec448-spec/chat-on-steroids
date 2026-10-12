@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Chờ xác nhận. Nếu không có, hãy mở trình kết nối này trong ChatGPT và chọn Cập nhật tất cả để kiểm tra lại.",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "Chạy một công cụ qua trình kết nối này trong ChatGPT để xác nhận kết nối.",
   "No tools published": "Chưa công bố công cụ nào",
-  "The app may restart. Finish active work before updating.": "Ứng dụng có thể khởi động lại. Hãy hoàn tất công việc đang chạy trước khi cập nhật.",
   "The downloaded update could not be confirmed for installation.": "Không thể xác minh bản cập nhật đã tải xuống để cài đặt.",
   "The saved connector update state could not be read.": "Không thể đọc trạng thái cập nhật trình kết nối đã lưu.",
   "The release information has no valid version number.": "Thông tin bản phát hành không có số phiên bản hợp lệ.",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "Không thể hoàn tất “Cập nhật tất cả”: {0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Hoàn tất các tác vụ đang chạy và thoát hoàn toàn Chat On Steroids. Thay ứng dụng trong /Applications, rồi mở phiên bản đã cập nhật từ thư mục đó.",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Chọn “Kiểm tra thiết lập” để kiểm tra quyền trên macOS, sau đó thoát hoàn toàn ứng dụng rồi mở lại.",
-  "Choose Update all to check for updates and update the app.": "Chọn “Cập nhật tất cả” để kiểm tra bản cập nhật và cập nhật ứng dụng."
+  "Choose Update all to check for updates and update the app.": "Chọn “Cập nhật tất cả” để kiểm tra bản cập nhật và cập nhật ứng dụng.",
+  "Restart to install the update?": "Khởi động lại để cài bản cập nhật?",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids sẽ đóng và khởi động lại. Các cuộc trò chuyện, tác nhân và lệnh đang chạy có thể bị gián đoạn.",
+  "Keep working": "Tiếp tục làm việc",
+  "Restart and install": "Khởi động lại và cài đặt",
+  "Update postponed. You can keep working.": "Đã hoãn cập nhật. Bạn có thể tiếp tục làm việc.",
+  "You will be asked before the app restarts. Finish active work before installing.": "Bạn sẽ được hỏi trước khi ứng dụng khởi động lại. Hãy hoàn thành công việc đang chạy trước khi cài đặt.",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "Sau khi cập nhật, ứng dụng kết nối một lần để hoàn tất kiểm tra trình kết nối, kể cả khi kết nối tự động bị tắt.",
+  "Could not verify the saved connector against the current tool definitions.": "Không thể xác minh trình kết nối đã lưu với các định nghĩa công cụ hiện tại.",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "Làm mới trình kết nối hiện có này trong ChatGPT, rồi chọn “Cập nhật tất cả” để kiểm tra lại. Nếu không có Refresh, hãy lưu báo cáo chẩn đoán từ Activity."
 }

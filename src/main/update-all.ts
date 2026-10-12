@@ -8,15 +8,18 @@ import { wakeBrowserWork } from './browser-wake.js';
 import type { UpdateAllResult } from '../shared/types.js';
 
 let pass: Promise<UpdateAllResult> | null = null;
-export function updateAll(quit: () => void, openDownload: (url: string) => Promise<void>): Promise<UpdateAllResult> {
+export function updateAll(quit: () => void, openDownload: (url: string) => Promise<void>, confirmRestart: (version: string) => Promise<boolean>): Promise<UpdateAllResult> {
   if (pass) return pass;
   const run = (async (): Promise<UpdateAllResult> => {
     await checkForUpdates();
     const update = updateStatus();
-    if (update.stage === 'failed') throw new Error(update.error ?? 'Update check failed');
+    const failed = update.stage === 'failed';
+    // Ask after the download, when quitting can actually install the named build. A
+    // cancelled dialog grants neither installer shutdown nor future startup work.
+    if (update.stage === 'ready' && !await confirmRestart(update.latest!)) return 'cancelled';
     // An app update must not wait on tunnel authentication or connectivity. The next
     // build connects for its accepted refresh request; the current build only commits intent.
-    if (!update.latest) {
+    if (failed || !update.latest) {
       await startBridge();
       await connect();
     }
@@ -26,7 +29,13 @@ export function updateAll(quit: () => void, openDownload: (url: string) => Promi
     const surfaces = getStatus().surfaces.filter(surface => surface.id === 'core' || (surface.available && surface.tools.length > 0 &&
       (tunnel.kind !== 'openai' || (surface.id === 'desktop' ? tunnel.desktopTunnelId : tunnel.pluginsTunnelId)))).map(surface => surface.id);
     // Core remains requested even if connecting failed before any surface became live.
-    await requestPluginRefreshes(update.latest ?? update.current, [...new Set(['core' as const, ...surfaces])]);
+    await requestPluginRefreshes(failed ? update.current : update.latest ?? update.current, [...new Set(['core' as const, ...surfaces])]);
+    if (failed) {
+      // GitHub failure does not block the running build's connector check. Keep the
+      // release owner's failure and the operation error visible; this is no full pass.
+      wakeBrowserWork();
+      throw new Error(update.error ?? 'Update check failed');
+    }
     if (update.stage === 'ready') {
       if (!markInstallOnQuit(update.latest!)) throw new Error('There is no downloaded update to install yet');
       quit();

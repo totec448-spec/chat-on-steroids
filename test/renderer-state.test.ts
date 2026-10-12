@@ -2504,6 +2504,14 @@ it('shows update failure causes and next steps without using stale connector dia
   expect(row('core')).toContain('Diagnostics report');
   next.connectorRefresh.core.failure = 'confirmation'; push(next);
   expect(row('core')).toContain('Could not confirm');
+  next.connectorRefresh.core = { schemaId: 'current', state: 'failed', failure: 'migration', responding: true }; push(next);
+  expect(row('core')).toContain('Connector check failed');
+  expect(row('core')).toContain('saved connector');
+  expect(row('core')).toContain('refresh this existing connector');
+  expect(row('core')).not.toContain('recreate');
+  expect(w.document.querySelector('[data-update-part="core"]')!.classList.contains('is-bad')).toBe(true);
+  expect(w.document.getElementById('updateReadinessSummary')!.dataset.ready).toBe('false');
+  next.connectorRefresh.core.failure = 'confirmation';
   next.connectorRefresh.core.schemaId = 'old'; push(next);
   expect(row('core')).not.toContain('Could not confirm');
   next.connectorRefresh.core = { schemaId: 'current', state: 'manual' }; push(next);
@@ -2606,7 +2614,8 @@ it('runs Update all once on explicit click and keeps it busy across state pushes
   const { window: w, state, push } = await mountChat({}, [], { updateAll });
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
   expect(button).not.toBeNull();
-  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('The app may restart');
+  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('asked before the app restarts');
+  expect(button.getAttribute('aria-describedby')).toBe('updateAllNotice');
   button.click(); button.click(); push(structuredClone(state));
   expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
   expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');

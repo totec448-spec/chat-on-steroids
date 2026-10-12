@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "请等待确认。如果一直未完成，请在 ChatGPT 中打开此连接器，然后选择“全部更新”重新检查。",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "请在 ChatGPT 中通过此连接器运行一个工具，以确认连接。",
   "No tools published": "没有已发布的工具",
-  "The app may restart. Finish active work before updating.": "应用可能会重启。请先完成正在进行的任务，再更新。",
   "The downloaded update could not be confirmed for installation.": "无法确认下载的更新是否可用于安装。",
   "The saved connector update state could not be read.": "无法读取已保存的连接器更新状态。",
   "The release information has no valid version number.": "发布信息中没有有效的版本号。",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "无法完成全部更新：{0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "完成正在进行的任务并完全退出 Chat On Steroids。替换 /Applications 中的应用，然后从该文件夹打开更新后的应用。",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "选择“检查连接设置”以检查 macOS 权限，然后完全退出应用并重新打开。",
-  "Choose Update all to check for updates and update the app.": "选择“全部更新”，检查更新并更新应用。"
+  "Choose Update all to check for updates and update the app.": "选择“全部更新”，检查更新并更新应用。",
+  "Restart to install the update?": "要重启以安装更新吗？",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids 将关闭并重新启动。正在运行的聊天、代理和命令可能会中断。",
+  "Keep working": "继续工作",
+  "Restart and install": "重启并安装",
+  "Update postponed. You can keep working.": "已推迟更新。你可以继续工作。",
+  "You will be asked before the app restarts. Finish active work before installing.": "应用重启前会请求确认。请在安装前完成正在进行的工作。",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "更新后，即使关闭了自动连接，应用也会连接一次，以完成连接器检查。",
+  "Could not verify the saved connector against the current tool definitions.": "无法确认已保存的连接器是否与当前工具定义一致。",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "请在 ChatGPT 中刷新这个现有连接器，然后选择“全部更新”重新检查。如果无法使用 Refresh，请从 Activity 保存诊断报告。"
 }

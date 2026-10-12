@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Doğrulamayı bekleyin. Gelmezse ChatGPT’de bu bağlayıcıyı açın ve yeniden kontrol etmek için Tümünü güncelle seçeneğini seçin.",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "Bağlantıyı doğrulamak için ChatGPT’de bu bağlayıcı üzerinden bir araç çalıştırın.",
   "No tools published": "Yayımlanmış araç yok",
-  "The app may restart. Finish active work before updating.": "Uygulama yeniden başlayabilir. Güncellemeden önce devam eden işleri tamamlayın.",
   "The downloaded update could not be confirmed for installation.": "İndirilen güncelleme kurulum için doğrulanamadı.",
   "The saved connector update state could not be read.": "Bağlayıcı güncellemelerinin kayıtlı durumu okunamadı.",
   "The release information has no valid version number.": "Sürüm bilgileri geçerli bir sürüm numarası içermiyor.",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "Tümünü güncelle tamamlanamadı: {0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Devam eden işleri bitirin ve Chat On Steroids’i tamamen kapatın. /Applications içindeki uygulamayı güncel sürümle değiştirin ve uygulamayı bu klasörden açın.",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "macOS izinlerini kontrol etmek için “Kurulumu gözden geçir”i seçin. Ardından uygulamayı tamamen kapatıp yeniden açın.",
-  "Choose Update all to check for updates and update the app.": "Güncellemeleri kontrol edip uygulamayı güncellemek için “Tümünü güncelle”yi seçin."
+  "Choose Update all to check for updates and update the app.": "Güncellemeleri kontrol edip uygulamayı güncellemek için “Tümünü güncelle”yi seçin.",
+  "Restart to install the update?": "Güncellemeyi yüklemek için yeniden başlatılsın mı?",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids kapanıp yeniden başlayacak. Devam eden sohbetler, ajanlar ve komutlar kesintiye uğrayabilir.",
+  "Keep working": "Çalışmaya devam et",
+  "Restart and install": "Yeniden başlat ve yükle",
+  "Update postponed. You can keep working.": "Güncelleme ertelendi. Çalışmaya devam edebilirsiniz.",
+  "You will be asked before the app restarts. Finish active work before installing.": "Yeniden başlatmadan önce onay istenir. Yüklemeden önce devam eden işleri bitirin.",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "Güncellemeden sonra, otomatik bağlantı kapalı olsa bile bağlayıcı kontrollerini tamamlamak için uygulama bir kez bağlanır.",
+  "Could not verify the saved connector against the current tool definitions.": "Kayıtlı bağlayıcı, geçerli araç tanımlarıyla doğrulanamadı.",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "ChatGPT’de bu mevcut bağlayıcıyı yenileyin, sonra kontrol için “Tümünü güncelle”yi seçin. Refresh yoksa Activity’den bir tanılama raporu kaydedin."
 }

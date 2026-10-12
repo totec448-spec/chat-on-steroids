@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "확인을 기다려 주세요. 완료되지 않으면 ChatGPT에서 이 커넥터를 열고 모두 업데이트를 선택하여 다시 확인하세요.",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "ChatGPT에서 이 커넥터의 도구를 실행하여 연결을 확인하세요.",
   "No tools published": "공개된 도구 없음",
-  "The app may restart. Finish active work before updating.": "앱이 다시 시작될 수 있습니다. 진행 중인 작업을 마친 후 업데이트하세요.",
   "The downloaded update could not be confirmed for installation.": "다운로드한 업데이트를 설치할 수 있는지 확인하지 못했습니다.",
   "The saved connector update state could not be read.": "저장된 커넥터 업데이트 상태를 읽을 수 없습니다.",
   "The release information has no valid version number.": "릴리스 정보에 유효한 버전 번호가 없습니다.",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "모두 업데이트를 완료하지 못했습니다: {0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "실행 중인 작업을 마치고 Chat On Steroids를 완전히 종료하세요. /Applications에서 앱을 교체한 다음, 그곳에서 업데이트된 앱을 여세요.",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "「연결 설정 확인」에서 macOS 권한을 확인한 다음, 앱을 완전히 종료하고 다시 여세요.",
-  "Choose Update all to check for updates and update the app.": "“모두 업데이트”를 선택해 업데이트를 확인하고 앱을 업데이트하세요."
+  "Choose Update all to check for updates and update the app.": "“모두 업데이트”를 선택해 업데이트를 확인하고 앱을 업데이트하세요.",
+  "Restart to install the update?": "업데이트를 설치하기 위해 다시 시작할까요?",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids가 종료된 후 다시 시작됩니다. 실행 중인 채팅, 에이전트, 명령이 중단될 수 있습니다.",
+  "Keep working": "계속 작업",
+  "Restart and install": "다시 시작하고 설치",
+  "Update postponed. You can keep working.": "업데이트를 미뤘습니다. 계속 작업할 수 있습니다.",
+  "You will be asked before the app restarts. Finish active work before installing.": "앱을 다시 시작하기 전에 확인합니다. 설치 전에 진행 중인 작업을 마쳐 주세요.",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "업데이트 후 커넥터 확인을 마치기 위해 자동 연결이 꺼져 있어도 앱이 한 번 연결됩니다.",
+  "Could not verify the saved connector against the current tool definitions.": "저장된 커넥터가 현재 도구 정의와 일치하는지 확인할 수 없습니다.",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "ChatGPT에서 이 기존 커넥터를 새로고침한 후 ‘모두 업데이트’를 선택해 다시 확인하세요. Refresh를 사용할 수 없으면 Activity에서 진단 보고서를 저장하세요."
 }

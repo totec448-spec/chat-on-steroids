@@ -2219,7 +2219,6 @@
   "Wait for confirmation. If it does not arrive, open this connector in ChatGPT and choose Update all to recheck.": "Attendez la confirmation. Si elle n’arrive pas, ouvrez ce connecteur dans ChatGPT et choisissez Tout mettre à jour pour vérifier à nouveau.",
   "Run a tool through this connector in ChatGPT to confirm this connection.": "Exécutez un outil via ce connecteur dans ChatGPT pour confirmer la connexion.",
   "No tools published": "Aucun outil publié",
-  "The app may restart. Finish active work before updating.": "L’application peut redémarrer. Terminez les tâches en cours avant de la mettre à jour.",
   "The downloaded update could not be confirmed for installation.": "La mise à jour téléchargée n’a pas pu être validée pour l’installation.",
   "The saved connector update state could not be read.": "Impossible de lire l’état enregistré des mises à jour des connecteurs.",
   "The release information has no valid version number.": "Les informations de la version ne contiennent aucun numéro de version valide.",
@@ -2241,5 +2240,14 @@
   "Update all could not finish: {0}": "Tout mettre à jour n’a pas pu se terminer : {0}",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.": "Terminez les tâches en cours et quittez complètement Chat On Steroids. Remplacez l’app dans /Applications, puis ouvrez la version mise à jour depuis ce dossier.",
   "Choose Review setup to check macOS permissions, then fully quit and reopen the app.": "Choisissez « Vérifier la connexion » pour vérifier les autorisations macOS, puis quittez complètement l’app et rouvrez-la.",
-  "Choose Update all to check for updates and update the app.": "Choisissez « Tout mettre à jour » pour rechercher des mises à jour et mettre à jour l’application."
+  "Choose Update all to check for updates and update the app.": "Choisissez « Tout mettre à jour » pour rechercher des mises à jour et mettre à jour l’application.",
+  "Restart to install the update?": "Redémarrer pour installer la mise à jour ?",
+  "Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.": "Chat On Steroids se fermera et redémarrera. Les discussions, agents et commandes en cours peuvent être interrompus.",
+  "Keep working": "Continuer à travailler",
+  "Restart and install": "Redémarrer et installer",
+  "Update postponed. You can keep working.": "Mise à jour reportée. Vous pouvez continuer à travailler.",
+  "You will be asked before the app restarts. Finish active work before installing.": "Une confirmation sera demandée avant le redémarrage. Terminez le travail en cours avant l’installation.",
+  "After updating, the app connects once to finish connector checks, even if automatic connection is off.": "Après la mise à jour, l’application se connecte une fois pour terminer les vérifications des connecteurs, même si la connexion automatique est désactivée.",
+  "Could not verify the saved connector against the current tool definitions.": "Impossible de vérifier le connecteur enregistré avec les définitions actuelles des outils.",
+  "In ChatGPT, refresh this existing connector, then choose Update all to recheck. If Refresh is unavailable, save a Diagnostics report from Activity.": "Actualisez ce connecteur existant dans ChatGPT, puis choisissez « Tout mettre à jour » pour vérifier. Si Refresh est indisponible, enregistrez un rapport de diagnostic depuis Activity."
 }

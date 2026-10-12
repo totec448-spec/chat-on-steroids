@@ -18,6 +18,16 @@ const state = () => ({ config: defaultConfig(),
   connectorSchemas: { core: 'a' }, connectorRefresh: { core: { schemaId: 'a', state: 'current' } }
 } as any);
 
+it('keeps an app-check failure visible while showing independently pending connector checks', async () => {
+  const { updateReadiness, paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
+  const next = state(); next.update.stage = 'failed'; next.update.error = 'Network unavailable';
+  next.connectorRefresh.core.state = 'pending';
+  expect(updateReadiness(next).find(row => row.id === 'app')!.status).toBe('fail');
+  expect(updateReadiness(next).find(row => row.id === 'core')!.detail).toBe('Refresh needed in ChatGPT');
+  paintUpdateReadiness(next);
+  expect(document.getElementById('updateReadinessSummary')!.dataset.ready).toBe('false');
+});
+
 it.each(['2.1.33', '2.1.34', '2.1.35', null])('guides extension %s in the correct version direction', async version => {
   const { updateReadiness } = await import('../src/renderer/update-readiness.js');
   const next = state(); next.bridge.extensionVersion = version;
