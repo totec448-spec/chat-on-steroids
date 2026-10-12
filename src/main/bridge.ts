@@ -8853,6 +8853,15 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     }
     const schedule = COMPACTION_PICKUPS[phase];
     if (now < watch.nextAt) continue;
+    // The handoff request is sent when the source turn has finished. While that turn still works,
+    // a pickup only reloads a busy page and spends the budget: on 2026-10-12 an automatic ticket
+    // filed mid-turn spent all ten pickups on a generating page, wrote "Trying to reload chat to
+    // recover a handoff request that has not been sent" each time, and gave up (handoff_never_sent)
+    // just after the turn finally ended. Wait for the turn instead, without counting.
+    if (phase === 'asking' && session && sessionInputActivity(session).exact) {
+      watch.nextAt = now + schedule.every;
+      continue;
+    }
     if (watch.attempts >= schedule.attempts) {
       if (phase === 'writing' && !watch.told) {
         // The sent request stays protected and gets no fourth reload, but the person reading
