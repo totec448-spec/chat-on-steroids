@@ -149,6 +149,26 @@ describe('external plugin authority', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('installs a server with more tools than ChatGPT gets, publishes what fits, and lets switched-off tools make room (#1313)', async () => {
+    // 300 tools of about 4.5 KB each: 1.3 MB of schema, over the old 256-tool / 1 MB discovery refusal.
+    const tools = Array.from({ length: 300 }, (_, index) => ({
+      name: `big_${index}`, description: 'x'.repeat(4500), inputSchema: { type: 'object' },
+    }));
+    await fs.writeFile(entry, fixture.replace(/const tools=.*?;\n/, `const tools=${JSON.stringify(tools)};\n`));
+    const snapshot = await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } });
+    const id = snapshot.plugins.at(-1)!.id;
+    const published = manager.tools().map(tool => tool.name);
+    // The connector's own budget decides what ChatGPT gets, as for any plugin.
+    expect(published.length).toBeGreaterThan(0);
+    expect(published.length).toBeLessThan(300);
+    expect(published[0]).toBe('big_0');
+    const firstLeftOut = `big_${published.length}`;
+    expect(JSON.stringify(await manager.call(firstLeftOut))).toContain('schema size limit');
+    // Switching tools off frees room for the next ones.
+    await manager.setToolEnabled(id, 'big_0', false);
+    expect(manager.tools().map(tool => tool.name)).toContain(firstLeftOut);
+  });
+
   it('keeps a server failure distinct from a disabled tool on subsequent cached calls', async () => {
     const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
     const upstream = vi.spyOn(Client.prototype, 'callTool').mockRejectedValueOnce(new Error('private transport details'));
