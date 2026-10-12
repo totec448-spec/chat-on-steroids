@@ -73,4 +73,28 @@ describe('the diagnostics report', () => {
       compaction: { handoffPrompt: 'secret words' }, custom: { note: 'two words' }, connectorSuffix: 'Janes-MacBook' });
     expect(lines).toEqual(['ui.theme: dark', 'ui.followOutput: true']);
   });
+
+  // #1312: "7 GB with only 3 workers" could not be answered from the report: it did not say what
+  // the memory was in. Numbers only, so nothing personal can be in it.
+  it('says where the memory is: ChatGPT pages, the app window, and the rest', () => {
+    const report = renderDiagnosticsReport({ ...sources, memory: [
+      { kind: 'main', megabytes: 131.5 }, { kind: 'window', megabytes: 1841.8 }, { kind: 'gpu', megabytes: 164.2 },
+      { kind: 'chatgpt', megabytes: 443.5 }, { kind: 'chatgpt', megabytes: 979.8 }, { kind: 'chatgpt', megabytes: 627.4 },
+      { kind: 'page', megabytes: 94 }, { kind: 'other', megabytes: 26.2 }, { kind: 'other', megabytes: 23.6 }
+    ] });
+    const memory = report.slice(report.indexOf('## Memory'), report.indexOf('## Chats'));
+    expect(memory).toContain('Total: 4332 MB in 9 processes');
+    // Largest first, so one runaway page stands out.
+    expect(memory).toContain('ChatGPT pages in the built-in browser (3): 2051 MB — 980, 627, 444');
+    expect(memory).toContain('App window: 1842 MB');
+    expect(memory).toContain('Main process: 132 MB');
+    expect(memory).toContain('Graphics: 164 MB');
+    expect(memory).toContain('Other pages (1): 94 MB');
+    expect(memory).toContain('Helpers (2): 50 MB');
+  });
+
+  it('leaves the memory section out when the system reports nothing', () => {
+    expect(renderDiagnosticsReport(sources)).not.toContain('## Memory');
+    expect(renderDiagnosticsReport({ ...sources, memory: [] })).not.toContain('## Memory');
+  });
 });
