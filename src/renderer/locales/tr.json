@@ -1844,9 +1844,6 @@
   "Skill added to your library": "Beceri kitaplığınıza eklendi",
   "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Uygulama bir tarayıcı başlattığında kullanılır. Bu tarayıcının etkin profiline yardımcı eklentiyi yükleyip ChatGPT'ye giriş yapın. Zaten bağlı olan sekmeler kendi tarayıcılarında kalır. Yerleşik Chat On Steroids tarayıcısı kurulum gerektirmez ve sistem tepsisinde gizli çalışır.",
   "Chat On Steroids browser (built-in)": "Chat On Steroids tarayıcısı (yerleşik)",
-  "Choose a folder to share — step 2.": "Paylaşılacak klasörü seçin — 2. adım.",
-  "Create a tunnel and paste its ID — step 3.": "Bir tünel oluşturup kimliğini yapıştırın — 3. adım.",
-  "Add a restricted API key — step 4.": "Kısıtlı bir API anahtarı ekleyin — 4. adım.",
   "Dismiss": "Kapat",
   "Sign in to ChatGPT": "ChatGPT'de oturum açın",
   "Sign out of ChatGPT": "ChatGPT'den oturumu kapatın",
@@ -2182,5 +2179,8 @@
   "Where the plugin offers permissions: allow all tools": "Eklenti izin sunuyorsa: tüm araçlara izin verin",
   "First tool call: allow it, always for this plugin": "İlk araç çağrısı: izin verin, bu eklenti için her zaman",
   "Review the action, then allow it, always for this plugin.": "Eylemi gözden geçirin, ardından bu eklenti için her zaman izin verin.",
-  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Bu, eklentinin izinlerinden ayrıdır ve bu hatırlatma bir araç çağrısını onaylamaz."
+  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Bu, eklentinin izinlerinden ayrıdır ve bu hatırlatma bir araç çağrısını onaylamaz.",
+  "Choose a folder to share — step {0}.": "Paylaşılacak klasörü seçin — {0}. adım.",
+  "Create a tunnel and paste its ID — step {0}.": "Bir tünel oluşturup kimliğini yapıştırın — {0}. adım.",
+  "Add a restricted API key — step {0}.": "Kısıtlı bir API anahtarı ekleyin — {0}. adım."
 }
