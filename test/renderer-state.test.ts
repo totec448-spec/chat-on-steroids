@@ -1891,6 +1891,56 @@ it('requires external installation before choosing the built-in browser and sign
   expect(mounted.calls.at(-1)?.ui?.chatBrowser).toBe('edge');
 });
 
+it('walks the extension install in the chosen browser\'s own words and pictures, never another browser\'s', async () => {
+  const opened: Array<[string, string]> = [];
+  const mounted = await mountChat({}, [], { openSetupBrowser: (browser: string, page: string) => { opened.push([browser, page]); return Promise.resolve({ ok: true, data: true }); } });
+  const text = (id: string) => document.getElementById(id)!.textContent;
+  const img = (id: string) => document.querySelector<HTMLImageElement>(`#${id} img`);
+  const chrome = structuredClone(mounted.state);
+  chrome.config.ui = { ...chrome.config.ui, chatBrowser: 'chrome' };
+  mounted.push(chrome);
+  expect(text('extensionStepOpen')).toBe('Open the extensions page in Chrome');
+  expect(text('setupExtensionAddress')).toBe('chrome://extensions');
+  expect(text('extensionStepDev')).toBe('Turn on “Developer mode”');
+  expect(text('extensionStepLoad')).toBe('Click “Load unpacked” and choose the extension folder');
+  expect(document.getElementById('extensionStepDevWhere')!.hidden).toBe(true);
+  // Chrome's own page, with the place to click outlined where Chrome draws it.
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('chrome-en-dev');
+  expect(img('extensionPictureDev')!.alt).toBe('The extensions page in Chrome, with “Developer mode” outlined');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('chrome-en-load');
+  expect(document.querySelector<HTMLElement>('#extensionPictureDev .ext-spot')!.style.left).toBe('63.7%');
+
+  // Edge has no capture yet: no picture at all rather than Chrome's, and the hint for its sidebar.
+  (document.querySelector('[data-external-browser="edge"]') as HTMLButtonElement).click();
+  expect(text('setupExtensionAddress')).toBe('edge://extensions');
+  expect(text('extensionStepOpen')).toBe('Open the extensions page in Edge');
+  expect(document.getElementById('extensionPictureDev')!.hidden).toBe(true);
+  expect(img('extensionPictureDev')).toBeNull();
+  expect(img('extensionPictureLoad')).toBeNull();
+  expect(document.getElementById('extensionStepDevWhere')!.hidden).toBe(false);
+  expect(text('extensionStepOpenHint')).toBe('Click the address to copy it, then paste it into the address bar in Edge and press Enter.');
+  // Browsers ignore their own pages from the command line, so the app copies the address.
+  (document.getElementById('openExtensionSettings') as HTMLButtonElement).click();
+  await settle();
+  expect(opened).toEqual([['edge', 'extensions']]);
+  expect(text('extensionStepOpenHint')).toBe('Copied. Paste it into the address bar in Edge and press Enter.');
+
+  // Brave has its own captures.
+  (document.querySelector('[data-external-browser="brave"]') as HTMLButtonElement).click();
+  expect(text('setupExtensionAddress')).toBe('brave://extensions');
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('brave-en-dev');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('brave-en-load');
+
+  // In German, Chrome's German page and Chrome's German words, quoted the German way.
+  (document.querySelector('[data-external-browser="chrome"]') as HTMLButtonElement).click();
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(text('extensionStepDev')).toBe('Schalte „Entwicklermodus“ ein');
+  expect(text('extensionStepLoad')).toBe('Klicke auf „Entpackte Erweiterung laden“ und wähle den Erweiterungsordner');
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('chrome-de-dev');
+  setLanguage('en');
+});
+
 it('preserves optional Desktop disclosures and inline screenshots across status pushes', async () => {
   const mounted = await mountChat();
   const state = structuredClone(mounted.state) as any;
