@@ -899,8 +899,10 @@ An isolated worktree starts at a committed Git base: never imply the Prime's dir
 files are present in that checkout. Unrelated unavailable approved roots must not invalidate
 the valid root that owns a worker; the actual owning root must remain available and approved.
 Existing isolated workers keep their workspace even if the setting is later disabled. Startup
-restores marker-verified leases only for identities authorized by the restored durable broker,
-after its snapshot and before worker execution. Stale or unaccepted checkout markers do not
+restores marker-verified leases only for durable broker workers that can still execute or be
+revived (including an exact authorized pre-park turn), after its snapshot and before worker
+execution. Terminal or retired rows use on-demand cleanup rather than startup restoration.
+Stale or unaccepted checkout markers do not
 authorize their own recovery and are never deleted merely for lacking a broker owner.
 Root approval and lease ownership are rechecked immediately before worker admission, including
 after asynchronous Git work and the broker durability barrier. Evicting finite broker history
@@ -912,7 +914,11 @@ retained checkouts on demand rather than scanning unowned markers during startup
 never automatic: the main process must obtain explicit user confirmation, recheck the current
 approved root and Git/marker ownership, and preserve the Git branch/committed work. Checkout
 removal can discard ignored/uncommitted files; do not conflate a clean `git status` with safe
-implicit deletion. Sleeping/revivable workers retain their worktree for follow-up tasks.
+implicit deletion. Confirmed removal compares a bounded content fingerprint for tracked changes,
+untracked files and ignored directories after the dialog and again inside the deletion fence;
+unreadable, changed, truncated or unsafe snapshots must refuse removal even when filenames stay
+unchanged. Concurrent managed directory creation requires a fresh symlink-safe containment check.
+Sleeping/revivable workers retain their worktree for follow-up tasks.
 The checkout review belongs in its own Settings section, separate from live workers: a grouped
 list with task-first names, plain status, secondary virtual paths, explicit data-at-risk labels,
 and a real removal button. Never place physical paths in this UI, nest a second scroll pane, or

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import type { Root } from '../../shared/types.js';
 import type { Workspace } from '../workspace.js';
@@ -13,6 +14,9 @@ const OID = /^[0-9a-f]{40,64}$/;
 const MAX_GIT_BYTES = 4 * 1024 * 1024;
 const MAX_PATCH_BYTES = 1536 * 1024;
 const MAX_STATUS = 2_000;
+const MAX_FINGERPRINT_ENTRIES = 4_096;
+const MAX_FINGERPRINT_DEPTH = 32;
+const MAX_FINGERPRINT_BYTES = 64 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 20_000;
 const MANAGED_FOLDER = '.chat-on-steroids-worktrees';
 
@@ -121,6 +125,8 @@ export interface WorkerCleanupOfferPreview {
   branch: string;
   /** Commit present in this checkout at inspection time; internal only. */
   headOid: string;
+  /** Main-process confirmation token. Never project file-derived digests to the renderer. */
+  contentFingerprint: string | null;
   dirty: boolean;
   ignoredFiles: boolean;
   uniqueCommits: boolean;
@@ -332,19 +338,168 @@ async function statusOf(cwd: string, includeIgnored = false): Promise<DetailedWo
   return { headOid, dirty: parts.length > 0, changes, truncated: parts.length > MAX_STATUS, trackedChanges, untrackedFiles, ignoredFiles };
 }
 
+/**
+ * Bound every byte that Git's status may cause a confirmed removal to discard.
+ * `--ignored=matching` can report an entire ignored directory as one `!! dir/`;
+ * recurse through those directories without following any directory symlink.
+ * Metadata (size/mtime) alone is insufficient: two same-name, same-size edits
+ * can have exactly the same mtime on real filesystems.
+ */
+async function cleanupContentFingerprint(root: string, inspected?: DetailedWorkerWorktreeStatus): Promise<string> {
+  const initial = await statusOf(root, true);
+  if (initial.truncated || (inspected && JSON.stringify(initial) !== JSON.stringify(inspected))) {
+    throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNAVAILABLE', 'Git status changed or was truncated during cleanup inspection');
+  }
+  const index = await runGit(root, ['diff', '--cached', '--raw', '-z', 'HEAD', '--'], 1024 * 1024);
+  if (index.code !== 0) throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNAVAILABLE', 'staged Git changes could not be inspected');
+  const hash = createHash('sha256');
+  hash.update('cos-worktree-cleanup-v1\0');
+  hash.update(initial.headOid);
+  hash.update('\0index\0');
+  hash.update(index.stdout);
+  const entries = new Map<string, 'tracked' | 'untracked' | 'ignored'>();
+  for (const [kind, filenames] of [
+    ['tracked', initial.trackedChanges], ['untracked', initial.untrackedFiles], ['ignored', initial.ignoredFiles]
+  ] as const) {
+    for (const gitName of filenames) {
+      // Porcelain lists collapsed ignored directories with a trailing slash.
+      const filename = gitName.replace(/\/$/, '');
+      if (!filename || filename.includes('\0') || filename.includes('\ufffd') || path.isAbsolute(filename) ||
+          filename.split(/[\\/]/).some(part => part === '..' || part === '.' || !part)) {
+        throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNSAFE', 'Git status contains an unsafe path');
+      }
+      const target = path.resolve(root, filename);
+      if (target === root || !isContained(root, target)) {
+        throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNSAFE', 'Git status path escaped the worktree');
+      }
+      entries.set(filename, kind);
+    }
+  }
+  let visited = 0;
+  let bytes = 0;
+  const addEntry = (): void => {
+    if (++visited > MAX_FINGERPRINT_ENTRIES) {
+      throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_LIMIT', 'too many changed files for safe cleanup confirmation');
+    }
+  };
+  const addBytes = (amount: number): void => {
+    bytes += amount;
+    if (bytes > MAX_FINGERPRINT_BYTES) {
+      throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_LIMIT', 'changed files exceed the cleanup fingerprint byte limit');
+    }
+  };
+  const scan = async (relative: string, depth: number, allowMissing: boolean): Promise<void> => {
+    if (depth > MAX_FINGERPRINT_DEPTH) throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_LIMIT', 'changed directory nesting is too deep');
+    const absolute = path.resolve(root, relative);
+    if (absolute === root || !isContained(root, absolute)) throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNSAFE', 'changed path escaped the worktree');
+    // Resolve each ancestor with lstat: even a symlink pointing inside the root
+    // must not turn the fingerprint read into a traversal outside this checkout.
+    const components = path.relative(root, absolute).split(path.sep);
+    let ancestor = root;
+    for (const component of components.slice(0, -1)) {
+      ancestor = path.join(ancestor, component);
+      const parentStat = await fs.lstat(ancestor);
+      if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+        throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNSAFE', 'changed path crosses a symlink or non-directory');
+      }
+    }
+    let before: Awaited<ReturnType<typeof fs.lstat>>;
+    try { before = await fs.lstat(absolute); }
+    catch (error: unknown) {
+      if (allowMissing && (error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        addEntry();
+        hash.update('missing\0' + relative + '\0');
+        return;
+      }
+      throw error;
+    }
+    addEntry();
+    hash.update(relative + '\0');
+    if (before.isSymbolicLink()) {
+      const destination = await fs.readlink(absolute);
+      addBytes(Buffer.byteLength(destination));
+      hash.update('symlink\0' + destination + '\0');
+    } else if (before.isDirectory()) {
+      hash.update('directory\0');
+      const children: string[] = [];
+      // Bounded streaming enumeration: do not allocate an unbounded readdir list.
+      for await (const child of await fs.opendir(absolute)) {
+        children.push(child.name);
+        if (visited + children.length > MAX_FINGERPRINT_ENTRIES) {
+          throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_LIMIT', 'ignored directory contains too many files');
+        }
+      }
+      children.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+      for (const child of children) await scan(path.join(relative, child), depth + 1, false);
+    } else if (before.isFile()) {
+      hash.update('file\0');
+      if (before.size > MAX_FINGERPRINT_BYTES - bytes) {
+        throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_LIMIT', 'changed file exceeds the cleanup byte limit');
+      }
+      const handle = await fs.open(absolute, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+          throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_CHANGED', 'changed file was replaced while opening');
+        }
+        const chunk = Buffer.allocUnsafe(1024 * 1024);
+        let offset = 0;
+        while (offset < opened.size) {
+          const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, opened.size - offset), offset);
+          if (bytesRead === 0) throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_CHANGED', 'changed file was truncated during reading');
+          addBytes(bytesRead);
+          hash.update(chunk.subarray(0, bytesRead));
+          offset += bytesRead;
+        }
+        const afterRead = await handle.stat();
+        if (afterRead.size !== opened.size || afterRead.mtimeMs !== opened.mtimeMs || afterRead.ctimeMs !== opened.ctimeMs) {
+          throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_CHANGED', 'changed file changed during reading');
+        }
+      } finally { await handle.close(); }
+    } else {
+      throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_UNSAFE', 'changed path is an unsupported filesystem object');
+    }
+    const after = await fs.lstat(absolute);
+    if (after.dev !== before.dev || after.ino !== before.ino || after.mode !== before.mode ||
+        after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+      throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_CHANGED', 'changed path was modified during cleanup inspection');
+    }
+  };
+  const ordered = [...entries].sort(([left], [right]) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  for (const [filename, kind] of ordered) {
+    hash.update(kind + '\0');
+    await scan(filename, 0, kind === 'tracked');
+  }
+  const [final, finalIndex] = await Promise.all([
+    statusOf(root, true), runGit(root, ['diff', '--cached', '--raw', '-z', 'HEAD', '--'], 1024 * 1024)
+  ]);
+  if (final.truncated || JSON.stringify(initial) !== JSON.stringify(final) ||
+      finalIndex.code !== 0 || !index.stdout.equals(finalIndex.stdout)) {
+    throw new WorkerWorktreeError('WORKTREE_FINGERPRINT_CHANGED', 'Git status changed during cleanup fingerprint');
+  }
+  return hash.digest('hex');
+}
+
 async function ensureDirectoryTree(root: string, segments: readonly string[]): Promise<string> {
   let current = root;
   for (const segment of segments) {
     current = path.join(current, segment);
-    try {
-      const found = await fs.lstat(current);
-      if (found.isSymbolicLink() || !found.isDirectory()) throw new WorkerWorktreeError('WORKTREE_STORAGE_UNSAFE', `${current} is not an owned directory`);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
-      await fs.mkdir(current);
+    try { await fs.mkdir(current); }
+    catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error;
+    }
+    // Check after mkdir as well as on EEXIST. Another allocation may have
+    // created the same parent concurrently, or substituted a symlink/file.
+    const found = await fs.lstat(current);
+    if (found.isSymbolicLink() || !found.isDirectory()) {
+      throw new WorkerWorktreeError('WORKTREE_STORAGE_UNSAFE', `${current} is not an owned directory`);
     }
     const resolved = await fs.realpath(current);
     if (!isContained(root, resolved)) throw new WorkerWorktreeError('WORKTREE_STORAGE_ESCAPE', 'managed worktree storage escaped its approved root');
+    const verified = await fs.lstat(current);
+    if (verified.isSymbolicLink() || !verified.isDirectory()) {
+      throw new WorkerWorktreeError('WORKTREE_STORAGE_UNSAFE', 'managed directory changed after mkdir');
+    }
     current = resolved;
   }
   return current;
@@ -804,14 +959,29 @@ export async function listOfferedWorkerWorktrees(
     try {
       const lease = await offeredWorkerLease(approvedRoots, offer);
       const inspected = await inspectWorkerWorkspaceForCleanup(lease);
+      let contentFingerprint: string | null = null;
+      if (!inspected.changesTruncated) {
+        try {
+          contentFingerprint = await cleanupContentFingerprint(lease.worktreePath);
+          // The fingerprint must describe the same status that the UI reviewed.
+          const verified = await statusOf(lease.worktreePath, true);
+          if (verified.headOid !== inspected.headOid || verified.truncated ||
+              JSON.stringify(verified.trackedChanges) !== JSON.stringify(inspected.trackedChanges) ||
+              JSON.stringify(verified.untrackedFiles) !== JSON.stringify(inspected.untrackedFiles) ||
+              JSON.stringify(verified.ignoredFiles) !== JSON.stringify(inspected.ignoredFiles)) {
+            contentFingerprint = null;
+          }
+        } catch { /* A missing, unreadable, unsafe or over-limit file is never authorized for removal. */ }
+      }
       result.push({
         runId: lease.runId, agentId: lease.agentId, createdAt: offer.createdAt,
         reason: offer.reason, workspace: lease.workspace.virtual, branch: inspected.branch, headOid: inspected.headOid,
+        contentFingerprint,
         dirty: inspected.trackedChanges.length + inspected.untrackedFiles.length + inspected.ignoredFiles.length > 0 || inspected.changesTruncated,
         ignoredFiles: inspected.ignoredFiles.length > 0,
         uniqueCommits: inspected.hasWorkerCommits && !inspected.branchIntegratedIntoSource,
         changes: [...inspected.trackedChanges, ...inspected.untrackedFiles, ...inspected.ignoredFiles],
-        blockers: inspected.blockers, canOfferRemoval: inspected.canOfferRemoval,
+        blockers: inspected.blockers, canOfferRemoval: inspected.canOfferRemoval && contentFingerprint !== null,
         hasWorkerCommits: inspected.hasWorkerCommits,
         branchIntegratedIntoSource: inspected.branchIntegratedIntoSource,
         trackedChangesCount: inspected.trackedChanges.length,
@@ -832,7 +1002,8 @@ export async function listOfferedWorkerWorktrees(
 export async function disposeOfferedWorkerWorktree(
   approvedRoots: readonly Root[],
   offer: WorkerCleanupOfferIdentity,
-  activeProcessCwds: readonly string[]
+  activeProcessCwds: readonly string[],
+  expectedContentFingerprint?: string
 ): Promise<WorkerFinalizeResult> {
   // The caller is the confirmation-gated main-process IPC; no tool/worker path
   // may call this with a marker it discovered or synthesized on its own.
@@ -844,7 +1015,9 @@ export async function disposeOfferedWorkerWorktree(
   if (activeProcessCwds.some(cwd => path.isAbsolute(cwd) && isContained(lease.worktreePath, path.resolve(cwd)))) {
     throw new WorkerWorktreeError('WORKTREE_ACTIVE_PROCESS', 'a running command still uses this checkout');
   }
-  return finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'keep' } });
+  return finalizeWorkerWorkspace({
+    lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'keep' }, expectedContentFingerprint
+  });
 }
 
 /**
@@ -1061,6 +1234,8 @@ export function finalizeWorkerWorkspace(input: {
   reason: 'completed' | 'cancelled' | 'failed' | 'superseded';
   discardChanges?: boolean;
   branch?: WorkerFinalizeBranch;
+  /** Captured before the native dialog; only used for confirmation-gated cleanup. */
+  expectedContentFingerprint?: string;
 }): Promise<WorkerFinalizeResult> {
   return withLeaseMutation(input.lease, async () => {
     const marker = await markerForLease(input.lease);
@@ -1077,7 +1252,21 @@ export function finalizeWorkerWorkspace(input: {
       // Even a clean status does not authorize deletion: ignored files could appear
       // before Git removes the worktree, and Git will delete them without --force.
       if (input.discardChanges !== true) return { removed: false, branchRemoved: false, branch: marker.branch, changes };
+      if (input.expectedContentFingerprint !== undefined) {
+        if (!/^[a-f0-9]{64}$/.test(input.expectedContentFingerprint)) {
+          throw new WorkerWorktreeError('WORKTREE_CONTENT_CHANGED', 'cleanup confirmation had no valid content fingerprint');
+        }
+        try {
+          const currentFingerprint = await cleanupContentFingerprint(marker.worktreePath, status);
+          if (currentFingerprint !== input.expectedContentFingerprint) {
+            throw new WorkerWorktreeError('WORKTREE_CONTENT_CHANGED', 'checkout files changed since cleanup confirmation');
+          }
+        } catch {
+          throw new WorkerWorktreeError('WORKTREE_CONTENT_CHANGED', 'checkout content changed or cannot be proven safe');
+        }
+      }
     } catch (error: unknown) {
+      if (input.expectedContentFingerprint !== undefined) throw error;
       if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' || (error instanceof WorkerWorktreeError && error.code === 'WORKTREE_PATH_INVALID')) worktreeExists = false;
       else throw error;
     }

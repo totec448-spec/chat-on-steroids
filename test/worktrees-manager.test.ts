@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -243,6 +244,21 @@ describe('automatic worker Git worktrees', () => {
     expect(joined.newlyCreated).toBe(false);
     expect(created.ownershipToken).toBe(joined.ownershipToken);
     await finalizeWorkerWorkspace({ lease: created, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+  });
+
+  it('accepts concurrent REAL Git allocations sharing newly-created managed storage parents', async () => {
+    const leases = await Promise.all(Array.from({ length: 6 }, () => allocWorkerWorkspace({
+      runId: randomUUID(), agentId: 'worker-1',
+      primeWorkspace: { real: repo, virtual: '/approved/repo' }, approvedRoots: roots
+    })));
+    expect(new Set(leases.map(lease => lease.worktreePath)).size).toBe(leases.length);
+    for (const lease of leases) {
+      expect(await fs.stat(lease.worktreePath).then(stat => stat.isDirectory())).toBe(true);
+      expect(await fs.readFile(path.join(lease.worktreePath, 'file.txt'), 'utf8')).toBe('base\n');
+    }
+    for (const lease of leases) {
+      await finalizeWorkerWorkspace({ lease, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+    }
   });
 
   it('keeps a nested project cwd inside the equivalent folder of its isolated Git checkout', async () => {
@@ -591,6 +607,60 @@ describe('automatic worker Git worktrees', () => {
     expect(git(repo, ['rev-parse', 'HEAD'])).toBe(lease.baseOid);
     expect(await listOfferedWorkerWorktrees(roots, [offered])).toEqual([]);
     expect(lookupWorkerWorkspace(ACCEPTED[0])).toBeNull();
+  });
+
+  it.each(['tracked', 'untracked', 'ignored-directory'] as const)(
+    'refuses confirmed removal when %s bytes change at the same path, size and mtime', async kind => {
+      if (kind === 'ignored-directory') {
+        await write(path.join(repo, '.gitignore'), 'private-cache/\n');
+        await commit(repo, 'ignore worker private directory');
+      }
+      const lease = await allocate();
+      const target = kind === 'tracked'
+        ? path.join(lease.worktreePath, 'file.txt')
+        : kind === 'untracked'
+          ? path.join(lease.worktreePath, 'notes.txt')
+          : path.join(lease.worktreePath, 'private-cache', 'nested', 'notes.txt');
+      if (kind === 'ignored-directory') await fs.mkdir(path.dirname(target), { recursive: true });
+      await write(target, 'one!\n');
+      const offer = { runId: lease.runId, agentId: lease.agentId, createdAt: lease.createdAt, reason: 'cleared' };
+      resetWorkerWorktreeRegistryForTests();
+      const previews = await listOfferedWorkerWorktrees(roots, [offer]);
+      expect(previews).toHaveLength(1);
+      expect(previews[0]!.contentFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      if (kind === 'ignored-directory') {
+        expect(previews[0]!.changes).toContain('private-cache/');
+      }
+      const stat = await fs.stat(target);
+      await write(target, 'two!\n');
+      await fs.utimes(target, stat.atime, stat.mtime);
+      const changed = await fs.stat(target);
+      expect(changed.size).toBe(stat.size);
+      expect(Math.abs(changed.mtimeMs - stat.mtimeMs)).toBeLessThan(2);
+      await expect(disposeOfferedWorkerWorktree(roots, offer, [], previews[0]!.contentFingerprint!))
+        .rejects.toMatchObject({ code: 'WORKTREE_CONTENT_CHANGED' });
+      expect(await fs.readFile(target, 'utf8')).toBe('two!\n');
+      expect(git(repo, ['rev-parse', lease.branchRef])).toBe(lease.baseOid);
+    }
+  );
+
+  it('fails closed when an ignored directory exceeds bounded content fingerprint limits', async () => {
+    await write(path.join(repo, '.gitignore'), 'private-cache/\n');
+    await commit(repo, 'ignore large worker cache');
+    const lease = await allocate();
+    const cache = path.join(lease.worktreePath, 'private-cache');
+    await fs.mkdir(cache);
+    const target = path.join(cache, 'large.bin');
+    await write(target, '');
+    await fs.truncate(target, 64 * 1024 * 1024 + 1);
+    const offer = { runId: lease.runId, agentId: lease.agentId, createdAt: lease.createdAt, reason: 'cleared' };
+    resetWorkerWorktreeRegistryForTests();
+    const previews = await listOfferedWorkerWorktrees(roots, [offer]);
+    expect(previews).toHaveLength(1);
+    expect(previews[0]).toMatchObject({ contentFingerprint: null, canOfferRemoval: false });
+    await expect(disposeOfferedWorkerWorktree(roots, offer, [], 'a'.repeat(64)))
+      .rejects.toMatchObject({ code: 'WORKTREE_CONTENT_CHANGED' });
+    expect(await fs.stat(target).then(stat => stat.size)).toBe(64 * 1024 * 1024 + 1);
   });
 
   it('refuses confirmed removal while a background process still owns the worker checkout cwd', async () => {
