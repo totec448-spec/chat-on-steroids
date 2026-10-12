@@ -2182,5 +2182,6 @@
   "Dictation on Windows": "Windows에서 받아쓰기",
   "The microphone button turns your speech into text in the message box, and you send it when you're ready.": "마이크 버튼으로 말한 내용이 메시지 상자의 텍스트가 되고, 준비되면 보내면 됩니다.",
   "Rename your connectors": "커넥터 이름 변경",
-  "Chat On Steroids apps you rename in ChatGPT keep working.": "ChatGPT에서 이름을 바꾼 Chat On Steroids 앱도 계속 작동합니다."
+  "Chat On Steroids apps you rename in ChatGPT keep working.": "ChatGPT에서 이름을 바꾼 Chat On Steroids 앱도 계속 작동합니다.",
+  "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "이 터널 ID는 {0}에도 설정되어 있습니다. 커넥터마다 자체 터널이 필요합니다. 그렇지 않으면 ChatGPT가 일부 호출을 잘못된 커넥터로 보내 UNKNOWN_TOOL로 실패합니다."
 }
