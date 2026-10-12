@@ -2171,5 +2171,16 @@
   "This chat was deleted in ChatGPT. Start a new chat to continue.": "此聊天已在 ChatGPT 中删除。请新建聊天以继续。",
   "Chat deleted in ChatGPT": "已在 ChatGPT 中删除的聊天",
   "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT 中已没有此聊天，因此无法再向其发送任何内容。",
-  "Start a new chat to continue. This history stays in the app.": "请新建聊天以继续。此历史记录会保留在应用中。"
+  "Start a new chat to continue. This history stays in the app.": "请新建聊天以继续。此历史记录会保留在应用中。",
+  "ChatGPT Projects for your projects, workers in their own Git copy, and steadier long runs.": "为项目创建 ChatGPT 项目、子智能体使用各自的 Git 副本，长时间运行更稳定。",
+  "Projects in ChatGPT": "ChatGPT 中的项目",
+  "New projects get their own ChatGPT Project, and their new chats open inside it.": "新项目会获得自己的 ChatGPT 项目，其新对话会在其中打开。",
+  "Background chats in a tab group": "标签组中的后台对话",
+  "Background chats can stay in one collapsed tab group in your browser window instead of their own window.": "后台对话可以留在浏览器窗口中一个折叠的标签组里，而不是单独的窗口。",
+  "Workers in their own Git copy": "子智能体使用各自的 Git 副本",
+  "When you turn it on, each new worker gets its own Git worktree and branch, away from your checkout.": "开启后，每个新的子智能体都会获得自己的 Git worktree 和分支，与你的检出分开。",
+  "Dictation on Windows": "Windows 上的语音输入",
+  "The microphone button turns your speech into text in the message box, and you send it when you're ready.": "麦克风按钮会把你的语音转成消息框中的文字，准备好后由你发送。",
+  "Rename your connectors": "重命名连接器",
+  "Chat On Steroids apps you rename in ChatGPT keep working.": "在 ChatGPT 中重命名的 Chat On Steroids 应用会继续正常工作。"
 }

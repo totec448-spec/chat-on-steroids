@@ -2171,5 +2171,16 @@
   "This chat was deleted in ChatGPT. Start a new chat to continue.": "Dieser Chat wurde in ChatGPT gelöscht. Starte einen neuen Chat, um weiterzumachen.",
   "Chat deleted in ChatGPT": "Chat in ChatGPT gelöscht",
   "ChatGPT no longer has this chat, so nothing more can be sent to it.": "ChatGPT hat diesen Chat nicht mehr, daher kann nichts mehr an ihn gesendet werden.",
-  "Start a new chat to continue. This history stays in the app.": "Starte einen neuen Chat, um weiterzumachen. Dieser Verlauf bleibt in der App."
+  "Start a new chat to continue. This history stays in the app.": "Starte einen neuen Chat, um weiterzumachen. Dieser Verlauf bleibt in der App.",
+  "ChatGPT Projects for your projects, workers in their own Git copy, and steadier long runs.": "ChatGPT-Projekte für deine Projekte, Worker in eigener Git-Kopie und stabilere lange Läufe.",
+  "Projects in ChatGPT": "Projekte in ChatGPT",
+  "New projects get their own ChatGPT Project, and their new chats open inside it.": "Neue Projekte bekommen ein eigenes ChatGPT-Projekt, und ihre neuen Chats öffnen sich darin.",
+  "Background chats in a tab group": "Hintergrund-Chats in einer Tab-Gruppe",
+  "Background chats can stay in one collapsed tab group in your browser window instead of their own window.": "Hintergrund-Chats können in einer eingeklappten Tab-Gruppe in deinem Browserfenster bleiben statt in einem eigenen Fenster.",
+  "Workers in their own Git copy": "Worker in eigener Git-Kopie",
+  "When you turn it on, each new worker gets its own Git worktree and branch, away from your checkout.": "Wenn du es einschaltest, bekommt jeder neue Worker einen eigenen Git-Worktree und Branch, getrennt von deinem Checkout.",
+  "Dictation on Windows": "Diktieren unter Windows",
+  "The microphone button turns your speech into text in the message box, and you send it when you're ready.": "Die Mikrofon-Schaltfläche macht aus deiner Sprache Text im Nachrichtenfeld, und du sendest ihn, wenn du so weit bist.",
+  "Rename your connectors": "Connectoren umbenennen",
+  "Chat On Steroids apps you rename in ChatGPT keep working.": "Chat On Steroids-Apps, die du in ChatGPT umbenennst, funktionieren weiter."
 }
