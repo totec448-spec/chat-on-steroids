@@ -16,7 +16,6 @@ const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const keepFrames = process.argv.includes('--frames');
 const output = path.resolve(args[0] || path.join(root, 'docs/images'));
 const SIZE = { width: 1280, height: 720 };
-const PROMPT = 'Add dark mode to the settings page and keep the existing tests green.';
 app.setPath('userData', path.join(root, 'outputs/readme-demo-runtime'));
 
 /** Encodes the frames, each held for its time, as H.264 in MP4 with Chromium's own recorder. */
@@ -25,7 +24,8 @@ async function recordVideo(frames) {
   try {
     await win.loadURL('about:blank');
     await win.webContents.executeJavaScript(`window.clips = []; window.add = (png, ms) => { window.clips.push({ png, ms }); }; true`);
-    for (const frame of frames) await win.webContents.executeJavaScript(`add(${JSON.stringify('data:image/png;base64,' + frame.png.toString('base64'))}, ${frame.ms})`);
+    // Base64 and a number: nothing in these calls needs escaping.
+    for (const frame of frames) await win.webContents.executeJavaScript(`add('data:image/png;base64,${frame.png.toString('base64')}', ${Number(frame.ms)})`);
     const base64 = await win.webContents.executeJavaScript(`(async () => {
       const canvas = Object.assign(document.createElement('canvas'), { width: ${SIZE.width}, height: ${SIZE.height} });
       const context = canvas.getContext('2d');
@@ -67,7 +67,8 @@ app.whenReady().then(async () => {
     const frame = async ms => { await settle(); frames.push({ png: (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).resize(SIZE).toPNG(), ms }); };
     /** Moves the story on and waits until the app has drawn it. */
     const advance = async (change, drawn, what) => {
-      await js(`advance(${JSON.stringify(change)})`);
+      // Stage values are numbers; the keys are this script's own.
+      await js(`advance({ ${Object.entries(change).map(([key, value]) => `${key}: ${Number(value)}`).join(', ')} })`);
       await until(drawn, what);
       // Work in progress stays open, as a person watching it would keep it.
       await js(`(() => { for (const group of document.querySelectorAll('#timeline details.tool-group')) group.open = true;
@@ -79,8 +80,10 @@ app.whenReady().then(async () => {
     // 1. A new chat: the task is typed, the model is chosen.
     await until('window.ready && document.getElementById("chatInput").getClientRects().length', 'composer');
     await frame(900);
-    for (let end = 3; end < PROMPT.length + 3; end += 3) {
-      await js(`(() => { const input = document.getElementById('chatInput'); input.value = ${JSON.stringify(PROMPT)}.slice(0, ${end}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    // The text typed is the message the story then shows as sent.
+    const length = await js('window.rows[1].message.text.length');
+    for (let end = 3; end < length + 3; end += 3) {
+      await js(`(() => { const input = document.getElementById('chatInput'); input.value = window.rows[1].message.text.slice(0, ${Number(end)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
       await frame(60);
     }
     await frame(500);
