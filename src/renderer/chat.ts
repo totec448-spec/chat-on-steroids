@@ -5111,7 +5111,9 @@ export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[],
     }
     copy.append(facts, path);
 
-    const remove = el('button', 'btn worktree-remove-button', () => t('Remove checkout…'));
+    // Use the same visible solid action as other Settings controls, not a quiet
+    // text-only link for a destructive workflow.
+    const remove = el('button', 'btn btn-solid worktree-remove-button', () => t('Remove checkout…'));
     remove.setAttribute('type', 'button');
     ui(remove, 'aria-label', () => `${t('Remove checkout…')} — ${name()}`);
     remove.dataset.worktreeRemove = 'true';
