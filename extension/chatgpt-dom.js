@@ -2706,11 +2706,15 @@ var CLF_DOM = (() => {
     return changed;
   }
   const connectorApps = () => ownApps.map(app => ({ ...app }));
-  /** The proven apps of the surface that a configured connector name belongs to (renames keep the id). */
+  /** Configured and learned names select one surface; renames never discard its proven IDs. */
   function provenAppsFor(connectorName) {
     const at = connectorNames().indexOf(connectorName);
-    if (at < 0) return [];
-    const surface = ['core', 'desktop', 'plugins'][at];
+    const surfaces = new Set(ownApps.filter(app => app.name === connectorName).map(app => app.surface));
+    if (at >= 0) surfaces.add(['core', 'desktop', 'plugins'][at]);
+    // A learned name can collide with another surface's learned or configured name.
+    // That ambiguity is not permission to fall back to name-only enrollment.
+    if (surfaces.size > 1) return null;
+    const surface = [...surfaces][0];
     return ownApps.filter(app => app.surface === surface);
   }
   /** This install's three names, or the plain ones while the app has not said. */
@@ -2720,7 +2724,12 @@ var CLF_DOM = (() => {
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
-    const externalPlugins = pluginsConnectorName(connectorName);
+    // A durable exact-ID request already identifies its connector even when names collide.
+    // Use that ID's proven surface for limits too, rather than borrowing another surface's name.
+    const identified = expectedAppId ? ownApps.filter(app => app.appId === expectedAppId) : [];
+    const proven = identified.length ? identified : provenAppsFor(connectorName);
+    if (proven === null && !expectedAppId) return null;
+    const externalPlugins = proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2748,20 +2757,32 @@ var CLF_DOM = (() => {
    */
   function ownSnapshot(snapshot, connectorName) {
     const proven = provenAppsFor(connectorName);
-    return proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName;
+    return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
   function pluginInstalledButtons(connectorName) {
-    // The installed list shows only names. A renamed connector shows its proven current name; the
-    // page opened from the row is then checked by app id (ownSnapshot), so a name match is no proof.
-    const names = [connectorName, ...provenAppsFor(connectorName).map(app => app.name).filter(Boolean)];
+    // Native links name their exact App Id, even when a fresh provider rename has not reached
+    // the learned name yet. Legacy buttons still need names; the destination proves identity.
+    const proven = provenAppsFor(connectorName);
+    if (proven === null) return null;
+    const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
     const named = node => names.includes(text(node));
     return safe(() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
-        if (!main) return null;
-        const rows = [...main.querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
-          [...button.querySelectorAll('*')].some(node => !node.children.length && named(node)));
+        if (!main || (!proven.length && !connectorNames().includes(connectorName))) return null;
+        // Measured 2026-10-11: installed rows became links to exact management pages.
+        // Catalog and external links cannot identify an installed connector.
+        const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
+          if (!button.isConnected || button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
+          if (button.tagName === 'A') {
+            const url = new URL(button.href, location.href);
+            const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
+            if (url.origin !== location.origin || !route || url.hash) return false;
+            if (proven.length) return proven.some(app => app.appId === route[1]);
+          }
+          return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
+        });
         return rows.length ? rows : null;
       }
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
