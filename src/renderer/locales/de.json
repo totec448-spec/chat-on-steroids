@@ -2184,5 +2184,14 @@
   "Rename your connectors": "Connectoren umbenennen",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "Chat On Steroids-Apps, die du in ChatGPT umbenennst, funktionieren weiter.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "Diese Tunnel-ID ist auch für {0} eingetragen. Jeder Connector braucht einen eigenen Tunnel, sonst schickt ChatGPT manche Aufrufe an den falschen Connector und sie scheitern mit UNKNOWN_TOOL.",
-  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT hat darum gebeten, mindestens bis {0} zu warten. Danach macht die App von selbst weiter. Neu laden hebt dieses Limit nicht auf."
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT hat darum gebeten, mindestens bis {0} zu warten. Danach macht die App von selbst weiter. Neu laden hebt dieses Limit nicht auf.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Ich höre mit einfacher Genauigkeit zu. Für Satzzeichen und bessere Ergebnisse schalte in den Windows-Einstellungen die Online-Spracherkennung ein.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Kein Mikrofon verfügbar. Schließe eines an oder erlaube den Mikrofonzugriff in den Windows-Einstellungen.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows sperrt den Mikrofonzugriff für Desktop-Apps. Erlaube ihn in den Windows-Einstellungen.",
+  "Windows speech recognition lost its internet connection.": "Die Windows-Spracherkennung hat die Internetverbindung verloren.",
+  "The microphone signal was too poor to recognize speech.": "Das Mikrofonsignal war zu schlecht, um Sprache zu erkennen.",
+  "Windows speech recognition stopped unexpectedly.": "Die Windows-Spracherkennung wurde unerwartet beendet.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Keine Windows-Spracherkennung installiert. Installiere ein Windows-Sprachpaket mit Spracherkennung.",
+  "Windows speech recognition could not start": "Die Windows-Spracherkennung konnte nicht starten",
+  "Windows speech recognition exited unexpectedly": "Die Windows-Spracherkennung wurde unerwartet beendet"
 }

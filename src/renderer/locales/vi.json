@@ -2184,5 +2184,14 @@
   "Rename your connectors": "Đổi tên connector",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "Các ứng dụng Chat On Steroids bạn đổi tên trong ChatGPT vẫn tiếp tục hoạt động.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "ID tunnel này cũng được đặt cho {0}. Mỗi connector cần tunnel riêng; nếu không, ChatGPT sẽ gửi một số lệnh gọi đến sai connector và chúng thất bại với UNKNOWN_TOOL.",
-  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT yêu cầu chờ ít nhất đến {0}. Sau đó ứng dụng sẽ tự tiếp tục. Tải lại không gỡ được giới hạn này."
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT yêu cầu chờ ít nhất đến {0}. Sau đó ứng dụng sẽ tự tiếp tục. Tải lại không gỡ được giới hạn này.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Đang nghe với độ chính xác cơ bản. Để có dấu câu và kết quả tốt hơn, hãy bật nhận dạng giọng nói trực tuyến trong cài đặt Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Không có micrô nào. Hãy cắm micrô hoặc cho phép truy cập micrô trong cài đặt Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows đang chặn quyền truy cập micrô của ứng dụng máy tính. Hãy cho phép trong cài đặt Windows.",
+  "Windows speech recognition lost its internet connection.": "Nhận dạng giọng nói của Windows đã mất kết nối internet.",
+  "The microphone signal was too poor to recognize speech.": "Tín hiệu micrô quá kém để nhận dạng giọng nói.",
+  "Windows speech recognition stopped unexpectedly.": "Nhận dạng giọng nói của Windows đã dừng đột ngột.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Chưa cài trình nhận dạng giọng nói của Windows. Hãy cài gói ngôn ngữ giọng nói của Windows.",
+  "Windows speech recognition could not start": "Không thể khởi động nhận dạng giọng nói của Windows",
+  "Windows speech recognition exited unexpectedly": "Nhận dạng giọng nói của Windows đã thoát đột ngột"
 }

@@ -2184,5 +2184,14 @@
   "Rename your connectors": "重新命名連接器",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "在 ChatGPT 中重新命名的 Chat On Steroids 應用程式會繼續正常運作。",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "此通道 ID 也設定給了 {0}。每個連接器都需要自己的通道；否則 ChatGPT 會把部分呼叫送到錯誤的連接器，並以 UNKNOWN_TOOL 失敗。",
-  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT 要求至少等到 {0}。之後應用程式會自行繼續。重新載入無法解除此限制。"
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT 要求至少等到 {0}。之後應用程式會自行繼續。重新載入無法解除此限制。",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "正以基本精確度聆聽。若要加上標點並提升效果，請在 Windows 設定中開啟線上語音辨識。",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "沒有可用的麥克風。請連接麥克風，或在 Windows 設定中允許麥克風存取。",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows 封鎖了桌面應用程式存取麥克風。請在 Windows 設定中允許存取。",
+  "Windows speech recognition lost its internet connection.": "Windows 語音辨識失去網路連線。",
+  "The microphone signal was too poor to recognize speech.": "麥克風訊號太差，無法辨識語音。",
+  "Windows speech recognition stopped unexpectedly.": "Windows 語音辨識意外停止。",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "未安裝 Windows 語音辨識器。請安裝 Windows 語音語言套件。",
+  "Windows speech recognition could not start": "無法啟動 Windows 語音辨識",
+  "Windows speech recognition exited unexpectedly": "Windows 語音辨識意外結束"
 }

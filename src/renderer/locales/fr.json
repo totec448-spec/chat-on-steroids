@@ -2184,5 +2184,14 @@
   "Rename your connectors": "Renommez vos connecteurs",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "Les apps Chat On Steroids que vous renommez dans ChatGPT continuent de fonctionner.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "Cet ID de tunnel est aussi défini pour {0}. Chaque connecteur a besoin de son propre tunnel ; sinon ChatGPT envoie certains appels au mauvais connecteur et ils échouent avec UNKNOWN_TOOL.",
-  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT a demandé d’attendre au moins jusqu’à {0}. Ensuite, l’application continue toute seule. Recharger ne lève pas cette limite."
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT a demandé d’attendre au moins jusqu’à {0}. Ensuite, l’application continue toute seule. Recharger ne lève pas cette limite.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Écoute avec une précision de base. Pour la ponctuation et de meilleurs résultats, activez la reconnaissance vocale en ligne dans les paramètres de Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Aucun microphone n’est disponible. Branchez-en un ou autorisez l’accès au microphone dans les paramètres de Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows bloque l’accès au microphone pour les applications de bureau. Autorisez-le dans les paramètres de Windows.",
+  "Windows speech recognition lost its internet connection.": "La reconnaissance vocale de Windows a perdu sa connexion Internet.",
+  "The microphone signal was too poor to recognize speech.": "Le signal du microphone était trop faible pour reconnaître la parole.",
+  "Windows speech recognition stopped unexpectedly.": "La reconnaissance vocale de Windows s’est arrêtée de manière inattendue.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Aucun module de reconnaissance vocale Windows n’est installé. Installez un module linguistique vocal Windows.",
+  "Windows speech recognition could not start": "La reconnaissance vocale de Windows n’a pas pu démarrer",
+  "Windows speech recognition exited unexpectedly": "La reconnaissance vocale de Windows s’est fermée de manière inattendue"
 }
