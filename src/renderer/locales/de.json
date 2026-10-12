@@ -851,7 +851,6 @@
   "Download link opened. Install the app to continue; your settings are kept.": "Download-Link geöffnet. Installiere die App, um fortzufahren. Deine Einstellungen bleiben erhalten.",
   "Connector checks requested. Any remaining steps are shown in Update status.": "Connector-Prüfungen angefordert. Verbleibende Schritte stehen unter Update-Status.",
   "Update all could not finish: {0}": "Alles aktualisieren konnte nicht abgeschlossen werden: {0}",
-  "Choose Update all to retry.": "Wähle „Alles aktualisieren“, um es erneut zu versuchen.",
   "Update check failed": "Update-Prüfung fehlgeschlagen",
   "Downloading {0}": "{0} wird heruntergeladen",
   "Ready to install {0}": "{0} ist zur Installation bereit",
