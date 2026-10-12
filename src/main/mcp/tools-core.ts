@@ -248,11 +248,7 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
 /** One stable owner for the running model turn, upgraded lazily when page proof arrives. */
 function execPrincipal(): string | null {
   const caller = currentCaller();
-  return executionPrincipal(
-    caller.requestId,
-    caller.sessionId ?? null,
-    currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls
-  );
+  return executionPrincipal(caller.requestId, caller.sessionId ?? null);
 }
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
