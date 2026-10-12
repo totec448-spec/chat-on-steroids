@@ -15,6 +15,7 @@ export const CONTROL_API_ROUTES = [
   '/v1/sessions',
   '/v1/sessions/{id}',
   '/v1/sessions/{id}/events',
+  '/v1/sessions/{id}/events/stream',
   '/v1/inputs',
   '/v1/agents',
   '/v1/log'

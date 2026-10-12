@@ -4318,6 +4318,17 @@ null instead of describing a different chat than `session`. Start and stop are s
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
 
+`GET /v1/sessions/{id}/events/stream` (`control-stream.ts`) pushes a session's events as
+Server-Sent Events. It is the paged read repeated: every frame is a row `…/events?from=` would
+return, read through `streamEvents` under the same heavy-read limit, with `id` = `seq` so
+`Last-Event-ID` resumes after it (and wins over `from`). The recorder's `onSessionChange` says
+when to read again and a 5 s tick covers a missed notice. Everything that can refuse a stream
+does so as JSON before the first byte; the first read runs under the listener's read deadline.
+At most `MAX_EVENT_STREAMS` (4) are open; each sends `: stream open` at once and a comment every
+15 s, ends after 30 minutes, on API stop (`closeEventStreams`, before the drain), when more than
+1 MiB waits in its socket, or when the session is gone, always with an `end` frame naming the
+reason, and answers with `Connection: close`.
+
 The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
 or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
 is the message id, as for the composer's New chat) and `POST /v1/inputs/{id}/cancel`. They need a second switch, `controlApi.allowActions`, off by
