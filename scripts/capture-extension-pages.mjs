@@ -90,5 +90,7 @@ for (const [name, b] of Object.entries(BROWSERS)) {
     finally { spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); await sleep(600); }
   }
 }
-fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+// One line per browser and language: generated data, readable in a diff.
+fs.writeFileSync(manifestPath, '{\n' + Object.entries(manifest).map(([browser, langs]) => `  ${JSON.stringify(browser)}: {\n` +
+  Object.entries(langs).map(([lang, entry]) => `    ${JSON.stringify(lang)}: ${JSON.stringify(entry)}`).join(',\n') + '\n  }').join(',\n') + '\n}\n');
 process.exit(0);
