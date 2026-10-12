@@ -2184,5 +2184,14 @@
   "Rename your connectors": "Bağlayıcılarınızı yeniden adlandırın",
   "Chat On Steroids apps you rename in ChatGPT keep working.": "ChatGPT'de yeniden adlandırdığınız Chat On Steroids uygulamaları çalışmaya devam eder.",
   "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.": "Bu tünel kimliği {0} için de ayarlı. Her bağlayıcının kendi tüneli olmalı; aksi halde ChatGPT bazı çağrıları yanlış bağlayıcıya gönderir ve bunlar UNKNOWN_TOOL ile başarısız olur.",
-  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT en az {0} saatine kadar beklenmesini istedi. Sonrasında uygulama kendiliğinden devam eder. Yeniden yüklemek bu sınırı kaldırmaz."
+  "ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.": "ChatGPT en az {0} saatine kadar beklenmesini istedi. Sonrasında uygulama kendiliğinden devam eder. Yeniden yüklemek bu sınırı kaldırmaz.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Temel doğrulukla dinleniyor. Noktalama ve daha iyi sonuçlar için Windows ayarlarında çevrimiçi konuşma tanımayı açın.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Kullanılabilir mikrofon yok. Bir mikrofon bağlayın veya Windows ayarlarında mikrofon erişimine izin verin.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows, masaüstü uygulamalarının mikrofon erişimini engelliyor. Windows ayarlarında izin verin.",
+  "Windows speech recognition lost its internet connection.": "Windows konuşma tanıma internet bağlantısını kaybetti.",
+  "The microphone signal was too poor to recognize speech.": "Mikrofon sinyali konuşmayı tanımak için çok zayıftı.",
+  "Windows speech recognition stopped unexpectedly.": "Windows konuşma tanıma beklenmedik şekilde durdu.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Yüklü bir Windows konuşma tanıyıcısı yok. Bir Windows konuşma dil paketi yükleyin.",
+  "Windows speech recognition could not start": "Windows konuşma tanıma başlatılamadı",
+  "Windows speech recognition exited unexpectedly": "Windows konuşma tanıma beklenmedik şekilde kapandı"
 }

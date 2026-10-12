@@ -514,7 +514,9 @@ function onDictationEvent(event: DictationEvent): void {
     if (['stopped', 'idle', 'ended', 'complete'].includes(status)) { completedDictation(session, 'Dictation stopped.'); return; }
     if (!session.stopping) {
       dictationPhase = ['starting', 'initializing', 'requesting'].includes(status) ? 'starting' : 'listening';
-      dictationNotice = dictationPhase === 'starting' ? 'Preparing microphone…' : 'Listening…';
+      dictationNotice = dictationPhase === 'starting' ? 'Preparing microphone…'
+        : event.engine === 'legacy' ? 'Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.'
+          : 'Listening…';
       paintDictation();
     }
   }
