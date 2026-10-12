@@ -374,7 +374,7 @@ export interface ControlApiSettings {
   /** Serve the loopback API and write its token to userData. Off unless the user turns it on. */
   enabled: boolean;
   /**
-   * Also let a caller with the token send and cancel messages through the outbox. Off unless the
+   * Also let a caller with the token send messages, start new chats and cancel messages through the outbox. Off unless the
    * user turns it on, and never on while `enabled` is off: turning the API off revokes it.
    */
   allowActions: boolean;

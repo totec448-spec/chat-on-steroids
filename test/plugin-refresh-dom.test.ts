@@ -263,7 +263,7 @@ it('finds a renamed connector\'s installed row by its proven current name', () =
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(1);
   expect(api.pluginInstalledButtons('Chat On Steroids Desktop')).toEqual([]);
 });
-it('finds renamed native installed links while retaining visibility, route and ambiguity checks', () => {
+it('finds renamed native installed links by proven identity while retaining visibility, route and ambiguity checks', () => {
   const { api } = settingsPage('/settings/plugins-settings');
   const main = dom.window.document.querySelector('main')!;
   main.innerHTML = '<a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Renamed</span></a>' +
@@ -275,7 +275,63 @@ it('finds renamed native installed links while retaining visibility, route and a
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([main.querySelector('a')]);
   expect(api.pluginInstalledButtons('Chat On Steroids Desktop')).toBeNull();
   main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><span>Renamed</span></a>');
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([main.querySelector('a')]); // A same-named foreign ID is not this connector.
+  main.insertAdjacentHTML('beforeend', main.querySelector('a')!.outerHTML);
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(2);
+});
+function renamedNativeList() {
+  const { api } = settingsPage('/settings/plugins-settings');
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = '<a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>My renamed connector 日本語</span></a>';
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
+  return { api, main, link: main.querySelector('a')! };
+}
+it('finds an arbitrarily renamed native installed app even while its proven name remains old', () => {
+  const { api, main, link } = renamedNativeList();
+  main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_foreign"><span>Chat On Steroids Core</span></a>');
+  expect(api.connectorApps()[0].name).toBe('Chat On Steroids Core');
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([link]);
+});
+it.each(['external', 'catalog', 'hash', 'wrong-id', 'hidden', 'detached', 'replacement-foreign', 'outside', 'quoted', 'own-surface'])(
+  'keeps proven native link selection closed when the row is %s', mode => {
+    const { api, main, link } = renamedNativeList();
+    if (mode === 'external') link.href = 'https://example.com/settings/plugins-settings/plugin_asdk_app_synthetic';
+    if (mode === 'catalog') link.href = '/plugins/plugin_asdk_app_synthetic';
+    if (mode === 'hash') link.href += '#unowned';
+    if (mode === 'wrong-id') { link.href = '/settings/plugins-settings/plugin_asdk_app_foreign'; link.querySelector('span')!.textContent = 'Chat On Steroids Core'; }
+    if (mode === 'hidden') link.hidden = true;
+    if (mode === 'detached') link.remove();
+    if (mode === 'replacement-foreign') {
+      const other = link.cloneNode(true) as HTMLAnchorElement;
+      other.href = '/settings/plugins-settings/plugin_asdk_app_foreign'; other.querySelector('span')!.textContent = 'Chat On Steroids Core'; link.replaceWith(other);
+    }
+    if (mode === 'outside') dom.window.document.body.append(link);
+    if (mode === 'quoted' || mode === 'own-surface') {
+      const host = dom.window.document.createElement('section');
+      if (mode === 'quoted') host.dataset.testid = 'conversation-turn-1';
+      else host.className = 'clf-stage';
+      main.append(host); host.append(link);
+    }
+    expect(api.pluginInstalledButtons('Chat On Steroids Core')).toBeNull();
+  }
+);
+it.each(['duplicate-id', 'multiple-core-ids'])('preserves ambiguity among proven native rows (%s)', mode => {
+  const { api, main, link } = renamedNativeList();
+  const other = link.cloneNode(true) as HTMLAnchorElement;
+  if (mode === 'multiple-core-ids') {
+    other.href = '/settings/plugins-settings/plugin_asdk_app_other'; other.textContent = 'Another renamed connector';
+    api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Core' },
+      { appId: 'asdk_app_other', name: 'Older known name' }], desktop: [], plugins: [] });
+  }
+  main.append(other);
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([link, other]); // The workflow must refuse length !== 1.
+});
+it('does not use unproven IDs or an unknown request name to discover a renamed native app', () => {
+  const { api, link } = renamedNativeList();
+  api.setConnectorApps({ core: [], desktop: [], plugins: [] });
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toBeNull();
+  link.querySelector('span')!.textContent = 'Unknown connector';
+  expect(api.pluginInstalledButtons('Unknown connector')).toBeNull();
 });
 it('keeps the Plugins connector\'s larger catalog limit after a rename, by its proven app id', async () => {
   const { api, props } = page();

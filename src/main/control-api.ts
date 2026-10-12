@@ -22,10 +22,11 @@ import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, settlingToolC
 import { pluginManager } from './plugins/manager.js';
 import { updateStatus } from './update.js';
 import { APP_VERSION } from './version.js';
+import { closeEventStreams, eventStreamSession, serveEventStream } from './control-stream.js';
 
 /**
  * The local control API: an opt-in loopback listener for a trusted local caller. It reads by
- * default; a second switch lets it send and cancel messages through the outbox.
+ * default; a second switch lets it send messages, start new chats and cancel messages through the outbox.
  *
  * Its caller is typically an MCP server an agent launched to watch this app from outside its
  * process. It is deliberately not a fourth MCP surface: those are published through tunnels and
@@ -190,6 +191,8 @@ async function stopOnce(): Promise<void> {
   recentActions.length = 0;
   await removeFiles();
   if (!instance) return;
+  // A stream never finishes on its own; without this the drain would wait out its full grace.
+  closeEventStreams('stopped');
   await drain(instance);
   logInfo('control API stopped');
 }
@@ -397,6 +400,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, token
   }
   // A cancel path answers to POST only; a GET there is a wrong method, not a missing page.
   if (isActionPath(route) && route !== '/v1/inputs') return reply(res, 405, { error: 'method_not_allowed' }, { allow: 'POST' });
+
+  const streamed = eventStreamSession(route);
+  if (streamed) {
+    try {
+      return await serveEventStream(req, res, streamed, url.searchParams, withReadDeadline);
+    } catch (error) {
+      if (error instanceof RequestError && !res.headersSent) return reply(res, error.status, { error: error.code, ...(error.detail ? { detail: error.detail } : {}) });
+      throw error;
+    }
+  }
 
   if (route === '/v1/health') {
     const uptime = process.uptime();

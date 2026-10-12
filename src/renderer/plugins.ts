@@ -3,6 +3,7 @@ import type { AppState } from '../shared/types.js';
 import type { SettingsPatch } from '../preload/index.js';
 import type { PluginSnapshot, PluginView, PluginCatalogEntry, PluginSource } from '../shared/plugins.js';
 import { $, disclosureChevron, el, run, toast } from './dom.js';
+import { paintSharedTunnel } from './tunnel-warning.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
 let epoch = 0;
@@ -99,6 +100,10 @@ function showConnection(): void {
     body.append(button(() => t("Open Tunnels"), async () => { await run(window.api.openLink('https://platform.openai.com/settings/organization/tunnels')); }));
     tunnel = field(body, () => t("Plugins tunnel ID"), config.tunnel.pluginsTunnelId ?? '', false, () => t("Create a dedicated tunnel in the same workspace you use in ChatGPT."));
     tunnel.id = 'pluginsTunnelId'; tunnel.spellcheck = false; tunnel.autocomplete = 'off';
+    const shared = el('p', 'hint is-required'); shared.id = 'pluginsTunnelIdShared'; shared.setAttribute('role', 'status');
+    tunnel.closest('label')!.after(shared);
+    const paintShared = () => paintSharedTunnel(shared, { ...config.tunnel, pluginsTunnelId: tunnel!.value }, 'plugins');
+    tunnel.addEventListener('input', paintShared); paintShared();
     if (hasApiKey) body.append(el('p', 'hint', () => t("Your stored tunnel API key is already available.")));
     else key = field(body, () => t("Tunnel API key"), '', true, () => t("Use a restricted key with Tunnels: Read and Tunnels: Use. It is stored securely and shared with your other connectors."));
   }

@@ -55,6 +55,7 @@ import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
+import { paintSharedTunnel } from './tunnel-warning.js';
 
 declare global {
   interface Window {
@@ -1297,6 +1298,14 @@ function paintSetupFields(): void {
     input.classList.toggle('is-empty', !stored && input.value.trim() === '');
     input.setAttribute('aria-required', String(!stored));
   }
+  // The drafts in the fields, against the saved Plugins ID, so a shared ID shows while typing.
+  const tunnel = {
+    tunnelId: $<HTMLInputElement>('tunnelId').value,
+    desktopTunnelId: $<HTMLInputElement>('desktopTunnelId').value,
+    pluginsTunnelId: state?.config.tunnel.pluginsTunnelId ?? ''
+  };
+  paintSharedTunnel($('tunnelIdShared'), tunnel, 'core');
+  paintSharedTunnel($('desktopTunnelIdShared'), tunnel, 'desktop');
   if (state) paintConnectButtons(state);
 }
 
@@ -2535,7 +2544,7 @@ $('copyLogJson').addEventListener('click', async () => {
 });
 
 // The API key is written on blur so it is not saved keystroke by keystroke.
-for (const id of ['tunnelId', 'apiKey']) $(id).addEventListener('input', paintSetupFields);
+for (const id of ['tunnelId', 'desktopTunnelId', 'apiKey']) $(id).addEventListener('input', paintSetupFields);
 function storeSetupApiKeyDraft(): Promise<boolean> {
   const input = $<HTMLInputElement>('apiKey');
   const submitted = input.value;

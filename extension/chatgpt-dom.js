@@ -2757,8 +2757,8 @@ var CLF_DOM = (() => {
     return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
   function pluginInstalledButtons(connectorName) {
-    // The installed list shows only names. A renamed connector shows its proven current name; the
-    // page opened from the row is then checked by app id (ownSnapshot), so a name match is no proof.
+    // Native links name their exact App Id, even when a fresh provider rename has not reached
+    // the learned name yet. Legacy buttons still need names; the destination proves identity.
     const proven = provenAppsFor(connectorName);
     if (proven === null) return null;
     const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
@@ -2767,14 +2767,16 @@ var CLF_DOM = (() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
-        if (!main) return null;
+        if (!main || (!proven.length && !connectorNames().includes(connectorName))) return null;
         // Measured 2026-10-11: installed rows became links to exact management pages.
         // Catalog and external links cannot identify an installed connector.
         const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
-          if (button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
+          if (!button.isConnected || button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
           if (button.tagName === 'A') {
             const url = new URL(button.href, location.href);
-            if (url.origin !== location.origin || !/^\/settings\/plugins-settings\/plugin_asdk_app_[a-zA-Z0-9_-]+$/.test(url.pathname) || url.hash) return false;
+            const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
+            if (url.origin !== location.origin || !route || url.hash) return false;
+            if (proven.length) return proven.some(app => app.appId === route[1]);
           }
           return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
         });

@@ -184,7 +184,7 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
+                <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
             </section>
           </div>
@@ -668,6 +668,7 @@
                       spellcheck="false"
                       placeholder="tunnel_0123456789abcdef0123456789abcdef"
                     />
+                    <p class="hint is-required" id="tunnelIdShared" role="status" hidden></p>
                   </div>
                   <!-- Desktop is a second connector in ChatGPT, so on this method it needs a
                        second tunnel of its own. Hidden unless desktop permissions are on, so
@@ -682,6 +683,7 @@
                         spellcheck="false"
                         placeholder="tunnel_0123456789abcdef0123456789abcdef"
                       />
+                      <p class="hint is-required" id="desktopTunnelIdShared" role="status" hidden></p>
                       <p class="hint">
                         Screen and mouse/keyboard control are a separate connector, so they need a
                         second tunnel. Create another one and paste its ID here. Leave it empty to

@@ -4270,9 +4270,12 @@ without clicking Refresh. The owner refuses mutating claims even when legacy rep
 an impossible click receipt. A mismatch ends the observation; an explicit new check can inspect a
 manually recreated app by its unique connector name and current tunnel rather than a retired app ID.
 Installed discovery on `/settings/plugins-settings` accepts visible native buttons and same-origin
-links to exact `plugin_asdk_app_*` management routes inside the page's `main`. The connector name
-must match its own leaf; catalog, external, transcript, extension and hidden-page links do not count.
-Multiple matching rows remain ambiguous and grant no Refresh authority. Native links are
+links to exact `plugin_asdk_app_*` management routes inside the page's `main`. For a uniquely
+resolved surface with account-proven App IDs, native links must name one of those IDs; a provider
+rename need not have reached the learned name yet. A same-named foreign ID cannot be a fallback.
+First enrollment without proven IDs and legacy buttons still match the configured/learned name's
+own leaf. Unknown request names, catalog, external, transcript, extension and hidden-page links do
+not count. Multiple matching rows remain ambiguous and grant no Refresh authority. Native links are
 rechecked after discovery: the same unique visible, connected row must retain its exact href.
 The elected helper carries its request marker into that management URL before reading the
 card; unreadable declarations cannot prevent restoring page custody. Legacy buttons retain
@@ -4318,7 +4321,7 @@ Page side: fiber.js decides ownership once (`ownResult`, `ownRequestPath`, `ownS
 proven app id, then proven link, then the configured/proven name, except that a name match on a
 surface with a proven app but a different id is foreign. Rows carry `own`; content.js trusts it.
 Turns carry `sightings` for every connector's result rows, emitted once per request id as
-`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, installed-row names) and the
+`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, native installed-link IDs) and the
 Plugins catalog limit use proven ids first.
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
@@ -4419,8 +4422,20 @@ null instead of describing a different chat than `session`. Start and stop are s
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
 
-The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat)
-and `POST /v1/inputs/{id}/cancel`. They need a second switch, `controlApi.allowActions`, off by
+`GET /v1/sessions/{id}/events/stream` (`control-stream.ts`) pushes a session's events as
+Server-Sent Events. It is the paged read repeated: every frame is a row `…/events?from=` would
+return, read through `streamEvents` under the same heavy-read limit, with `id` = `seq` so
+`Last-Event-ID` resumes after it (and wins over `from`). The recorder's `onSessionChange` says
+when to read again and a 5 s tick covers a missed notice. Everything that can refuse a stream
+does so as JSON before the first byte; the first read runs under the listener's read deadline.
+At most `MAX_EVENT_STREAMS` (4) are open; each sends `: stream open` at once and a comment every
+15 s, ends after 30 minutes, on API stop (`closeEventStreams`, before the drain), when more than
+1 MiB waits in its socket, or when the session is gone, always with an `end` frame naming the
+reason, and answers with `Connection: close`.
+
+The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
+or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
+is the message id, as for the composer's New chat) and `POST /v1/inputs/{id}/cancel`. They need a second switch, `controlApi.allowActions`, off by
 default, which never outlives `enabled`: the config schema enforces it on load and on every write
 (`enabled:false` stores `allowActions:false`, and each field repairs on its own), and the settings
 merge mirrors it. Turning the API off revokes actions, and turning it back on leaves them off. The

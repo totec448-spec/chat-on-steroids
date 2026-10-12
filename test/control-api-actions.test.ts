@@ -721,6 +721,78 @@ describe('sending', () => {
   });
 });
 
+describe('starting a new chat', () => {
+  it('starts one when no session is named, through the same send path, and names it by the message id', async () => {
+    const { getSession } = await import('../src/main/session/store.js');
+    const id = randomUUID();
+    const reply = await post('/v1/inputs', { id, text: '  Start a new task: list the open pull requests.  ' });
+    expect(reply.status).toBe(202);
+    expect(reply.body.replayed).toBe(false);
+    // The new chat's id is the message id: the caller can follow it right away.
+    expect(reply.body.input).toMatchObject({
+      id, sessionId: id, state: 'queued', delivery: 'pending', mode: 'auto', automatic: false,
+      text: { text: 'Start a new task: list the open pull requests.', truncated: false }
+    });
+    expect(await getSession(id)).toMatchObject({ id, origin: { kind: 'desktop' } });
+    expect((await call('GET', '/v1/sessions/' + id)).status).toBe(200);
+    expect((await outbox()).filter((entry) => entry.id === id)).toMatchObject([{ sessionId: id, opening: true }]);
+    // The composer's own path opens ChatGPT for it; nothing else sends.
+    await vi.waitFor(() => expect(wake()).toHaveBeenCalledTimes(1));
+
+    // The same request again names the chat that exists and starts no second one.
+    const sends = vi.spyOn(startInput, 'sendDesktopInput');
+    try {
+      const again = await post('/v1/inputs', { id, text: 'Start a new task: list the open pull requests.' });
+      expect(again.status).toBe(200);
+      expect(again.body).toMatchObject({ replayed: true, input: { id, sessionId: id } });
+      // The id of a new chat's first message cannot be reused for another chat or another text.
+      for (const different of [{ id, sessionId: chatSession, text: 'Start a new task: list the open pull requests.' }, { id, text: 'Something else' }]) {
+        const conflict = await post('/v1/inputs', different);
+        expect(conflict.status).toBe(409);
+        expect(conflict.body.error).toBe('id_conflict');
+      }
+      expect(sends).not.toHaveBeenCalled();
+    } finally {
+      sends.mockRestore();
+    }
+    expect((await outbox()).filter((entry) => entry.id === id)).toHaveLength(1);
+  });
+
+  it('starts it in a project only when that project exists, and never moves an existing chat', async () => {
+    const unknown = await post('/v1/inputs', { id: randomUUID(), projectId: randomUUID(), text: 'In a project' });
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.error).toBe('project_not_found');
+    // A project belongs to a new chat; with a session it is not a field of this request.
+    const moved = await post('/v1/inputs', sendBody({ projectId: randomUUID() }));
+    expect(moved.status).toBe(400);
+    expect(moved.body.error).toBe('invalid_body');
+    expect(await outbox()).toEqual([]);
+    expect(wake()).not.toHaveBeenCalled();
+
+    const { defaultConfig, saveConfig } = await import('../src/main/config.js');
+    const { validateNewRoot } = await import('../src/main/sandbox.js');
+    const { addProject } = await import('../src/main/projects.js');
+    const { getSession } = await import('../src/main/session/store.js');
+    const folder = path.join(dir, 'project-root');
+    await fs.mkdir(folder, { recursive: true });
+    const approved = await validateNewRoot(folder, []);
+    await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: approved }] });
+    const project = await addProject(approved);
+    const id = randomUUID();
+    const started = await post('/v1/inputs', { id, projectId: project.id, text: 'Work in this project' });
+    expect(started.status).toBe(202);
+    expect(started.body.input).toMatchObject({ id, sessionId: id });
+    expect((await getSession(id))?.projectId).toBe(project.id);
+  });
+
+  it('needs the actions switch like every other send', async () => {
+    gate.actions = false;
+    const reply = await post('/v1/inputs', { id: randomUUID(), text: 'Start' });
+    expect(reply.status).toBe(403);
+    expect(await outbox()).toEqual([]);
+  });
+});
+
 describe('cancelling', () => {
   it('withdraws a queued message and says it was not sent', async () => {
     const sent = await post('/v1/inputs', sendBody());
