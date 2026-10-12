@@ -4229,8 +4229,23 @@ Page side: fiber.js decides ownership once (`ownResult`, `ownRequestPath`, `ownS
 proven app id, then proven link, then the configured/proven name, except that a name match on a
 surface with a proven app but a different id is foreign. Rows carry `own`; content.js trusts it.
 Turns carry `sightings` for every connector's result rows, emitted once per request id as
-`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, installed-row names) and the
+`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, native installed-link IDs) and the
 Plugins catalog limit use proven ids first.
+
+**Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
+and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
+A unique surface with account-proven App IDs accepts only its proven IDs, permitting
+renames before learned names catch up; a same-named foreign ID never falls back.
+First enrollment and legacy buttons use the unique configured/learned name leaf.
+Unknown, catalog, external, transcript, hidden or ambiguous rows grant no authority.
+After awaits, the same unique connected visible link must retain its exact href;
+the elected helper adds its request marker before navigating/reading the card.
+Legacy buttons retain their flow. Each invocation fences its starting URL/epoch,
+including document registration before claim/result dispatch; navigation cannot
+inherit click authority or misattribute an old failed read. Name collisions fail
+closed, while an enrolled exact App ID retains its surface and declaration budget.
+Initial enrollment and a legitimately recreated, proven identity remain supported.
+
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
 waking browser work; ordinary status polling and a closed helper do not grant another attempt.
