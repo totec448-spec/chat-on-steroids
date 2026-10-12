@@ -223,7 +223,7 @@
   "Turn on": "Activer",
   ". Repeat for the Desktop plugin if you added it.": ". Répétez l'opération pour le plugin Desktop si vous l'avez ajouté.",
   "This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.": "Cela permet à ChatGPT d'utiliser le plugin sans demander pour chaque action. Sinon, les demandes d'approbation peuvent interrompre les tâches Goal, Loop et des agents. Vos autorisations de dossiers et d'outils dans cette application s'appliquent toujours.",
-  "Load unpacked": "Load unpacked",
+  "Load unpacked": "Charger l’extension non empaquetée",
   "Required for sub-agents:": "Requis pour les sous-agents :",
   "the companion extension must be loaded and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or coordinate worker chats.": "l'extension compagnon doit être chargée et connectée dans ChatGPT. Sans elle, Chat On Steroids ne peut pas identifier, ouvrir ni coordonner les chats des agents.",
   "Open extension folder": "Ouvrir le dossier de l'extension",
