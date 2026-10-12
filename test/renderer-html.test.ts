@@ -533,6 +533,19 @@ c & d
     expect(separateDisplayMath('Price $5 and $6.')).toBe('Price $5 and $6.');
   });
 
+  it('draws a GPT-6 answer read from its fallback text: aligned blocks, \\\\[10pt] and inline formulas (#1342)', () => {
+    // The reply as the extension hands it over once formulas keep their LaTeX (recorded 2026-10-12).
+    const rendered = renderedMarkdown("The Lindhard dielectric function, as discussed in *Solid State Physics* by Ashcroft and Mermin, describes the electronic screening response of a noninteracting electron gas.\n\n\\[\n\\begin{aligned}\n\\varepsilon(\\mathbf{q},\\omega)\n\\\\\n=\n\\\\\n1-\\frac{4\\pi e^2}{q^2}\n\\frac{2}{V}\n\\sum_{\\mathbf{k}}\n\\frac{\nf\\!\\left(\\epsilon_{\\mathbf{k}+\\mathbf{q}}\\right)\n-\nf\\!\\left(\\epsilon_{\\mathbf{k}}\\right)\n}{\n\\epsilon_{\\mathbf{k}+\\mathbf{q}}\n-\n\\epsilon_{\\mathbf{k}}\n-\n\\hbar(\\omega+i0^+)\n}\n\\end{aligned}\n\\]\n\nHere, \\(\\mathbf{q}\\) is the wave vector of the perturbation, with magnitude \\(q=|\\mathbf{q}|\\).\n\n\\[\n\\begin{aligned}\n\\epsilon_{\\mathbf{k}} &= \\frac{\\hbar^2 k^2}{2m}\n\\\\[10pt]\nf(\\epsilon) &= \\frac{1}{e^{(\\epsilon-\\mu)/(k_B T)}+1}\n\\end{aligned}\n\\]\n\n[ok] 2^10 = 1024 a_b *star*");
+    expect(rendered.querySelectorAll('.math-display .katex-display')).toHaveLength(2);
+    expect(rendered.querySelectorAll('.math-inline .katex')).toHaveLength(2);
+    expect(rendered.querySelector('h1, h2, .is-source')).toBeNull();
+    // What is drawn, not the source KaTeX keeps for screen readers.
+    const shown = [...rendered.querySelectorAll('.katex-html')].map(node => node.textContent).join(' ');
+    expect(shown).toContain('ℏ');
+    expect(shown).not.toContain(String.raw`\frac`);
+    expect(rendered.querySelector('p:last-of-type')!.textContent).toContain('[ok] 2^10 = 1024 a_b');
+  });
+
   it('shows the name of a person or place ChatGPT links, instead of dropping it', () => {
     const rendered = renderedMarkdown('No \uE200entity\uE202["place","Antigo Egito"]\uE201, \uE200entity\uE202["people","René \\"Descartes\\"","filósofo"]\uE201 estudou.');
     expect(JSON.stringify(rendered.textContent!.trim())).toBe(JSON.stringify('No Antigo Egito, René "Descartes" estudou.'));

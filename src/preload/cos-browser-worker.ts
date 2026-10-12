@@ -4,8 +4,8 @@
  * Electron runs the companion extension unchanged, but its own `chrome.tabs` lacks the tab state
  * and events the extension orchestrates with, and it has no `chrome.windows` or
  * `chrome.debugger`. This preload replaces exactly those namespaces in the extension worker's
- * own world with calls into the app's tab model (src/main/cos-browser). Messaging, scripting,
- * storage, alarms and runtime stay Electron's.
+ * own world with calls into the app's tab model (src/main/cos-browser), and supplies `chrome.alarms`,
+ * whose alarms Electron never delivers. Messaging, scripting, storage and runtime stay Electron's.
  *
  * The session registers this preload for every service worker, including chatgpt.com's own, so
  * it acts only inside a `chrome-extension:` worker; the app also checks the caller's scope.
@@ -147,6 +147,69 @@ function installChromeShim(trace: boolean): void {
     timed(tabs, 'sendMessage', 'tabs.sendMessage');
     timed(chrome.scripting as Record<string, unknown>, 'executeScript', 'scripting.executeScript');
     timed(chrome.scripting as Record<string, unknown>, 'insertCSS', 'scripting.insertCSS');
+  }
+  // Electron keeps `chrome.alarms.create` and drops a due alarm, but never calls `onAlarm`
+  // (measured 2026-10-12). The companion's retry pass runs on that alarm and arms the next one only
+  // when it fires, so after its first failure the extension stopped retrying for good: page events
+  // and command claims stalled for half an hour while its socket stayed open. The app holds this
+  // worker alive, so its own timers keep the time.
+  {
+    type Alarm = { name: string; scheduledTime: number; periodInMinutes?: number };
+    const armed = new Map<string, { alarm: Alarm; timer: ReturnType<typeof setTimeout> }>();
+    const onAlarm = event('alarms.onAlarm');
+    const listeners = events.get('alarms.onAlarm')!;
+    const settle = <T>(value: T, args: unknown[]): Promise<T> | undefined => {
+      const callback = typeof args.at(-1) === 'function' ? args.at(-1) as (value: T) => void : null;
+      if (!callback) return Promise.resolve(value);
+      callback(value);
+      return undefined;
+    };
+    const copy = (alarm: Alarm): Alarm => ({ ...alarm });
+    const arm = (alarm: Alarm) => {
+      const previous = armed.get(alarm.name);
+      if (previous) clearTimeout(previous.timer);
+      const timer = setTimeout(() => {
+        const due = armed.get(alarm.name);
+        if (!due || due.alarm !== alarm) return;
+        if (alarm.periodInMinutes) arm({ ...alarm, scheduledTime: Date.now() + alarm.periodInMinutes * 60_000 });
+        else armed.delete(alarm.name);
+        for (const listener of [...listeners]) {
+          try { listener(copy(alarm)); } catch (error) { console.error(error); }
+        }
+      }, Math.max(0, alarm.scheduledTime - Date.now()));
+      armed.set(alarm.name, { alarm, timer });
+    };
+    const clear = (name: string): boolean => {
+      const held = armed.get(name);
+      if (!held) return false;
+      clearTimeout(held.timer);
+      armed.delete(name);
+      return true;
+    };
+    chrome.alarms = {
+      create: (...args: unknown[]) => {
+        const name = typeof args[0] === 'string' ? args.shift() as string : '';
+        const info = (args[0] && typeof args[0] === 'object' ? args[0] : {}) as { when?: number; delayInMinutes?: number; periodInMinutes?: number };
+        const period = Number.isFinite(info.periodInMinutes) && info.periodInMinutes! > 0 ? info.periodInMinutes : undefined;
+        const delay = Number.isFinite(info.delayInMinutes) ? info.delayInMinutes! : period;
+        const scheduledTime = Number.isFinite(info.when) ? info.when! : Date.now() + (delay ?? 0) * 60_000;
+        arm({ name, scheduledTime, ...(period ? { periodInMinutes: period } : {}) });
+        return settle(undefined, args);
+      },
+      get: (...args: unknown[]) => {
+        const name = typeof args[0] === 'string' ? args[0] : '';
+        const held = armed.get(name);
+        return settle(held ? copy(held.alarm) : undefined, args);
+      },
+      getAll: (...args: unknown[]) => settle([...armed.values()].map(held => copy(held.alarm)), args),
+      clear: (...args: unknown[]) => settle(clear(typeof args[0] === 'string' ? args[0] : ''), args),
+      clearAll: (...args: unknown[]) => {
+        const any = armed.size > 0;
+        for (const name of [...armed.keys()]) clear(name);
+        return settle(any, args);
+      },
+      onAlarm
+    };
   }
   // Chrome fires onStartup when the browser starts; Electron never does, so the app does.
   Object.defineProperty(chrome.runtime, 'onStartup', { value: event('runtime.onStartup'), configurable: true, writable: true });
