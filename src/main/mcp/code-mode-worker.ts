@@ -17,8 +17,13 @@ function finish(error) { if (closed) return; send({ type: 'done', error }); clos
   const vm = runtime.newContext();
   let usedCpu = 0, sliceStart = 0, fatal = null, nextId = 0, emitted = 0, outputBytes = 0;
   const pending = new Map();
-  runtime.setInterruptHandler(() => usedCpu + performance.now() - sliceStart > workerData.limits.cpuMs);
-  const enter = fn => { sliceStart = performance.now(); try { return fn(); } finally { usedCpu += performance.now() - sliceStart; } };
+  // The CPU budget counts this thread's CPU time (#1367). Wall time inside a slice also counts
+  // the thread being descheduled or paused, which a busy machine does at random.
+  const cpuNow = typeof process.threadCpuUsage === 'function'
+    ? () => { const usage = process.threadCpuUsage(); return (usage.user + usage.system) / 1000; }
+    : () => performance.now();
+  runtime.setInterruptHandler(() => usedCpu + cpuNow() - sliceStart > workerData.limits.cpuMs);
+  const enter = fn => { sliceStart = cpuNow(); try { return fn(); } finally { usedCpu += cpuNow() - sliceStart; } };
   const bridge = vm.newFunction('__bridge', (operation, payload) => {
     const kind = vm.getString(operation), json = vm.getString(payload);
     if (fatal) return { error: vm.newError('Script limit reached') };
