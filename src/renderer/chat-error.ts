@@ -1,7 +1,7 @@
 import type { SessionEvent } from '../shared/session.js';
 import { positionOf } from '../shared/chronology.js';
 import { chatErrorMessageKey, CONVERSATION_DELETED } from '../shared/chat-error.js';
-import { t } from './i18n.js';
+import { currentLanguage, t } from './i18n.js';
 
 type ChatError = Extract<SessionEvent, { kind: 'chat_error' }>;
 
@@ -20,6 +20,14 @@ export function duplicateChatErrors(history: readonly SessionEvent[]): Set<numbe
   return duplicates;
 }
 
+/** The retry time as a clock time, with the day when the wait ends on another day than the notice. */
+function retryTime(retryAt: number, noticedAt: number): string {
+  const at = new Date(retryAt), language = currentLanguage();
+  const clock = at.toLocaleTimeString(language, { hour: 'numeric', minute: '2-digit' });
+  return at.toDateString() === new Date(noticedAt).toDateString() ? clock
+    : `${at.toLocaleDateString(language, { month: 'short', day: 'numeric' })}, ${clock}`;
+}
+
 /** Presentation only: never infer send/reload authority from error prose. */
 export function chatErrorPresentation(error: ChatError, history: readonly SessionEvent[] = []) {
   const text = error.message.text.trim();
@@ -33,7 +41,9 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
   const message = thinking ? t('ChatGPT’s page reported a failure. This does not prove the work stopped.')
     : stalled ? t('No visible progress for ten minutes. The app could not confirm that this turn finished.') : error.message.text;
   let next = error.blocking === true
-    ? t('Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.')
+    ? error.retryAt
+      ? t('ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.', [retryTime(error.retryAt, error.time)])
+      : t('Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.')
     : thinking
       ? t('You can send a follow-up. Automatic recovery, when allowed, refreshes the page and waits five minutes before a queued continuation; new work postpones it.')
       : error.recoverable === true || stalled

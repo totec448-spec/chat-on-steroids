@@ -10096,16 +10096,19 @@ describe('unattributed activity recovery', () => {
       ]);
       await attributed(PRIME, false, Date.now());
       const limit = 'ChatGPT temporarily rate-limited loading this conversation history.';
-      let retryAt = 0;
+      let retryAt = 0, firstRetryAt = 0;
       for (let attempt = 0; attempt < 8; attempt++) {
         if (attempt) await vi.advanceTimersByTimeAsync(60_000);
         retryAt = Date.now() + 30_000 + attempt * 1000;
+        if (!attempt) firstRetryAt = retryAt;
         await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt, text: limit }]);
       }
       const session = (await findSessionByConversation(PRIME))!;
       const { readRecentEvents } = await import('../src/main/session/store.js');
       const notices = async () => (await readRecentEvents(session.id, 50, { kinds: ['chat_error'] })).filter(event => event.kind === 'chat_error' && event.message.text === limit);
       expect(await notices()).toHaveLength(1);
+      // The one notice keeps the first deadline ChatGPT gave, for the timeline to show (#1355).
+      expect((await notices())[0]).toMatchObject({ blocking: true, retryAt: firstRetryAt });
       // Whichever hold shows, its deadline is the newest Retry-After, though only one notice was written.
       expect((await sessionControlsFor(session.id)).recovery?.map(hold => hold.deadline)).toEqual([retryAt]);
       // Another error in between makes the next limit a new notice again.
