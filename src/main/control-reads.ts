@@ -322,7 +322,7 @@ export function projectEvent(event: SessionEvent): ControlApiEvent {
     case 'turn_end':
       return { ...base, outcome: event.outcome, detail: event.detail && line(event.detail, SUMMARY_CAP), reason: event.reason };
     case 'chat_error':
-      return { ...base, message: stored(event.message), recoverable: event.recoverable, blocking: event.blocking, reason: event.reason };
+      return { ...base, message: stored(event.message), recoverable: event.recoverable, blocking: event.blocking, retryAt: event.retryAt, reason: event.reason };
     case 'tool_call': {
       const call = event.call;
       const summary = toolCallSummary(call);

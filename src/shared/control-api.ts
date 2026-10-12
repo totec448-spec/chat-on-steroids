@@ -247,6 +247,8 @@ export type ControlApiEvent = {
   reason?: string;
   recoverable?: boolean;
   blocking?: boolean;
+  /** `chat_error` for a history limit: the first time ChatGPT said it may be retried (epoch ms). */
+  retryAt?: number;
   /** `page_tool`. */
   label?: string;
   /** `native_image`. */
