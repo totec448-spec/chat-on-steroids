@@ -62,10 +62,11 @@ annotations cannot prove that an external process is unable to mutate. Tool anno
 otherwise relayed without making them more permissive.
 
 The Plugins surface forwards complete JSON schemas and MCP results through the SDK and the
-existing request attribution/recording dispatcher. Upstream tool names are preserved; conflicting declarations are excluded rather than renamed. Publication is normally bounded by 250 KB of schemas,
-with a separate 256-tool emergency ceiling for pathological catalogs. Catalogs larger than 64 tools
-can therefore be published in full when their complete schemas remain within the byte budget. The
-installed tool list distinguishes enabled tools from those actually published within the limit.
+existing request attribution/recording dispatcher. Upstream tool names are preserved; conflicting declarations are excluded rather than renamed. Publication is bounded by 256 tools and
+250 KB of schemas across all enabled plugins; tools past that are listed as not exposed. A server may
+declare more (up to 2,048 tools or 8 MB, an emergency guard against pathological catalogs): it is
+installed, publishes what fits, and switching tools off on its page makes room for the ones you want.
+The installed tool list distinguishes enabled tools from those actually published within the limit.
 Transport failures never automatically retry tool calls. A failed mutation can already have
 taken effect; inspect its state before deciding to retry.
 
