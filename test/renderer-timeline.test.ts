@@ -5201,6 +5201,29 @@ it('keeps the working line under your message while a failed delivery notice sta
   expect(moves.stop()).toBe(0);
 });
 
+it("keeps a long running turn's line at the top of its loaded rows, not under its newest action (2026-10-12)", async () => {
+  // A 45-minute turn pushed its question out of the loaded rows. "Working for" fell to the bottom,
+  // after the newest action, and jumped back under the question whenever that was loaded again.
+  const asked = Date.now() - 45 * 60_000;
+  const calls = Array.from({ length: 220 }, (_, i): SessionEvent => ({ ...toolCall(i + 3, `long-${i}`), time: asked + (i + 1) * 1000, turnId: 'long-turn' }));
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'long-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'long-turn', messageId: 'q-long', message: text('Build all thirty quests') },
+    ...calls
+  ]);
+  const { w } = app;
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('.ev-user_message')).toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  const rows = [...timeline.querySelectorAll('[data-timeline-key], .turn-status, .turn-now')];
+  expect(rows[0]).toBe(line);
+  expect(rows.at(-1)?.matches('.turn-now')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
 it('does not move a parked working line on every repaint', async () => {
   // A turn with no row yet parks its line after the queue; repainting it in place used to re-insert
   // it each time, restarting its shimmer and Thinking's breathing several times a second.
