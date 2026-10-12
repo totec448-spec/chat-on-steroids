@@ -851,7 +851,6 @@
   "Download link opened. Install the app to continue; your settings are kept.": "Đã mở liên kết tải xuống. Cài đặt ứng dụng để tiếp tục; các thiết lập của bạn sẽ được giữ nguyên.",
   "Connector checks requested. Any remaining steps are shown in Update status.": "Đã yêu cầu kiểm tra trình kết nối. Các bước còn lại được hiển thị trong Trạng thái cập nhật.",
   "Update all could not finish: {0}": "Không thể hoàn tất “Cập nhật tất cả”: {0}",
-  "Choose Update all to retry.": "Chọn Cập nhật tất cả để thử lại.",
   "Update check failed": "Không thể kiểm tra bản cập nhật",
   "Downloading {0}": "Đang tải {0}",
   "Ready to install {0}": "Sẵn sàng cài đặt {0}",

@@ -945,7 +945,6 @@
   "Download link opened. Install the app to continue; your settings are kept.": "ダウンロード先を開きました。アプリをインストールすると確認を続けられます。設定は引き継がれます。",
   "Connector checks requested. Any remaining steps are shown in Update status.": "コネクターの確認を受け付けました。残りの操作は「更新状況」で確認できます。",
   "Update all could not finish: {0}": "まとめて更新を完了できませんでした：{0}",
-  "Choose Update all to retry.": "「まとめて更新」で再試行してください。",
   "Update check failed": "更新の確認に失敗しました",
   "Downloading {0}": "{0}をダウンロード中",
   "Ready to install {0}": "{0}をインストールできます",
