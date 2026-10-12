@@ -97,13 +97,15 @@ app.whenReady().then(async () => {
     await js("setLanguage('pt-BR')");
     await capture('extension-waiting-desktop');
     // Each browser shows its own extensions page in the app's language, or no picture at all.
-    const pictures = () => js(`[...document.querySelectorAll('.ext-picture img')].map(i=>({src:i.getAttribute('src'),loaded:i.naturalWidth>0&&i.getBoundingClientRect().width>=200}))`);
+    const pictures = () => js(`(async()=>{ const imgs=[...document.querySelectorAll('.ext-picture img')]; await Promise.all(imgs.map(i=>i.decode().catch(()=>{}))); return imgs.map(i=>({src:i.getAttribute('src'),loaded:i.naturalWidth>0&&i.getBoundingClientRect().width>=200})); })()`);
     const chromePictures = await pictures();
     assert.equal(chromePictures.length, 2);
     assert.ok(chromePictures.every(p => p.loaded && /chrome-pt-BR-(dev|load)/.test(p.src)), JSON.stringify(chromePictures));
     assert.equal(await js('document.getElementById("extensionStepDevWhere").hidden'), true);
     await js("document.querySelector('[data-external-browser=edge]').click()");
-    assert.deepEqual(await pictures(), []);
+    const edgePictures = await pictures();
+    assert.equal(edgePictures.length, 2);
+    assert.ok(edgePictures.every(p => p.loaded && /edge-pt-BR-(dev|load)/.test(p.src)), JSON.stringify(edgePictures));
     assert.equal(await js('document.getElementById("extensionStepDevWhere").hidden'), false);
     await capture('extension-edge-desktop');
     await js("document.querySelector('[data-external-browser=chrome]').click()");
