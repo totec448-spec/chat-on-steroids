@@ -8142,7 +8142,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenanceBatch(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened' | 'present'
+    repairAction?: 'reloaded' | 'reopened' | 'present' | 'preserved'
   ): Promise<Array<{ conversationId: string; token: string; reason: string }>> {
     const path = repaired
       ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
@@ -8161,7 +8161,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenance(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened' | 'present'
+    repairAction?: 'reloaded' | 'reopened' | 'present' | 'preserved'
   ): Promise<{ conversationId: string; token: string; reason: string } | null> {
     const batch = await maintenanceBatch(repaired, repairAction);
     expect(batch.length).toBeLessThanOrEqual(1);
@@ -9303,6 +9303,48 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
     } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  // 2026-10-12: the browser leaves a silent page that still shows ChatGPT's transport error as it
+  // is (no reload) and confirms the repair as preserved; the automatic Continue must still follow.
+  it('files the automatic Continue when the silence repair kept the page instead of reloading it', async () => {
+    const input = await import('../src/main/session/input.js');
+    const { recoveryHeldByCalls, recoveryInputAllowed, sessionInputActivity } = await import('../src/main/bridge.js');
+    input.configureInputDelivery({ recoveryAllowed: recoveryInputAllowed, callsHoldRecovery: recoveryHeldByCalls,
+      activity: sessionInputActivity, applyAutomation: async () => {}, changed: () => {} });
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = 'interrupted-turn';
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Port the renderer', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+      await events(chat, [endTurn(turnId, 'failed')]);
+      let repair = null;
+      for (let pass = 0; pass < 4 && !repair; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        repair = await maintenance();
+      }
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+      await maintenance(repair!.token, 'preserved');
+      const session = (await findSessionByConversation(chat))!;
+      let continues: Awaited<ReturnType<typeof input.listInputs>> = [];
+      for (let pass = 0; pass < 6 && !continues.length; pass++) {
+        await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
+        await sweepStaleSwarm(Date.now());
+        continues = (await input.listInputs()).filter(row => row.sessionId === session.id && row.recovery);
+      }
+      expect(continues).toHaveLength(1);
+    } finally {
+      input.configureInputDelivery(null as never);
+      await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); await saveConfig(previous);
+    }
   });
 
   it('lets calls of no known chat hold a silent chat only for a while, then recovers it anyway (#1086)', async () => {
