@@ -9832,7 +9832,14 @@ describe('unattributed activity recovery', () => {
         requestWorkerRevivals(staged.waking);
         await gate.entered;
         if (scenario === 'manual-close') await request('POST', '/closed', { body: { conversationId: WORKER, manual: true } });
-        else if (scenario === 'wake-finished') finishAgent({ conversationId: WORKER }, 'No follow-up remains');
+        else if (scenario === 'wake-finished') {
+          // The woken worker's own turn ends the wake (finishing a worker that is still waking is
+          // ignored), and it then finishes the follow-up.
+          expect(noteAgentAlive(WORKER, 'turn', Date.now() + 1)?.revived).toBe(true);
+          finishAgent({ conversationId: WORKER }, 'No follow-up remains');
+          // The read must outlive a wake that really ended, not one that is still pending.
+          expect(pendingWorkerRevivals(), 'the wake ended during the read').toEqual([]);
+        }
         else if (scenario === 'page-returned') await events(WORKER, [openTurn(`wake-returned-${scenario}`)]);
         else if (scenario === 'recovery-off') await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
         else if (scenario === 'redeemed') {
