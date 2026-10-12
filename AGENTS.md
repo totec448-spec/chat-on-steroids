@@ -3724,8 +3724,9 @@ beside the log, never an event, message, call, work or completion evidence. `ses
 A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
 of its own but keeps the answer's one MCP request id across it. The page ends the local turn there
 and sends `turn_end` with `continued: true` when a message steered it (Stop stayed) or replaced it
-while it was unfinished (no answer yet; Stop can already be gone at that tick). A turn that ended
-with its answer is never marked. Past a `continued` end, a call of that request that *started*
+while it was unfinished (no answer yet; Stop can already be gone at that tick). Where Fiber
+answers, unfinished means no `end_turn`: interim prose alone does not make the answer finished.
+A turn that ended with its answer is never marked. Past a `continued` end, a call of that request that *started*
 after the end is filed under the turn that began then, and the request's ownership moves there
 (`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);
 a late result of a call that started before the end stays with the earlier turn (`turnOpenAt`).
