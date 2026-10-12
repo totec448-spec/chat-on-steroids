@@ -2177,6 +2177,9 @@
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
     let lastAnswer = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
+    // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
+    // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
+    const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
     for (const [index, item] of entry.turn.items.entries()) {
       if (++work > MAX_ROWS) return null;
@@ -2211,6 +2214,14 @@
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
           if (++work > MAX_ROWS) return null;
+          if (step?.type === 'assistant-message' && item !== step) {
+            // Interim prose whatever phase it carries: only a top-level answer can end the turn.
+            const id = str(step.messageId), text = shellItemText(step);
+            if (!id || topLevel.has(id) || !remember(id) || !text || ONLY_CONTENT_REFERENCES.test(text)) continue;
+            messages.push({ id, author: { role: 'assistant' }, content: { content_type: 'text', parts: [text] },
+              channel: 'commentary', end_turn: false, status: step.completed === true ? 'finished_successfully' : 'in_progress', metadata: {} });
+            continue;
+          }
           if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
             const id = str(step.callId);
             if (!id) continue;
