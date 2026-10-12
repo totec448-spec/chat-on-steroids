@@ -14,6 +14,21 @@
     "zh-CN": {"locale":"zh-CN","dev":{"file":"chrome-zh-CN-dev.webp","label":"开发者模式","box":[70.8,16.2,27.8,43.3],"size":[428,74]},"load":{"file":"chrome-zh-CN-load.webp","label":"加载未打包的扩展程序","box":[4.2,47.3,41.1,40.7],"size":[428,118]}},
     "zh-TW": {"locale":"zh-TW","dev":{"file":"chrome-zh-TW-dev.webp","label":"開發人員模式","box":[67.8,16.2,30.8,43.3],"size":[428,74]},"load":{"file":"chrome-zh-TW-load.webp","label":"載入未封裝項目","box":[4.6,48.1,35.2,40.3],"size":[389,119]}}
   },
+  "edge": {
+    "en": {"locale":"en-US","dev":{"file":"edge-en-dev.webp","label":"Developer mode","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-en-load.webp","label":"Load unpacked","box":[17.2,21.6,30.2,56.8],"size":[480,74]}},
+    "de": {"locale":"de","dev":{"file":"edge-de-dev.webp","label":"Entwicklermodus","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-de-load.webp","label":"Entpackte Dateien laden","box":[3.1,21.6,37.2,56.8],"size":[517,74]}},
+    "es": {"locale":"es","dev":{"file":"edge-es-dev.webp","label":"Modo para desarrolladores","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-es-load.webp","label":"Cargar desempaquetado","box":[3.2,21.6,37.8,56.8],"size":[516,74]}},
+    "fr": {"locale":"fr","dev":{"file":"edge-fr-dev.webp","label":"Mode développeur","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-fr-load.webp","label":"Charger l’extension décompressée","box":[2.7,21.6,41.7,56.8],"size":[589,74]}},
+    "ja": {"locale":"ja","dev":{"file":"edge-ja-dev.webp","label":"開発者モード","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-ja-load.webp","label":"展開して読み込み","box":[13.6,21.6,33,56.8],"size":[480,74]}},
+    "ko": {"locale":"ko","dev":{"file":"edge-ko-dev.webp","label":"개발자 모드","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-ko-load.webp","label":"압축 풀린 파일 로드","box":[18.1,21.6,35.4,56.8],"size":[480,74]}},
+    "pt-BR": {"locale":"pt-BR","dev":{"file":"edge-pt-BR-dev.webp","label":"Modo do desenvolvedor","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-pt-BR-load.webp","label":"Carregar sem pacote","box":[3.5,21.6,36.2,56.8],"size":[480,74]}},
+    "pt-PT": {"locale":"pt-PT","dev":{"file":"edge-pt-PT-dev.webp","label":"Modo de programador","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-pt-PT-load.webp","label":"Carregar descompactada","box":[3.2,21.6,39.4,56.8],"size":[498,74]}},
+    "ru": {"locale":"ru","dev":{"file":"edge-ru-dev.webp","label":"Режим разработчика","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-ru-load.webp","label":"Загрузить распакованное","box":[3,21.6,38,56.8],"size":[540,74]}},
+    "tr": {"locale":"tr","dev":{"file":"edge-tr-dev.webp","label":"Geliştirici modu","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-tr-load.webp","label":"Açılmışı yükle","box":[15.6,21.6,28.2,56.8],"size":[480,74]}},
+    "vi": {"locale":"vi","dev":{"file":"edge-vi-dev.webp","label":"Chế độ nhà phát triển","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-vi-load.webp","label":"Tải phần mở rộng đã giải nén","box":[3.2,21.6,45.2,56.8],"size":[487,74]}},
+    "zh-CN": {"locale":"zh-CN","dev":{"file":"edge-zh-CN-dev.webp","label":"开发人员模式","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-zh-CN-load.webp","label":"加载解压缩的扩展","box":[23.3,21.6,33.3,56.8],"size":[480,74]}},
+    "zh-TW": {"locale":"zh-TW","dev":{"file":"edge-zh-TW-dev.webp","label":"開發人員模式","box":[13.6,28.8,72.9,42.3],"size":[339,104]},"load":{"file":"edge-zh-TW-load.webp","label":"載入解壓縮","box":[25.8,21.6,25.8,56.8],"size":[480,74]}}
+  },
   "brave": {
     "en": {"locale":"en-US","dev":{"file":"brave-en-dev.webp","label":"Developer mode","box":[60.4,10.9,38.2,50],"size":[428,78]},"load":{"file":"brave-en-load.webp","label":"Load unpacked","box":[4.6,47.3,32.9,40.7],"size":[390,118]}},
     "de": {"locale":"de-DE","dev":{"file":"brave-de-dev.webp","label":"Entwicklermodus","box":[60,10.9,38.6,50],"size":[428,78]},"load":{"file":"brave-de-load.webp","label":"Entpackte Erweiterung laden","box":[3.5,47.3,38.8,40.7],"size":[521,118]}},
