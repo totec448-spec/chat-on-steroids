@@ -9,8 +9,8 @@
  *
  * So: write to a temp file, rename over the target (atomic on NTFS), and coalesce
  * bursts on a short timer so a chatty broker does not rewrite the file per message.
- * A parse failure returns null rather than throwing — a corrupt state file must cost
- * the pending work, never the app's ability to start.
+ * Reads normally return null on corruption so the app can start. Authority ledgers
+ * can require strict reads: unreadable state must not become a fresh grant.
  */
 
 import { promises as fs } from 'node:fs';
@@ -44,13 +44,20 @@ function fileFor(name: string): string {
   return path.join(root, `${name}.json`);
 }
 
-export async function readDurable<T>(name: string): Promise<T | null> {
+export async function readDurable<T>(name: string, options: { strict?: boolean } = {}): Promise<T | null> {
   if (!root) return null;
   try {
     const raw = await fs.readFile(fileFor(name), 'utf8');
-    return JSON.parse(raw) as T;
+    const value = JSON.parse(raw) as T;
+    // writeDurableNow(null) removes the file; an on-disk null is not that reset receipt.
+    if (options.strict && value === null) throw new Error('Invalid null state');
+    return value;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
+    if (options.strict && code !== 'ENOENT') {
+      // JSON parser diagnostics can contain stored content. Keep the public error generic.
+      throw new Error(`Could not read ${name} state`);
+    }
     if (code && code !== 'ENOENT') {
       logWarn(`could not read ${name} state: ${(err as Error).message}`);
     }

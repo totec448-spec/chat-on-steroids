@@ -47,8 +47,14 @@ function remember(current: Row[]): void {
 }
 async function save(current: Row[]): Promise<void> { await writeDurableNow('plugin-refresh', current); remember(current); }
 async function rows(): Promise<Row[]> {
-  const result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh') ?? []);
-  if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+  let result: Row[];
+  try {
+    result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh', { strict: true }) ?? []);
+    if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+  } catch {
+    // Neither a corrupt ledger nor its parser diagnostics may grant new Refresh authority.
+    throw new Error('Could not read plugin-refresh state');
+  }
   // Legacy fail() marked discovery failures as clicks. A real claim always commits a
   // concrete appId, so null proves these rows never crossed the refresh boundary.
   let repaired = false;
