@@ -406,7 +406,8 @@ function cleanupOfferKey(identity: { runId: string; agentId: string }): string {
 
 /** A task-first row label, even when a worker was spawned without a custom label. */
 function cleanupDisplayLabel(info: AgentInfo): string {
-  const title = info.label && info.label !== info.id ? info.label : workerOwnTask(info.task);
+  // A wake replaces `task` with the waking message; the checkout keeps the job's own name.
+  const title = info.label && info.label !== info.id ? info.label : info.jobTitle || workerOwnTask(info.task);
   return (title?.split(/[\r\n]/, 1)[0]?.trim() || info.label || info.id).slice(0, 160);
 }
 
@@ -1364,6 +1365,7 @@ function makeWorker(id: string, label: string, task: string, model: string | nul
       role: 'worker',
       label,
       task,
+      jobTitle: (workerOwnTask(task).split(/[\r\n]/, 1)[0]?.trim() ?? '').slice(0, 160) || undefined,
       model,
       reasoningEffort,
       state: 'invited',
@@ -5439,6 +5441,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         workerAllocationRunId: allocation,
         managedWorktree: entry.info.managedWorktree === true,
         managedWorktreeCleaned: entry.info.managedWorktree === true && cleanupAcknowledged(entry.info),
+        jobTitle: typeof entry.info.jobTitle === 'string' && entry.info.jobTitle ? entry.info.jobTitle.slice(0, 160) : undefined,
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
         reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
