@@ -518,13 +518,13 @@
             <div class="setup-track">
               <nav class="setup-rail" aria-label="Setup steps">
                 <ol>
-                  <li><button type="button" data-rail-step="browser"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Extension</span></button></li>
+                  <li><button type="button" data-rail-step="browser"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Browser</span></button></li>
                   <li><button type="button" data-rail-step="folder"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Folder</span></button></li>
                   <li><button type="button" data-rail-step="access"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Access</span></button></li>
                   <li><button type="button" data-rail-step="tunnel"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Tunnel</span></button></li>
                   <li><button type="button" data-rail-step="key"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">API key</span></button></li>
                   <li><button type="button" data-rail-step="connect"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Connect</span></button></li>
-                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Plugins</span></button></li>
+                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">ChatGPT</span></button></li>
                   <li class="setup-rail-ready"><button type="button" data-rail-step="ready"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Ready</span></button></li>
                 </ol>
               </nav>
@@ -540,8 +540,8 @@
                 <div class="step-body browser-setup">
                   <div class="browser-setup-header">
                     <ol class="browser-phases" aria-label="Connect your ChatGPT">
-                    <li id="browserPhaseExtension" aria-current="step"><span class="phase-number" aria-hidden="true" translate="no">A</span><span>Install</span></li>
-                    <li id="browserPhaseLocation"><span class="phase-number" aria-hidden="true" translate="no">B</span><span>Where to use it</span></li>
+                    <li id="browserPhaseExtension" aria-current="step"><span class="phase-number" aria-hidden="true" translate="no">A</span><span>Install the extension</span></li>
+                    <li id="browserPhaseLocation"><span class="phase-number" aria-hidden="true" translate="no">B</span><span>Where ChatGPT runs</span></li>
                   </ol>
                     <div class="browser-picker">
                       <p class="step-lead">Choose your browser.</p>
@@ -551,22 +551,18 @@
                         <button type="button" role="radio" data-external-browser="brave" aria-checked="false" tabindex="-1"><img src="./browser-icons/brave.svg" alt="" /><span translate="no">Brave</span></button>
                       </div>
                       </div>
-                    <h3 id="browserExtensionTitle" tabindex="-1">First, connect your browser</h3>
+                    <h3 id="browserExtensionTitle" tabindex="-1">Connect your browser</h3>
                   </div>
                   <section id="browserExtensionStage" class="browser-stage" aria-labelledby="browserExtensionTitle">
                     <div class="browser-stage-copy">
                       <ol class="browser-install-steps">
-                        <li><div><b>Open the extensions page and turn on Developer mode.</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button><details class="browser-picture-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>See where to click</summary>                    <figure class="browser-install-figure">
-                      <div class="setup-guide" data-setup-guide="extension"></div>
-                      <figcaption><span>Shown in Chrome. The same steps apply in Edge and Brave.</span></figcaption>
-                    </figure></details></div></li>
-                        <li><div><b class="browser-install-instruction">Click Load unpacked and choose the CoS extension folder.</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
-                          <details class="browser-picture-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>See where to click</summary><figure class="browser-install-figure">
-                            <div class="setup-guide" data-setup-guide="extension-load"></div>
-                            <figcaption><span>Shown in Chrome. The same steps apply in Edge and Brave.</span></figcaption>
-                          </figure></details>
-                        </div></li>
-                        <li><div><b>Open ChatGPT in that browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
+                        <li><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
+                          <p id="extensionStepOpenHint">Click the address to copy it, then paste it into the address bar and press Enter.</p></div></li>
+                        <li><div><b id="extensionStepDev">Turn on Developer mode</b><p id="extensionStepDevWhere" hidden></p>
+                          <figure class="ext-figure" id="extensionPictureDev"></figure></div></li>
+                        <li><div><b id="extensionStepLoad">Click Load unpacked and choose the extension folder</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
+                          <figure class="ext-figure" id="extensionPictureLoad"></figure></div></li>
+                        <li><div><b id="extensionStepChatGpt">Open ChatGPT in your browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
                       </ol>
                       <details class="extension-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Need help?</summary><div class="extension-meta"><p class="extension-folder" id="extensionPath"></p><button class="btn btn-quiet" id="bridgeDownload" type="button">Download extension ZIP</button><p id="bridgeState" class="muted"></p></div></details>
                     </div>
@@ -606,7 +602,7 @@
                   <div class="step-actions">
                     <button class="btn step-link" id="wizManageFolders" type="button">Manage folders</button>
                   </div>
-                  <!-- Like Start the tunnel: the step's one action is its picture. -->
+                  <!-- Like Connect the tunnel: the step's one action is its picture. -->
                   <div class="step-art connect-art">
                     <button class="connect-toggle" id="wizAddFolder" type="button" data-tone="off">
                       <span class="connect-ring" aria-hidden="true"><svg class="setup-folder-icon" viewBox="0 0 48 48" fill="none"><path d="M6 15V11a3 3 0 0 1 3-3h10l5 6h15a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V15Z"/><path d="M6 18h36M24 24v10m-5-5h10"/></svg></span>
@@ -700,7 +696,7 @@
                 </div>
                 <div class="step-body">
                   <h3>Create an API key</h3>
-                  <p class="step-lead">Opens your tunnel. Copy now: the key is shown only once.</p>
+                  <p class="step-lead">The app uses this key to start your tunnel. Copy it right away: it is shown only once.</p>
                   <div class="step-actions">
                     <button
                       class="btn btn-solid setup-tunnel-open"
@@ -727,7 +723,7 @@
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
-                  <h3>Start the tunnel</h3>
+                  <h3>Connect the tunnel</h3>
                   <p class="step-lead">Click Connect and wait for Connected.</p>
                   <p class="status-pill" id="wizStatusPill" data-tone="off"></p>
                   <p class="hint is-warn" id="wizStatus" hidden></p>
