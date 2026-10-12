@@ -25,7 +25,7 @@ import { APP_VERSION } from './version.js';
 
 /**
  * The local control API: an opt-in loopback listener for a trusted local caller. It reads by
- * default; a second switch lets it send and cancel messages through the outbox.
+ * default; a second switch lets it send messages, start new chats and cancel messages through the outbox.
  *
  * Its caller is typically an MCP server an agent launched to watch this app from outside its
  * process. It is deliberately not a fourth MCP surface: those are published through tunnels and
