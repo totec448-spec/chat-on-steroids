@@ -1843,9 +1843,6 @@
   "Pet instructions copied": "Đã sao chép hướng dẫn thú cưng",
   "Skill added to your library": "Đã thêm kỹ năng vào thư viện của bạn",
   "Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.": "Dùng khi ứng dụng khởi chạy trình duyệt. Cài companion và đăng nhập ChatGPT trong hồ sơ đang hoạt động của trình duyệt này. Các tab đã kết nối vẫn ở trình duyệt của chúng. Trình duyệt tích hợp của Chat On Steroids không cần cài đặt và chạy ẩn trong khay hệ thống.",
-  "Choose a folder to share — step 2.": "Chọn thư mục để chia sẻ — bước 2.",
-  "Create a tunnel and paste its ID — step 3.": "Tạo tunnel và dán ID — bước 3.",
-  "Add a restricted API key — step 4.": "Thêm API key hạn chế — bước 4.",
   "Select the tunnel for this connector.": "Chọn tunnel tương ứng với connector này.",
   "Chat On Steroids browser (built-in)": "Trình duyệt Chat On Steroids (tích hợp)",
   "Dismiss": "Bỏ qua",
@@ -2204,5 +2201,8 @@
   "Where the plugin offers permissions: allow all tools": "Nếu plugin có phần quyền: cho phép mọi công cụ",
   "First tool call: allow it, always for this plugin": "Lần gọi công cụ đầu tiên: cho phép, luôn luôn với plugin này",
   "Review the action, then allow it, always for this plugin.": "Hãy xem lại thao tác, rồi cho phép, luôn luôn với plugin này.",
-  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Phần này tách biệt với quyền của plugin, và lời nhắc này không phê duyệt lệnh gọi công cụ nào."
+  "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Phần này tách biệt với quyền của plugin, và lời nhắc này không phê duyệt lệnh gọi công cụ nào.",
+  "Choose a folder to share — step {0}.": "Chọn thư mục để chia sẻ — bước {0}.",
+  "Create a tunnel and paste its ID — step {0}.": "Tạo tunnel và dán ID — bước {0}.",
+  "Add a restricted API key — step {0}.": "Thêm API key hạn chế — bước {0}."
 }
