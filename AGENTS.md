@@ -4201,6 +4201,25 @@ duplicate surfaces and I/O failures leave the ledger intact and reject new work 
 `Could not read plugin-refresh state`; parser contents stay private. A missing file still
 allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
 
+
+**Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
+New ledger rows carry `tunnelKey`; old rows with a concrete App ID retain all consumed/manual
+custody until that same App ID proves the configured OpenAI tunnel and exact declarations.
+Their requests are `observeOnly`; stale definitions cannot authorize another Refresh click.
+Successful migration binds the receipt without creating a provider version. Manual/cloudflared
+runs retain schema proof only within the current process; another publication or scope cannot
+borrow it. A read-only legacy check binds its requested tunnel/schema, and an ended failure
+projects `failed/migration` without rewriting its installation or click identity.
+
+`pluginRefreshStatuses()` and `confirmedPluginSchemas()` project committed rows cached by
+`durableRevision('plugin-refresh')`. Reads create no debt, repair no rows, emit no browser wake
+and expose no App IDs, declarations or private errors. Writes/store replacement invalidate the
+cache; explicit requests/Restart may retry a failed read. `beginPluginToolCall` reserves successful
+use for one publication; the caller may confirm it only after a successful provider tool result.
+Explicit request primitives bind `requestedVersion`, `requestedFromVersion`, requested tunnel
+and optional first schema, retain claimed/manual custody, and reserve at most one durable startup
+attempt per accepted round. These primitives do not change automatic preferences or install apps.
+
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
