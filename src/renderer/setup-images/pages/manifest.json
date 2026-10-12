@@ -40,5 +40,20 @@
   },
   "api-key-tunnels": {
     "en": {"file":"api-key-tunnels-en.webp","size":[628,245],"labels":{"tunnels":"Tunnels","read":"Read","use":"Use"},"spots":{"tunnels":[48.4,44,47.8,44.5]}}
+  },
+  "signin": {
+    "en": {"labels":{"login":"Log in"}},
+    "de": {"labels":{"login":"Anmelden"}},
+    "es": {"labels":{"login":"Iniciar sesión"}},
+    "fr": {"labels":{"login":"Se connecter"}},
+    "ja": {"labels":{"login":"ログイン"}},
+    "ko": {"labels":{"login":"로그인"}},
+    "pt-BR": {"labels":{"login":"Entrar"}},
+    "pt-PT": {"labels":{"login":"Iniciar sessão"}},
+    "ru": {"labels":{"login":"Войти"}},
+    "tr": {"labels":{"login":"Oturum aç"}},
+    "vi": {"labels":{"login":"Đăng nhập"}},
+    "zh-CN": {"labels":{"login":"登录"}},
+    "zh-TW": {"labels":{"login":"登入"}}
   }
 }
