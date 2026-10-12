@@ -4318,8 +4318,9 @@ null instead of describing a different chat than `session`. Start and stop are s
 settings change starts or stops it only when the switch changes. Shutdown stops it in the
 admission/drain phase and does not let a late save reopen it.
 
-The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat)
-and `POST /v1/inputs/{id}/cancel`. They need a second switch, `controlApi.allowActions`, off by
+The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
+or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
+is the message id, as for the composer's New chat) and `POST /v1/inputs/{id}/cancel`. They need a second switch, `controlApi.allowActions`, off by
 default, which never outlives `enabled`: the config schema enforces it on load and on every write
 (`enabled:false` stores `allowActions:false`, and each field repairs on its own), and the settings
 merge mirrors it. Turning the API off revokes actions, and turning it back on leaves them off. The
