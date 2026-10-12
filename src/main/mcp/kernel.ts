@@ -502,7 +502,7 @@ async function withBackgroundExecRecovery(
 ): Promise<ToolResult> {
   const { publication, caller } = context;
   if (!publication || !caller.requestId) return result;
-  const principal = executionPrincipal(caller.requestId, caller.sessionId, context.allowUnattributed === true);
+  const principal = executionPrincipal(caller.requestId, caller.sessionId);
   if (!principal) return result;
   const used = result.content.reduce((bytes, part) => bytes + (part.type === 'text' ? Buffer.byteLength(part.text, 'utf8') : 0), 0);
   const budget = Math.min(12_000, DEFAULT_MAX_OUTPUT_TOKENS * 4 - used) - 64;
@@ -963,7 +963,7 @@ async function dispatchTracked(
   if (!nested && requestId && !preAckPolicyRefusal && !supersededConversation && !compacting) {
     const explicitPoll = name === 'write_stdin' && args && typeof args === 'object'
       ? (args as { session_id?: number }).session_id : undefined;
-    const principal = executionPrincipal(requestId, context.caller.sessionId, allowUnattributed);
+    const principal = executionPrincipal(requestId, context.caller.sessionId);
     await acknowledgeBackgroundExecOutput(principal, startedAt, explicitPoll);
   }
   let admissionRefusal = preAckPolicyRefusal;
