@@ -30,6 +30,8 @@ const runId = randomUUID();
 const scope = (surface: PluginSurface) => connectorTunnelKey(getConfig(), surface) ?? `unbound:${getConfig().tunnel.kind}:${getConfig().tunnel.profileId ?? 'default'}:${surface}`;
 /** Old builds recorded App ID/click custody, but never the tunnel it belonged to. */
 const legacyIdentity = (row: Row) => row.tunnelKey === undefined && row.appId !== null;
+const refreshableLegacy = (row: Row, publication: PluginPublication) => row.completedSchemaId === row.schemaId &&
+  row.schemaId !== publication.schemaId && !row.manual && !row.parked && (!row.error || row.failure === 'inspection') && row.failure !== 'confirmation';
 const requestedHere = (row: Row) => row.requestedVersion === APP_VERSION && (row.requestedTunnelKey ?? row.tunnelKey) === scope(row.surface);
 const legacyCheckCurrent = (row: Row) => !row.requestedSchemaId ||
   (requestedHere(row) && row.requestedSchemaId === currentPublication(row.surface)?.schemaId);
@@ -49,7 +51,7 @@ export function beginPluginToolCall(surface: PluginSurface): () => void {
     responding.set(surface, publication); changed();
   };
 }
-type SavedRows = { revision: number; value: Promise<Row[]>; rows?: Row[]; failed?: boolean };
+type SavedRows = { revision: number; value: Promise<Row[]>; rows?: Row[] };
 let savedCache: SavedRows | null = null;
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
 export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
@@ -85,23 +87,32 @@ async function readRows(): Promise<Row[]> {
     throw new Error('Could not read plugin-refresh state');
   }
 }
-async function savedRows(retryFailed = false): Promise<Row[]> {
+async function savedRows(): Promise<Row[]> {
   const revision = durableRevision('plugin-refresh');
-  if (savedCache?.revision !== revision || (retryFailed && savedCache.failed)) {
+  if (savedCache?.revision !== revision) {
     const entry: SavedRows = { revision, value: Promise.resolve([]) };
     entry.value = (async () => {
       const result = await readRows();
       entry.rows = result;
       return result;
     })().catch(() => {
-      entry.failed = true;
+      if (savedCache === entry) savedCache = null;
       // Invalid records may contain private values. Report the same safe read failure as
       // malformed JSON, while retaining the file and all consumed Refresh authority.
       throw new Error('Could not read plugin-refresh state');
     });
     savedCache = entry;
   }
-  return structuredClone(await savedCache.value);
+  const entry = savedCache;
+  try {
+    const result = await entry.value;
+    // A projection that overlapped recovery must use the owner's newer committed snapshot.
+    if (savedCache !== entry || durableRevision('plugin-refresh') !== entry.revision) return savedRows();
+    return structuredClone(result);
+  } catch (error) {
+    if ((savedCache && savedCache !== entry) || durableRevision('plugin-refresh') !== entry.revision) return savedRows();
+    throw error;
+  }
 }
 function remember(current: Row[]): void {
   const snapshot = structuredClone(current);
@@ -124,8 +135,8 @@ export function resetPluginRefreshLedger(): Promise<void> {
     wakeBrowserWork();
   });
 }
-async function rows(retryFailed = false): Promise<Row[]> {
-  const result = await savedRows(retryFailed);
+async function rows(): Promise<Row[]> {
+  const result = await savedRows();
   // Legacy fail() marked discovery failures as clicks. A real claim always commits a
   // concrete appId, so null proves these rows never crossed the refresh boundary.
   let repaired = false;
@@ -286,7 +297,7 @@ export function pluginRefreshStatuses(): Promise<Partial<Record<PluginSurface, P
 /** One fresh browser attempt after an explicit Restart, only before any Refresh claim. */
 export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
   return serial(async () => {
-    const current = await rows(true);
+    const current = await rows();
     const publication = currentPublication(surface);
     const row = current.find(candidate => candidate.surface === surface);
     if (!publication || !row || row.tunnelKey !== scope(surface) || row.schemaId !== publication.schemaId || row.attempted || row.manual || row.completedSchemaId === row.schemaId) return false;
@@ -357,7 +368,7 @@ function reconcileRows(current: Row[]): boolean {
 export function requestPluginRefreshes(version: string, surfaces: PluginSurface[] = [...publications.keys()]): Promise<void> {
   return serial(async () => {
     const target = requestedVersion.unwrap().parse(version);
-    const current = await rows(true);
+    const current = await rows();
     reconcileRows(current);
     for (const surface of surfaces) if (!current.some(row => row.surface === surface && (row.tunnelKey === scope(surface) || legacyIdentity(row)))) {
       const next: Row = { surface, tunnelKey: scope(surface), observe: false, schemaId: '', id: randomUUID(), appId: null, completedSchemaId: null, attempted: false, manual: false };
@@ -397,8 +408,8 @@ export function pendingPluginRefreshes(automatic = true): Promise<PluginRefreshR
     return current.flatMap(row => {
       const publication = currentPublication(row.surface);
       if (!publication || (!automatic && !requestedHere(row)) || (settling.get(row.surface)?.readyAt ?? 0) > Date.now()) return [];
-      if (legacyIdentity(row)) return legacyCheckCurrent(row) && (row.observe || (!row.error && !row.parked))
-        ? [{ ...structuredClone(publication), id: row.id, appId: row.appId, observeOnly: true }] : [];
+      if (legacyIdentity(row)) return legacyCheckCurrent(row) && (row.observe || refreshableLegacy(row, publication) || (!row.error && !row.parked))
+        ? [{ ...structuredClone(publication), id: row.id, appId: row.appId, ...(!refreshableLegacy(row, publication) ? { observeOnly: true } : {}) }] : [];
       return row.tunnelKey === scope(row.surface) && publication.schemaId === row.schemaId && (row.observe || (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId))
         ? [{ ...structuredClone(publication), id: row.id, appId: row.observe ? null : row.appId, ...(row.observe ? { observeOnly: true } : {}) }] : [];
     });
@@ -421,6 +432,11 @@ function enrolls(row: Row, publication: PluginPublication, input: Enrollment): b
   if (enrollable(input.tools, publication)) return true;
   return typeof input.tunnelId === 'string' && input.tunnelId.length > 0 && input.ownsTunnel?.(row.surface, input.tunnelId) === true;
 }
+function provesLegacyTunnel(row: Row, input: Identity & Enrollment): boolean {
+  return row.appId === input.appId && !!input.tunnelId &&
+    scope(row.surface) === `openai:${getConfig().tunnel.profileId ?? 'default'}:${input.tunnelId}` &&
+    input.ownsTunnel?.(row.surface, input.tunnelId) === true;
+}
 function exact(current: Row[], identity: Identity, allowLegacy = false): Row | undefined {
   if (!app.safeParse(identity.appId).success) return;
   return current.find(row => row.id === identity.id && !!currentPublication(row.surface) &&
@@ -432,20 +448,19 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
   return serial(async () => {
     const current = await rows(); const row = exact(current, input, true);
     if (!row || (!automatic && !requestedHere(row)) || !recognizable(input.tools, row.surface)) return false;
-    const legacy = legacyIdentity(row), observation = row.observe || legacy;
-    if (observation && input.alreadyCurrent !== true) return false;
-    if (legacy && (row.appId !== input.appId || !input.tunnelId ||
-        scope(row.surface) !== `openai:${getConfig().tunnel.profileId ?? 'default'}:${input.tunnelId}` ||
-        input.ownsTunnel?.(row.surface, input.tunnelId) !== true)) return false;
-    if (!observation && (row.attempted || row.manual || row.completedSchemaId === row.schemaId)) return false;
     const publication = publications.get(row.surface)!;
+    const legacy = legacyIdentity(row), migrationClick = legacy && refreshableLegacy(row, publication);
+    const observation = (row.observe || legacy) && !migrationClick;
+    if (observation && input.alreadyCurrent !== true) return false;
+    if (legacy && !provesLegacyTunnel(row, input)) return false;
+    if (!observation && !migrationClick && (row.attempted || row.manual || row.completedSchemaId === row.schemaId)) return false;
     // Unique-name discovery is initial enrollment only. Stale definitions can still
     // identify the surface; the complete post-refresh declarations must match below.
-    if (observation ? !enrolls(row, publication, input) : row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
+    if (observation || legacy ? !enrolls(row, publication, input) : row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
     if (current.some(other => other !== row && other.appId === input.appId)) return false;
     const isCurrent = matches(input.tools, publication.tools, row.surface);
     if (input.alreadyCurrent === true ? !isCurrent : isCurrent) return false;
-    if (legacy) { row.tunnelKey = scope(row.surface); row.schemaId = publication.schemaId; }
+    if (legacy) { row.tunnelKey = scope(row.surface); row.schemaId = publication.schemaId; row.observe = false; }
     row.appId = input.appId; row.attempted = true;
     delete row.error;
     delete row.failure;
@@ -466,11 +481,15 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
  */
 export function requireManualPluginRefresh(input: Identity & Enrollment & { error: string }): Promise<boolean> {
   return serial(async () => {
-    const current = await rows(); const row = exact(current, input);
-    if (!row || row.observe || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools, row.surface)) return false;
+    const current = await rows(); const row = exact(current, input, true);
+    if (!row || !recognizable(input.tools, row.surface)) return false;
     const publication = publications.get(row.surface)!;
+    const legacy = legacyIdentity(row);
+    if (legacy ? !refreshableLegacy(row, publication) || !provesLegacyTunnel(row, input) || !enrolls(row, publication, input)
+      : row.observe || row.attempted || row.manual || row.completedSchemaId === row.schemaId) return false;
     if (row.appId ? row.appId !== input.appId : !enrolls(row, publication, input)) return false;
     if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools, row.surface)) return false;
+    if (legacy) { row.tunnelKey = scope(row.surface); row.schemaId = publication.schemaId; row.observe = false; row.attempted = false; }
     row.appId = input.appId;
     row.manual = true;
     delete row.failure;

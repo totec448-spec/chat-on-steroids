@@ -4215,18 +4215,23 @@ allows initial enrollment. Tolerant reads for auxiliary state keep their existin
 
 
 **Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
-New ledger rows carry `tunnelKey`; old rows with a concrete App ID retain all consumed/manual
-custody until that same App ID proves the configured OpenAI tunnel and exact declarations.
-Their requests are `observeOnly`; stale definitions cannot authorize another Refresh click.
-Successful migration binds the receipt without creating a provider version. Manual/cloudflared
+New ledger rows carry `tunnelKey`; old rows with a concrete App ID require that same App ID
+to prove the configured OpenAI tunnel. A completed, unambiguous receipt may then bind a changed
+schema and durably claim its one Refresh click, or record manual handling if no control exists.
+Unconfirmed, manual, parked or ambiguously failed receipts, and unchanged completed schemas, remain
+`observeOnly`; full matching declarations can bind them without a new Refresh click. Manual/cloudflared
 runs retain schema proof only within the current process; another publication or scope cannot
 borrow it. A read-only legacy check binds its requested tunnel/schema, and an ended failure
 projects `failed/migration` without rewriting its installation or click identity.
+An inspection failure before a completed legacy migration claims its click may retry within
+the existing failure budget; binding still requires the same app and live owned tunnel.
 
 `pluginRefreshStatuses()` and `confirmedPluginSchemas()` project committed rows cached by
 `durableRevision('plugin-refresh')`. Reads create no debt, repair no rows, emit no browser wake
 and expose no App IDs, declarations or private errors. Writes/store replacement invalidate the
-cache; explicit requests/Restart may retry a failed read. `beginPluginToolCall` reserves successful
+cache. Failed reads are discarded and retry on the next call without Reset or browser work;
+a read overlapping recovery cannot replace or project an older snapshot after the write commits.
+`beginPluginToolCall` reserves successful
 use for one publication; the caller may confirm it only after a successful provider tool result.
 Explicit request primitives bind `requestedVersion`, `requestedFromVersion`, requested tunnel
 and optional first schema, retain claimed/manual custody, and reserve at most one durable startup
@@ -4238,7 +4243,8 @@ attempt per accepted round. These primitives do not change automatic preferences
 | Current unclaimed debt | Pending | One durable claim before a click |
 | Claimed, not confirmed | Refreshing or failed | No second click |
 | Manual or ended observation | Manual or failed | Read-only recheck only |
-| Unscoped legacy identity | Unknown or scoped migration failure | Same App ID, tunnel and full declarations to migrate |
+| Unscoped completed legacy identity, changed schema | Unknown until app/tunnel proof | Bind scope, then one durable claim; ambiguous outcomes stay read-only |
+| Other unscoped legacy identity | Unknown or scoped migration failure | Same App ID, tunnel and full declarations; no new click |
 | Scoped full confirmation | Current; unstable transports require this process | No additional click |
 | Future-version intent | Wait for the exact build; reserve startup once durably | No grant to the old build |
 
