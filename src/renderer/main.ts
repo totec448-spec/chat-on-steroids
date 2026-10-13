@@ -2516,7 +2516,7 @@ updateAllButton.addEventListener('click', async () => {
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
-    else if (result === 'checking-connectors') toast(t('Connector checks requested. Any remaining steps are shown in Update status.'));
+    else if (result === 'checking-connectors') toast(t('Plugin checks requested. Any remaining steps are shown in Update status.'));
     else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
     updateAllError = error instanceof Error ? error.message : String(error);
