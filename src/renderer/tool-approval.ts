@@ -12,8 +12,8 @@ function notice(): HTMLElement {
   ui(image, 'aria-label', () => t('Example of a ChatGPT tool approval prompt'));
   image.alt = t('Example of a ChatGPT tool approval prompt');
   card.append(image,
-    el('p', '', () => t('Review the action, then open Allow → Always allow.')),
-    el('p', 'muted tool-approval-footnote', () => t('Separate from Plugins → Allow all tools. This reminder does not approve a tool call.')));
+    el('p', '', () => t('Review the action, then allow it, always for this plugin.')),
+    el('p', 'muted tool-approval-footnote', () => t('This is separate from the plugin’s permissions, and this reminder does not approve a tool call.')));
   return card;
 }
 
