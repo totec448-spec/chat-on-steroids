@@ -94,6 +94,14 @@ function lineReader(onLine: (line: string) => void): (chunk: Buffer) => void {
 }
 
 /** Only a rejected control-plane request can invalidate the tunnel credentials. */
+/** A log field as text: an object is spelled out, never "[object Object]". */
+export function tunnelEventText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') { try { return JSON.stringify(value); } catch { return ''; } }
+  return String(value as number | boolean | bigint);
+}
+
 function tunnelAuthRejected(message: string, error: string, statusCode?: unknown): boolean {
   const controlPlane = /^(?:poll failed(?:;\s*backing off)?|tunnel metadata fetch failed)$/i.test(message) ||
     /\bcontrolplane (?:client|responder):/i.test(error);
@@ -574,8 +582,8 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       // warnings are followed by a healthy /readyz and are not actionable for users.
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
-        const level = String(event['level'] ?? '').toUpperCase();
-        const message = String(event['msg'] ?? 'tunnel-client event');
+        const level = tunnelEventText(event['level']).toUpperCase();
+        const message = tunnelEventText(event['msg']) || 'tunnel-client event';
         if (
           level === 'WARN' &&
           message === 'harpoon host auto-registration failed' &&
@@ -585,7 +593,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         }
         if (isBenignHarpoonChannelEvent(level, message, event)) return;
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
-          const errText = event['error'] ? String(event['error']) : '';
+          const errText = tunnelEventText(event['error']);
           if (tunnelAuthRejected(message, errText, event['status_code'])) {
             rejectAuthentication();
             return;

@@ -44,7 +44,7 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     name = markdownFileName(summary.title);
   }
   if (request.target === 'clipboard') {
-    clipboard.writeText(markdown);
+    await clipboard.writeText(markdown);
     return { done: 'copied' };
   }
   const options = {
