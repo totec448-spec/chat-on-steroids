@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Распознавание речи Windows неожиданно остановилось.",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Средство распознавания речи Windows не установлено. Установите языковой пакет Windows с распознаванием речи.",
   "Windows speech recognition could not start": "Не удалось запустить распознавание речи Windows",
-  "Windows speech recognition exited unexpectedly": "Распознавание речи Windows неожиданно завершилось"
+  "Windows speech recognition exited unexpectedly": "Распознавание речи Windows неожиданно завершилось",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Хранилище записей заполнено. Новые изображения и длинные тексты больше не сохраняются в ваших чатах."
 }

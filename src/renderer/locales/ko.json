@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Windows 음성 인식이 예기치 않게 중지되었습니다.",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "설치된 Windows 음성 인식기가 없습니다. Windows 음성 언어 팩을 설치하세요.",
   "Windows speech recognition could not start": "Windows 음성 인식을 시작할 수 없습니다",
-  "Windows speech recognition exited unexpectedly": "Windows 음성 인식이 예기치 않게 종료되었습니다"
+  "Windows speech recognition exited unexpectedly": "Windows 음성 인식이 예기치 않게 종료되었습니다",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "기록 저장 공간이 가득 찼습니다. 새 이미지와 긴 텍스트가 더 이상 채팅에 저장되지 않습니다."
 }

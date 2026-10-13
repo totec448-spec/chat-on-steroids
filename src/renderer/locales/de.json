@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Die Windows-Spracherkennung wurde unerwartet beendet.",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Keine Windows-Spracherkennung installiert. Installiere ein Windows-Sprachpaket mit Spracherkennung.",
   "Windows speech recognition could not start": "Die Windows-Spracherkennung konnte nicht starten",
-  "Windows speech recognition exited unexpectedly": "Die Windows-Spracherkennung wurde unerwartet beendet"
+  "Windows speech recognition exited unexpectedly": "Die Windows-Spracherkennung wurde unerwartet beendet",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Der Aufzeichnungsspeicher ist voll. Neue Bilder und lange Texte werden nicht mehr in deinen Chats gespeichert."
 }

@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Nhận dạng giọng nói của Windows đã dừng đột ngột.",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Chưa cài trình nhận dạng giọng nói của Windows. Hãy cài gói ngôn ngữ giọng nói của Windows.",
   "Windows speech recognition could not start": "Không thể khởi động nhận dạng giọng nói của Windows",
-  "Windows speech recognition exited unexpectedly": "Nhận dạng giọng nói của Windows đã thoát đột ngột"
+  "Windows speech recognition exited unexpectedly": "Nhận dạng giọng nói của Windows đã thoát đột ngột",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Bộ nhớ ghi lại đã đầy. Hình ảnh mới và văn bản dài không còn được lưu trong các cuộc trò chuyện của bạn."
 }
