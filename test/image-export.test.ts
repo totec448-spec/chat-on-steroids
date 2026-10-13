@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { makeTempDir, removeTempDir } from './helpers.js';
+import { rawPromises } from '../src/main/rawfs.js';
 import {
   completeImageExport, exportFileName, exportImage, ImageExportError, pendingImageExports, resetImageExportsForTests
 } from '../src/main/image-export.js';
@@ -67,3 +68,24 @@ it('gives up with a clear reason when no browser delivers in time', async () => 
   await expect(exportImage(image, target('late.png'), 20)).rejects.toThrow('did not deliver the image in time');
   expect(pendingImageExports()).toEqual([]);
 });
+
+// exFAT and FAT drives, many network shares and WSL folders have no hard links. The save published
+// its file with one, so there it failed with "operation not supported" every time.
+it.each(['ENOTSUP', 'EPERM', 'EXDEV'])('saves on a volume without hard links (%s), still without replacing a file', async code => {
+  const link = vi.spyOn(rawPromises, 'link').mockRejectedValue(Object.assign(new Error(`${code}: link`), { code }));
+  try {
+    const saved = exportImage(image, target('usb'));
+    const [job] = pendingImageExports();
+    const bytes = await png();
+    await completeImageExport({ nonce: job!.nonce, data: bytes.toString('base64') });
+    await expect(saved).resolves.toMatchObject({ virtual: '/workspace/usb.png', bytes: bytes.length });
+    expect(await fs.readFile(path.join(dir, 'usb.png'))).toEqual(bytes);
+    expect((await fs.readdir(dir)).filter(name => name.endsWith('.part'))).toEqual([]);
+
+    const again = exportImage(image, target('usb.png'));
+    const [next] = pendingImageExports();
+    await completeImageExport({ nonce: next!.nonce, data: bytes.toString('base64') });
+    await expect(again).rejects.toThrow('/workspace/usb.png already exists');
+  } finally { link.mockRestore(); }
+});
+
