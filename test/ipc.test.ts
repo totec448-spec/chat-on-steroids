@@ -651,6 +651,7 @@ describe('explicit settings replace the published tool contract', () => {
       const before = snapshot();
       const beforeState = await handlers.get('state:get')!(null, undefined) as any;
       expect(beforeState.data.connectorSchemas.core).toBe(before.schemaId);
+      expect(beforeState.data.connectorRefresh.core).toEqual({ schemaId: before.schemaId, state: 'unknown' });
       const tool = kind === 'finish' ? 'session_finish' : 'exec_command';
       expect(before.tools.map(row => row.name)).toContain(tool);
       expect(before.tools.map(row => row.name)).not.toContain('session');
@@ -2255,10 +2256,11 @@ describe('native worker checkout cleanup confirmation', () => {
   });
 });
 
-it('projects unreadable ledger health through state:get and recovers only through explicit reset', async () => {
+it('projects reloaded unreadable ledger health through state:get and recovers only through explicit reset', async () => {
   const file = path.join(dir, 'state', 'plugin-refresh.json');
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, '{broken');
+  initDurableStore(dir);
   const broken: any = await handlers.get('state:get')!(null, undefined);
   expect(broken).toMatchObject({ ok: true, data: { pluginRefreshUnreadable: true } });
   expect(await fs.readFile(file, 'utf8')).toBe('{broken');

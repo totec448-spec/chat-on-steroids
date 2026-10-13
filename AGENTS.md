@@ -3995,12 +3995,14 @@ and reload backing follow the persisted palette. `scripts/verify-appearance.cjs`
 production renderer in isolated Electron with color, queue/push, theme, reset, reload and narrow
 layout checks. It does not operate the installed app or a provider conversation.
 
-Unreadable plugin-refresh ledgers fail closed. `pluginRefreshUnreadable()` validates without
-repairing or rearming; `AppState.pluginRefreshUnreadable` exposes only that boolean. Settings
+Unreadable plugin-refresh ledgers fail closed. `pluginRefreshUnreadable()` uses the same
+revision-scoped read cache without repairing or rearming; `AppState.pluginRefreshUnreadable`
+exposes only that boolean. Settings
 shows the read error beside Automatic plugin refresh even when it is off. The explicit
-`plugin-refresh:reset` / `resetPluginRefresh()` action rechecks under the ledger owner's lock;
+`plugin-refresh:reset` / `resetPluginRefresh()` action rechecks the file under the ledger owner's lock;
 a healthy or missing ledger is a no-op. `recoverDurable()` copies the bad file to a unique
 `state/plugin-refresh.recovery-<uuid>.json` before atomically installing an empty ledger.
+Successful recovery invalidates that ledger's durable revision and replaces its read cache.
 Failed backup/replacement retains the original and never queues a recovery retry. Only a
 successful reset clears cached confirmation and wakes browser work; old request IDs stay fenced.
 
@@ -4210,6 +4212,35 @@ Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid ro
 duplicate surfaces and I/O failures leave the ledger intact and reject new work with
 `Could not read plugin-refresh state`; parser contents stay private. A missing file still
 allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
+
+
+**Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
+New ledger rows carry `tunnelKey`; old rows with a concrete App ID retain all consumed/manual
+custody until that same App ID proves the configured OpenAI tunnel and exact declarations.
+Their requests are `observeOnly`; stale definitions cannot authorize another Refresh click.
+Successful migration binds the receipt without creating a provider version. Manual/cloudflared
+runs retain schema proof only within the current process; another publication or scope cannot
+borrow it. A read-only legacy check binds its requested tunnel/schema, and an ended failure
+projects `failed/migration` without rewriting its installation or click identity.
+
+`pluginRefreshStatuses()` and `confirmedPluginSchemas()` project committed rows cached by
+`durableRevision('plugin-refresh')`. Reads create no debt, repair no rows, emit no browser wake
+and expose no App IDs, declarations or private errors. Writes/store replacement invalidate the
+cache; explicit requests/Restart may retry a failed read. `beginPluginToolCall` reserves successful
+use for one publication; the caller may confirm it only after a successful provider tool result.
+Explicit request primitives bind `requestedVersion`, `requestedFromVersion`, requested tunnel
+and optional first schema, retain claimed/manual custody, and reserve at most one durable startup
+attempt per accepted round. These primitives do not change automatic preferences or install apps.
+
+| Receipt | Readiness evidence | Refresh authority |
+| --- | --- | --- |
+| Missing or foreign scope | Unknown | No borrowed grant |
+| Current unclaimed debt | Pending | One durable claim before a click |
+| Claimed, not confirmed | Refreshing or failed | No second click |
+| Manual or ended observation | Manual or failed | Read-only recheck only |
+| Unscoped legacy identity | Unknown or scoped migration failure | Same App ID, tunnel and full declarations to migrate |
+| Scoped full confirmation | Current; unstable transports require this process | No additional click |
+| Future-version intent | Wait for the exact build; reserve startup once durably | No grant to the old build |
 
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
@@ -4585,6 +4616,14 @@ browser-chord policy prevents tab/window management through forbidden input chor
 focus chords support authorized navigation, like clicking or setting that same native control;
 it is not a general browser automation fallback. Capture/privacy settings and platform permission
 failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
+
+**Connector state publication.** IPC publishes `AppState.connectorRefresh` from the refresh
+owner's read-only committed projection and subscribes to its owner notifications. Schema,
+safe failure phase and optional operational response evidence stay separate; App IDs and
+private diagnostics never enter this state. The MCP HTTP boundary marks real provider
+requests, excluding self-tests/tunnel probes. Only successful outer tool results may complete
+the publication captured before dispatch; in-process calls, failed tools and late results
+cannot establish operational readiness or full-schema verification.
 
 ## 19. Debugging, tests and working here
 
