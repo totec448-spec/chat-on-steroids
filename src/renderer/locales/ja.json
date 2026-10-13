@@ -2305,5 +2305,10 @@
   "Send into the running turn now": "実行中のターンに今すぐ送信",
   "The turn ended before this message could join it. It stays queued.": "このメッセージが加わる前にターンが終了しました。キューに残っています。",
   "Keep the computer awake": "コンピューターをスリープさせない",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "チャットが作業している間はコンピューターがスリープしないので、長い作業が止まりません。画面はオフになることがあります。"
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "チャットが作業している間はコンピューターがスリープしないので、長い作業が止まりません。画面はオフになることがあります。",
+  "Find in chat": "チャット内を検索",
+  "{0} of {1}": "{0}/{1}",
+  "No matches": "一致なし",
+  "Previous match": "前の一致",
+  "Next match": "次の一致"
 }

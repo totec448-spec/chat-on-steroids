@@ -5475,3 +5475,43 @@ it('says so when a queued message can no longer join the running turn', async ()
   await settle();
   expect(w.document.body.textContent).toContain('The turn ended before this message could join it. It stays queued.');
 });
+
+// Codex's Find in chat: ⌘F (Ctrl+F) searches the open chat's whole recording, newest match first.
+it('finds in the open chat with Cmd/Ctrl+F, steps through matches and closes with Escape', async () => {
+  const rows: SessionEvent[] = [
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'user_message', messageId: 'q1', message: text('Check the Windows installer') },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'assistant_message', messageId: 'a1', final: true, message: text('The windows installer builds.') },
+    { seq: 3, time: T0 + 3000, source: 'extension', kind: 'user_message', messageId: 'q2', message: text('Now the docs') }
+  ];
+  const { w } = await boot(rows);
+  const api = (w as any).api;
+  const find = vi.fn(async () => ({ ok: true, data: [
+    { seq: 1, kind: 'user_message', messageId: 'q1', position: 1 },
+    { seq: 2, kind: 'assistant_message', messageId: 'a1', position: 2 }
+  ] }));
+  api.findInChat = find;
+  const bar = w.document.getElementById('chatFind')!;
+  expect(bar.hidden).toBe(true);
+  // The app reads the platform as isMac() does: ⌘F there, Ctrl+F elsewhere; both keys at once is neither.
+  const mac = /^Mac/.test(globalThis.navigator.platform);
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+  expect(bar.hidden).toBe(true);
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f', ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
+  expect(bar.hidden).toBe(false);
+  const field = w.document.getElementById('chatFindField') as HTMLInputElement;
+  expect(w.document.activeElement).toBe(field);
+  field.value = 'windows installer';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
+  expect(find).toHaveBeenCalledWith(summary(rows).id, 'windows installer');
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('1 of 2'));
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
+  find.mockResolvedValueOnce({ ok: true, data: [] });
+  field.value = 'linux';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('No matches'));
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(bar.hidden).toBe(true);
+});
