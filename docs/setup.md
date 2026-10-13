@@ -108,6 +108,9 @@ them behind, so a caller should treat a refused connection as "not running".
 
 ## Permissions and plugins
 
+For T3 Code or another local coding agent, see the [CoS command-line bridge](t3-code-bridge.md)
+to delegate through a ChatGPT coordinator and read delivery, worker status and updates.
+
 | Plugin in ChatGPT | What it adds |
 | --- | --- |
 | **Core** | Local files, patches, terminals, saving ChatGPT-generated images, plans and workers. Available on all supported platforms. |
