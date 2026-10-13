@@ -14,6 +14,7 @@ import type { SessionSearchLocation, SessionSearchReply, SessionSearchResult, Se
 import { positionOf } from '../../shared/chronology.js';
 import { transcriptEntries } from '../../shared/markdown-export.js';
 import { indexedSessions, readEvents, readOverflowText, sessionSearchIndexPath } from './store.js';
+import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { logWarn } from '../logger.js';
 
 /** Plenty for a long chat's words; a runaway transcript is cut, not stored whole. */
@@ -72,9 +73,9 @@ async function transcriptText(id: string): Promise<string> {
   const parts: string[] = [];
   let size = 0;
   for (const entry of transcriptEntries(events)) {
-    const text = entry.stored.truncated && entry.stored.assetId
+    const text = providerEntitiesAsMarkdown(entry.stored.truncated && entry.stored.assetId
       ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
-      : entry.stored.text;
+      : entry.stored.text);
     const clean = text.replace(/\s+/g, ' ').trim();
     if (!clean) continue;
     parts.push(clean);
@@ -231,9 +232,9 @@ export async function locateSearchMatch(id: string, query: string): Promise<Sess
   if (!terms.length) return null;
   const events = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
   for (const entry of transcriptEntries(events)) {
-    const text = entry.stored.truncated && entry.stored.assetId
+    const text = providerEntitiesAsMarkdown(entry.stored.truncated && entry.stored.assetId
       ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
-      : entry.stored.text;
+      : entry.stored.text);
     const lower = foldCase(text.replace(/\s+/g, ' '));
     if (!terms.some(term => lower.includes(term))) continue;
     const event = events.find(candidate => candidate.seq === entry.seq);
