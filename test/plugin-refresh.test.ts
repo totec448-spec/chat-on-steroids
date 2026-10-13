@@ -1,13 +1,16 @@
-import { promises as fs } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, confirmedPluginSchemas, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, pluginRefreshUnreadable, resetPluginRefreshLedger, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { PLUGIN_REFRESH_FAILURE_LIMIT, beginPluginToolCall, authorizedPluginRefreshPublications, consumeRequestedPluginRefreshStartup, hasRequestedPluginRefresh, requestPluginRefreshes, confirmedPluginSchemas, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, pluginRefreshStatuses, pluginRefreshUnreadable, resetPluginRefreshLedger, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { APP_VERSION } from '../src/main/version.js';
 import { buildServer } from '../src/main/mcp/tools.js';
 import { defaultConfig } from '../src/main/config.js';
+import * as configOwner from '../src/main/config.js';
 import type { PluginToolSchema } from '../src/shared/plugin-refresh.js';
 const appId = 'asdk_app_example';
 const tools: PluginToolSchema[] = [{ name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }];
@@ -17,6 +20,335 @@ afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); vi
 const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
+const consumeStartup = consumeRequestedPluginRefreshStartup;
+it.each(['claimed', 'manual', 'completed'] as const)('preserves unscoped legacy %s authority until the same app proves its tunnel and full schema', async state => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const request = (await pendingPluginRefreshes())[0]!;
+    if (state === 'manual') await requireManualPluginRefresh({ ...request, appId, connectorName: request.connectorName,
+      tools: [{ ...tools[0]!, description: 'Old' }], error: 'Recreate manually' });
+    else {
+      expect(await claim(request)).toBe(true);
+      if (state === 'completed') expect(await completePluginRefresh({ ...request, appId, tools })).toBe(true);
+    }
+    const legacy = await readDurable('plugin-refresh') as any[];
+    delete legacy[0].tunnelKey; delete legacy[0].verifiedRun;
+    await writeDurableNow('plugin-refresh', legacy);
+    resetPluginRefreshForTests(); publish();
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    expect(confirmedPluginSchemas()).toEqual({});
+    await pendingPluginRefreshes();
+    expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ id: request.id, appId,
+      attempted: state !== 'manual', manual: state === 'manual' });
+    expect((await readDurable('plugin-refresh') as any[])[0].tunnelKey).toBeUndefined();
+    expect(await rearmPluginRefresh('core')).toBe(false);
+    await requestPluginRefreshes(APP_VERSION);
+    const observation = (await pendingPluginRefreshes(false))[0]!;
+    expect(observation).toMatchObject({ appId, observeOnly: true });
+    expect(await claim(observation)).toBe(false);
+    const current = { ...observation, appId, connectorName: observation.connectorName, tools, alreadyCurrent: true };
+    expect(await claimPluginRefresh(current, false)).toBe(false);
+    expect(await claimPluginRefresh({ ...current, tunnelId, ownsTunnel: () => false }, false)).toBe(false);
+    expect(await claimPluginRefresh({ ...current, appId: 'asdk_app_replacement', tunnelId, ownsTunnel: () => true }, false)).toBe(false);
+    expect(await claimPluginRefresh({ ...current, tools: [{ ...tools[0]!, description: 'Still stale' }], tunnelId, ownsTunnel: () => true }, false)).toBe(false);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    expect(await claimPluginRefresh({ ...current, tunnelId, ownsTunnel: (surface, id) => surface === 'core' && id === tunnelId }, false)).toBe(true);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    expect(await claim(observation)).toBe(false);
+  } finally { get.mockRestore(); }
+});
+it.each(['claimed', 'manual'] as const)('shows failed legacy %s rechecks without borrowing verification or another refresh click', async state => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  let tunnel = { ...original.tunnel, kind: 'openai' as const, tunnelId };
+  const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel }));
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    if (state === 'manual') await requireManualPluginRefresh({ ...first, appId, connectorName: first.connectorName,
+      tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual outcome' });
+    else {
+      expect(await claim(first)).toBe(true);
+    }
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    const declarations = [{ ...tools[0]!, description: 'New contract' }];
+    publish('2', declarations);
+    await requestPluginRefreshes(APP_VERSION);
+    const observation = (await pendingPluginRefreshes(false))[0]!;
+    expect(observation).toMatchObject({ appId, observeOnly: true });
+    expect(await claim(observation)).toBe(false);
+    expect(await failPluginRefresh({ id: observation.id, error: 'Private failed observation' })).toBe(true);
+    const saved = await readDurable('plugin-refresh');
+    const wakes = wake.mock.calls.length;
+    expect((await pluginRefreshStatuses()).core).toMatchObject({ schemaId: observation.schemaId, state: 'failed', failure: 'migration' });
+    expect(await readDurable('plugin-refresh')).toEqual(saved); expect(wake.mock.calls.length).toBe(wakes);
+    expect(JSON.stringify(await pluginRefreshStatuses())).not.toContain('Private');
+    expect(confirmedPluginSchemas()).toEqual({});
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    expect(await rearmPluginRefresh('core')).toBe(false);
+    expect((saved as any[])[0]).toMatchObject({ appId, attempted: state !== 'manual', manual: state === 'manual' });
+    expect((saved as any[])[0].tunnelKey).toBeUndefined();
+    beginPluginToolCall('core')();
+    expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'failed', responding: true });
+    resetPluginRefreshForTests(); publish('2', declarations);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('failed');
+    tunnel = { ...tunnel, tunnelId: 'tunnel_other00000001' }; publish('2', declarations);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    expect(await failPluginRefresh({ id: observation.id, error: 'Foreign connection failure' })).toBe(false);
+    tunnel = { ...tunnel, tunnelId }; publish('2', declarations);
+    publish('3', [{ ...tools[0]!, description: 'Later contract' }]);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    expect(await failPluginRefresh({ id: observation.id, error: 'Stale declaration failure' })).toBe(false);
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    await requestPluginRefreshes(APP_VERSION);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+    const retry = (await pendingPluginRefreshes(false))[0]!;
+    expect(retry).toMatchObject({ appId, observeOnly: true });
+    expect(await claim(retry)).toBe(false);
+    expect(await claimPluginRefresh({ ...retry, appId: 'asdk_app_foreign', connectorName: retry.connectorName,
+      tools: retry.tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true }, false)).toBe(false);
+    expect(await claimPluginRefresh({ ...retry, appId, connectorName: retry.connectorName,
+      tools: retry.tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true }, false)).toBe(true);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+  } finally { get.mockRestore(); }
+});
+it.each([{ automatic: true, inspectionFailure: false }, { automatic: false, inspectionFailure: false }, { automatic: true, inspectionFailure: true }])('refreshes a completed legacy receipt once after proven app/tunnel migration: %j', async ({ automatic, inspectionFailure }) => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    expect(await claim(first)).toBe(true);
+    expect(await completePluginRefresh({ ...first, appId, tools })).toBe(true);
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    const next = [{ ...tools[0]!, description: 'New declarations' }]; publish('2', next);
+    if (!automatic) await requestPluginRefreshes(APP_VERSION);
+    let request = (await pendingPluginRefreshes(automatic))[0]!;
+    if (inspectionFailure) {
+      expect(await failPluginRefresh({ id: request.id, error: 'Temporary unreadable settings page' })).toBe(true);
+      request = (await pendingPluginRefreshes(automatic))[0]!;
+    }
+    expect(request.observeOnly).not.toBe(true);
+    const input = { ...request, appId, connectorName: request.connectorName, tools, tunnelId, ownsTunnel: () => true };
+    const saved = await readDurable('plugin-refresh');
+    for (const wrong of [{ appId: 'asdk_app_foreign' }, { tunnelId: undefined }, { tunnelId: 'tunnel_other00000001' }, { ownsTunnel: () => false }]) {
+      expect(await claimPluginRefresh({ ...input, ...wrong }, automatic)).toBe(false);
+    }
+    expect(await readDurable('plugin-refresh')).toEqual(saved);
+    const actions: string[] = []; let refreshed = false;
+    const click = vi.fn(() => {
+      const row = JSON.parse(readFileSync(`${directory}/state/plugin-refresh.json`, 'utf8'))[0];
+      expect(row).toMatchObject({ tunnelKey: `openai:${original.tunnel.profileId ?? 'default'}:${tunnelId}`, schemaId: request.schemaId, attempted: true, observe: false });
+      expect(row.completedSchemaId).not.toBe(request.schemaId);
+      actions.push('click'); refreshed = true;
+    });
+    const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+    const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
+    const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1,
+      t: (_key: string, fallback: string) => fallback,
+      location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${request.id}#settings/Plugins/plugin_${appId}` },
+      CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+        pluginRefreshView: () => ({ appId, tunnelId, refresh: { click }, tools: refreshed ? next : tools }) },
+      ask: async (message: any) => {
+        actions.push(message.action);
+        const ok = message.action === 'claim' ? await claimPluginRefresh({ ...message, ownsTunnel: () => true }, automatic)
+          : message.action === 'complete' ? await completePluginRefresh(message)
+          : message.action === 'current' ? await claimPluginRefresh({ ...message, alreadyCurrent: true, ownsTunnel: () => true }, automatic) : false;
+        return { data: { ok } };
+      }
+    });
+    vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+    expect(await (context.run as Function)(request)).toBe(true);
+    expect(actions).toEqual(['claim', 'click', 'complete']);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+    expect(await claimPluginRefresh(input, automatic)).toBe(false);
+    expect(await pendingPluginRefreshes(automatic)).toEqual([]);
+  } finally { get.mockRestore(); }
+});
+it.each(['parked', 'error', 'unconfirmed', 'same-schema'] as const)('keeps a legacy %s receipt read-only even with proven app and tunnel', async outcome => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    await claim(first); await completePluginRefresh({ ...first, appId, tools });
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    if (outcome === 'parked') Object.assign(legacy[0], { parked: true, parkedBy: APP_VERSION });
+    if (outcome === 'error') legacy[0].error = 'Uncertain saved outcome';
+    if (outcome === 'unconfirmed') legacy[0].completedSchemaId = null;
+    await writeDurableNow('plugin-refresh', legacy);
+    publish('2', outcome === 'same-schema' ? tools : [{ ...tools[0]!, description: 'New declarations' }]);
+    await requestPluginRefreshes(APP_VERSION);
+    const request = (await pendingPluginRefreshes(false))[0]!;
+    expect(request.observeOnly).toBe(true);
+    const input = { ...request, appId, connectorName: request.connectorName, tools: [{ ...tools[0]!, description: 'Stale provider' }], tunnelId, ownsTunnel: () => true };
+    expect(await claimPluginRefresh(input, false)).toBe(false);
+    expect(await requireManualPluginRefresh({ ...input, error: 'No Refresh control' })).toBe(false);
+    expect((await readDurable('plugin-refresh') as any[])[0].tunnelKey).toBeUndefined();
+  } finally { get.mockRestore(); }
+});
+it('records a proven completed legacy migration as manual when the provider has no Refresh control', async () => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    await claim(first); await completePluginRefresh({ ...first, appId, tools });
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    publish('2', [{ ...tools[0]!, description: 'New declarations' }]);
+    const request = (await pendingPluginRefreshes())[0]!;
+    const input = { ...request, appId, connectorName: request.connectorName, tools, tunnelId, ownsTunnel: () => true, error: 'No Refresh control' };
+    expect(await requireManualPluginRefresh({ ...input, tunnelId: undefined })).toBe(false);
+    expect(await requireManualPluginRefresh(input)).toBe(true);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('manual');
+    expect(await claimPluginRefresh(input)).toBe(false);
+    expect(await pendingPluginRefreshes()).toEqual([]);
+  } finally { get.mockRestore(); }
+});
+it('retries a transient ledger read on the next state push without Reset, replacement or browser work', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(request)).toBe(true);
+  expect(await completePluginRefresh({ ...request, appId, tools })).toBe(true);
+  initDurableStore(directory); wake.mockClear();
+  const file = `${directory}/state/plugin-refresh.json`, before = await fs.readFile(file, 'utf8');
+  const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(new Error('Transient private diagnostics'));
+  expect(await pluginRefreshUnreadable()).toBe(true);
+  expect(confirmedPluginSchemas()).toEqual({});
+  const [status, unreadable] = await Promise.all([pluginRefreshStatuses(), pluginRefreshUnreadable(), hasRequestedPluginRefresh()]);
+  expect(status.core?.state).toBe('current'); expect(unreadable).toBe(false);
+  expect(confirmedPluginSchemas()).toEqual({ core: request.schemaId });
+  expect(read).toHaveBeenCalledTimes(2); read.mockRestore();
+  expect(await fs.readFile(file, 'utf8')).toBe(before);
+  expect(wake).not.toHaveBeenCalled();
+});
+it.each(['success', 'failure'] as const)('does not publish an older %s read after Reset commits recovery', async outcome => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  await claim(request); await completePluginRefresh({ ...request, appId, tools });
+  initDurableStore(directory);
+  const bytes = await fs.readFile(`${directory}/state/plugin-refresh.json`, 'utf8');
+  let release!: (value: string) => void, reject!: (reason: Error) => void;
+  const held = new Promise<string>((resolve, fail) => { release = resolve; reject = fail; });
+  vi.spyOn(fs, 'readFile').mockImplementationOnce(() => held as any).mockRejectedValueOnce(new Error('Reset inspection failed'));
+  const beforeReset = pluginRefreshStatuses();
+  await resetPluginRefreshLedger();
+  if (outcome === 'success') release(bytes); else reject(new Error('Late read failed'));
+  expect((await beforeReset).core?.state).toBe('unknown');
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  expect(confirmedPluginSchemas()).toEqual({});
+  expect(await readDurable('plugin-refresh')).toEqual([]);
+});
+it.each(['manual', 'cloudflared'] as const)('never binds an old Secure Tunnel observation to a current %s publication', async replacement => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  let kind: 'openai' | 'manual' | 'cloudflared' = 'openai';
+  const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel: { ...original.tunnel, kind, tunnelId } }));
+  try {
+    publish(); const request = (await pendingPluginRefreshes())[0]!; expect(await claim(request)).toBe(true);
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    kind = replacement; publish();
+    const observation = (await pendingPluginRefreshes())[0]!;
+    // The old ID can remain configured after switching transport. ID equality alone
+    // cannot prove the old app points at this publication's current endpoint.
+    expect(await claimPluginRefresh({ ...observation, appId, connectorName: observation.connectorName,
+      tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true })).toBe(false);
+    expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ appId, attempted: true });
+    expect((await readDurable('plugin-refresh') as any[])[0].tunnelKey).toBeUndefined();
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
+  } finally { get.mockRestore(); }
+});
+it('consumes unpublished explicit startup work once durably without expiring browser intent', async () => {
+  await requestPluginRefreshes(APP_VERSION, ['core']);
+  expect(await hasRequestedPluginRefresh()).toBe(true);
+  expect(await consumeStartup()).toBe(true);
+  resetPluginRefreshForTests();
+  expect(await hasRequestedPluginRefresh()).toBe(true);
+  expect(await consumeStartup()).toBe(false);
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ schemaId: '', requestedVersion: APP_VERSION });
+  publish(); expect((await pendingPluginRefreshes(false))[0]?.surface).toBe('core');
+  expect(await consumeStartup()).toBe(false);
+  await requestPluginRefreshes(APP_VERSION);
+  expect(await consumeStartup()).toBe(true);
+  expect(await consumeStartup()).toBe(false);
+});
+it('allows one explicit refresh round while automatic refresh stays off and fences later schema edits', async () => {
+  publish(); const automatic = (await pendingPluginRefreshes())[0]!;
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+  expect(await claimPluginRefresh({ ...automatic, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(false);
+  await requestPluginRefreshes(APP_VERSION);
+  const explicit = (await pendingPluginRefreshes(false))[0]!;
+  expect(explicit.schemaId).toBe(automatic.schemaId); expect(explicit.id).not.toBe(automatic.id);
+  publishPluginSurface('desktop', 'Desktop', '1', '', tools);
+  expect((await pendingPluginRefreshes(false)).map(row => row.surface)).toEqual(['core']);
+  expect((await authorizedPluginRefreshPublications(false)).map(row => row.surface)).toEqual(['core']);
+  expect(await claimPluginRefresh({ ...explicit, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true }, false)).toBe(true);
+  expect(await hasRequestedPluginRefresh()).toBe(false);
+  publish('1', [{ ...tools[0]!, description: 'Later settings edit' }]);
+  expect(await pendingPluginRefreshes(false)).toEqual([]);
+  expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
+  const later = (await pendingPluginRefreshes())[0]!;
+  expect(await claimPluginRefresh({ ...later, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(false);
+});
+it('keeps both state projections on committed evidence when a write fails', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  await claimPluginRefresh({ ...request, appId, connectorName: request.connectorName, tools, alreadyCurrent: true });
+  const confirmation = confirmedPluginSchemas();
+  const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('Disk full'));
+  try {
+    await expect(requestPluginRefreshes(APP_VERSION)).rejects.toThrow('Disk full');
+    expect(confirmedPluginSchemas()).toEqual(confirmation);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+  } finally { rename.mockRestore(); }
+});
+it('caches committed ledger reads across state pushes and invalidates only that ledger', async () => {
+  publish();
+  const read = vi.spyOn(fs, 'readFile');
+  try {
+    await Promise.all(Array.from({ length: 100 }, () => pluginRefreshStatuses()));
+    const reads = () => read.mock.calls.filter(call => String(call[0]).endsWith('plugin-refresh.json')).length;
+    expect(reads()).toBe(1);
+    await writeDurableNow('other-ledger', {});
+    await pluginRefreshStatuses(); expect(reads()).toBe(1);
+    await requestPluginRefreshes(APP_VERSION);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('pending'); expect(reads()).toBe(1);
+    publish('1', [{ ...tools[0]!, description: 'Changed' }]);
+    await pluginRefreshStatuses(); expect(reads()).toBe(1);
+    await writeDurableNow('plugin-refresh', []);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('unknown'); expect(reads()).toBe(2);
+  } finally { read.mockRestore(); }
+});
+it('tracks successful use separately from complete schema verification and fences late calls', async () => {
+  publish(); const confirm = beginPluginToolCall('core'); confirm();
+  expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'unknown', responding: true });
+  publish('1'); expect((await pluginRefreshStatuses()).core?.responding).toBe(true);
+  const late = beginPluginToolCall('core');
+  publish('1', [{ ...tools[0]!, description: 'Changed' }]); late();
+  expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+  const disconnected = beginPluginToolCall('core'); unpublishPluginSurface('core'); publish(); disconnected();
+  expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+});
+it('never borrows schema or successful-use proof from another setup tunnel', async () => {
+  let tunnelId = 'tunnel_aaaaaaaaaaaaaaaa';
+  const original = configOwner.getConfig();
+  const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } }));
+  try {
+    publish(); await requestPluginRefreshes(APP_VERSION);
+    const request = (await pendingPluginRefreshes(false))[0]!;
+    await claimPluginRefresh({ ...request, appId, connectorName: request.connectorName, tools, alreadyCurrent: true }, false);
+    expect(confirmedPluginSchemas()).toEqual({ core: request.schemaId });
+    const late = beginPluginToolCall('core');
+    tunnelId = 'tunnel_bbbbbbbbbbbbbbbb'; late();
+    expect((await pluginRefreshStatuses()).core).toMatchObject({ state: 'unknown' });
+    expect(confirmedPluginSchemas()).toEqual({});
+    expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    await requestPluginRefreshes(APP_VERSION);
+    expect(await pendingPluginRefreshes(false)).toEqual([]);
+    publish();
+    expect((await pendingPluginRefreshes(false))[0]).toMatchObject({ appId: null });
+  } finally { get.mockRestore(); }
+});
+
 it.each(['malformed', 'null', 'invalid', 'duplicate'] as const)('preserves a %s ledger without creating new refresh authority', async kind => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   expect(await claim(request)).toBe(true);
@@ -29,7 +361,7 @@ it.each(['malformed', 'null', 'invalid', 'duplicate'] as const)('preserves a %s 
   await expect(claim(request)).rejects.toThrow(/^Could not read plugin-refresh state$/);
   expect(await fs.readFile(file, 'utf8')).toBe(broken);
   // An independently restored receipt remains consumed; the failed read did not rearm it.
-  await fs.writeFile(file, JSON.stringify(saved));
+  await writeDurableNow('plugin-refresh', saved);
   expect(await pendingPluginRefreshes()).toEqual([]);
   expect(await claim(request)).toBe(false);
 });
@@ -395,6 +727,7 @@ it('projects unreadable state without repairing legacy receipts or waking work',
   expect(await pluginRefreshUnreadable()).toBe(false);
   expect(await readDurable('plugin-refresh')).toEqual(legacy);
   await fs.writeFile(`${directory}/state/plugin-refresh.json`, '{broken');
+  initDurableStore(directory); // A reloaded store invalidates the read-only projection cache.
   expect(await pluginRefreshUnreadable()).toBe(true);
   expect(wake).not.toHaveBeenCalled();
 });
@@ -404,6 +737,7 @@ it.each(['{broken', 'null', '[{}]'])('archives an unreadable ledger only on expl
   expect(await completePluginRefresh({ ...old, appId, tools })).toBe(true);
   expect(confirmedPluginSchemas().core).toBe(old.schemaId);
   await fs.writeFile(`${directory}/state/plugin-refresh.json`, broken); wake.mockClear();
+  initDurableStore(directory);
   expect(await pluginRefreshUnreadable()).toBe(true);
   await Promise.all([resetPluginRefreshLedger(), resetPluginRefreshLedger()]);
   expect(await readDurable('plugin-refresh')).toEqual([]);
@@ -426,6 +760,26 @@ it('leaves healthy and missing ledgers unchanged when a stale Reset arrives', as
   await resetPluginRefreshLedger();
   expect(await fs.readFile(`${directory}/state/plugin-refresh.json`, 'utf8')).toBe(before);
   expect(await fs.readdir(`${directory}/state`)).toEqual(['plugin-refresh.json']);
+  expect(wake).not.toHaveBeenCalled();
+});
+it('rechecks cached state only on explicit Reset and clears a stale read failure without replacing healthy bytes', async () => {
+  await writeDurableNow('plugin-refresh', []);
+  const read = vi.spyOn(fs, 'readFile');
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  expect(read).toHaveBeenCalledTimes(1);
+  const file = `${directory}/state/plugin-refresh.json`;
+  await fs.writeFile(file, '{broken');
+  await expect(resetPluginRefreshLedger()).resolves.toBeUndefined();
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  await fs.writeFile(file, '{broken'); initDurableStore(directory);
+  expect(await pluginRefreshUnreadable()).toBe(true);
+  await fs.writeFile(file, '[]'); wake.mockClear();
+  const before = await fs.readdir(`${directory}/state`);
+  await resetPluginRefreshLedger();
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  expect(await fs.readFile(file, 'utf8')).toBe('[]');
+  expect(await fs.readdir(`${directory}/state`)).toEqual(before);
   expect(wake).not.toHaveBeenCalled();
 });
 it.each(['copyFile', 'writeFile', 'rename'] as const)('retains the unreadable ledger when recovery %s fails', async operation => {
