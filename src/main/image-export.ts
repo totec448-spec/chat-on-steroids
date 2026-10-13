@@ -12,6 +12,7 @@
  * them (size, a real PNG/JPEG/WebP that decodes) and writes them without ever replacing a file.
  */
 import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { rawPromises as fs } from './rawfs.js';
@@ -25,6 +26,8 @@ export const IMAGE_EXPORT_TIMEOUT_MS = 60_000;
 /** Base64 of the largest original plus the JSON around it. */
 export const IMAGE_EXPORT_BODY_BYTES = Math.ceil(MAX_IMAGE_EXPORT_BYTES / 3) * 4 + 64 * 1024;
 
+/** What `link` answers on a volume that has no hard links, or across two volumes. */
+const NO_HARD_LINKS = new Set(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV', 'EMLINK']);
 const FORMATS: Record<string, string> = { png: '.png', jpeg: '.jpg', webp: '.webp' };
 const EXTENSIONS: Record<string, string> = { '.png': 'png', '.jpg': 'jpeg', '.jpeg': 'jpeg', '.webp': 'webp' };
 
@@ -144,7 +147,14 @@ async function save(bytes: Buffer, target: ImageExportTarget): Promise<ImageExpo
   const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.part`);
   await fs.writeFile(temporary, bytes, { flag: 'wx' });
   try {
-    await fs.link(temporary, file);
+    try {
+      await fs.link(temporary, file);
+    } catch (error) {
+      // exFAT and FAT drives, many network shares and WSL folders have no hard links. An
+      // exclusive copy publishes the file there, and still never replaces one.
+      if (!NO_HARD_LINKS.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      await fs.copyFile(temporary, file, constants.COPYFILE_EXCL);
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new ImageExportError(`${virtual} already exists. Choose another name.`);
     throw error;
