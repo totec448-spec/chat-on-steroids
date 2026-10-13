@@ -25,6 +25,21 @@ export function paintRecordingStorageNotice(full: boolean): void {
   document.getElementById('dismissRecordingStorageFull')!.onclick = () => { noticeDismissed = true; notice.hidden = true; };
 }
 
+/** The clean-up's place in Settings → Agents & automation → Browser & history (#1406). */
+export function initRecordingStorageSetting(): void {
+  document.getElementById('settingsFreeImageStorage')!.onclick = () => showImageStorage();
+}
+
+/** Usage, read when Settings opens; the description stays when it cannot be read. */
+export async function paintRecordingStorageUsage(): Promise<void> {
+  const reply = await window.api.getImageStorage().catch(() => null);
+  // A reply without data (an older main, a test fixture) leaves the description too.
+  const usage = reply?.ok ? reply.data : null;
+  if (!usage) return;
+  ui(document.getElementById('recordingStorageUsage')!, 'textContent', () =>
+    t('{0} GB used of {1} GB', [(usage.usedBytes / 2 ** 30).toFixed(2), (usage.limitBytes / 2 ** 30).toFixed(0)]));
+}
+
 function showImageStorage(): void {
   if (document.querySelector('.image-storage-dialog')) return;
   const dialog = document.createElement('dialog');

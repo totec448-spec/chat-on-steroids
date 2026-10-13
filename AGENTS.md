@@ -1710,7 +1710,8 @@ quota failures retain the canonical row and explicitly report storage full. The 
 one state (`recordingStorageFull()`, set by a write the global limit refused, cleared by an admitted
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
-There is no automatic
+The same clean-up is in Settings → Agents & automation → Browser & history (Recording storage), which
+reads the usage when Settings opens. There is no automatic
 eviction. The adjacent Free image storage action offers explicit oldest-1-GiB or all-recorded-image
 cleanup with confirmation; chat text, original files and pending attachments remain. Store owns
 serialized image inventory, durable reference retirement and physical removal. A removed native
