@@ -2255,10 +2255,11 @@ describe('native worker checkout cleanup confirmation', () => {
   });
 });
 
-it('projects unreadable ledger health through state:get and recovers only through explicit reset', async () => {
+it('projects reloaded unreadable ledger health through state:get and recovers only through explicit reset', async () => {
   const file = path.join(dir, 'state', 'plugin-refresh.json');
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, '{broken');
+  initDurableStore(dir);
   const broken: any = await handlers.get('state:get')!(null, undefined);
   expect(broken).toMatchObject({ ok: true, data: { pluginRefreshUnreadable: true } });
   expect(await fs.readFile(file, 'utf8')).toBe('{broken');
