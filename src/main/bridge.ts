@@ -9523,6 +9523,8 @@ async function takePendingRepairs(
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
     requiresClaim?: boolean;
+    /** A silence repair whose confirmation files an automatic Continue, so an error page may be kept. */
+    continueFollows?: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
     // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy.
@@ -9583,7 +9585,8 @@ async function takePendingRepairs(
         !stopRequestedFor(conversationId))
       {
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
-          ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}) });
+          ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
+          ...(repair.reason === 'silence' && recoveryInputAllowed(repair.sessionId, conversationId) ? { continueFollows: true } : {}) });
       }
   }
   if (ready.length) logInfo(`bridge: handing the browser ${ready.length} repair(s): ` +

@@ -9332,7 +9332,8 @@ describe('unattributed activity recovery', () => {
         await sweepStaleSwarm(Date.now());
         repair = await maintenance();
       }
-      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+      // Automatic recovery is on, so the browser is told a Continue follows and may keep the page.
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence', continueFollows: true });
       await maintenance(repair!.token, 'preserved');
       const session = (await findSessionByConversation(chat))!;
       let continues: Awaited<ReturnType<typeof input.listInputs>> = [];
@@ -10936,6 +10937,9 @@ describe('unattributed activity recovery', () => {
       }
       expect(chatOf(handout)).toBe(OTHER);
       expect(handout?.reason).toBe('silence');
+      // Automatic recovery is off here and no Goal is armed: no Continue would follow, so the
+      // browser is not allowed to keep an error page instead of reloading it.
+      expect(handout).not.toHaveProperty('continueFollows');
     } finally {
       vi.useRealTimers();
     }
