@@ -83,7 +83,7 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-const { startTunnel } = await import('../src/main/tunnel/index.js');
+const { startTunnel, setSystemProxyResolver } = await import('../src/main/tunnel/index.js');
 const { ROUTE_SETTLE_MS, resetRouteSettleForTests, tunnelRouteSettling } = await import('../src/main/tunnel/route-settle.js');
 
 const settings = {
@@ -102,9 +102,42 @@ beforeEach(() => {
   fixture.termination.release = null;
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  setSystemProxyResolver(null);
 });
 
 describe('OpenAI tunnel process ownership', () => {
+  // #1255: without this, a computer that reaches the internet through a system proxy could not
+  // connect the tunnel unless the person set HTTPS_PROXY before starting the app.
+  it('starts the tunnel program with the system proxy, and without one when there is none or the lookup fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })));
+    const envOf = async (): Promise<Record<string, string>> => {
+      const before = fixture.spawn.mock.calls.length;
+      const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/mcp/core/token', settings, apiKey: 'test', report: () => {} });
+      await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledTimes(before + 1));
+      const call = fixture.spawn.mock.calls.at(-1) as unknown as [string, string[], { env: Record<string, string> }];
+      await handle.stop();
+      return call[2].env;
+    };
+    expect(await envOf()).not.toHaveProperty('HTTPS_PROXY');
+
+    const asked: string[] = [];
+    setSystemProxyResolver(async url => { asked.push(url); return 'PROXY 127.0.0.1:7890'; });
+    expect(await envOf()).toMatchObject({ HTTPS_PROXY: 'http://127.0.0.1:7890', NO_PROXY: 'localhost,127.0.0.1,::1' });
+    expect(asked).toEqual(['https://api.openai.com/']);
+
+    setSystemProxyResolver(async () => 'DIRECT');
+    expect(await envOf()).not.toHaveProperty('HTTPS_PROXY');
+    setSystemProxyResolver(async () => { throw new Error('proxy service unavailable'); });
+    expect(await envOf()).not.toHaveProperty('HTTPS_PROXY');
+    // A lookup that never answers (an unreachable PAC script) must not keep the tunnel from starting.
+    vi.useFakeTimers();
+    setSystemProxyResolver(() => new Promise<string>(() => {}));
+    const pending = envOf();
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(await pending).not.toHaveProperty('HTTPS_PROXY');
+    vi.useRealTimers();
+  });
+
   it('serves each run\'s fresh MCP path through the same tunnel id', async () => {
     // ChatGPT's plugin names the tunnel, not a URL: tunnel-client is told this run's local URL,
     // token path included, so the per-start token never reaches ChatGPT and a plugin created in an
@@ -113,6 +146,7 @@ describe('OpenAI tunnel process ownership', () => {
     const runs: Array<{ args: string[]; url: string }> = [];
     for (const localUrl of ['http://127.0.0.1:1234/mcp/core/first-run-token', 'http://127.0.0.1:1234/mcp/core/second-run-token']) {
       const handle = await startTunnel({ localUrl, settings, apiKey: 'test', report: () => {} });
+      await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledTimes(runs.length + 1));
       const call = fixture.spawn.mock.calls.at(-1) as unknown as [string, string[], { env: Record<string, string> }];
       runs.push({ args: call[1], url: call[2].env.MCP_SERVER_URL ?? '' });
       await handle.stop();
