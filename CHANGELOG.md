@@ -11,47 +11,57 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.36] — Steadier long runs, proxy support and ChatGPT's own words
 
-Long runs recover more reliably, the tunnel to ChatGPT works behind a proxy, and Windows dictation is much more accurate. The app now uses ChatGPT's own words and screens, in your language, and the Local control API can start chats and follow them live.
+Long runs recover more reliably: a chat that stops on "Message delivery timed out" now continues by itself, and the app keeps its footing after your computer sleeps. The tunnel to ChatGPT works behind a proxy, Windows dictation is much more accurate, and the app now uses ChatGPT's own words and screens, in your language. Developers can start chats through the Local control API and follow them live.
+
+### 👉 After updating
+
+- **Refresh the Core plugin in ChatGPT once.** One of Core's tool descriptions changed, so ChatGPT needs to load the new version. With **Automatic plugin refresh** on (**Settings → Agents & automation → Browser & history**), the app does this by itself about two and a half minutes after it starts. Otherwise the app shows a reminder: in ChatGPT, open **Plugins**, choose your **Chat On Steroids Core** plugin and click **Refresh tools**.
+- The browser extension updates itself once no chat is busy; there is nothing to do.
 
 ### ✨ Highlights
 
-- **Steadier long runs.** After your computer wakes from sleep, working chats get a moment to reconnect before the app tries to recover them. A chat that is being moved to a new chat with Compact & Resume no longer gets stuck when its answer goes quiet, and the timeline keeps a long turn's "Working…" line, its worker reports and its recovered notices where they belong.
-- **Works behind a proxy.** The Secure Tunnel now uses your system's proxy by itself (HTTP, HTTPS or SOCKS5), and `ALL_PROXY` if you set it. Before, you had to set `HTTPS_PROXY` before starting the app.
+- **Chats continue after a delivery timeout.** When ChatGPT's answer stops on "Message delivery timed out" or "Connection interrupted", the app now presses Stop and sends Continue on the page as it is, which is what got these chats going again by hand. Before, it reloaded the page into the same error or into "Could not load this ChatGPT conversation". Needs **Automatically recover unfinished answers** on (**Settings → Agents & automation → Continuation sources**).
+- **Steadier long runs.** After your computer wakes from sleep, working chats get 90 seconds to reconnect before the app tries to recover them. Compact & Resume no longer gets stuck when the old chat's answer goes quiet, and still picks up the handoff when the old chat's turn only ends after the request. While an automatic Compact & Resume waits for the turn to end, the dock above the message box says so. The timeline keeps a long turn's "Working…" line, its worker reports and its recovered notices where they belong.
+- **Works behind a proxy.** The Secure Tunnel now uses your system's proxy by itself (HTTP, HTTPS or SOCKS5), and `ALL_PROXY` if you set it. Before, you had to set `HTTPS_PROXY` before starting the app. `HTTPS_PROXY` still wins, and is the way to use a proxy that needs a login.
 - **Better dictation on Windows.** Dictation now uses Windows' own speech recognition, with punctuation and much better accuracy, and keeps your last words when you stop.
 - **Plugins, as ChatGPT calls them.** ChatGPT no longer says "connector" anywhere, so the app doesn't either: Core, Desktop and Plugins are plugins in ChatGPT. Plugins with many tools (over 256, or over 1 MB) can now be installed too; ChatGPT gets what fits, and switching tools off makes room for others.
-- **Start chats from your own tools.** With **Local control API** and **Allow actions** on (Settings → General → For developers), `POST /v1/inputs` without a `sessionId` starts a new chat, and `GET /v1/sessions/{id}/events/stream` sends that chat's events as they happen.
+- **Start chats from your own tools.** With **Local control API** and **Allow actions** on (**Settings → General → For developers**), `POST /v1/inputs` without a `sessionId` starts a new chat, and `GET /v1/sessions/{id}/events/stream` sends that chat's events as they happen.
 
 ### 🛠 Fixed
 
-- **Chats that stopped after "Message delivery timed out" or an interrupted connection** now continue by themselves when automatic recovery is on: the app presses Stop and sends Continue on the page as it is, instead of reloading it into the same error or ChatGPT's history limit. A turn that ChatGPT opened again after a reload is recognized as the same work.
 - **Plans in an existing chat.** When nothing is running in the chat, a written plan now waits for you and starts when you press Enter or Send. Before, it waited for another message.
 - **Project folders that looked empty.** A project whose chats are all older now loads them when you expand it, instead of showing nothing.
-- **Saved keys that can no longer be read** (for example after moving to another computer): the app now says so and offers to start fresh, keeping the old file as a backup. Before, every new key was silently refused.
+- **Saved keys that can no longer be read** (for example after moving to another computer or resetting the keychain): the app now says so and offers to start fresh, keeping the old file as a backup. Before, every new key was silently refused.
 - **Recording storage full.** When the 2 GiB of stored images and long texts is full, the app now shows a notice with the clean-up, instead of silently no longer saving them. **Settings → Agents & automation → Browser & history → Recording storage** shows the space used and offers the same clean-up at any time.
-- **Long unattended runs on Windows** could stop at a ChatGPT approval prompt that flagged a tool description as suspicious. The description is reworded; ChatGPT asks to refresh the Core plugin once after the update (automatic with Automatic plugin refresh).
+- **Long unattended runs on Windows** could stop at a ChatGPT approval prompt that flagged a tool description as "suspicious". The description is reworded (this is the Core refresh above).
+- **Automatic plugin refresh after an update** now reaches ChatGPT: it waits until the restarted tunnel has taken over, where it used to click too early and leave ChatGPT with the old tools. A refresh that worked is now confirmed as soon as ChatGPT has the new tools, instead of sometimes being reported as failed with the reminder staying up.
 - **Updates** recover by themselves after a failed check, and now download on slow connections too.
 - **Saving a ChatGPT image** now works in folders on exFAT drives, network shares and WSL.
 - **Editing a file with `apply_patch`** no longer removes its byte-order mark, which broke PowerShell scripts with non-English text.
 - **Formulas in GPT-6 answers** now draw; before, many showed as LaTeX source with broken brackets.
-- **The "ChatGPT temporarily limited access" notice** says until when ChatGPT asked to wait, appears once, and the app continues by itself afterwards.
-- **Code mode** no longer stops a short script with a CPU-limit error when the computer is busy.
+- **The "ChatGPT temporarily limited access" notice** says until when ChatGPT asked to wait, appears once, and the app continues by itself afterwards. A chat that is continuing stays under watch through that limit.
+- **Automatic recovery** is kept for a new turn that starts while the app is still finishing a check on the previous one.
 - **Portuguese ChatGPT accounts:** a message that ChatGPT failed to deliver ("A entrega da mensagem atingiu o tempo limite") is now recognized and recovered.
 - **The built-in browser** no longer goes quiet in long runs while still looking connected.
+- **Code mode** no longer stops a short script with a CPU-limit error when the computer is busy.
+- **Tunnel errors** that arrive as structured data now show their text instead of "[object Object]".
 - **A copy that fails** is now reported instead of being shown as done.
+- **Switching the language** now also updates two labels that stayed in the previous language.
 
 ### ✨ Improved
 
-- **A waiting Compact & Resume is visible.** While a chat waits for its turn to end before an automatic Compact & Resume, or is asking ChatGPT for the handoff, the dock above the message box says so, instead of the chat looking stuck.
 - **Setup in your language.** Setup shows ChatGPT's and OpenAI's screens as they look today, in your language, names ChatGPT's buttons the way ChatGPT shows them, and its first step opens your browser's own extensions page with the address copied for you.
 - **Two plugins on one tunnel ID** (which makes about every second call fail with UNKNOWN_TOOL) is now flagged in Setup, in the Plugins dialog and by the connection self-test.
-- **Automatic plugin refresh after an update** now reaches ChatGPT: it waits about two and a half minutes until the restarted tunnel has taken over, where it used to click too early and leave ChatGPT with the old tools. It is also confirmed as soon as ChatGPT has the new tools; before, a refresh that had worked was sometimes reported as failed and the "tools changed" reminder stayed up. It is also safer when tunnels or setup profiles change, and recovers by itself from a saved state that could not be read for a moment.
+- **Automatic plugin refresh** is safer when tunnels or setup profiles change, and recovers by itself from a saved state that could not be read for a moment.
 - **Translations:** each feature has one name throughout each language, German says "du" everywhere, the browser extension is called that everywhere, and the bundled pets describe themselves in your language.
 - **The diagnostics report** shows how much memory the app's parts use, including each ChatGPT page of the built-in browser.
 - **Worker checkouts** are listed under the worker's job, not under the last message it received.
 
 ### 💛 Thank you
 
-To **@Haz4rdovisk** for the long-run, timeline and recovery fixes from their test runs, **@atsu6** for making automatic plugin refresh safer and preparing the update texts, **@mch1902879100-cmyk** for finding and first fixing the empty project folders, and to everyone who reported problems and tested fixes.
+To **@Haz4rdovisk** for the delivery-timeout recovery, the Compact & Resume and timeline fixes and the measurements from their long runs, **@atsu6** for making automatic plugin refresh safer and preparing the update texts, and **@mch1902879100-cmyk** for finding and first fixing the empty project folders.
+
+And to everyone whose reports led to fixes in this release: **@danangplace-cpu** (delivery timeouts), **@lic-twrightjay** (proxy), **@lambert-lincoln** (plans in an existing chat) and **@j5bak928-a11y** (two plugins on one tunnel).
 
 ## [2.1.35] — ChatGPT Projects, worker worktrees and steadier long runs
 
