@@ -706,6 +706,19 @@ it('hands out a refresh only after the surface tunnel has been live for its grac
   vi.advanceTimersByTime(19_000); expect(await pendingPluginRefreshes()).toEqual([]);
   vi.advanceTimersByTime(1_000); expect((await pendingPluginRefreshes())[0]?.tools[0]?.description).toBe('Changed at runtime');
 });
+// Release round 2026-10-13: after an update the app restarts and its tunnel-client is new. For
+// about 128 s OpenAI can still route an existing app's requests to the previous client (#1220).
+// A Refresh clicked 30 s after the Mac's Core tunnel connected never reached the app, and ChatGPT
+// kept the old tools; the click is spent, so nothing tried again.
+it('waits out the previous tunnel client before handing out a refresh after the app starts', async () => {
+  setPluginRefreshTunnelGraceForTests(PLUGIN_REFRESH_TUNNEL_GRACE_MS);
+  publishPluginSurface('core', 'Chat On Steroids Core', '1', '', tools);
+  vi.advanceTimersByTime(130_000);
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  expect(wake).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(PLUGIN_REFRESH_TUNNEL_GRACE_MS - 130_000);
+  expect((await pendingPluginRefreshes()).map(row => row.surface)).toEqual(['core']);
+});
 it('does not take an older completion as current after an unconfirmed click for a newer schema', async () => {
   publish('1', tools); let request = (await pendingPluginRefreshes())[0]!;
   expect(await claim(request)).toBe(true);

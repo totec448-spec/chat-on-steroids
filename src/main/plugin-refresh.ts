@@ -62,8 +62,14 @@ export const PLUGIN_REFRESH_DEBOUNCE_MS = 20_000;
  * reached this app (no MCP request at all; 3 of 3 app starts), so ChatGPT kept the old tools and
  * the attempt was recorded as clicked. Clicks about 20 s after connecting, and at runtime,
  * arrived every time.
+ *
+ * That wait was too short after an update. A new tunnel-client takes over an existing app's route
+ * only once the previous client's lease ends, about 128 s (#1220, tunnel/route-settle.ts). In the
+ * 2.1.36 release round (2026-10-13) a Refresh clicked 30 s after the Mac's Core tunnel connected
+ * never reached this app either, and on Windows the first one was late. The click is spent, so
+ * nothing tries again: wait past the lease. Updates are rare; a refresh two minutes later is fine.
  */
-export const PLUGIN_REFRESH_TUNNEL_GRACE_MS = 30_000;
+export const PLUGIN_REFRESH_TUNNEL_GRACE_MS = 150_000;
 let tunnelGraceMs = PLUGIN_REFRESH_TUNNEL_GRACE_MS;
 /**
  * Pre-claim failures one schema may spend before automatic browser maintenance stops.
