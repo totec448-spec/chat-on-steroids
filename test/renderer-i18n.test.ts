@@ -318,3 +318,14 @@ it('matches both Turkish I pairs when searching settings', async () => {
   for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) expect(searchSettings(entries, query)).toHaveLength(1);
   expect(searchSettings(entries, 'missing')).toEqual([]);
 });
+
+// The German interface says "du". Formal address crept in with whole features more than once
+// (sign-in flow, 2026-10): an imperative or statement with "Sie", or "Ihr …" for the person's things.
+it('addresses the person as "du" throughout the German catalog', () => {
+  const formal = /(?:^|[.!?:]\s+|,\s+|\s)(?:\p{Lu}\p{Ll}+(?:en|ern|eln) Sie\b|Sie (?:sind|können|müssen|haben|werden gefragt)\b)|\b(?:werden|können|müssen|sind|haben|wählen|öffnen|versuchen|fahren) Sie\b|\bIhr(?:e[mnrs]?)? (?:Browser|Konto|App|Einstellungen|Computer|Projekt|Chat)\b/u;
+  const offenders = Object.entries(catalogs.de!).filter(([, value]) => formal.test(value)).map(([key, value]) => `${key} → ${value}`);
+  expect(offenders).toEqual([]);
+  // The extension's popup and in-page notices are the same product, in its own catalog.
+  const extension = JSON.parse(readFileSync('extension/_locales/de/messages.json', 'utf8')) as Record<string, { message: string }>;
+  expect(Object.entries(extension).filter(([, entry]) => formal.test(entry.message)).map(([key, entry]) => `${key} → ${entry.message}`)).toEqual([]);
+});
