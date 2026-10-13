@@ -15,6 +15,7 @@ export const CONTROL_API_ROUTES = [
   '/v1/sessions',
   '/v1/sessions/{id}',
   '/v1/sessions/{id}/events',
+  '/v1/sessions/{id}/events/stream',
   '/v1/inputs',
   '/v1/agents',
   '/v1/log'
@@ -246,6 +247,8 @@ export type ControlApiEvent = {
   reason?: string;
   recoverable?: boolean;
   blocking?: boolean;
+  /** `chat_error` for a history limit: the first time ChatGPT said it may be retried (epoch ms). */
+  retryAt?: number;
   /** `page_tool`. */
   label?: string;
   /** `native_image`. */

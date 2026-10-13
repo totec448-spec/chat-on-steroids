@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chronological, projectTimeline, type Chronological, type TimelineTurns } from '../src/shared/chronology.js';
+import { applyTurnIdentity, chronological, projectTimeline, type Chronological, type TimelineTurns, type TurnIdentity } from '../src/shared/chronology.js';
 
 describe('transcript pagination across recovered turns', () => {
   const turns: TimelineTurns = {
@@ -51,7 +51,11 @@ describe('transcript pagination across recovered turns', () => {
     const [projected] = projectTimeline([row], turns);
     expect(projected).toMatchObject(row);
     expect(projected?.turnId).toBeUndefined();
-    expect(projected?.turnOrigin).toBeNull();
+    // Reported only after the second turn began, it is drawn in the turn ChatGPT wrote it in rather
+    // than below the second turn's work; that is presentation, not ownership.
+    expect(projected?.turnOrigin).toBe(2);
+    const unreported: Chronological = { seq: 41, origin: 6, kind: 'assistant_message', time: 300, authoredAt: 110 };
+    expect(projectTimeline([unreported], turns)[0]?.turnOrigin).toBeNull();
   });
 
   it('keeps unowned backfill and post-turn notices outside a partially loaded generation', () => {
@@ -132,5 +136,43 @@ describe('transcript pagination across recovered turns', () => {
     const sameResponse = { ...turns, second: { ...turns.second!, responseTurnId: 'first' } };
     expect(projectTimeline(source, sameResponse).map(row => row.turnOrigin)).toEqual([2, 2, 2]);
     expect(projectTimeline(source, turns).map(row => row.turnOrigin)).toEqual([2, 8, null]);
+  });
+});
+
+describe('a turn reopened after an early end', () => {
+  // 2026-10-12, live: the page ended a turn while its request kept calling tools, the app reopened it,
+  // and worker reports recorded during the reopened stretch carry no turn. Indexed as ended at its
+  // first end, those reports had no group and were drawn after the turn's final answer.
+  const rows: Chronological[] = [
+    { seq: 10, time: 1000, kind: 'turn_start', turnId: 'reopened' },
+    { seq: 11, time: 1100, kind: 'tool_call', turnId: 'reopened' },
+    { seq: 20, time: 2000, kind: 'turn_end', turnId: 'reopened' },
+    { seq: 21, time: 2001, kind: 'turn_start', turnId: 'reopened', source: 'app' },
+    { seq: 30, time: 3000, kind: 'agent_message' },
+    { seq: 40, time: 3500, kind: 'assistant_message', turnId: 'reopened', final: true },
+    { seq: 41, time: 3600, kind: 'tool_call', turnId: 'reopened' },
+    { seq: 50, time: 4000, kind: 'turn_end', turnId: 'reopened' }
+  ];
+  const index = (upTo: number): TimelineTurns => {
+    const identity: TurnIdentity = {};
+    for (const row of rows) if (row.seq <= upTo) applyTurnIdentity(identity, row);
+    return identity.timelineTurns ?? {};
+  };
+
+  it('holds the turn open from its reopening to its next end', () => {
+    expect(index(20).reopened).toMatchObject({ endTime: 2000 });
+    expect(index(30).reopened?.endTime).toBeUndefined();
+    expect(index(50).reopened).toMatchObject({ origin: 10, endTime: 4000, endOrigin: 50 });
+  });
+
+  it('draws a report from the reopened stretch inside the turn, before its answer', () => {
+    // Read while the turn was still reopened, and after its real end: the same place either way.
+    for (const upTo of [41, 50]) {
+      const page = rows.filter(row => row.seq <= upTo);
+      const projected = projectTimeline(page, index(upTo));
+      expect(projected.find(row => row.seq === 30)?.turnOrigin).toBe(10);
+      const order = chronological(projected).map(row => row.seq);
+      expect(order.indexOf(30)).toBeLessThan(order.indexOf(40));
+    }
   });
 });

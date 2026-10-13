@@ -75,6 +75,24 @@ const submitEntryDialog = async (value: string): Promise<void> => {
   await tick();
 };
 
+it('rearms a lost watch without resending watches for ordinary file changes or another project', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  toggle.click();
+  await tick();
+  const before = vi.mocked(window.api.watchProjectFiles).mock.calls.length;
+  projectFilesChanged!({ projectId: projectA.id, directory: '' });
+  await tick();
+  expect(window.api.watchProjectFiles).toHaveBeenCalledTimes(before);
+  projectFilesChanged!({ projectId: projectB.id, directory: '', watchLost: true });
+  await tick();
+  expect(window.api.watchProjectFiles).toHaveBeenCalledTimes(before);
+  projectFilesChanged!({ projectId: projectA.id, directory: '', watchLost: true });
+  await tick();
+  expect(window.api.watchProjectFiles).toHaveBeenCalledTimes(before + 1);
+  expect(window.api.watchProjectFiles).toHaveBeenLastCalledWith(projectA.id, ['']);
+});
+
 beforeEach(() => {
   codeMount.wait = null; codeMount.calls = 0;
   dom = new JSDOM('<body><section id="host"></section><button id="toggle"></button></body>', { url: 'https://cos.local/' });

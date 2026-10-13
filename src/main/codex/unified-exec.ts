@@ -639,7 +639,8 @@ export function execCommandStructuredOutput(output: ExecCommandToolOutput): Reco
     ...(output.exitCode === null ? {} : { exit_code: output.exitCode }),
     ...(output.processId === null ? {} : { session_id: output.processId }),
     ...(output.completedSessionId === undefined ? {} : { completed_session_id: output.completedSessionId }),
-    ...(output.benignExit ? { benign_exit: true } : {}),
+    // Named for what it says (#1417): "benign" read to ChatGPT's reviewer as a verdict on risk.
+    ...(output.benignExit ? { expected_exit: true } : {}),
     ...(output.replayed ? { output_replayed: true } : {}),
     ...(output.originalTokenCount === null ? {} : { original_token_count: output.originalTokenCount }),
     // This adapter emits structuredContent beside the text result, so both representations

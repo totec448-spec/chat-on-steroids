@@ -8,10 +8,12 @@
  * reach the stream tens of seconds before React publishes it, which is the difference between
  * an exact Core caller and CALLER_IDENTITY_REQUIRED. Resume requests also project their
  * opaque conversation id and HTTP status; the isolated recorder owns generation eligibility.
+ * A bounded 404 answer to a history or send request contributes only whether its code is
+ * `conversation_deleted`, with the exact conversation id.
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 5;
+  const OBSERVER_VERSION = 7;
   const prior = window.__cosUsageObserver;
   // An extension update re-executes this file in pages that stay open, and the same protocol
   // version used to keep the *old* code running until the tab was reloaded — measured
@@ -34,6 +36,7 @@
   const post = (...args) => { if (active) nativePost(...args); };
   let latest = null;
   let latestHistoryLimit = null;
+  let latestDeleted = null;
   let requestOrder = 0, latestOrder = 0;
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // @ehkogh/#318: the alternate shell also uses bare UUID workflow ids.
@@ -130,6 +133,53 @@
     post(projected, location.origin);
   }
   /**
+   * A chat deleted in ChatGPT, in ChatGPT's own words (2026-10-11, measured): opening it answers
+   * the history request, and sending into it answers the send, with HTTP 404 and
+   * `detail.code: "conversation_deleted"`. The page then shows a localized notice, or moves to
+   * its home page. Only that code and the exact conversation id leave this world: the history
+   * route names the id, and a send names it in its own request body.
+   */
+  async function inspectDeleted(response, method, sentTo, observedAt) {
+    if (!active || response.status !== 404) return;
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin) return;
+    const history = method === 'GET' ? HISTORY_PATH.exec(url.pathname)?.[1] : null;
+    const conversationId = history || (method === 'POST' && /^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname) ? sentTo : null);
+    if (!conversationId || !response.headers.get('content-type')?.includes('application/json')) return;
+    const reader = response.clone().body?.getReader();
+    if (!reader) return;
+    readers.add(reader);
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), 10000);
+    let bytes = 0, text = ''; const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        bytes += value.byteLength; if (bytes > 16 * 1024) return;
+        text += decoder.decode(value, { stream: true });
+      }
+      const detail = JSON.parse(text + decoder.decode())?.detail;
+      if (detail?.code !== 'conversation_deleted') return;
+      // The history answer also names the conversation; one naming another proves nothing.
+      if (typeof detail.conversation_id === 'string' && detail.conversation_id.toLowerCase() !== conversationId.toLowerCase()) return;
+      latestDeleted = { type: 'cos-conversation-deleted', conversationId: conversationId.toLowerCase(), observedAt };
+      post(latestDeleted, location.origin);
+    } catch { /* An unreadable answer proves nothing. */ }
+    finally { clearTimeout(timer); readers.delete(reader); void reader.cancel().catch(() => {}); }
+  }
+  /** The conversation a send request names, read before the request leaves. */
+  function sendConversation(args) {
+    try {
+      const init = args[1];
+      const method = String(init?.method || args[0]?.method || 'GET').toUpperCase();
+      const url = new URL(typeof args[0] === 'string' ? args[0] : args[0] instanceof URL ? args[0].href : args[0].url, location.origin);
+      if (method !== 'POST' || url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname) ||
+          typeof init?.body !== 'string' || init.body.length > 2_000_000) return null;
+      const conversationId = JSON.parse(init.body)?.conversation_id;
+      return typeof conversationId === 'string' && CONVERSATION.test(conversationId) ? conversationId : null;
+    } catch { return null; }
+  }
+  /**
    * COS Core and Plugins identities, read from the page's own system hints (#861).
    *
    * On some accounts ChatGPT attaches an app to a message only when the message mentions it, so
@@ -216,6 +266,22 @@
    * Reads bounded complete SSE events from a clone without changing the page's response.
    * Only a conversation id and server request metadata from the same event are projected.
    */
+  /**
+   * The app a connector result names (#1305): `invoked_resource.resource_uri` is
+   * `/asdk_app_<id>/link_<id>/<tool>`, beside the request id that reached the app. Only a
+   * complete tool result message from `api_tool.call_tool` counts, never text in its content.
+   */
+  const APP_RESOURCE = /^\/(asdk_app_[A-Za-z0-9_-]{1,160})\/(link_[A-Za-z0-9_-]{1,160})\/[^/\s]{1,200}$/;
+  function appSightingsOf(message) {
+    const metadata = message?.metadata;
+    if (message?.author?.role !== 'tool' || message.author.name !== 'api_tool.call_tool' || !metadata || typeof metadata !== 'object') return [];
+    const requestId = metadata.request_id;
+    const match = typeof metadata.invoked_resource?.resource_uri === 'string' ? APP_RESOURCE.exec(metadata.invoked_resource.resource_uri) : null;
+    if (typeof requestId !== 'string' || !REQUEST.test(requestId) || !match) return [];
+    const name = metadata.invoked_resource.app_name;
+    const appName = typeof name === 'string' && name.length <= 200 ? name : null;
+    return [{ requestId, appId: match[1], linkId: match[2], appName }];
+  }
   function readOrigin(frame, stream = {}) {
       if (!frame || frame.length > 512 * 1024) { stream.header = null; return; }
       const lines = frame.split(/\r?\n/);
@@ -287,7 +353,8 @@
       const requestIds = new Set([body?.metadata?.request_id, body?.message?.metadata?.request_id,
         body?.input_message?.metadata?.request_id]
         .filter(id => typeof id === 'string' && REQUEST.test(id)));
-      return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
+      const sightings = appSightingsOf(body?.message);
+      return requestIds.size || sightings.length ? { conversationId, requestIds: [...requestIds], sightings } : null;
   }
   async function inspectRequestOrigins(response, observedAt) {
     if (!active) return;
@@ -303,9 +370,15 @@
     const timer = setTimeout(() => void reader.cancel().catch(() => {}), ORIGIN_LISTEN_MS);
     const decoder = new TextDecoder(), emitted = new Set(), stream = {};
     let bytes = 0, buffer = '';
+    const sighted = new Set();
     const scan = (frame) => {
       const origin = readOrigin(frame, stream);
       if (!origin) return;
+      const newSightings = (origin.sightings || []).filter(sighting => !sighted.has(sighting.requestId)).slice(0, 16 - sighted.size);
+      if (newSightings.length) {
+        for (const sighting of newSightings) sighted.add(sighting.requestId);
+        if (active) post({ type: 'cos-app-sighting', conversationId: origin.conversationId, sightings: newSightings }, location.origin);
+      }
       const fresh = origin.requestIds.filter((id) => !emitted.has(id)).slice(0, 16 - emitted.size);
       if (fresh.length === 0) return;
       for (const id of fresh) emitted.add(id);
@@ -456,6 +529,7 @@
       const observedAt = Date.now(), order = ++requestOrder;
       noteSendModel(args, observedAt);
       const resume = active ? resumeRequest(args) : null;
+      const sentTo = active ? sendConversation(args) : null;
       const result = downstreamFetch.apply(this, args);
       if (!active) return result;
       void result.then((response) => {
@@ -481,6 +555,7 @@
           method = String(explicit || inherited || 'GET').toUpperCase();
         } catch { return; }
         inspectHistoryLimit(response, responseAt, method);
+        void inspectDeleted(response, method, sentTo, responseAt).catch(() => {});
         void inspect(response, observedAt, order).catch(() => {});
         void inspectSystemHints(response).catch(() => {});
         if (method === 'POST') void inspectRequestOrigins(response, observedAt).catch(() => {});
@@ -505,6 +580,7 @@
     if (!active || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
     if (latest) post(latest, location.origin);
     if (latestHistoryLimit && latestHistoryLimit.retryAt > Date.now()) post(latestHistoryLimit, location.origin);
+    if (latestDeleted) post(latestDeleted, location.origin);
     if (coreMention) post(coreMention, location.origin);
     // Newest first: old evidence must not fill content's 16-ID pending capacity
     // before the current workflow can enter it during document startup.
@@ -513,7 +589,7 @@
   };
   const hide = () => {
     for (const reader of originReaders) void reader.cancel().catch(() => {});
-    origins.clear(); latestHistoryLimit = null;
+    origins.clear(); latestHistoryLimit = null; latestDeleted = null;
   };
   window.addEventListener('message', request);
   window.addEventListener('pagehide', hide);
@@ -524,7 +600,7 @@
     dispose() {
       active = false;
       for (const reader of readers) void reader.cancel().catch(() => {});
-      readers.clear(); origins.clear(); latest = null; latestHistoryLimit = null;
+      readers.clear(); origins.clear(); latest = null; latestHistoryLimit = null; latestDeleted = null;
       window.removeEventListener('message', request); window.removeEventListener('pagehide', hide);
       window.removeEventListener('DOMContentLoaded', installFetchObserver);
       window.removeEventListener('DOMContentLoaded', installSocketObserver);

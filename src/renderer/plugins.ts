@@ -3,6 +3,7 @@ import type { AppState } from '../shared/types.js';
 import type { SettingsPatch } from '../preload/index.js';
 import type { PluginSnapshot, PluginView, PluginCatalogEntry, PluginSource } from '../shared/plugins.js';
 import { $, disclosureChevron, el, run, toast } from './dom.js';
+import { paintSharedTunnel } from './tunnel-warning.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
 let epoch = 0;
@@ -50,7 +51,7 @@ async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notif
   const own = ++epoch; const result = await run(work);
   if (!result) return false;
   if (own === epoch) { snapshot = result; renderInstalled(); }
-  if (notify) toast(t("Plugin settings saved. Refresh the {0} connector in ChatGPT to update its tools.", [pluginsConnectorName()]));
+  if (notify) toast(t("Plugin settings saved. Refresh {0} in ChatGPT to update its tools.", [pluginsConnectorName()]));
   return true;
 }
 /** This computer's Plugins connector name, which carries its suffix when one is set. */
@@ -65,16 +66,16 @@ export function applyPluginsState(next: AppState): void {
   const contacted = surface?.state === 'live' && !!surface.lastRequestAt;
   const configured = !!next.config.tunnel.pluginsTunnelId?.trim() || surface?.state === 'live';
   $('pluginsSetupTitle').closest('.plugin-connection')!.classList.toggle('is-configured', configured);
-  ui($('pluginsSetupTitle'), 'textContent', () => configured ? t("Your Plugins connector") : t("Set up plugins before your first use"));
+  ui($('pluginsSetupTitle'), 'textContent', () => configured ? t("Chat On Steroids Plugins in ChatGPT") : t("Set up plugins before your first use"));
   ui($('pluginsSetupHint'), 'textContent', () => configured
-    ? t("Your enabled plugins share one connector in ChatGPT. Manage its connection here.")
-    : t("Add the {0} connector in ChatGPT once so it can use your installed plugins.", [pluginsConnectorName()]));
+    ? t("Your enabled plugins reach ChatGPT through one plugin there: Chat On Steroids Plugins. Manage its connection here.")
+    : t("Add {0} to ChatGPT once, so ChatGPT can use your installed plugins.", [pluginsConnectorName()]));
   ui($('pluginsSetupLink'), 'textContent', () => configured ? t("Plugin setup") : t("Set up plugins"));
   ui($('pluginsRefreshName'), 'textContent', pluginsConnectorName);
   $('pluginsSetupLink').classList.toggle('btn-solid', !configured);
   ui(status, 'textContent', () => surface?.state === 'live'
-    ? contacted ? t("Connected to ChatGPT") : t("Connector online · waiting for ChatGPT")
-    : configured ? t("Plugins connector offline") : t("Setup required · connect your plugins"));
+    ? contacted ? t("Connected to ChatGPT") : t("Plugin online · waiting for ChatGPT")
+    : configured ? t("Chat On Steroids Plugins offline") : t("Setup required · connect your plugins"));
   status.dataset.live = String(surface?.state === 'live');
   ui(status, 'title', () => t(surface?.detail ?? ''));
   const setupStatus = document.getElementById('pluginSetupStatus');
@@ -87,7 +88,7 @@ function showConnection(): void {
   const { config, hasApiKey, status } = appState;
   const surface = status.surfaces.find(item => item.id === 'plugins');
   const { body } = dialog(() => t("Plugin setup"));
-  body.append(el('p', '', () => t("Connect once. Your enabled plugins share this connector in ChatGPT.")));
+  body.append(el('p', '', () => t("Connect once. Your enabled plugins share this one plugin in ChatGPT.")));
   const connectionStatus = el('p', 'plugin-setup-status'); connectionStatus.id = 'pluginSetupStatus'; body.append(connectionStatus);
   const copy = (label: string, value: string) => {
     const input = field(body, label, value); input.readOnly = true;
@@ -99,17 +100,21 @@ function showConnection(): void {
     body.append(button(() => t("Open Tunnels"), async () => { await run(window.api.openLink('https://platform.openai.com/settings/organization/tunnels')); }));
     tunnel = field(body, () => t("Plugins tunnel ID"), config.tunnel.pluginsTunnelId ?? '', false, () => t("Create a dedicated tunnel in the same workspace you use in ChatGPT."));
     tunnel.id = 'pluginsTunnelId'; tunnel.spellcheck = false; tunnel.autocomplete = 'off';
+    const shared = el('p', 'hint is-required'); shared.id = 'pluginsTunnelIdShared'; shared.setAttribute('role', 'status');
+    tunnel.closest('label')!.after(shared);
+    const paintShared = () => paintSharedTunnel(shared, { ...config.tunnel, pluginsTunnelId: tunnel!.value }, 'plugins');
+    tunnel.addEventListener('input', paintShared); paintShared();
     if (hasApiKey) body.append(el('p', 'hint', () => t("Your stored tunnel API key is already available.")));
-    else key = field(body, () => t("Tunnel API key"), '', true, () => t("Use a restricted key with Tunnels: Read and Tunnels: Use. It is stored securely and shared with your other connectors."));
+    else key = field(body, () => t("Tunnel API key"), '', true, () => t("Use a restricted key with Tunnels: Read and Tunnels: Use. It is stored securely and shared with Core and Desktop."));
   }
   // Values needed for ChatGPT setup stay copyable; tool lists belong to each plugin.
-  copy(t("Connector name"), surface?.connectorName ?? 'Chat On Steroids Plugins');
+  copy(t("Name in ChatGPT"), surface?.connectorName ?? 'Chat On Steroids Plugins');
   copy(t("Description"), surface?.description ?? 'Tools from your enabled Chat On Steroids plugins.');
   const url = surface?.publicUrl ?? (config.tunnel.kind === 'manual' ? surface?.localUrl : null);
   if (url) copy(t("MCP server URL"), url);
   body.append(el('p', 'hint', () => config.tunnel.kind === 'openai'
-    ? t("In ChatGPT, add this connector with Tunnel and select your Plugins tunnel. Refresh its tools after adding or changing plugins.")
-    : t("In ChatGPT, add this connector using its MCP server URL. Refresh its tools after adding or changing plugins.")));
+    ? t("In ChatGPT, add this as a plugin with Tunnel and select your Plugins tunnel. Refresh it after adding or changing plugins.")
+    : t("In ChatGPT, add this as a plugin using its MCP server URL. Refresh it after adding or changing plugins.")));
   const actions = el('div', 'plugin-setup-actions');
   actions.append(button(() => t("Open ChatGPT plugins"), async () => { await run(window.api.openLink('https://chatgpt.com/plugins')); }), button(() => t("Save & connect"), async () => {
     if (!appState) return;
@@ -249,7 +254,7 @@ function showConfigure(plugin: PluginView): void {
   }, true));
 }
 function showCatalog(): void {
-  const { body } = dialog(() => t("Add a plugin")); body.append(el('p', 'muted', () => t("Independent integrations, one shared connector. Review each plugin’s access and setup before installing.")));
+  const { body } = dialog(() => t("Add a plugin")); body.append(el('p', 'muted', () => t("Independent integrations, one shared plugin in ChatGPT. Review each plugin’s access and setup before installing.")));
   const grid = el('div', 'plugin-catalog'); grid.dataset.pluginCatalog = ''; renderCatalog(grid);
   body.append(grid, el('h3', '', () => t("Bring your own server"))); const custom = el('div', 'plugin-actions');
   custom.append(button(() => t("Import MCPB bundle"), async () => { const path = await run(window.api.pluginsImportBundle()); if (path) showCustom('mcpb', path); }), button(() => t("npm / Python / executable"), () => showCustom('npm')), button(() => t("Remote MCP URL"), () => showCustom('remote')), button(() => t("GitHub repository"), () => showCustom('github')));

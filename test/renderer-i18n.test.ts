@@ -318,3 +318,62 @@ it('matches both Turkish I pairs when searching settings', async () => {
   for (const query of ['izinler', 'İZİNLER', 'ışık', 'IŞIK']) expect(searchSettings(entries, query)).toHaveLength(1);
   expect(searchSettings(entries, 'missing')).toEqual([]);
 });
+
+// The German interface says "du". Formal address crept in with whole features more than once
+// (sign-in flow, 2026-10): an imperative or statement with "Sie", or "Ihr …" for the person's things.
+it('addresses the person as "du" throughout the German catalog', () => {
+  const formal = /(?:^|[.!?:]\s+|,\s+|\s)(?:\p{Lu}\p{Ll}+(?:en|ern|eln) Sie\b|Sie (?:sind|können|müssen|haben|werden gefragt)\b)|\b(?:werden|können|müssen|sind|haben|wählen|öffnen|versuchen|fahren) Sie\b|\bIhr(?:e[mnrs]?)? (?:Browser|Konto|App|Einstellungen|Computer|Projekt|Chat)\b/u;
+  const offenders = Object.entries(catalogs.de!).filter(([, value]) => formal.test(value)).map(([key, value]) => `${key} → ${value}`);
+  expect(offenders).toEqual([]);
+  // The extension's popup and in-page notices are the same product, in its own catalog.
+  const extension = JSON.parse(readFileSync('extension/_locales/de/messages.json', 'utf8')) as Record<string, { message: string }>;
+  expect(Object.entries(extension).filter(([, entry]) => formal.test(entry.message)).map(([key, entry]) => `${key} → ${entry.message}`)).toEqual([]);
+});
+
+// A feature has one name per language. Sentences kept the English name ("Wie viel ein Compact &
+// Resume-Bericht behält") beside the translated one ("Komprimieren & Fortsetzen"), or a second
+// translation of it, so one settings page named the same feature three ways (2026-10-13).
+it('calls each feature by the language\'s own name in every sentence', () => {
+  // The names hold no regular-expression characters.
+  const word = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}-])${name}(?![\\p{L}\\p{N}-])`, 'u');
+  const offenders: string[] = [];
+  for (const [language, catalog] of Object.entries(catalogs)) {
+    for (const [name, entry] of [['Compact & Resume', 'Compact & Resume:'], ['Goal', 'Goal'], ['Loop', 'Loop'], ['Activity', 'Activity']] as const) {
+      const own = catalog![entry]?.replace(/[:：]\s*$/, '').trim();
+      if (!own || own === name) continue;
+      for (const [key, value] of Object.entries(catalog!)) {
+        if (!word(name).test(key)) continue;
+        if (word(name).test(value)) offenders.push(`${language}: "${name}" left in → ${value}`);
+        // The handoff feature is always named in full; a second translation of it is a second name.
+        else if (name === 'Compact & Resume' && !value.toLowerCase().includes(own.toLowerCase())) offenders.push(`${language}: not "${own}" → ${value}`);
+      }
+    }
+  }
+  expect(offenders).toEqual([]);
+});
+
+// One word for it: the interface, the extension and its name in the browser say "browser
+// extension". "Companion" was a second name for the same thing in 20 texts (2026-10-13). The pets
+// are companions of another kind and keep the word.
+// What a person adds in ChatGPT is a plugin there (Plugins → Add custom MCP server → Create as a
+// plugin); "connector" no longer appears in ChatGPT, so the app does not use it either.
+it("calls what ChatGPT holds a plugin, not a connector, in every language's source text", () => {
+  const page = new JSDOM(readFileSync('src/renderer/index.html', 'utf8')).window.document;
+  const shown = [page.body.textContent ?? '', ...[...page.querySelectorAll('[title], [aria-label], [placeholder]')]
+    .flatMap(node => ['title', 'aria-label', 'placeholder'].map(name => node.getAttribute(name) ?? ''))].join('\n');
+  expect(shown.split('\n').map(line => line.trim()).filter(line => /connector/i.test(line))).toEqual([]);
+  const catalog = JSON.parse(readFileSync('src/renderer/locales/de.json', 'utf8')) as Record<string, string>;
+  expect(Object.keys(catalog).filter(key => /connector/i.test(key))).toEqual([]);
+  const extension = JSON.parse(readFileSync('extension/_locales/en/messages.json', 'utf8')) as Record<string, { message: string }>;
+  expect(Object.entries(extension).filter(([, entry]) => /connector/i.test(entry.message)).map(([key]) => key)).toEqual([]);
+});
+
+it('calls the browser extension an extension, not a companion', () => {
+  // What a person can read: the page's text and its tooltips, labels and placeholders (comments are not).
+  const page = new JSDOM(readFileSync('src/renderer/index.html', 'utf8')).window.document;
+  const shown = [page.body.textContent ?? '', ...[...page.querySelectorAll('[title], [aria-label], [placeholder]')]
+    .flatMap(node => ['title', 'aria-label', 'placeholder'].map(name => node.getAttribute(name) ?? ''))].join('\n');
+  expect(shown.split('\n').map(line => line.trim()).filter(line => /\bcompanion\b/i.test(line) && !/desktop companions/.test(line))).toEqual([]);
+  const extension = JSON.parse(readFileSync('extension/_locales/en/messages.json', 'utf8')) as Record<string, { message: string }>;
+  expect(Object.entries(extension).filter(([, entry]) => /\bcompanion\b/i.test(entry.message)).map(([key]) => key)).toEqual([]);
+});

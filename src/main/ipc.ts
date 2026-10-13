@@ -1,4 +1,5 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { setMainTextTranslations } from './main-texts.js';
@@ -13,9 +14,11 @@ import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
-import { committedResumeAncestorsFromSummary, REASONING_EFFORTS, type SessionChange } from '../shared/session.js';
+import { refreshAppProxy } from './app-proxy.js';
+import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
+import { refreshKeepAwake } from './keep-awake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
 import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
@@ -24,7 +27,7 @@ import { stageInputAttachment, stageInputAttachments, type AttachmentSource } fr
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
-import { inputArgs, listInputs, editQueuedInput, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
+import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +38,7 @@ import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
-import { confirmedPluginSchemas, pluginRefreshPublications } from './plugin-refresh.js';
+import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -71,15 +74,20 @@ import { runningToolActivity } from './mcp/call-context.js';
 import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
-import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
+import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
+import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
+import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
+import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
+import { unifiedExecManager } from './codex/manager.js';
+import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject, setProjectColor } from './projects.js';
+import { addProject, expireArmedProjectCreates, getSessionProject, listProjects, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
-import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
+import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -107,10 +115,13 @@ import { APP_VERSION, extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
   clearImageStorage,
+  onRecordingStorageFullChange,
+  recordingStorageFull,
   clearSessionName,
   renameSession,
   getSession,
   getImageStorage,
+  setRecordingStorageLimit,
   readHandoff,
   readToolEditReview,
   withSessionMutationFence
@@ -213,14 +224,18 @@ const settingsPatch = z.object({
     finishAction: z.enum(['notify', 'goal']).optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional(),
+    backgroundPlacement: z.enum(['window', 'group']).optional(),
+    followUp: z.enum(['steer', 'queue']).optional(),
     browserBridgePort: browserBridgePortSchema.optional(),
     browserOnly: z.boolean().optional(),
     autoRefreshPlugins: z.boolean().optional(),
+    autoRefreshPluginsAsked: z.boolean().optional(),
     autoSelectSkills: z.boolean().optional(),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
+    keepAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
     theme: z.enum(['light', 'dark'])
   }),
@@ -228,7 +243,9 @@ const settingsPatch = z.object({
     record: z.boolean(),
     retainDays: z.number().int().min(0).max(3650),
     advisoryTokens: z.number().int().min(10_000).max(4_000_000),
-    limitTokens: z.number().int().min(10_000).max(4_000_000)
+    limitTokens: z.number().int().min(10_000).max(4_000_000),
+    storageLimitGiB: z.number().refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
+      .transform(size => size as RecordingStorageLimitGiB).optional()
   }),
   compaction: z.object({
     auto: z.boolean(),
@@ -248,6 +265,7 @@ const settingsPatch = z.object({
     strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
+    autoWorktrees: z.boolean().optional(),
     endSleepingWorkerProcesses: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
@@ -379,15 +397,20 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       finishAction: pick(current.ui.finishAction, base.ui.finishAction, wanted.ui.finishAction),
       finishLeadMinutes: pick(current.ui.finishLeadMinutes, base.ui.finishLeadMinutes, wanted.ui.finishLeadMinutes),
       backgroundChats: pick(current.ui.backgroundChats, base.ui.backgroundChats, wanted.ui.backgroundChats),
+      backgroundPlacement: pick(current.ui.backgroundPlacement, base.ui.backgroundPlacement, wanted.ui.backgroundPlacement),
+      followUp: pick(current.ui.followUp, base.ui.followUp, wanted.ui.followUp),
       browserBridgePort: wanted.ui.browserBridgePort === undefined ? current.ui.browserBridgePort
         : pick(current.ui.browserBridgePort ?? 'auto', base.ui.browserBridgePort ?? 'auto', wanted.ui.browserBridgePort),
       browserOnly: pick(current.ui.browserOnly, base.ui.browserOnly, wanted.ui.browserOnly),
       autoRefreshPlugins: pick(current.ui.autoRefreshPlugins, base.ui.autoRefreshPlugins, wanted.ui.autoRefreshPlugins),
+      // Only the offer's own call answers it; a settings save never takes it back.
+      autoRefreshPluginsAsked: current.ui.autoRefreshPluginsAsked === true || wanted.ui.autoRefreshPluginsAsked === true,
       autoSelectSkills: pick(current.ui.autoSelectSkills, base.ui.autoSelectSkills, wanted.ui.autoSelectSkills),
       tabsToKeepOpen: pick(current.ui.tabsToKeepOpen, base.ui.tabsToKeepOpen, wanted.ui.tabsToKeepOpen),
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
+      keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
       privacyScreenshots: pick(
         current.ui.privacyScreenshots,
         base.ui.privacyScreenshots,
@@ -403,7 +426,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.sessions.advisoryTokens,
         wanted.sessions.advisoryTokens
       ),
-      limitTokens: pick(current.sessions.limitTokens, base.sessions.limitTokens, wanted.sessions.limitTokens)
+      limitTokens: pick(current.sessions.limitTokens, base.sessions.limitTokens, wanted.sessions.limitTokens),
+      storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB)
     },
     compaction: {
       auto: pick(current.compaction.auto, base.compaction.auto, wanted.compaction.auto),
@@ -448,6 +472,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.waitForSubAgents,
         base.multiAgent.waitForSubAgents,
         wanted.multiAgent.waitForSubAgents
+      ),
+      autoWorktrees: pick(
+        current.multiAgent.autoWorktrees ?? false,
+        base.multiAgent.autoWorktrees ?? false,
+        wanted.multiAgent.autoWorktrees ?? false
       ),
       endSleepingWorkerProcesses: pick(
         current.multiAgent.endSleepingWorkerProcesses ?? false,
@@ -514,12 +543,16 @@ async function buildState(): Promise<AppState> {
       pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
     ),
     confirmedConnectorSchemas: confirmedPluginSchemas(),
+    pluginRefreshUnreadable: await pluginRefreshUnreadable(),
+    recordingStorageFull: recordingStorageFull(),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
     hasApiKey: await hasSecret(setupApiKeySlot(config.tunnel.profileId)),
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
+    // After the reads above: only a read can find the file unreadable.
+    credentialsUnreadable: storedSecretsUnreadable(),
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
     bridge: await bridgeStatus(),
@@ -563,6 +596,7 @@ export async function openSessionChat(id: string): Promise<void> {
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  registerDictationIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();
@@ -600,6 +634,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return buildState();
   });
   handle('usage:get', () => usageOverview());
+  handle('plugin-refresh:reset', async () => {
+    await resetPluginRefreshLedger();
+    return buildState();
+  });
+  // The renderer asks the person first. Nothing is set aside when the file can be read after all.
+  handle('credentials:start-fresh', async () => {
+    const setAside = (await setAsideUnreadableSecrets()) !== null;
+    return { state: await buildState(), setAside };
+  });
   handle('state:get', async () => {
     const state = await buildState();
     // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike
@@ -630,6 +673,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
     // system theme until restart (and startup still defaulted to system before index.ts applies it).
+    // A changed Goal provider address may be one the system reaches directly.
+    void refreshAppProxy();
+    setRecordingStorageLimit(next.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
+    if ((before.ui.keepAwake !== false) !== (next.ui.keepAwake !== false)) refreshKeepAwake();
     nativeTheme.themeSource = next.ui.theme;
     if (process.platform === 'win32') getWindow()?.setTitleBarOverlay(titleBarOverlayForTheme(next.ui.theme, next.ui.appearance));
     // BrowserWindow's native backing color is fixed at construction unless updated explicitly.
@@ -756,6 +803,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const language = z.enum(UI_LANGUAGES).parse(payload);
     if (getConfig().ui.language !== language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
   });
+  // The one-time offer to turn automatic plugin refresh on (installs from before it existed have
+  // it saved as off). Either answer is kept, so the offer never comes back.
+  handle('pluginRefresh:offer', async (payload) => {
+    const { turnOn } = z.object({ turnOn: z.boolean() }).strict().parse(payload);
+    await updateConfig(config => ({ ...config, ui: { ...config.ui, autoRefreshPluginsAsked: true, ...(turnOn ? { autoRefreshPlugins: true } : {}) } }));
+    if (turnOn) wakeBrowserWork();
+    return buildState();
+  });
   handle('ui:whatsNewSeen', async () => {
     // Only this version can be recorded; the renderer cannot write another one (#1172).
     if (getConfig().ui.lastSeenVersion !== APP_VERSION) await updateConfig(config => ({ ...config, ui: { ...config.ui, lastSeenVersion: APP_VERSION } }));
@@ -872,6 +927,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       push('state:changed', state);
     }
     const project = await addProject(folder);
+    push('session:changed');
+    // Its native ChatGPT Project is created by the browser; tell it there is work.
+    if (project.chatgpt?.state === 'requested') wakeBrowserWork();
+    return project;
+  });
+  handle('projects:chatgpt-retry', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = await retryProjectCreate(id);
+    if (project) wakeBrowserWork();
     push('session:changed');
     return project;
   });
@@ -1105,6 +1169,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       projects: await listProjects().catch(() => []),
       workerTexts: workers.flatMap(worker => [worker.task ?? '', worker.label ?? '', worker.result ?? '']),
       log: await readRecentLog(),
+      memory: memoryFacts(getWindow()),
       now: Date.now()
     });
     return saveDiagnosticsReport(text, getWindow());
@@ -1188,8 +1253,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // Installation does not change the saved execution browser or load the CoS host.
   handle('browser:setupOpen', async (payload) => {
     const { browser, page } = z.object({ browser: z.enum(['chrome', 'edge', 'brave']), page: z.enum(['extensions', 'chatgpt']) }).strict().parse(payload);
-    const url = page === 'chatgpt' ? 'https://chatgpt.com/' : `${browser === 'edge' ? 'edge' : browser === 'brave' ? 'brave' : 'chrome'}://extensions/`;
-    await openInPreferredBrowser(url, { browser, reveal: true });
+    if (page === 'chatgpt') {
+      await openInPreferredBrowser('https://chatgpt.com/', { browser, reveal: true });
+      return true;
+    }
+    // A browser opens its own internal pages only from its address bar: given on the command line,
+    // chrome://extensions and edge://extensions both open a new tab instead (measured 2026-10-12).
+    // So the address goes on the clipboard and the browser comes up with a new tab to paste it into.
+    await clipboard.writeText(`${browser}://extensions`);
+    await openInPreferredBrowser('about:blank', { browser, reveal: true });
     return true;
   });
 
@@ -1203,14 +1275,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
-    const { cursor, limit } = z
+    const { cursor, limit, projectId } = z
       .object({
         cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
-        limit: z.number().int().min(1).max(60).optional()
+        limit: z.number().int().min(1).max(60).optional(),
+        // One project's own pages: expanding a project must not page the whole history (#1190).
+        projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
       })
       .parse(payload ?? {});
-    return readSessionList({ cursor, limit: limit ?? 60 });
+    return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
   });
 
   handle('sessions:image', async (payload) => {
@@ -1347,6 +1421,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:retryHelper', async (payload) => {
     const { id, sourceSessionId } = z.object({ id: z.string().uuid(), sourceSessionId: z.string().min(8).max(64) }).parse(payload);
     return retryGoalBrowserHelper(sourceSessionId, id);
+  });
+  handle('sessions:sendQueuedNow', async (payload) => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const sent = await sendQueuedInputNow(id);
+    if (sent) wakeBrowserWork();
+    return sent;
   });
   handle('sessions:editInput', async (payload) => { const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: inputArgs.shape.text, afterTurn: z.boolean().optional() }).parse(payload); return editQueuedInput(id, text, afterTurn); });
   handle('sessions:cancelInput', async (payload) => cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id));
@@ -1609,6 +1689,133 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return { cleared: outcome.cleared, reason: outcome.reason, swarm: swarmState() };
   });
 
+  // Retiring a worker must never silently erase its branch, ignored files or uncommitted
+  // work. The UI offers a review after finished/failed/cleared (including after restart).
+  // Lookup is *on demand*: startup only restores worktrees for still-broker-owned workers.
+  const worktreeCleanupId = z.object({
+    runId: z.string().uuid(),
+    agentId: z.string().regex(/^worker-[1-9][0-9]{0,5}$/)
+  }).strict();
+  handle('swarm:worktreeCleanupList', async (): Promise<WorkerWorktreeCleanupOffer[]> => {
+    try {
+      if (!(await persistAgentAuthorityNow())) throw new Error('worker authority could not be persisted');
+      const candidates = await listOfferedWorkerWorktrees(getConfig().roots, managedWorktreeCleanupOffers());
+      return candidates.map(candidate => ({
+        runId: candidate.runId,
+        agentId: candidate.agentId,
+        reason: candidate.reason,
+        label: managedWorktreeCleanupOffers().find(offer =>
+          offer.runId === candidate.runId && offer.agentId === candidate.agentId)?.label,
+        workspace: candidate.workspace,
+        dirty: candidate.dirty,
+        ignoredFiles: candidate.ignoredFiles,
+        uniqueCommits: candidate.uniqueCommits,
+        changeCount: candidate.changes.length
+      }));
+    } catch (error) {
+      // Native paths from Git failures belong to local logs, never the browser/AI surface.
+      logInfo(`worktree cleanup inspection failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not review retained worker worktrees. Check the local app logs.');
+    }
+  });
+  handle('swarm:worktreeCleanupRemove', async (payload) => {
+    const { runId, agentId } = worktreeCleanupId.parse(payload);
+    if (!(await persistAgentAuthorityNow())) throw new Error('Cleanup could not confirm durable worker retirement. No files were removed.');
+    const offer = managedWorktreeCleanupOffers().find(entry => entry.runId === runId && entry.agentId === agentId);
+    if (!offer) throw new Error('This worker cleanup offer is no longer available. Refresh the list.');
+    let candidate: Awaited<ReturnType<typeof listOfferedWorkerWorktrees>>[number] | undefined;
+    try {
+      candidate = (await listOfferedWorkerWorktrees(getConfig().roots, [offer]))[0];
+    } catch (error) {
+      logInfo(`worktree cleanup preview failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not verify this worker checkout. No files were removed.');
+    }
+    if (!candidate) throw new Error('This checkout is missing or has no verified cleanup owner. No files were removed.');
+    // The native confirmation must describe a complete, byte-verified snapshot.
+    // A bounded/truncated inspection cannot authorize discarding files.
+    if (candidate.changesTruncated || !candidate.contentFingerprint) {
+      throw new Error('Could not safely inspect all contents of this worker checkout. No files were removed.');
+    }
+    // The preview is shown only in the trusted desktop confirmation, not the renderer
+    // or a model-facing tool. List bounded relative paths instead of native paths.
+    const changedFiles = candidate.changes.slice(0, 25).map(name =>
+      `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+    const details = [
+      `Checkout: ${candidate.workspace}`,
+      candidate.changes.length
+        ? `${candidate.changes.length} uncommitted/ignored paths would be discarded:`
+        : 'No uncommitted or ignored paths were detected.',
+      ...changedFiles,
+      candidate.changes.length > changedFiles.length || candidate.changesTruncated
+        ? 'Additional paths are not shown; review the checkout before confirming.' : '',
+      candidate.ignoredFiles ? 'Ignored files are included in the removal.' : '',
+      candidate.uniqueCommits ? 'Commits made only on this branch will remain in Git.' : '',
+      'This action removes the entire checkout directory, including tracked working files, ignored files and uncommitted changes. The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'
+    ].filter(Boolean).join('\n');
+    // Approval is acquired in the trusted main process, not supplied as a boolean by renderer
+    // or model. Default is cancellation, even for an apparently clean checkout.
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Remove worker Git checkout?',
+      message: 'Review the worker checkout before removing it',
+      detail: details,
+      buttons: ['Keep checkout', 'Remove checkout; preserve Git branch'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    if (response !== 1) return { removed: false, branchPreserved: true };
+    // Git's name/size status can stay identical across same-size byte edits.
+    // Compare the complete content fingerprint, including ignored/untracked files.
+    // The manager also checks this fingerprint inside its mutation fence.
+    let fresh: typeof candidate | undefined;
+    try {
+      fresh = (await listOfferedWorkerWorktrees(getConfig().roots, [offer]))[0];
+    } catch (error) {
+      logInfo(`worktree cleanup reinspection failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('Could not recheck this checkout after confirmation. No files were removed.');
+    }
+    if (!fresh || fresh.workspace !== candidate.workspace || fresh.branch !== candidate.branch ||
+        fresh.headOid !== candidate.headOid || fresh.dirty !== candidate.dirty ||
+        fresh.ignoredFiles !== candidate.ignoredFiles || fresh.uniqueCommits !== candidate.uniqueCommits ||
+        fresh.changesTruncated || !fresh.contentFingerprint ||
+        fresh.contentFingerprint !== candidate.contentFingerprint ||
+        JSON.stringify(fresh.changes) !== JSON.stringify(candidate.changes)) {
+      throw new Error('The checkout changed while you were reviewing it. No files were removed.');
+    }
+    // Root approval and exact broker-offer identity are checked again after user interaction.
+    if (!(await persistAgentAuthorityNow())) throw new Error('Cleanup could not reconfirm durable worker retirement. No files were removed.');
+    const current = managedWorktreeCleanupOffers().find(entry => entry.runId === runId && entry.agentId === agentId);
+    if (!current || current.createdAt !== offer.createdAt || current.reason !== offer.reason) {
+      throw new Error('Cleanup ownership changed during confirmation. No files were removed.');
+    }
+    // A cleared worker's child processes do not stop merely because its broker row was
+    // retired. Refuse destructive removal while any tool may still be writing files.
+    if (inFlightToolCalls() > 0) {
+      throw new Error('Local tools are still executing. No worker files were removed.');
+    }
+    try {
+      const result = await disposeOfferedWorkerWorktree(getConfig().roots, current,
+        unifiedExecManager.listProcesses().map(process => process.cwd), candidate.contentFingerprint);
+      if (result.removed && acknowledgeManagedWorktreeCleanupOffer(runId, agentId)) {
+        // The files are already removed at this point. Failure to persist the acknowledgment
+        // is a recoverable stale UI offer, not permission to claim that deletion failed.
+        try {
+          if (!(await persistAgentAuthorityNow())) logInfo('worktree cleanup acknowledgment could not be persisted');
+        } catch (error) {
+          logInfo(`worktree cleanup acknowledgment persistence failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return { removed: result.removed, branchPreserved: !result.branchRemoved };
+    } catch (error) {
+      logInfo(`worktree cleanup removal refused: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof WorkerWorktreeError && error.code === 'WORKTREE_CONTENT_CHANGED') {
+        throw new Error('The checkout changed while you were reviewing it. No files were removed.');
+      }
+      throw new Error('The checkout was not removed safely. Inspect the local app logs for details.');
+    }
+  });
+
 
   // Push updates so the UI reflects tunnel progress without polling. buildState() crosses
   // async secret/bridge reads, so an older snapshot can otherwise resolve after a newer one and
@@ -1699,9 +1906,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
   };
   onStatusChange(pushState);
+  onRecordingStorageFullChange(pushState);
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);
   onConnectorProofChange(pushState);
+  // A project's native ChatGPT Project changes from the browser; the sidebar and a waiting new chat say so.
+  onProjectLinkChange(() => push('session:changed'));
+  // A creation armed before the app last quit becomes uncertain on time, not on the browser's next pass.
+  void expireArmedProjectCreates().catch(() => undefined);
   registerPluginIpc(handle, getWindow, pushState);
   // Draft stages belong to session controls; state:changed only refreshes settings.
   onGoalChange(() => push('session:changed'));

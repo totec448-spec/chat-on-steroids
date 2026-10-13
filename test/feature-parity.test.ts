@@ -27,6 +27,7 @@ describe('portable browser-backed feature parity', () => {
         strictChatAllowlist: false,
         recoverAgentTabs: false,
         waitForSubAgents: false,
+        autoWorktrees: false,
         endSleepingWorkerProcesses: false
       });
       expect(browserExtensionRequired(config)).toBe(true);

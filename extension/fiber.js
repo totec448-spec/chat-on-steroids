@@ -154,18 +154,84 @@
     return name === PLAIN_APPS[2] || SUFFIXED_APP.exec(typeof name === 'string' ? name : '')?.[1] === 'Plugins';
   }
 
-  /** Whether an `invoked_resource.app_name` names one of this app's own connectors. */
-  function ourApp(name) {
-    if (typeof name !== 'string') return false;
-    for (let at = 0; at < OUR_APPS.length; at++) if (OUR_APPS[at] === name) return true;
-    return false;
+  /**
+   * This install's proven connector apps ({ surface, appId, linkId, name }), from the app's
+   * status (connector-identity.ts). ChatGPT keeps an app's `asdk_app_…` and `link_…` ids when the
+   * user renames it (measured 2026-10-11), so a renamed connector is still recognized by them.
+   */
+  const APP_ID = /^asdk_app_[A-Za-z0-9_-]{1,160}$/, LINK_ID = /^link_[A-Za-z0-9_-]{1,160}$/;
+  const SURFACES = ['core', 'desktop', 'plugins'];
+  let OUR_APP_IDS = [];
+  function adoptAppIds(list) {
+    if (!Array.isArray(list)) return;
+    const next = [];
+    for (let at = 0; at < list.length && next.length < 12; at++) {
+      const app = list[at];
+      if (!app || typeof app.appId !== 'string' || !APP_ID.test(app.appId) || !SURFACES.includes(app.surface)) continue;
+      next.push({ surface: app.surface, appId: app.appId,
+        linkId: typeof app.linkId === 'string' && LINK_ID.test(app.linkId) ? app.linkId : null,
+        name: typeof app.name === 'string' && app.name ? app.name : null });
+    }
+    OUR_APP_IDS = next;
   }
-
+  /** This install's Plugins connector, by name or (after a rename) by its proven app id. */
+  function pluginsConnectorApp(name, appId) {
+    return pluginsConnectorName(name) || (typeof appId === 'string' && OUR_APP_IDS.some(app => app.surface === 'plugins' && app.appId === appId));
+  }
+  /** `/asdk_app_…/link_…/tool` → the app id, or null. */
+  function appIdOf(resource) {
+    if (typeof resource !== 'string' || resource.charCodeAt(0) !== 47) return null;
+    const end = resource.indexOf('/', 1), id = resource.slice(1, end > 0 ? end : undefined);
+    return APP_ID.test(id) ? id : null;
+  }
+  /** `/<name or app id>/link_…/tool` → the link id, or null. */
+  function linkIdOf(path) {
+    if (typeof path !== 'string' || path.charCodeAt(0) !== 47) return null;
+    const parts = path.split('/');
+    return parts.length >= 4 && LINK_ID.test(parts[2]) ? parts[2] : null;
+  }
+  /** Which surface a configured or proven name belongs to, or null. */
+  function surfaceOfName(name) {
+    for (let at = 0; at < 3; at++) if (OUR_APPS[at] === name) return SURFACES[at];
+    for (let at = 0; at < OUR_APP_IDS.length; at++) if (OUR_APP_IDS[at].name === name) return OUR_APP_IDS[at].surface;
+    return null;
+  }
+  /**
+   * A name is ours, exactly as before, unless its surface already has a proven app and this row
+   * names a different one: then a same-named app is somebody else's.
+   */
+  function ownByName(name, appId, linkId) {
+    if (typeof name !== 'string') return false;
+    for (let at = 0; at < LEGACY_APPS.length; at++) if (LEGACY_APPS[at] === name) return true;
+    const surface = surfaceOfName(name);
+    if (!surface) return false;
+    const known = OUR_APP_IDS.filter(app => app.surface === surface);
+    if (!known.length) return true;
+    if (appId) return known.some(app => app.appId === appId);
+    if (linkId) return known.some(app => app.linkId === linkId);
+    return true;
+  }
+  /** Whether a result row (`invoked_resource`) belongs to one of this app's own connectors. */
+  function ownResult(result) {
+    if (!result) return false;
+    const appId = appIdOf(result.resource);
+    if (appId && OUR_APP_IDS.some(app => app.appId === appId)) return true;
+    return ownByName(result.app, appId, linkIdOf(result.resource));
+  }
   /** Whether a request path — `/<connector>/link_…/<tool>` — is one of ours. */
-  function ourPath(path) {
+  function ownRequestPath(path) {
     if (typeof path !== 'string' || path.charCodeAt(0) !== 47) return false;
+    const linkId = linkIdOf(path);
+    if (linkId && OUR_APP_IDS.some(app => app.linkId === linkId)) return true;
     const end = path.indexOf('/', 1);
-    return end > 1 && ourApp(path.slice(1, end));
+    return end > 1 && ownByName(path.slice(1, end), null, linkId);
+  }
+  /** Names `mcp-tool-call` steps may carry for ours: configured and proven (spaces may be `_`). */
+  function ownServerName(name) {
+    if (typeof name !== 'string') return null;
+    const names = [...OUR_APPS];
+    for (let at = 0; at < OUR_APP_IDS.length; at++) if (OUR_APP_IDS[at].name) names.push(OUR_APP_IDS[at].name);
+    return names.find(app => name === app || name === app.replaceAll(' ', '_')) || null;
   }
   /**
    * The tool path at the very front of a request payload.
@@ -1324,6 +1390,24 @@
   }
 
   /** The connector a result came back through, and whether it came back at all. */
+  /**
+   * Every connector result row's identity in these messages, ours or not: request id, app id,
+   * link id and the name ChatGPT shows. The app learns its own connectors from these, but only
+   * for request ids it served itself (connector-identity.ts). No arguments or result bytes.
+   */
+  function sightingsOf(messages) {
+    const out = [];
+    if (!Array.isArray(messages)) return out;
+    for (let at = 0; at < messages.length && out.length < 50; at++) {
+      const message = messages[at];
+      if (!message || message.author?.role !== 'tool' || message.author.name !== 'api_tool.call_tool') continue;
+      const result = resultOf(message), requestId = str(message.metadata?.request_id), appId = appIdOf(result?.resource);
+      if (!requestId || !appId) continue;
+      out.push({ requestId, appId, linkId: linkIdOf(result.resource), appName: result.app });
+    }
+    return out;
+  }
+
   function resultOf(message) {
     if (!message || typeof message !== 'object') return null;
     const meta = message.metadata;
@@ -1348,7 +1432,7 @@
     }
     for (const message of messages || []) {
       const result = resultOf(message);
-      if (!result || !ourApp(result.app)) continue;
+      if (!result || !ownResult(result)) continue;
       const visited = new Set();
       let id = str(message.metadata?.parent_id), parentId = null;
       while (id && visited.size < MAX_CALLS && !visited.has(id)) {
@@ -1375,7 +1459,7 @@
     const result = resultOf(message);
     const messageId = str(message.id), requestId = str(message.metadata?.request_id);
     const tool = result && toolName(result.resource);
-    if (!result || !ourApp(result.app) || !messageId || !requestId || !tool) return null;
+    if (!result || !ownResult(result) || !messageId || !requestId || !tool) return null;
     return { ...result, messageId, requestId, tool, createTime: num(message.create_time) };
   }
   /** Exact number of this app's own invocations represented by the whole turn, or null. */
@@ -1395,12 +1479,12 @@
     for (let at = 0; at < messages.length; at++) {
       const message = messages[at];
       const request = requestOf(message);
-      if (request && ourPath(request.path)) {
+      if (request && ownRequestPath(request.path)) {
         remember(request.messageId);
       }
 
       const result = resultOf(message);
-      if (result && ourApp(result.app)) {
+      if (result && ownResult(result)) {
         remember(resultParents.get(message) || completedCallOf(message)?.messageId);
       }
     }
@@ -1457,7 +1541,7 @@
     // Never borrow a neighbor's result to complete that request or a still-running group.
     if (request && !result && group.isCompletionRequestInProgress === false && messages.length === 2 &&
         messages[0].status === 'finished_successfully' && messages[1].status === 'finished_successfully' &&
-        !conflictingRequestScope(messages[0], messages[1]) && ourPath(request.path)) {
+        !conflictingRequestScope(messages[0], messages[1]) && ownRequestPath(request.path)) {
       const displayed = completedCallOf(messages[1]);
       if (displayed && displayed.requestId === request.requestId && identify(request, displayed) === displayed.tool) completed = displayed;
     }
@@ -1465,7 +1549,7 @@
       resource: completed.resource, messageId: completed.messageId, turnId: str(group.turnId),
       conversationId: str(group.clientThreadId) || str(group.conversationId), createTime: completed.createTime,
       hidden: int(own.call(group, 'collapsedSameToolCallCount') ? group.collapsedSameToolCallCount : null),
-      localCount, answered: true };
+      localCount, answered: true, own: ownResult(completed) };
     if (!request) return null;
 
     /**
@@ -1493,7 +1577,9 @@
       // Turn-wide cardinality only. No request arguments or message bodies cross worlds.
       localCount,
       /** Whether the page has shown a result for the representative call yet. */
-      answered: result !== null
+      answered: result !== null,
+      /** Whether this row is one of this install's connectors (app id, link, then name). */
+      own: result ? ownResult(result) : ownRequestPath(request.path)
     };
   }
 
@@ -1591,7 +1677,7 @@
     for (let at = 0; at < messages.length && answered.size < MAX_CALLS; at++) {
       const message = messages[at];
       const result = resultOf(message);
-      if (!result || !ourApp(result.app)) continue;
+      if (!result || !ownResult(result)) continue;
       const parent = resultParents.get(message);
       if (parent) answered.add(parent);
     }
@@ -1600,7 +1686,7 @@
     for (let at = 0; at < messages.length && out.length < MAX_CALLS; at++) {
       const request = requestOf(messages[at]);
       const completed = request ? null : completedCallOf(messages[at]);
-      if ((!request || !ourPath(request.path)) && !completed) continue;
+      if ((!request || !ownRequestPath(request.path)) && !completed) continue;
       const tool = completed ? completed.tool : toolName(request.path);
       const id = completed ? completed.messageId : request.messageId;
       if (!tool || !id) continue;
@@ -1721,7 +1807,7 @@
         const app = invocation ? str(invocation.server) : null;
         const tool = invocation ? toolName(str(invocation.tool)) : null;
         const id = str(item.callId);
-        if (!app || !ourApp(app) || !tool || !id) continue;
+        if (!app || !ownServerName(app) || !tool || !id) continue;
         if (seen.has(id)) duplicated.add(id);
         seen.add(id);
         out.push({
@@ -1817,7 +1903,7 @@
   }
   /** #318 identified the history cache. Both sources project only explicitly named
    * messages. Typed public items own presentation; cache text cannot supply a final. */
-  function shellRequestMetadata(fiber, queries, shell, conversation) {
+  function shellRequestMetadata(fiber, queries, shell, conversation, sightings = []) {
     if (conversation.conflict) return [];
     const entry = shell.entry;
     const ids = entry.turn.messageIds;
@@ -1856,7 +1942,7 @@
       const message = messageAt(id);
       if (message?.author?.role === 'assistant' && message.recipient === 'functions.exec') invocationIds.add(id);
     }
-    const serverName = name => OUR_APPS.find(app => name === app || name === app.replaceAll(' ', '_'));
+    const serverName = name => ownServerName(name);
     for (const call of shell.calls) {
       const reference = shell.callSources.get(call.messageId);
       if (!reference?.id || !selected.has(reference.id) || sourceCounts.get(reference.id) !== 1) continue;
@@ -1884,6 +1970,8 @@
       if (typeof id !== 'string' || !id || id.length > MAX_TEXT || !own.call(mapping, id)) continue;
       const node = Object.getOwnPropertyDescriptor(mapping, id)?.value, message = node?.message;
       if (node?.id !== id || message?.id !== id) continue;
+      // The stripped entries below carry no app identity; read it here, ids only (sightingsOf).
+      for (const sighting of sightingsOf([message])) if (sightings.length < 50 && !sightings.some(prior => prior.requestId === sighting.requestId && prior.appId === sighting.appId)) sightings.push(sighting);
       const request = str(message.metadata?.request_id), cached = data?.mapping?.[id]?.message;
       if (live && cached?.id === id && request && cached.metadata?.request_id && cached.metadata.request_id !== request) return [];
       const publicMessage = selected.has(id) && message.author?.role === 'assistant' && !hiddenMessage(message) &&
@@ -1897,6 +1985,24 @@
         ...(preamble ? { preamble: budgetedText(preamble, publicBudget, MAX_RENDERED_TEXT),
           publicIdentity: { parent_id: str(message.metadata?.parent_id), working_turn_id: str(message.metadata?.working_turn_id),
             turn_exchange_id: str(message.metadata?.turn_exchange_id) } } : {}) });
+    }
+    // A result row can sit outside the turn's message ids (a new chat, measured 2026-10-11). Find
+    // the result rows of this turn's own request ids anywhere in the mapping; bounded, ids only.
+    const turnRequests = new Set();
+    for (const entry of out) if (entry.metadata.request_id) turnRequests.add(entry.metadata.request_id);
+    if (turnRequests.size && sightings.length < 50) {
+      const known = new Set(sightings.map(sighting => `${sighting.requestId} ${sighting.appId}`));
+      let visited = 0;
+      for (const key in mapping) {
+        if (++visited > 5000 || sightings.length >= 50) break;
+        if (!own.call(mapping, key)) continue;
+        const message = Object.getOwnPropertyDescriptor(mapping, key)?.value?.message;
+        if (!message || !turnRequests.has(str(message.metadata?.request_id))) continue;
+        for (const sighting of sightingsOf([message])) {
+          const seen = `${sighting.requestId} ${sighting.appId}`;
+          if (!known.has(seen)) { known.add(seen); sightings.push(sighting); }
+        }
+      }
     }
     return out;
   }
@@ -1962,6 +2068,8 @@
       typeof reference.model_dil_v2?.fallbackMarkdown === 'string' && reference.model_dil_v2.fallbackMarkdown.trim());
     return own.length === 1 ? unescapeFallbackMarkdown(own[0].model_dil_v2.fallbackMarkdown).slice(0, MAX_RENDERED_TEXT) : content;
   }
+  /** A display formula longer than this is not looked for; its lines are read as plain text. */
+  const MAX_FORMULA_LINES = 400;
   /**
    * The reply as the model wrote it. `fallbackMarkdown` keeps its formatting but backslash-escapes
    * every literal punctuation mark in plain text (measured on GPT-6, 2026-10-09: `2\^10 = 1024 \[ok\]`,
@@ -1969,30 +2077,49 @@
    * theirs verbatim. Every reader of a reply (Goal markers, Loop decisions, compaction briefs) expects
    * the model's own text, so outside code each `\` before ASCII punctuation is dropped, as Markdown
    * itself would on rendering.
+   *
+   * Formulas are verbatim too (measured 2026-10-12, #1342): a display formula is a block from a line
+   * holding only `\[` to a line holding only `\]`, an inline one sits in `\( … \)`, and both hold raw
+   * LaTeX. Literal brackets are escaped inside their text line and literal parentheses never are,
+   * so neither is mistaken for one. An opening without its closing is plain text.
    */
   function unescapeFallbackMarkdown(markdown) {
+    const lines = markdown.split('\n');
+    const out = [];
     let fence = null;
-    return markdown.split('\n').map(line => {
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
       const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
       if (fence) {
         if (marker && marker[0] === fence[0] && marker.length >= fence.length && !line.slice(line.indexOf(marker) + marker.length).trim()) fence = null;
-        return line;
+        out.push(line);
+        continue;
       }
-      if (marker && !(marker[0] === '`' && line.slice(line.indexOf(marker) + marker.length).includes('`'))) { fence = marker; return line; }
-      let out = '';
+      if (marker && !(marker[0] === '`' && line.slice(line.indexOf(marker) + marker.length).includes('`'))) { fence = marker; out.push(line); continue; }
+      if (line.trim() === '\\[') {
+        let close = -1;
+        for (let at = index + 1; at < lines.length && at <= index + MAX_FORMULA_LINES; at++) if (lines[at].trim() === '\\]') { close = at; break; }
+        if (close > index) { for (; index <= close; index++) out.push(lines[index]); index--; continue; }
+      }
+      let text = '';
       for (let at = 0; at < line.length;) {
         const char = line[at];
-        if (char === '\\' && /[!-\/:-@[-`{-~]/.test(line[at + 1] || '')) { out += line[at + 1]; at += 2; continue; }
+        if (char === '\\' && line[at + 1] === '(') {
+          const close = line.indexOf('\\)', at + 2);
+          if (close >= 0) { text += line.slice(at, close + 2); at = close + 2; continue; }
+        }
+        if (char === '\\' && /[!-\/:-@[-`{-~]/.test(line[at + 1] || '')) { text += line[at + 1]; at += 2; continue; }
         if (char === '`') {
           const run = /^`+/.exec(line.slice(at))[0];
           const close = new RegExp(`(?<!\`)${run}(?!\`)`).exec(line.slice(at + run.length));
-          if (close) { const end = at + run.length + close.index + run.length; out += line.slice(at, end); at = end; continue; }
-          out += run; at += run.length; continue;
+          if (close) { const end = at + run.length + close.index + run.length; text += line.slice(at, end); at = end; continue; }
+          text += run; at += run.length; continue;
         }
-        out += char; at++;
+        text += char; at++;
       }
-      return out;
-    }).join('\n');
+      out.push(text);
+    }
+    return out.join('\n');
   }
   /**
    * The provider's own outline of a shell turn's work, in its order: what the model said between
@@ -2006,6 +2133,15 @@
    * does not already know, and the app places its recorded calls in rounds by tool and order
    * (renderer/timeline-rounds.ts), never by an id. Hidden groups and transient reasoning stay out.
    */
+  /**
+   * The user message that opened a shell turn, by ChatGPT's id (#1301). A message the user sends
+   * into a running answer opens a turn of its own in ChatGPT's model, while the request id of the
+   * answer runs on; the app files each turn's outline only under the local turn that message opened.
+   */
+  function shellQuestion(shell) {
+    const first = shell?.entry?.turn?.items?.[0];
+    return first?.type === 'user-message' ? str(first.messageId) || str(first.serverMessageId) || null : null;
+  }
   function shellTurnTrace(shell) {
     const out = [], budget = { remaining: MAX_TRACE_TEXT };
     for (const item of shell.entry.turn.items) {
@@ -2030,8 +2166,7 @@
             const recap = budgetedText(visibleText(step.content), budget, MAX_TRACE_RECAP);
             if (recap) out.push({ kind: 'recap', text: recap });
           }
-        } else if (step?.type === 'mcp-tool-call' && OUR_APPS.some(app =>
-            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) {
+        } else if (step?.type === 'mcp-tool-call' && ownServerName(step.invocation?.server)) {
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (id && tool) out.push({ kind: 'call', id, tool, done: step.completed === true });
         } else if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
@@ -2063,6 +2198,9 @@
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
     let lastAnswer = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
+    // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
+    // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
+    const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
     for (const [index, item] of entry.turn.items.entries()) {
       if (++work > MAX_ROWS) return null;
@@ -2097,6 +2235,14 @@
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
           if (++work > MAX_ROWS) return null;
+          if (step?.type === 'assistant-message' && item !== step) {
+            // Interim prose whatever phase it carries: only a top-level answer can end the turn.
+            const id = str(step.messageId), text = shellItemText(step);
+            if (!id || topLevel.has(id) || !remember(id) || !text || ONLY_CONTENT_REFERENCES.test(text)) continue;
+            messages.push({ id, author: { role: 'assistant' }, content: { content_type: 'text', parts: [text] },
+              channel: 'commentary', end_turn: false, status: step.completed === true ? 'finished_successfully' : 'in_progress', metadata: {} });
+            continue;
+          }
           if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
             const id = str(step.callId);
             if (!id) continue;
@@ -2104,8 +2250,7 @@
             executionIds.push(id);
             continue;
           }
-          if (step?.type !== 'mcp-tool-call' || !OUR_APPS.some(app =>
-            step.invocation?.server === app || step.invocation?.server === app.replaceAll(' ', '_'))) continue;
+          if (step?.type !== 'mcp-tool-call' || !ownServerName(step.invocation?.server)) continue;
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (!id || !tool) continue;
           if (!remember(id) || calls.length >= MAX_CALLS) return null;
@@ -2222,7 +2367,8 @@
         const calls = legacyCalls.length ? legacyCalls : group.search ? viewCallsOf(fiber) : legacyCalls;
         const queries = shell ? shellQueries(fiber) : [];
         const conversation = shell ? shellConversation(queries, shell.entry.conversationId, conversationEvidenceOf(fiber)) : conversationEvidenceOf(fiber);
-        const metadata = shell ? shellRequestMetadata(fiber, queries, shell, conversation) : messages;
+        const shellSightings = [];
+        const metadata = shell ? shellRequestMetadata(fiber, queries, shell, conversation, shellSightings) : messages;
         const requests = requestIdsOf(metadata);
         if (shell) for (const call of calls) {
           const invocation = metadata.find(message => message.id === call.messageId);
@@ -2267,11 +2413,13 @@
           calls,
           codeModeCalls,
           requests,
+          sightings: shell ? shellSightings : sightingsOf(metadata),
           messages: renderedMessages,
           activities,
           thoughtNotifications: nativeActivities.notifications,
           images: generatedImages,
-          ...(trace.length ? { trace } : {})
+          ...(trace.length ? { trace } : {}),
+          ...(shellQuestion(shell) ? { question: shellQuestion(shell) } : {})
         };
         // The isolated-world renderer needs to know which visible section this exact Fiber
         // turn descriptor came from. Remember the desired ephemeral scan index now and apply
@@ -2733,7 +2881,7 @@
       }
     }
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
-    const externalPlugins = pluginsConnectorName(connector.name);
+    const externalPlugins = pluginsConnectorApp(connector.name, connector.id);
     if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
     const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
     // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
@@ -2779,7 +2927,7 @@
         if (props.actions === observedActions) continue;
         if (observedActions) return null;
         observedActions = props.actions;
-        const externalPlugins = pluginsConnectorName(props.connector.name);
+        const externalPlugins = pluginsConnectorApp(props.connector.name, props.connector.id);
         if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
@@ -2804,6 +2952,7 @@
     const nonce = typeof data.nonce === 'string' ? data.nonce.slice(0, 64) : '';
     if (!nonce) return;
     adoptAppNames(data.apps);
+    adoptAppIds(data.appIds);
     const previousPaths = currentPaths;
     currentPaths = new WeakMap();
     try {

@@ -18,6 +18,7 @@ import {
 } from '../src/main/project-files.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { ProjectFileWatchSet } from '../src/main/project-file-watcher.js';
+import * as projectFiles from '../src/main/project-files.js';
 
 let directory: string;
 let approved: string;
@@ -388,4 +389,60 @@ it('watches only requested project directories, debounces changes, and closes co
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('reports a lost watch for resync and ignores notifications from its retired handle', async () => {
+  vi.useFakeTimers();
+  const records: Array<{ emitter: EventEmitter & { close: ReturnType<typeof vi.fn> }; fire: () => void }> = [];
+  const changed: Array<{ projectId: string; directory: string; watchLost?: boolean }> = [];
+  const watches = new ProjectFileWatchSet(event => changed.push(event), (_nativePath, listener) => {
+    const emitter = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+    emitter.close = vi.fn();
+    records.push({ emitter, fire: listener });
+    return emitter as never;
+  });
+  try {
+    const project = await addProject(path.join(approved, 'project'));
+    await watches.sync(project.id, ['']);
+    records[0]!.fire(); // Pending ordinary notification must retire with the failed watch.
+    records[0]!.emitter.emit('error', new Error('watch closed by the filesystem'));
+    expect(changed).toEqual([{ projectId: project.id, directory: '', watchLost: true }]);
+    expect(records[0]!.emitter.close).toHaveBeenCalledTimes(1);
+    changed.length = 0;
+    await watches.sync(project.id, ['']);
+    records[0]!.fire();
+    records[0]!.emitter.emit('error', new Error('late old error'));
+    vi.advanceTimersByTime(180);
+    expect(changed).toEqual([]);
+    records[1]!.fire();
+    vi.advanceTimersByTime(180);
+    expect(changed).toEqual([{ projectId: project.id, directory: '' }]);
+  } finally {
+    watches.close();
+    vi.useRealTimers();
+  }
+});
+
+it('does not retire a new watch when an obsolete A-B-A validation fails late', async () => {
+  vi.useFakeTimers();
+  const listeners: Array<() => void> = [];
+  const changed: Array<{ projectId: string; directory: string }> = [];
+  const watches = new ProjectFileWatchSet(event => changed.push(event), (_nativePath, listener) => {
+    const emitter = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+    emitter.close = vi.fn(); listeners.push(listener); return emitter as never;
+  });
+  try {
+    const project = await addProject(path.join(approved, 'project'));
+    await watches.sync(project.id, ['']);
+    let failOld!: (error: Error) => void;
+    vi.spyOn(projectFiles, 'projectFileTarget').mockImplementationOnce(() => new Promise((_resolve, reject) => { failOld = reject; }));
+    const oldSync = watches.sync(project.id, ['']);
+    await watches.sync(null, []);
+    await watches.sync(project.id, ['']);
+    failOld(new Error('old directory no longer available'));
+    await oldSync;
+    listeners[1]!();
+    vi.advanceTimersByTime(180);
+    expect(changed).toEqual([{ projectId: project.id, directory: '' }]);
+  } finally { watches.close(); vi.useRealTimers(); }
 });

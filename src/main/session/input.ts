@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 import { getSession, findSessionByConversation, createSession, deleteSession, rebindSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, questionHasMcpCall, sessionDirectoryMissing, readCompletedFinal, readLatestUserMessage } from './store.js';
-import { assignSessionProject, projectWorkspace, getSessionProject } from '../projects.js';
+import { assignSessionProject, getProject, projectWorkspace, getSessionProject } from '../projects.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
 import { logInfo, logWarn } from '../logger.js';
@@ -20,6 +20,7 @@ import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../share
 import { inFlightToolCalls } from '../mcp/call-context.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
+import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
@@ -659,6 +660,21 @@ function append(current: InputEntry[], entry: InputEntry, stackDirect = false): 
     return (!row.companionInputId || retained.has(row.companionInputId)) && (!root || retained.has(root.id));
   }), ...active, ...current.filter(row => !retained.has(row.id) && active.some(root => sameDelivery(root, row) || root.id === row.companionInputId)), entry];
 }
+/**
+ * Whether a message of yours must reach this chat through ChatGPT's composer, never a tool result.
+ *
+ * On a model that is not Pro, text inside a tool result never reached the model (#1231). Measured
+ * 2026-10-12 on GPT-6 Thinking: while the page kept closing a turn whose request kept calling tools,
+ * four messages in a row were folded into tool results, never appeared in the conversation and were
+ * not acted on as the user's words. Pro turns, images and attachments keep the tool path.
+ */
+function composerOnlyText(entry: Pick<InputEntry, 'images' | 'attachments' | 'attachmentDelivery' | 'toolImages'> & Parameters<typeof manualInput>[0],
+  session: Pick<SessionSummary, 'conversationId' | 'selectedModel'> | null | undefined): boolean {
+  const selection = session?.selectedModel;
+  return manualInput(entry) && !entry.images?.length && !entry.attachments?.length && !entry.toolImages?.length &&
+    !!session?.conversationId && selection?.conversationId === session.conversationId && !!selection.model &&
+    !isProModel(selection.model, selection.reasoningEffort);
+}
 async function target(entry: InputEntry): Promise<string | null> {
   if (entry.purpose === 'decision') {
     if (entry.conversationId && isChatBlocked(entry.conversationId)) throw new Error('Unblock this helper conversation before sending');
@@ -730,6 +746,11 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     // turn takes one, the explicit choice goes through the composer too. Files keep the tool path.
     if (input.delivery === 'tool' && !input.attachmentDelivery && !input.attachments?.length && !input.images?.length &&
         input.mode === 'auto' && !finishOwner && !input.stages?.length && policy?.directTurn) delete input.delivery;
+    // Not a Pro turn and no direct turn to join: the text waits for the composer instead.
+    if (!finishOwner && !input.stages?.length && composerOnlyText({ ...input, mode: input.mode }, requestedSession)) {
+      if (input.delivery === 'tool') delete input.delivery;
+      if (policy?.canInject) policy = { ...policy, canInject: false };
+    }
     const toolDelivery = input.delivery === 'tool' || input.attachmentDelivery === 'tool';
     if (toolDelivery) {
       const turnId = policy?.directTurn?.id ?? policy?.injectionTurnId;
@@ -1020,6 +1041,27 @@ export function editQueuedInput(id: string, text: string, afterTurn?: boolean): 
     if (current.filter(entry => !terminal(entry)).reduce((sum, entry) => sum + Buffer.byteLength(entry === row ? value : entry.text), 0) > 1024000) throw new Error('Queued messages exceed the text limit');
     await commit(current.map(entry => entry === row ? { ...row, text: value, authoredSource: 'text',
       ...(afterTurn === undefined ? {} : { afterTurn }), deliveryText: undefined, autoSkills: undefined } : entry));
+    return true;
+  });
+}
+
+/**
+ * Sends one queued follow-up into the running turn now, the way Send directly would (Codex calls
+ * this Steer). Only a plain text message waiting for the end of the turn qualifies, and only while
+ * that turn can be joined through ChatGPT's own composer; otherwise it keeps waiting.
+ */
+export function sendQueuedInputNow(id: string): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id && entry.state === 'queued' && entry.mode === 'after-turn' && queuedFollowup(entry) &&
+      !entry.recovery && !entry.finishOwner && !entry.attachments?.length && !entry.images?.length && !entry.stages?.length && !!entry.sessionId);
+    if (!row) return false;
+    const policy = await sessionInputPolicy(row.sessionId!);
+    if (!policy.directTurn) return false;
+    // The person chose immediate delivery for this message; it is no longer an after-turn request.
+    const { requestedMode: _requested, silenceBoundary: _silence, ...rest } = row;
+    await commit(current.map(entry => entry === row ? { ...rest, mode: 'auto' as const, directTurn: policy.directTurn!, transportIntent: 'browser' as const,
+      dueAt: Math.min(row.dueAt, Date.now()) } : entry));
     return true;
   });
 }
@@ -1448,9 +1490,9 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return turnId;
 }
-export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner' }>> {
+export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string }>> {
   return serial(async () => {
-    const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner' }> = [];
+    const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string }> = [];
     const current = await load();
     for (const entry of ordered(current)) {
       if (companionOf(current, entry)) continue;
@@ -1459,6 +1501,11 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
       if (!(await browserInputAllowed(entry))) continue;
       try {
         const conversationId = await target(entry);
+        // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
+        // else: it waits while the Project is being created or could not be, never the root.
+        const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime
+          ? (await getProject(entry.projectId))?.chatgpt : undefined;
+        if (chatgptProject && chatgptProject.state !== 'linked') continue;
         const [end] = !entry.silenceBoundary && manualInput(entry) && entry.sessionId
           ? await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&
@@ -1469,7 +1516,8 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
           ...(entry.directTurn ? { directTurn: entry.directTurn } : {}),
           ...(entry.state === 'queued' && entry.purpose !== 'decision' && entry.sessionId && entry.conversationId && entry.conversationId !== conversationId
             ? { supersededConversationId: entry.conversationId } : {}),
-          ...(entry.lifetime ? { lifetime: entry.lifetime } : {}) });
+          ...(entry.lifetime ? { lifetime: entry.lifetime } : {}),
+          ...(chatgptProject?.state === 'linked' ? { project: chatgptProject.id } : {}) });
       } catch { /* blocked/deleted stays user-visible */ }
     }
     return result;
@@ -1714,6 +1762,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
       // A message for the running turn goes through the composer only: in a tool result the model
       // never saw it (#1231). If the page cannot take it, it is sent once the turn has ended.
       if (entry.directTurn && entry.state === 'queued') return entry;
+      if (entry.state === 'queued' && entry.delivery !== 'tool' && composerOnlyText(entry, session)) return entry;
       // ChatGPT may reuse one request id for the whole server turn. Receipt follows
       // the actual invocation start, never a change in that grouping id.
       const received = toolInputReceipt(entry, sessionId, conversationId, startedAt);
@@ -1888,6 +1937,34 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;
+  });
+}
+
+/**
+ * Ends every message still waiting for a chat that ChatGPT says it deleted.
+ *
+ * Measured 2026-10-11: opening a deleted chat sends the tab to ChatGPT's home page, and a
+ * message for it waited in the queue with no status; one already claimed failed as "Requested
+ * model or reasoning could not be confirmed". Nothing can be delivered into that chat any more,
+ * so each one fails with the real reason instead of reopening it. Sent messages are untouched.
+ */
+export function failInputsForDeletedConversation(conversationId: string): Promise<number> {
+  return serial(async () => {
+    const current = await load();
+    const ended = new Set<string>();
+    for (const row of current) {
+      if (row.state !== 'queued' && row.state !== 'browser') continue;
+      let destination = row.conversationId;
+      if (!destination) { try { destination = await target(row); } catch { destination = null; } }
+      if (destination === conversationId) ended.add(row.id);
+    }
+    if (!ended.size) return 0;
+    await commit(current.map(row => ended.has(row.id) ? { ...row, state: 'failed', owner: null, error: CONVERSATION_DELETED } : row));
+    for (const id of ended) {
+      decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + CONVERSATION_DELETED));
+      decisionWaiters.delete(id);
+    }
+    return ended.size;
   });
 }
 

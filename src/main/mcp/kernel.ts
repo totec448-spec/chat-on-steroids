@@ -41,6 +41,7 @@ import {
   type Resolved
 } from '../sandbox.js';
 import { currentWorkspace, forgetMissingWorkspace, learnWorkspace, setCurrentWorkspace } from '../workspace.js';
+import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from '../worktrees/index.js';
 import { getSessionProject } from '../projects.js';
 import { firstTaskRoot, resolveLinkedSkillAlias } from '../skill-access.js';
 import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js';
@@ -66,6 +67,8 @@ import {
   sleepSilentWorkers,
   noteAgentAlive,
   agentForCaller,
+  managedWorkerAllocationIdentity,
+  managedWorkerIsolationRequired,
   agentForOwnedConversation,
   agentForFinishCaller,
   hasRetiredWorkerLeases,
@@ -79,6 +82,7 @@ import {
   swarmRunning
 } from '../agents.js';
 import type { SurfaceId } from './surfaces.js';
+import { noteServedRequest } from '../connector-identity.js';
 import {
   currentCall,
   emptyEvidence,
@@ -498,7 +502,7 @@ async function withBackgroundExecRecovery(
 ): Promise<ToolResult> {
   const { publication, caller } = context;
   if (!publication || !caller.requestId) return result;
-  const principal = executionPrincipal(caller.requestId, caller.sessionId, context.allowUnattributed === true);
+  const principal = executionPrincipal(caller.requestId, caller.sessionId);
   if (!principal) return result;
   const used = result.content.reduce((bytes, part) => bytes + (part.type === 'text' ? Buffer.byteLength(part.text, 'utf8') : 0), 0);
   const budget = Math.min(12_000, DEFAULT_MAX_OUTPUT_TOKENS * 4 - used) - 64;
@@ -694,6 +698,8 @@ async function dispatchTracked(
   // question the setup screen has to answer honestly.
   surfaceToolCallAt.set(surface, Date.now());
   noteConnectorUse(surface, 'tool');
+  // Proof for connector identity: this exact request reached this surface's own endpoint.
+  if (!nested) noteServedRequest(requestId, surface);
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
   const allowUnattributed = context.allowUnattributed === true;
@@ -957,7 +963,7 @@ async function dispatchTracked(
   if (!nested && requestId && !preAckPolicyRefusal && !supersededConversation && !compacting) {
     const explicitPoll = name === 'write_stdin' && args && typeof args === 'object'
       ? (args as { session_id?: number }).session_id : undefined;
-    const principal = executionPrincipal(requestId, context.caller.sessionId, allowUnattributed);
+    const principal = executionPrincipal(requestId, context.caller.sessionId);
     await acknowledgeBackgroundExecOutput(principal, startedAt, explicitPoll);
   }
   let admissionRefusal = preAckPolicyRefusal;
@@ -1246,13 +1252,31 @@ function isFinishCall(name: string, args: unknown): boolean {
  * refusal it would have got for a relative path before, which is why ambiguity here costs a
  * retry rather than reaching the wrong file.
  */
-async function validatedWorkspace() {
+export async function validatedWorkspace() {
   return (await liveWorkspace()).workspace;
 }
 
 /** The workspace, plus the virtual path of a learned one just dropped because its folder is gone. */
 async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: string } | null; missing: string | null }> {
-  const sessionId = currentCall()?.caller.sessionId;
+  const call = currentCall();
+  const sessionId = call?.caller.sessionId;
+  // Session project metadata is inherited by workers for grouping; the broker's exact
+  // worktree allocation must take precedence, including after a restart or revival.
+  // An evicted managed broker family is not permission to use the inherited Prime project.
+  // Exact-chat managed allocation/tombstone proof survives the finite broker-history window;
+  // ordinary and older unmanaged workers never acquire an isolation requirement by origin.
+  if (call && managedWorkerIsolationRequired(call.caller)) {
+    const allocation = managedWorkerAllocationIdentity(call.caller);
+    const lease = allocation && call.agent === allocation.agentId ? lookupWorkerWorkspace(allocation) : null;
+    if (!lease) {
+      throw new Error('WORKTREE_OWNER_UNAVAILABLE: the required isolated worker checkout has no verified owner. Relative file and command operations are blocked.');
+    }
+    // Cache provenance is not filesystem ownership: another process may replace the
+    // directory while this worker sleeps. Recheck marker, inode and Git owner now.
+    const verified = await validateWorkerWorkspaceLease(lease, getConfig().roots);
+    setCurrentWorkspace(verified.workspace);
+    return { workspace: verified.workspace, missing: null };
+  }
   // Explicit project bindings are durable authority, even after a cwd was learned.
   // Validate first so a revoked or moved project never becomes a first-root fallback.
   const project = sessionId ? await getSessionProject(sessionId) : null;

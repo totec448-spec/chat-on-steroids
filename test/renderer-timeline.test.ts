@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -196,7 +196,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }),
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
       ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
@@ -1221,7 +1221,7 @@ it('keeps generated-image metadata visible when recording storage is full', asyn
   expect(row.querySelector('.generated-image-frame')).toBeTruthy();
   expect(row.querySelector('img')).toBeNull();
   expect(row.querySelector('.generated-image-frame')?.classList.contains('is-unavailable')).toBe(true);
-  expect(row.querySelector('button')?.textContent).toBe('Free image storage');
+  expect(row.querySelector('button')?.textContent).toBe('Free storage');
 });
 
 it('does not group images across an intervening authored message or another turn', async () => {
@@ -1378,6 +1378,108 @@ it('loads recorded tool images on expansion and hides truncated binary envelopes
   expect(tool.textContent).not.toContain('AAAA');
   expect(getImage).toHaveBeenCalledWith(summary([]).id, 'abcdefab.png');
   expect(tool.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,YQ==');
+});
+
+// #1190: project headings come from the whole project list, chats from the newest page of all
+// history. A project whose chats are all older looked empty, and expanding it did nothing.
+async function olderProjectFixture(projectPages?: SessionSummary[][]) {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Older workspace', path: '/fixture', createdAt: 1 };
+  const recent = { ...summary([]), id: 'recent-unfiled', projectId: undefined, updatedAt: T0 + 400 };
+  const worker = { ...summary([]), id: 'older-worker', projectId: project.id, updatedAt: T0 + 3,
+    origin: { kind: 'worker' as const, fromSessionId: 'older-parent', agentId: 'worker-1', task: 'Inspect' } };
+  const parent = { ...summary([]), id: 'older-parent', conversationId: 'older-chat', projectId: project.id, updatedAt: T0 + 2 };
+  const unused = { ...summary([]), id: 'oldest-unfiled', projectId: undefined, updatedAt: T0 + 1 };
+  // The newest page of everything shows no chat of the project; the project's own pages do.
+  const all = [[recent], [unused]];
+  const own = projectPages ?? [[worker], [parent]];
+  const { w, append } = await boot([], false, [], [project], { sessions: [recent] });
+  const list = vi.fn(async (options: any) => {
+    const pages = options?.projectId === project.id ? own : all;
+    const index = options?.cursor ? pages.findIndex(rows => rows.at(-1)?.id === options.cursor.id) + 1 : 0;
+    const rows = pages[index] ?? [];
+    return { ok: true, data: { sessions: rows, total: 4, nextCursor: index < pages.length - 1 ? { updatedAt: rows.at(-1)!.updatedAt, id: rows.at(-1)!.id } : null,
+      activeId: null, pressure: [], blocked: [] } };
+  });
+  (w as any).api.listSessions = list;
+  await append([]); list.mockClear();
+  const heading = () => w.document.querySelector('.project-heading') as HTMLElement;
+  const projectCalls = () => list.mock.calls.map(([options]) => options).filter(options => options?.projectId);
+  return { w, list, heading, parent, worker, own, project, append, projectCalls };
+}
+
+it("shows a project's older chats when it is expanded, asking for that project's pages only", async () => {
+  const f = await olderProjectFixture(); f.heading().click(); await settle();
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+  // A page of workers alone shows no chat, so the next page of the project follows.
+  expect(f.projectCalls()).toEqual([
+    { projectId: f.project.id, limit: 60 },
+    { projectId: f.project.id, limit: 60, cursor: { updatedAt: f.worker.updatedAt, id: f.worker.id } }
+  ]);
+  // The rest of the history is not paged for it, no chat is selected, and the project stays open.
+  expect(f.list.mock.calls.every(([options]) => !!options?.projectId)).toBe(true);
+  expect(f.w.document.querySelector('[data-id="oldest-unfiled"]')).toBeNull();
+  expect(f.w.document.querySelector('.sess.is-sel')).toBeNull();
+  expect((f.w.document.querySelector('.project-group') as HTMLDetailsElement).open).toBe(true);
+});
+
+it("keeps a project's older chats through the sidebar's next refresh", async () => {
+  const f = await olderProjectFixture(); f.heading().click(); await settle();
+  await f.append([]); await settle();
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+  // Asked once: the refresh and another expand do not read the project again.
+  f.heading().click(); f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(2);
+});
+
+it('stops reading a project when it is collapsed while a page is on its way', async () => {
+  const f = await olderProjectFixture();
+  let resolve!: (value: any) => void;
+  f.list.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(1);
+  f.heading().click();
+  resolve({ ok: true, data: { sessions: f.own[0], total: 4, nextCursor: { updatedAt: f.worker.updatedAt, id: f.worker.id }, activeId: null, pressure: [], blocked: [] } });
+  await settle();
+  expect(f.projectCalls()).toHaveLength(1);
+  expect((f.w.document.querySelector('.project-group') as HTMLDetailsElement).open).toBe(false);
+  // Expanding again continues where it stopped.
+  f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(2);
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+});
+
+it('does not loop when a project page cannot be read, and tries again on the next expand', async () => {
+  const f = await olderProjectFixture();
+  f.list.mockResolvedValueOnce({ ok: false, error: 'Fixture read failure' } as any);
+  f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(1);
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).toBeNull();
+  f.heading().click(); f.heading().click(); await settle();
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+});
+
+it('asks an empty project once', async () => {
+  const f = await olderProjectFixture([[]]);
+  f.heading().click(); await settle();
+  f.heading().click(); f.heading().click(); await settle();
+  expect(f.projectCalls()).toEqual([{ projectId: f.project.id, limit: 60 }]);
+  expect(f.w.document.querySelectorAll('.project-group .sess')).toHaveLength(0);
+});
+
+it('continues with the project\'s older pages from "Show more"', async () => {
+  const task = (index: number): SessionSummary => ({ ...summary([]), id: `project-task-${index}`, conversationId: `chat-${index}`, title: `Task ${index}`,
+    projectId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', updatedAt: T0 + 100 - index });
+  const f = await olderProjectFixture([[0, 1, 2, 3, 4].map(task), [5, 6].map(task)]);
+  f.heading().click(); await settle();
+  const shown = () => [...f.w.document.querySelectorAll<HTMLElement>('.project-group .sess')].map(row => row.dataset.id);
+  expect(shown()).toHaveLength(5);
+  // Everything loaded is on screen, and the project has more: the button reads on from there.
+  const more = f.w.document.querySelector('.project-show-more') as HTMLElement;
+  expect(more).not.toBeNull();
+  more.click(); await settle();
+  expect(f.projectCalls()).toHaveLength(2);
+  expect(shown()).toEqual([0, 1, 2, 3, 4, 5, 6].map(index => `project-task-${index}`));
+  expect(f.w.document.querySelector('.project-show-more')).toBeNull();
 });
 
 it('pages project tasks as complete parent/worker groups and keeps the selected task visible after reordering', async () => {
@@ -2882,6 +2984,32 @@ it('shows Send directly alone for a running turn, keeps After this turn selected
   expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('after-turn');
 });
 
+it("retires the running turn's lines when the turn ends after its rows were drawn (2026-10-12)", async () => {
+  // The turn's end reached the header ("Worked for") after the last rows were drawn; the timeline kept
+  // "Working for" and "Thinking" frozen under the finished answer until another event arrived.
+  const asked = Date.now() - 60_000;
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'ending-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'ending-turn', messageId: 'q-end', message: text('Finish the step') }
+  ]);
+  const { w } = app;
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: 'ending-turn' } });
+  await app.append([{ seq: 3, time: asked + 50_000, source: 'extension', kind: 'assistant_message', turnId: 'ending-turn', messageId: 'a-end', final: true, message: text('Step finished.') },
+    { seq: 4, time: asked + 51_000, source: 'extension', kind: 'turn_end', turnId: 'ending-turn', outcome: 'completed' }]);
+  // The rows were drawn while the controls still said the turn runs.
+  expect(w.document.querySelector('#timeline .turn-status.is-working')).not.toBeNull();
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null } });
+  // An app state update re-reads only the controls, as the live app did when the turn ended.
+  const chat = await import('../src/renderer/chat.js');
+  chat.chatApply((await api.getState()).data);
+  await settle(); await settle();
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Worked for /);
+  expect(w.document.querySelector('#timeline .turn-status.is-working')).toBeNull();
+  expect(w.document.querySelector('#timeline .turn-now')).toBeNull();
+});
+
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
   const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
@@ -3427,6 +3555,32 @@ it('queues every generated stage in an existing session without Send and preserv
   expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(1);
   expect(w.document.getElementById('finishQueue')!.textContent).toContain('Verify it');
   expect(live.sent).toHaveLength(1);
+});
+
+// #1428: in a chat with nothing running, the plan used to be queued "at Session finish" right
+// away, and Session finish only comes at the end of a turn. Nothing started until the person
+// sent some other message.
+it('shows the plan in an idle chat and starts it with Enter, like in a new chat', async () => {
+  const { w, live } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = (id: string) => Promise.resolve({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  // Selected again, so the chat's state is read with nothing running.
+  w.document.getElementById('newChat')!.click(); await settle();
+  (w.document.querySelector(`[data-id="${summary([]).id}"]`) as HTMLButtonElement).click(); await settle();
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
+  // Written out for review, not queued behind a turn that will not come.
+  expect(live.sent).toHaveLength(0);
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(2);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Start full plan');
+  expect(w.document.querySelector('.plan-stage-heading')!.getAttribute('title')).not.toMatch(/Session finish/);
+  input.focus();
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: summary([]).id, text: 'Build foundation', stages: ['Verify it'], objective: 'Build the whole task', authoredSource: 'objective', mode: 'auto' });
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(0);
 });
 
 it('retries a materialized finish checkpoint without recreating its already independent siblings', async () => {
@@ -5166,4 +5320,191 @@ it('opens the next chat at its end after the reader scrolled away from a sent me
   // Its answer keeps growing: the reader who just opened it follows the end.
   await append([{ seq: 100, time: T0 + 100, source: 'extension', kind: 'assistant_message', messageId: 'grown', message: text('A new answer'), final: false }]);
   expect(pane.scrollTop).toBe(pane.scrollHeight);
+});
+
+/** Counts how often the running turn's two lines are taken out of the page and put back. */
+function lineMoves(w: JSDOM['window']): { stop: () => number } {
+  let moves = 0;
+  const watched = (node: Node) => node instanceof w.HTMLElement && (node.matches('.turn-status') || node.matches('.turn-now'));
+  const observer = new w.MutationObserver(records => {
+    for (const record of records) for (const node of [...record.addedNodes, ...record.removedNodes]) if (watched(node)) moves++;
+  });
+  observer.observe(w.document.getElementById('timelineContent')!, { childList: true, subtree: true });
+  return { stop: () => { observer.takeRecords().forEach(record => { for (const node of [...record.addedNodes, ...record.removedNodes]) if (watched(node)) moves++; }); observer.disconnect(); return moves; } };
+}
+
+it('keeps the working line under your message while a failed delivery notice stays in the queue (2026-10-12)', async () => {
+  // A failed "continue" kept its notice in the queue. Counted as a message on its way, it parked the
+  // running turn's line after the queue, below the question, and every repaint moved it again.
+  const asked = Date.now() - 12_000;
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-live', message: text('Finish the three steps') }
+  ]);
+  const { w } = app;
+  app.live.inputs.push({ id: 'failed-continue', sessionId: '2026-09-02-test0001', text: 'Continue from where you left off.',
+    mode: 'auto', dueAt: 0, model: null, reasoningEffort: null, state: 'failed', owner: null, createdAt: asked - 60_000,
+    conversationId: 'chat-b', error: 'Not injected: the selected turn ended before an eligible tool call.' });
+  await app.append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message.is-delivery-error')).not.toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
+it("keeps a long running turn's line at the top of its loaded rows, not under its newest action (2026-10-12)", async () => {
+  // A 45-minute turn pushed its question out of the loaded rows. "Working for" fell to the bottom,
+  // after the newest action, and jumped back under the question whenever that was loaded again.
+  const asked = Date.now() - 45 * 60_000;
+  const calls = Array.from({ length: 220 }, (_, i): SessionEvent => ({ ...toolCall(i + 3, `long-${i}`), time: asked + (i + 1) * 1000, turnId: 'long-turn' }));
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'long-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'long-turn', messageId: 'q-long', message: text('Build all thirty quests') },
+    ...calls
+  ]);
+  const { w } = app;
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('.ev-user_message')).toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  const rows = [...timeline.querySelectorAll('[data-timeline-key], .turn-status, .turn-now')];
+  expect(rows[0]).toBe(line);
+  expect(rows.at(-1)?.matches('.turn-now')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
+it('keeps a running turn’s line under its question while a message sent into it waits (2026-10-12)', async () => {
+  // A message sent mid-round pulled the running turn's line below it, as if the chat had moved on to
+  // the new message; the rows jumped back once it was delivered or cancelled.
+  const asked = Date.now() - 200_000;
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'running-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'running-turn', messageId: 'q-run', message: text('Port the reference client') },
+    { ...toolCall(3, 'mid-call'), turnId: 'running-turn' }
+  ]);
+  const { w } = app;
+  app.live.inputs.push({ id: 'mid-round', sessionId: '2026-09-02-test0001', text: 'Here is where the reference files are.',
+    mode: 'auto', dueAt: 0, model: null, reasoningEffort: null, state: 'browser', owner: 'page', createdAt: Date.now(), conversationId: 'chat-a' });
+  await app.append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message:not(.is-delivery-error)')).not.toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
+it('does not move a parked working line on every repaint', async () => {
+  // A turn with no row yet parks its line after the queue; repainting it in place used to re-insert
+  // it each time, restarting its shimmer and Thinking's breathing several times a second.
+  const app = await boot([]);
+  const { w } = app;
+  expect(w.document.querySelector('.turn-status')!.previousElementSibling?.id).toBe('inputQueue');
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+  expect(w.document.querySelector('.turn-status')!.previousElementSibling?.id).toBe('inputQueue');
+});
+
+it("never hangs the running turn's clock under an older question read further up (2026-10-12)", async () => {
+  // Reading a page of history up the chat, its newest loaded question is an old, finished one. The live
+  // "Working for" went right under it, as if that old exchange were still running.
+  const rows = Array.from({ length: 360 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `origin-${i}`, message: text(`Origin row ${i + 1}.`) }));
+  const { w } = await boot(rows);
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => Math.max(400, timeline.querySelectorAll('[data-timeline-key]').length * 20) } });
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    const index = [...timeline.querySelectorAll('[data-timeline-key]')].indexOf(this);
+    const top = index < 0 ? 0 : index * 20 - pane.scrollTop;
+    return { top, bottom: top + 20, height: 20 } as DOMRect;
+  };
+  // At the end the running turn's line sits under the newest question.
+  expect(w.document.querySelector('.turn-status')!.closest('#timeline')).not.toBeNull();
+  for (let index = 0; index < 8 && !timeline.textContent?.includes('Origin row 200.'); index++) {
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+  }
+  expect(timeline.textContent).not.toContain('Origin row 360.');
+  expect(w.document.querySelector('#timeline .turn-status')).toBeNull();
+});
+
+// Like Codex's Steer: a message waiting for the end of the turn can be sent into it now.
+it('offers Send now on a queued message while the running turn can take it', async () => {
+  const { w, live, append } = await boot([]);
+  const api = (w as any).api;
+  let directly = false;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id,
+    activeTurnId: 'plain-turn', canInject: false, canSendDirectly: directly, queueAtFinish: false } });
+  live.inputs.push({ id: 'waiting', sessionId: summary([]).id, text: 'Also check the logs', mode: 'after-turn', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  const sendNow = () => w.document.querySelector<HTMLButtonElement>('#finishQueue [aria-label="Send now"]:not([hidden])');
+  // A turn that cannot be joined (or no turn at all): the message just waits.
+  expect(sendNow()).toBeNull();
+
+  directly = true;
+  await append([]);
+  const steer = vi.fn(async () => { live.inputs[0]!.mode = 'auto'; return { ok: true, data: true }; });
+  api.sendQueuedInputNow = steer;
+  sendNow()!.click(); sendNow()?.click();
+  await settle();
+  expect(steer).toHaveBeenCalledTimes(1);
+  expect(steer).toHaveBeenCalledWith('waiting');
+});
+
+it('says so when a queued message can no longer join the running turn', async () => {
+  const { w, live, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id,
+    activeTurnId: 'plain-turn', canInject: false, canSendDirectly: true, queueAtFinish: false } });
+  live.inputs.push({ id: 'waiting', sessionId: summary([]).id, text: 'Also check the logs', mode: 'after-turn', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  api.sendQueuedInputNow = async () => ({ ok: true, data: false });
+  w.document.querySelector<HTMLButtonElement>('#finishQueue [aria-label="Send now"]:not([hidden])')!.click();
+  await settle();
+  expect(w.document.body.textContent).toContain('The turn ended before this message could join it. It stays queued.');
+});
+
+// Codex's "Follow-up behavior": messages typed while a turn runs join it, or wait for its end.
+// Cmd/Ctrl+Shift+Enter sends the other way.
+async function sendDuringTurn(followUp: 'steer' | 'queue' | undefined, keys: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {}) {
+  const app = await boot([], true, [], [], followUp === undefined ? {} : { followUp });
+  const api = (app.w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, activeTurnId: 'running-turn', canInject: false, canSendDirectly: true, queueAtFinish: false } });
+  await app.append([]);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Also check the logs';
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  input.dispatchEvent(new app.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...keys }));
+  await vi.waitFor(() => expect(app.live.sent).toHaveLength(1));
+  return { app, sent: app.live.sent[0]! };
+}
+
+it('sends a message into the running turn by default', async () => {
+  const { app, sent } = await sendDuringTurn(undefined);
+  expect(sent.mode).toBe('auto');
+  expect((app.w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('auto');
+});
+
+it('queues a message for after the turn when that is the chosen follow-up behavior', async () => {
+  const { sent } = await sendDuringTurn('queue');
+  expect(sent.mode).toBe('after-turn');
+});
+
+it.each([
+  [{ metaKey: true }, undefined, 'after-turn'], [{ ctrlKey: true }, undefined, 'after-turn'],
+  [{ metaKey: true }, 'queue', 'auto'], [{ ctrlKey: true }, 'queue', 'auto']
+] as const)('sends the other way with %o + Shift + Enter (default %s)', async (modifier, followUp, mode) => {
+  expect((await sendDuringTurn(followUp, { ...modifier, shiftKey: true })).sent.mode).toBe(mode);
 });

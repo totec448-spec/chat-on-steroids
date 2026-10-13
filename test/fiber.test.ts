@@ -40,6 +40,7 @@ interface Descriptor {
   hidden: number;
   localCount: number | null;
   answered: boolean;
+  own?: boolean;
 }
 
 // ------------------------------------------------------------------ fixtures
@@ -243,6 +244,7 @@ interface TurnCall {
 
 interface TurnEvidence {
   index: number;
+  sightings?: Array<{ requestId: string; appId: string; linkId: string | null; appName: string | null }>;
   turnId: string | null;
   conversationId?: string | null;
   conversationConflict?: boolean;
@@ -299,7 +301,9 @@ async function scan(
   turnSections: TurnFixture[] = [],
   repeatStableScan = false,
   /** This install's connector names, as the content script passes them with every ask. */
-  apps?: unknown
+  apps?: unknown,
+  /** This install's proven connector apps ({ surface, appId, linkId, name }), passed the same way. */
+  appIds?: unknown
 ): Promise<{
   rows: Descriptor[];
   version: number;
@@ -449,7 +453,7 @@ async function scan(
   // Dispatched rather than posted: jsdom's own postMessage does not set `source`, and the
   // helper refuses any message that did not come from this window.
   window.dispatchEvent(
-    new window.MessageEvent('message', { data: { source: 'clf-fiber-ask', nonce, ...(apps === undefined ? {} : { apps }) }, source: window })
+    new window.MessageEvent('message', { data: { source: 'clf-fiber-ask', nonce, ...(apps === undefined ? {} : { apps }), ...(appIds === undefined ? {} : { appIds }) }, source: window })
   );
 
   const data = await reply;
@@ -574,6 +578,53 @@ describe('reading a row out of the page', () => {
     expect(rows[0]).toMatchObject({ messageId: 'result-only', tool: 'read', app: APP, path: null, answered: true, localCount: 1 });
     expect(turns[0]!.calls).toEqual([{ messageId: 'result-only', tool: 'read', order: 0,
       answered: true, requestId: 'wfr_01a009', createTime: 1786873669.5 }]);
+  });
+
+  describe('a connector renamed in ChatGPT (app id, 2026-10-11)', () => {
+    const NAMES = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins'];
+    const pair = (app: string, requestId: string, uri?: string) => {
+      const asked = request(`${requestId}-ask`, 'read', { app });
+      asked.metadata!.request_id = requestId;
+      const result = answer(`${requestId}-res`, asked.id, 'read', app);
+      result.metadata!.request_id = requestId;
+      result.author.name = 'api_tool.call_tool';
+      if (uri) (result.metadata!.invoked_resource as Record<string, unknown>).resource_uri = uri;
+      return [asked, result];
+    };
+
+    it('treats a renamed connector as ours by its learned app id and link', async () => {
+      const messages = pair('My tools', 'q1');
+      const { rows, turns } = await scan([rowInTurn(messages, messages)], [{ id: 'renamed-turn', messages }], false, NAMES,
+        [{ surface: 'core', appId: ASDK, linkId: LINK, name: 'My tools' }]);
+      expect(turns[0]!.calls.map(call => call.tool)).toEqual(['read']);
+      expect(rows[0]).toMatchObject({ own: true });
+    });
+
+    it('does not claim a same-named app once the real app id is learned', async () => {
+      const messages = pair(APP, 'q2', '/asdk_app_foreign/link_foreign/read');
+      const content = messages[0]!.content as Record<string, string>;
+      content['text'] = content['text']!.replace(LINK, 'link_foreign');
+      const { rows, turns } = await scan([rowInTurn(messages, messages)], [{ id: 'foreign-turn', messages }], false, NAMES,
+        [{ surface: 'core', appId: ASDK, linkId: LINK, name: APP }]);
+      expect(turns[0]?.calls ?? []).toEqual([]);
+      expect(rows[0]).toMatchObject({ own: false });
+    });
+
+    it('falls back to the names while nothing is learned', async () => {
+      const messages = pair(APP, 'q3');
+      const { rows, turns } = await scan([rowInTurn(messages, messages)], [{ id: 'names-turn', messages }], false, NAMES, []);
+      expect(turns[0]!.calls.map(call => call.tool)).toEqual(['read']);
+      expect(rows[0]).toMatchObject({ own: true });
+    });
+
+    it('reports a sighting for every connector result row, ours or not', async () => {
+      const messages = [...pair('My tools', 'q4'), ...pair('Gmail', 'q5', '/asdk_app_gmail/link_g/search')];
+      const { turns } = await scan([], [{ id: 'sighting-turn', messages }], false, NAMES, []);
+      expect(turns[0]!.sightings).toEqual([
+        { requestId: 'q4', appId: ASDK, linkId: LINK, appName: 'My tools' },
+        { requestId: 'q5', appId: 'asdk_app_gmail', linkId: 'link_g', appName: 'Gmail' }
+      ]);
+    });
   });
 
   it.each(['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'Chat On Steroids Backup', 'Gmail'])(
@@ -1748,6 +1799,7 @@ describe('what may leave the page', () => {
         'index',
         'localCount',
         'messageId',
+        'own',
         'path',
         'resource',
         'tool',

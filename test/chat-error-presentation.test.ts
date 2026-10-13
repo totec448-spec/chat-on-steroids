@@ -105,11 +105,48 @@ it('only an exact completed boundary supersedes the error guidance', () => {
   const end: SessionEvent = { seq: 3, time: 110, source: 'extension', kind: 'turn_end', turnId: 'turn-a', outcome: 'completed' };
   expect(chatErrorPresentation(failed, [failed, end]).next).toContain('later completed');
   expect(chatErrorPresentation(failed, [failed, end])).toMatchObject({ title: 'Recovered after interruption', resolved: true });
-  expect(chatErrorPresentation(failed, [failed, { ...end, turnId: 'turn-b' }]).next).not.toContain('later completed');
-  expect(chatErrorPresentation(failed, [failed, { ...end, outcome: 'stopped' }]).next).not.toContain('later completed');
+  // Each scenario below is a notice of its own: one notice seen resolved stays resolved across pages.
+  const other = error('Thinking failed', { seq: 2 });
+  expect(chatErrorPresentation(other, [other, { ...end, turnId: 'turn-b' }]).next).not.toContain('later completed');
+  expect(chatErrorPresentation(other, [other, { ...end, outcome: 'stopped' }]).next).not.toContain('later completed');
   const reopened: SessionEvent = { seq: 4, time: 120, source: 'app', kind: 'turn_start', turnId: 'turn-a' };
   expect(chatErrorPresentation(failed, [failed, end, reopened]).next).toContain('Work continued');
   expect(chatErrorPresentation(failed, [failed, end, reopened]).resolved).toBe(false);
-  expect(chatErrorPresentation(failed, [failed, { ...end, turnId: 'turn-b' }]).resolved).toBe(false);
-  expect(chatErrorPresentation(failed, [failed, { ...reopened, turnId: 'turn-b' }]).next).not.toContain('Work continued');
+  expect(chatErrorPresentation(other, [other, { ...end, turnId: 'turn-b' }]).resolved).toBe(false);
+  expect(chatErrorPresentation(other, [other, { ...reopened, turnId: 'turn-b' }]).next).not.toContain('Work continued');
+});
+
+it('names a chat deleted in ChatGPT and points to a new chat instead of a retry or reload', () => {
+  const deleted = error('This chat was deleted in ChatGPT. Start a new chat to continue.', { recoverable: false });
+  expect(chatErrorPresentation(deleted)).toEqual({ title: 'Chat deleted in ChatGPT',
+    message: 'ChatGPT no longer has this chat, so nothing more can be sent to it.',
+    next: 'Start a new chat to continue. This history stays in the app.', resolved: false, reloaded: false });
+});
+
+it('says until when ChatGPT asked to wait, when the notice recorded that time (#1355)', () => {
+  const noticed = new Date(2026, 9, 12, 14, 20).getTime();
+  const sameDay = new Date(2026, 9, 12, 14, 32).getTime();
+  const nextDay = new Date(2026, 9, 13, 0, 5).getTime();
+  const clock = (time: number) => new Date(time).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+  const limited = (retryAt?: number) => chatErrorPresentation(error('ChatGPT temporarily limited access to this conversation history.',
+    { time: noticed, blocking: true, ...(retryAt ? { retryAt } : {}) })).next;
+
+  expect(limited(sameDay)).toBe(`ChatGPT asked to wait until at least ${clock(sameDay)}. After that the app continues by itself. Reloading cannot remove this limit.`);
+  // A wait that ends on another day names the day too.
+  expect(limited(nextDay)).toContain(new Date(nextDay).toLocaleDateString('en', { month: 'short', day: 'numeric' }));
+  expect(limited(nextDay)).toContain(clock(nextDay));
+  // A notice recorded before the time was kept says what it always said.
+  expect(limited()).toBe('Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.');
+});
+
+it('keeps a resolved notice resolved when the rows that prove it leave the loaded page (2026-10-12)', () => {
+  // Scrolling up loads older rows and drops newer ones. A notice drawn red, then green once its turn's
+  // completion loaded, turned red again on the next page and green again when it came back.
+  const question: SessionEvent = { seq: 40, time: 4000, source: 'extension', kind: 'user_message', messageId: 'q-page', message: { text: 'Build', chars: 5, truncated: false } };
+  const failed = error('The response stream is unavailable (resume HTTP 404).', { seq: 41, time: 4100, turnId: 'turn-page', recoverable: true });
+  const completed: SessionEvent = { seq: 50, time: 5000, source: 'extension', kind: 'turn_end', turnId: 'turn-page', outcome: 'completed' };
+  expect(chatErrorPresentation(failed, [question, failed, completed]).resolved).toBe(true);
+  expect(chatErrorPresentation(failed, [question, failed]).resolved).toBe(true);
+  // Another notice of that page is not resolved by it.
+  expect(chatErrorPresentation({ ...failed, seq: 42 }, [question, failed]).resolved).toBe(false);
 });

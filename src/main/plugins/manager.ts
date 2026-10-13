@@ -36,6 +36,7 @@ function removePluginFolder(directory: string): Promise<void> {
 }
 import { PluginOAuth, PluginNeedsAuth, PluginOAuthSetupError, clearPluginOAuth } from './oauth.js';
 export { PLUGIN_MAX_TOOLS, PLUGIN_MAX_SCHEMA_BYTES } from './exposure.js';
+import { PLUGIN_DISCOVERY_MAX_BYTES, PLUGIN_DISCOVERY_MAX_TOOLS } from './exposure.js';
 
 interface RecordEntry extends Omit<PluginView, 'tools'> {
   /** Validated discovery belongs to the installation, not a replaceable connection. */
@@ -138,6 +139,10 @@ export class PluginManager {
       id: row.id, name: row.name, enabled: row.enabled && !['error', 'needs-auth', 'authenticating'].includes(row.status) && (row.source.auth !== 'oauth' || this.live.has(row.id)),
       tools: row.catalog, disabledTools: row.disabledTools,
     })));
+  }
+  /** Remote plugin addresses, so the app's proxy can leave the ones the system reaches directly alone. */
+  remoteEndpoints(): string[] {
+    return this.records.flatMap(row => row.source.kind === 'remote' && row.source.url ? [row.source.url] : []);
   }
   snapshot(): PluginSnapshot {
     const exposure = this.exposure();
@@ -590,8 +595,8 @@ export class PluginManager {
       // SDK listTools() without a cursor aggregates every page before returning.
       const page = await client.request({ method: 'tools/list', ...(cursor === undefined ? {} : { params: { cursor } }) }, { timeout: Math.max(1, Math.min(15000, deadline - Date.now())) });
       tools.push(...page.tools);
-      if (tools.length > 256 || Buffer.byteLength(JSON.stringify(tools)) > 1000000)
-        throw new Error('Server discovery exceeds 256 tools or 1 MB; configure a smaller server toolset');
+      if (tools.length > PLUGIN_DISCOVERY_MAX_TOOLS || Buffer.byteLength(JSON.stringify(tools)) > PLUGIN_DISCOVERY_MAX_BYTES)
+        throw new Error(`Server discovery exceeds ${PLUGIN_DISCOVERY_MAX_TOOLS} tools or ${PLUGIN_DISCOVERY_MAX_BYTES / 1024 / 1024} MB; configure a smaller server toolset`);
       cursor = page.nextCursor;
       if (cursor && cursors.has(cursor)) throw new Error('Server returned a repeated tool cursor');
       if (cursor) cursors.add(cursor);

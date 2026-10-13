@@ -127,6 +127,20 @@ describe('settings migration', () => {
       expect((await loadConfig()).ui.backgroundChats).toBe(backgroundChats);
     }
   });
+  it('defaults background placement to a window and keeps a saved tab-group choice', async () => {
+    expect(defaultConfig().ui.backgroundPlacement).toBe('window');
+    const legacy = defaultConfig(); delete (legacy.ui as { backgroundPlacement?: string }).backgroundPlacement;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.backgroundPlacement).toBe('window');
+    for (const backgroundPlacement of ['group', 'window'] as const) {
+      await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, backgroundPlacement } });
+      expect((await loadConfig()).ui.backgroundPlacement).toBe(backgroundPlacement);
+    }
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, backgroundPlacement: 'sidebar' } }), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.ui.backgroundPlacement).toBe('window');
+    expect(loaded.ui.backgroundChats).toBe(true);
+  });
   it('defaults login startup off for fresh and legacy settings independently of auto-connect', async () => {
     expect(defaultConfig().ui.startAtLogin).toBe(false);
     const legacy = defaultConfig();
@@ -374,6 +388,29 @@ describe('settings migration', () => {
     expect((await loadConfig()).compaction.handoffPrompt).toBe(custom);
   });
 
+  it('keeps 2 GB of recording storage for older and broken configs, and saves a larger size', async () => {
+    const config = defaultConfig();
+    expect(config.sessions.storageLimitGiB).toBe(2);
+    const older = structuredClone(config) as Record<string, any>;
+    delete older.sessions.storageLimitGiB;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(older), 'utf8');
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(2);
+    await fs.writeFile(path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, sessions: { ...config.sessions, storageLimitGiB: 7 } }), 'utf8');
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(2);
+    await saveConfig({ ...config, sessions: { ...config.sessions, storageLimitGiB: 20 } });
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(20);
+  });
+
+  it('joins the running turn by default, and loads a broken follow-up behavior as that default', async () => {
+    const config = defaultConfig();
+    expect(config.ui.followUp).toBe('steer');
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, ui: { ...config.ui, followUp: 'later' } }), 'utf8');
+    expect((await loadConfig()).ui.followUp).toBe('steer');
+    await saveConfig({ ...config, ui: { ...config.ui, followUp: 'queue' } });
+    expect((await loadConfig()).ui.followUp).toBe('queue');
+  });
+
   it('keeps the thorough handoff length for older and broken configs, and saves a choice', async () => {
     const config = defaultConfig();
     expect(config.compaction.handoffLength).toBe('thorough');
@@ -557,6 +594,7 @@ describe('shipped defaults', () => {
     // Waiting for a run's own workers is a workflow preference, not a first-launch exposure
     // decision, so it starts off even where unattributed calls start on.
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
+    expect(loaded.multiAgent.autoWorktrees).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
   });
 
@@ -575,6 +613,7 @@ describe('shipped defaults', () => {
       expect(config.multiAgent.strictChatAllowlist).toBe(false);
       expect(config.multiAgent.recoverAgentTabs).toBe(false);
       expect(config.multiAgent.waitForSubAgents).toBe(false);
+      expect(config.multiAgent.autoWorktrees).toBe(false);
       expect(config.multiAgent.endSleepingWorkerProcesses).toBe(false);
     }
   );
@@ -597,6 +636,7 @@ describe('shipped defaults', () => {
     expect(loaded.multiAgent.strictChatAllowlist).toBe(false);
     expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
+    expect(loaded.multiAgent.autoWorktrees).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
     expect(loaded.readOnly).toBe(true);
   });
@@ -630,6 +670,21 @@ describe('shipped defaults', () => {
       multiAgent: { ...config.multiAgent, globalMaxWorkers: 5 }
     });
     expect((await loadConfig()).multiAgent.globalMaxWorkers).toBe(5);
+  });
+
+  it('requires an explicit opt-in for new worker Git worktrees and persists either choice', async () => {
+    const original = defaultConfig();
+    expect(original.multiAgent.autoWorktrees).toBe(false);
+    await saveConfig({ ...original, multiAgent: { ...original.multiAgent, autoWorktrees: true } });
+    expect((await loadConfig()).multiAgent.autoWorktrees).toBe(true);
+    await saveConfig({ ...original, multiAgent: { ...original.multiAgent, autoWorktrees: false } });
+    expect((await loadConfig()).multiAgent.autoWorktrees).toBe(false);
+
+    // Existing settings written before this opt-in existed must not gain worktree creation.
+    const stored = JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8'));
+    delete stored.multiAgent.autoWorktrees;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(stored), 'utf8');
+    expect((await loadConfig()).multiAgent.autoWorktrees).toBe(false);
   });
 
   it('does not persist obsolete recording-off or age-retention choices', async () => {

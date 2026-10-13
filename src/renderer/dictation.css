@@ -1,0 +1,63 @@
+/* Dictation lives entirely in the existing composer and uses its theme tokens. */
+.composer-dictation-button[hidden] { display: none; }
+.composer-dictation-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soft);
+  cursor: pointer;
+  transition: background-color 130ms ease, border-color 130ms ease, color 130ms ease;
+}
+.composer-dictation-button > .ico { font-size: 19px; }
+.composer-dictation-button:not(:disabled):hover {
+  border-color: var(--edge);
+  background: var(--hover);
+  color: var(--ink);
+}
+.composer-dictation-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.composer-dictation-button:is([data-state='starting'],[data-state='listening'],[data-state='stopping']) {
+  border-color: var(--accent-edge);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.composer-dictation-button[data-state='error'] { color: var(--red); }
+.composer-dictation-button:disabled { opacity: .55; cursor: default; }
+.dictation-recording-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--card);
+  opacity: 0;
+}
+.composer-dictation-button[data-state='listening'] .dictation-recording-dot { opacity: 1; }
+.composer-dictation-status {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 4px 0;
+  color: var(--soft);
+  font-size: calc(11px * var(--text-scale, 1));
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.composer-dictation-status[hidden] { display: none; }
+.composer:has(.composer-dictation-button[data-state='error']) .composer-dictation-status {
+  color: var(--red);
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-dictation-button { transition: none; }
+}

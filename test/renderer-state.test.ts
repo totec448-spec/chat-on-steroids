@@ -957,7 +957,7 @@ it('saves strict chat allowlisting and disables the unattributed switch while st
 
 it('keeps project keyboard focus across activity repaint without taking composer focus or reloading on disclosure', async () => {
   const { project, session } = projectSidebarFixture();
-  const listSessions = vi.fn(async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } }));
+  const listSessions = vi.fn(async (_options?: { projectId?: string }) => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } }));
   const mounted = await mountChat({}, [], {
     listProjects: async () => ({ ok: true, data: [project] }), listSessions
   });
@@ -965,10 +965,14 @@ it('keeps project keyboard focus across activity repaint without taking composer
   const heading = () => doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] > summary`)!;
   await vi.waitFor(() => expect(heading()).not.toBeNull());
   await settle();
-  const reads = listSessions.mock.calls.length;
+  // Reads of the whole list. Opening a project reads one page of that project itself (#1190),
+  // which is not a reload of the sidebar.
+  const wholeListReads = () => listSessions.mock.calls.filter(([options]) => !options?.projectId).length;
+  const reads = wholeListReads();
   heading().focus(); heading().click();
   await settle();
-  expect(listSessions).toHaveBeenCalledTimes(reads);
+  expect(wholeListReads()).toBe(reads);
+  expect(listSessions.mock.calls.filter(([options]) => options?.projectId === project.id)).toHaveLength(1);
   expect(doc.activeElement).toBe(heading());
   mounted.push(structuredClone(mounted.state));
   expect(doc.activeElement).toBe(heading());
@@ -980,7 +984,7 @@ it('keeps project keyboard focus across activity repaint without taking composer
   const { chatVisible } = await import('../src/renderer/chat.js');
   chatVisible(false); chatVisible(true);
   await settle();
-  expect(listSessions).toHaveBeenCalledTimes(reads + 1);
+  expect(wholeListReads()).toBe(reads + 1);
 });
 
 // Adapted from @Haz4rdovisk's #345: typed Setup values used to reach the app only on blur, so a
@@ -1377,6 +1381,20 @@ it('restores a rejected focused port and prevents an unrelated queued save from 
   await vi.waitFor(() => expect(calls).toHaveLength(2)); await settle();
   expect(calls[1].patch.ui.browserBridgePort).toBe(calls[1].base.ui.browserBridgePort);
   expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
+});
+
+it('saves the background placement from its settings control and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const placement = w.document.getElementById('backgroundPlacement') as HTMLSelectElement;
+  expect(placement.value).toBe('window'); // older config has no field
+  expect([...placement.options].map(option => option.value)).toEqual(['window', 'group']);
+  placement.value = 'group';
+  placement.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.backgroundPlacement).toBe('group');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, backgroundPlacement: 'window' } } });
+  expect(placement.value).toBe('window');
 });
 
 it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
@@ -1877,6 +1895,60 @@ it('requires external installation before choosing the built-in browser and sign
   expect(mounted.calls.at(-1)?.ui?.chatBrowser).toBe('edge');
 });
 
+it('walks the extension install in each browser\'s own words and pictures', async () => {
+  const opened: Array<[string, string]> = [];
+  const mounted = await mountChat({}, [], { openSetupBrowser: (browser: string, page: string) => { opened.push([browser, page]); return Promise.resolve({ ok: true, data: true }); } });
+  const text = (id: string) => document.getElementById(id)!.textContent;
+  const img = (id: string) => document.querySelector<HTMLImageElement>(`#${id} img`);
+  const chrome = structuredClone(mounted.state);
+  chrome.config.ui = { ...chrome.config.ui, chatBrowser: 'chrome' };
+  mounted.push(chrome);
+  expect(text('extensionStepOpen')).toBe('Open the extensions page in Chrome');
+  expect(text('setupExtensionAddress')).toBe('chrome://extensions');
+  expect(text('extensionStepDev')).toBe('Turn on “Developer mode”');
+  expect(text('extensionStepLoad')).toBe('Click “Load unpacked” and choose the extension folder');
+  expect(document.getElementById('extensionStepDevWhere')!.hidden).toBe(true);
+  // Chrome's own page, with the place to click outlined where Chrome draws it.
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('chrome-en-dev');
+  expect(img('extensionPictureDev')!.alt).toBe('The extensions page in Chrome, with “Developer mode” outlined');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('chrome-en-load');
+  expect(document.querySelector<HTMLElement>('#extensionPictureDev .ext-spot')!.style.left).toBe('63.7%');
+
+  // Edge's own page, laid out differently (the switch sits in its sidebar), with the hint for where.
+  (document.querySelector('[data-external-browser="edge"]') as HTMLButtonElement).click();
+  expect(text('setupExtensionAddress')).toBe('edge://extensions');
+  expect(text('extensionStepOpen')).toBe('Open the extensions page in Edge');
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('edge-en-dev');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('edge-en-load');
+  expect(img('extensionPictureLoad')!.alt).toBe('The extensions page in Edge, with “Load unpacked” outlined');
+  expect(document.getElementById('extensionStepDevWhere')!.hidden).toBe(false);
+  expect(text('extensionStepOpenHint')).toBe('Click the address to copy it, then paste it into the address bar in Edge and press Enter.');
+  // Browsers ignore their own pages from the command line, so the app copies the address.
+  (document.getElementById('openExtensionSettings') as HTMLButtonElement).click();
+  await settle();
+  expect(opened).toEqual([['edge', 'extensions']]);
+  expect(text('extensionStepOpenHint')).toBe('Copied. Paste it into the address bar in Edge and press Enter.');
+
+  // Brave has its own captures.
+  (document.querySelector('[data-external-browser="brave"]') as HTMLButtonElement).click();
+  expect(text('setupExtensionAddress')).toBe('brave://extensions');
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('brave-en-dev');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('brave-en-load');
+
+  // In German, Chrome's German page and Chrome's German words, quoted the German way.
+  (document.querySelector('[data-external-browser="chrome"]') as HTMLButtonElement).click();
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(text('extensionStepDev')).toBe('Schalte „Entwicklermodus“ ein');
+  expect(text('extensionStepLoad')).toBe('Klicke auf „Entpackte Erweiterung laden“ und wähle den Erweiterungsordner');
+  expect(img('extensionPictureDev')!.getAttribute('src')).toContain('chrome-de-dev');
+  // Edge words the same button differently in German.
+  (document.querySelector('[data-external-browser="edge"]') as HTMLButtonElement).click();
+  expect(text('extensionStepLoad')).toBe('Klicke auf „Entpackte Dateien laden“ und wähle den Erweiterungsordner');
+  expect(img('extensionPictureLoad')!.getAttribute('src')).toContain('edge-de-load');
+  setLanguage('en');
+});
+
 it('preserves optional Desktop disclosures and inline screenshots across status pushes', async () => {
   const mounted = await mountChat();
   const state = structuredClone(mounted.state) as any;
@@ -1896,19 +1968,95 @@ it('preserves optional Desktop disclosures and inline screenshots across status 
   field.querySelector('summary')!.click();
   const guide = doc.querySelector('[data-setup-guide="tunnel"]')!;
   expect(guide.querySelectorAll('img')).toHaveLength(2);
-  expect(doc.querySelectorAll('[data-setup-guide="developer"] img')).toHaveLength(1);
+  // ChatGPT no longer has a Developer mode switch: no guide for one.
+  expect(doc.querySelector('[data-setup-guide="developer"]')).toBeNull();
   expect(doc.querySelectorAll('[data-setup-guide="plugin"] img')).toHaveLength(4);
   // Each picture's places are the step's numbered moves.
   expect([...guide.querySelectorAll('.guide-move')].map(move => move.textContent)).toEqual(
-    ['1Name it', '2Pick your ChatGPT workspace', '3Click Create', '4Copy the tunnel ID']);
+    ['1Name it', '2Pick your ChatGPT workspace', '3Click “Create”', '4Copy the tunnel ID']);
   const image = guide.querySelector('img')!;
   mounted.push(structuredClone(state));
   expect(field.open).toBe(true);
   expect(guide.querySelector('img')).toBe(image);
-  expect(image.src).toContain('tunnel-create.png');
+  expect(image.src).toContain('tunnel-create-en');
   expect(mounted.calls).toEqual([]);
   mounted.push(structuredClone(state));
   expect(field.open).toBe(true);
+});
+
+it("shows ChatGPT's own screens and words in the app's language, and the Platform's English ones", async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const moves = (group: string) => [...doc.querySelectorAll(`[data-setup-guide="${group}"] .guide-move, #pluginMoves .guide-move`)]
+    .filter(move => group !== 'plugin' || move.closest('#pluginMoves')).map(move => move.querySelector('.guide-move-text')!.textContent);
+  const pictures = (group: string) => [...doc.querySelectorAll<HTMLImageElement>(`[data-setup-guide="${group}"] img`)].map(img => img.getAttribute('src'));
+  expect(moves('plugin').slice(0, 5)).toEqual(['“Add” → “Add custom MCP server”', 'Paste the name exactly', '“Tunnel”, then your tunnel ID',
+    '“No authentication”', '“I understand and want to continue”, then “Create as a plugin”']);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // ChatGPT's German menu and dialog, quoted the German way; rebuilt without a reload.
+  expect(moves('plugin').slice(0, 5)).toEqual(['„Hinzufügen“ → „Benutzerdefinierten MCP-Server hinzufügen“', 'Den Namen exakt einfügen',
+    '„Tunnel“, dann deine Tunnel-ID', '„Keine Authentifizierung“', '„Ich habe das verstanden und möchte weitermachen“, dann „Als Plugin erstellen“']);
+  expect(pictures('plugin').slice(0, 2).every(src => /plugin-(add|new)-de/.test(src!))).toBe(true);
+  expect(doc.querySelectorAll('#pluginMoves .guide-moves')).toHaveLength(1);
+  // The OpenAI Platform is English: its pictures and labels stay English, translated around them.
+  expect(moves('tunnel')).toContain('Auf „Create“ klicken');
+  expect(pictures('key').every(src => /api-key-(create|tunnels)-en/.test(src!))).toBe(true);
+  setLanguage('en');
+});
+
+it('judges Setup from the saved settings on the first paint, and numbers its steps as the rail does', async () => {
+  // A finished setup: tunnel saved and key stored. The first paint read the tunnel field before it
+  // was filled from the settings, so Setup looked unfinished and Connect was disabled until the
+  // next state update.
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe('tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  expect(doc.getElementById('setupBadge')!.hidden).toBe(true);
+  expect((doc.getElementById('wizConnect') as HTMLButtonElement).disabled).toBe(false);
+
+  // The hints name the step by its place in the rail: Tunnel is 4 and API key 5 since Access joined.
+  const rail = [...doc.querySelectorAll<HTMLElement>('.setup-rail [data-rail-step]')].map(button => button.dataset.railStep);
+  expect(rail.indexOf('tunnel') + 1).toBe(4);
+  const noTunnel = structuredClone(mounted.state);
+  noTunnel.config.tunnel.tunnelId = '';
+  mounted.push(noTunnel);
+  (doc.getElementById('tunnelId') as HTMLInputElement).value = '';
+  mounted.push(structuredClone(noTunnel));
+  expect((doc.getElementById('wizConnect') as HTMLButtonElement).title).toBe('Create a tunnel and paste its ID — step 4.');
+  const noKey = structuredClone(mounted.state);
+  noKey.hasApiKey = false;
+  mounted.push(noKey);
+  expect((doc.getElementById('wizConnect') as HTMLButtonElement).title).toBe('Add a restricted API key — step 5.');
+});
+
+it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's language", async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const moves = (group: string) => [...doc.querySelectorAll(`[data-setup-guide="${group}"] .guide-move-text`)].map(move => move.textContent);
+  expect(moves('signin')).toContain('Click “Log in”');
+  expect(moves('external-browser')).toContain('Click “Log in”');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // ChatGPT's German page says "Anmelden"; the step used to send people looking for "Log in".
+  expect(moves('signin')).toContain('Auf „Anmelden“ klicken');
+  expect(moves('external-browser')).toContain('Auf „Anmelden“ klicken');
+  setLanguage('ja');
+  expect(moves('signin').some(text => text!.includes('「ログイン」'))).toBe(true);
+  setLanguage('en');
+});
+
+it("keeps a worker's delivery line in the app's language when the language changes", async () => {
+  const worker = { id: 'worker-1', role: 'worker', label: 'Docs', task: 'Update the docs', jobTitle: 'Docs', runId: 'run-1', reasoningEffort: null, model: null, state: 'active',
+    createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
+  const mounted = await mountChat({}, [], { getSwarm: async () => ({ ok: true, data: { enabled: true, running: true, runId: 'run-1', agents: [worker], maxWorkers: 2, pendingReports: 0 } }) });
+  const line = () => mounted.window.document.querySelector('#swarmList .model-sub')?.textContent;
+  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered · chat bound'));
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // The line was joined once when the list was painted, so it stayed English.
+  expect(line()).toBe('0 ausstehend · 1 zugestellt · Chat verknüpft');
+  setLanguage('en');
 });
 
 it('highlights missing required setup fields while respecting drafts and a stored API key', async () => {
@@ -2544,6 +2692,19 @@ it('offers the handoff length, starting at the thorough default, and saves a sho
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
 });
 
+// #1406: the recording store's size used to be fixed at 2 GB.
+it('offers the recording storage sizes, starting at 2 GB, and saves a larger choice', async () => {
+  const mounted = await mountChat({ hasGoalKey: true });
+  const size = mounted.window.document.getElementById('recordingStorageLimit') as HTMLSelectElement;
+  expect(size.value).toBe('2');
+  expect([...size.options].map(option => option.value)).toEqual(['2', '5', '10', '20', '50']);
+  size.value = '10';
+  size.dispatchEvent(new mounted.window.Event('change'));
+  await settle();
+  await settle();
+  expect(mounted.calls.at(-1)?.sessions.storageLimitGiB).toBe(10);
+});
+
 /**
  * The catalogue is a network request to somebody else's service, so it happens when a person
  * asks for it and not when the settings tab is opened.
@@ -2966,4 +3127,57 @@ it('shows a computer name set elsewhere and opens its section, so the suffixed c
   await settle();
   expect((doc.getElementById('connectorSuffix') as HTMLInputElement).value).toBe('Windows');
   expect((doc.getElementById('connectorSuffixField') as HTMLDetailsElement).open).toBe(true);
+});
+
+it('shows unreadable refresh state and allows one explicit reset, including failure and retry', async () => {
+  let finish!: (value: any) => void;
+  const reset = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const mounted = await mountChat({ pluginRefreshUnreadable: true }, [], { resetPluginRefresh: reset });
+  const doc = mounted.window.document;
+  const recovery = doc.getElementById('pluginRefreshRecovery')!;
+  const button = doc.getElementById('pluginRefreshReset') as HTMLButtonElement;
+  expect(recovery.hidden).toBe(false);
+  expect(recovery.textContent).toContain('Could not read plugin-refresh state');
+  expect(reset).not.toHaveBeenCalled();
+  button.click(); button.click();
+  expect(button.disabled).toBe(true); expect(reset).toHaveBeenCalledTimes(1);
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: true });
+  expect(button.disabled).toBe(true);
+  finish({ ok: false, error: 'private filesystem diagnostics' }); await settle();
+  expect(recovery.hidden).toBe(false); expect(button.disabled).toBe(false);
+  expect(recovery.textContent).toContain('Could not reset plugin-refresh state');
+  expect(recovery.textContent).not.toContain('private filesystem');
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: false });
+  expect(recovery.hidden).toBe(true);
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: true });
+  expect(recovery.textContent).toContain('Could not read plugin-refresh state');
+  button.click(); expect(reset).toHaveBeenCalledTimes(2);
+  finish({ ok: true, data: { ...mounted.state, pluginRefreshUnreadable: false } }); await settle();
+  expect(recovery.hidden).toBe(true);
+  button.click(); expect(reset).toHaveBeenCalledTimes(2);
+});
+
+// Codex's "Follow-up behavior", in General.
+it('offers the follow-up behavior, starting at joining the running turn, and saves waiting', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const followUp = w.document.getElementById('followUp') as HTMLSelectElement;
+  expect(followUp.value).toBe('steer');
+  expect([...followUp.options].map(option => option.value)).toEqual(['steer', 'queue']);
+  followUp.value = 'queue';
+  followUp.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.followUp).toBe('queue');
+});
+
+// Codex's "Prevent sleep while running": on unless switched off in General.
+it('keeps the computer awake while a chat works unless switched off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const keepAwake = w.document.getElementById('keepAwake') as HTMLInputElement;
+  expect(keepAwake.checked).toBe(true);
+  keepAwake.checked = false;
+  keepAwake.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.keepAwake).toBe(false);
 });

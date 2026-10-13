@@ -5,7 +5,7 @@ import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig } from '../config.js';
-import { connectorName } from '../../shared/connector-names.js';
+import { liveConnectorName } from './surfaces.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
  *
@@ -33,7 +33,9 @@ import {
 } from '../codex/view-image.js';
 import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
-import { currentWorkspace } from '../workspace.js';
+import { currentWorkspace, primeWorkspace } from '../workspace.js';
+import { getSessionProject } from '../projects.js';
+import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from '../agent-admission.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -113,8 +115,6 @@ import {
   agentForCaller,
   agentFamiliesForCaller,
   reconcileAgentRequestOwners,
-  noteAgentContextTokens,
-  persistCriticalSwarmNow,
   PRIME_ID,
   requestWorkerBootstraps,
   requestWorkerRevivals,
@@ -122,9 +122,9 @@ import {
   stageFinishAgent,
   stageMessages,
   stagePrimeMessage,
-  stageSpawn,
+  managedWorkerIsolationRequired,
+  managedWorkerAllocationIdentity,
   swarmRunning,
-  swarmStateForCaller,
   type Caller
 } from '../agents.js';
 import { repairPrimeFromResumeShadow } from '../session/continuation.js';
@@ -146,6 +146,7 @@ import {
   adoptAgent,
   fail,
   failIdentity,
+  validatedWorkspace,
   formatFileInfo,
   friendlyError,
   guard,
@@ -202,7 +203,7 @@ const unifiedExecOutputSchema = z
       .optional()
       .describe('Session ID while running.'),
     completed_session_id: z.number().optional().describe('Use as write_stdin session_id to reread completed output.'),
-    benign_exit: z.boolean().optional().describe('Non-zero exit is an expected result, not a failure.'),
+    expected_exit: z.boolean().optional().describe('Non-zero exit is an expected result, not a failure.'),
     output_replayed: z.boolean().optional().describe('Retained output; command was not run again.'),
     original_token_count: z.number().optional().describe('Approximate token count before output truncation.'),
     output: z.string().describe('Command output text, possibly truncated.'),
@@ -242,11 +243,7 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
 /** One stable owner for the running model turn, upgraded lazily when page proof arrives. */
 function execPrincipal(): string | null {
   const caller = currentCaller();
-  return executionPrincipal(
-    caller.requestId,
-    caller.sessionId ?? null,
-    currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls
-  );
+  return executionPrincipal(caller.requestId, caller.sessionId ?? null);
 }
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
@@ -501,7 +498,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           if (!conversationId) {
             // Name the Core that answered: with one ChatGPT account on several computers, ChatGPT
             // may send a chat's call to another computer's Core, which never sees that chat (#1097).
-            return fail(`${connectorName('core', getConfig().connectorSuffix)} could not tell which chat this save_image call came from, ` +
+            return fail(`${liveConnectorName('core')} could not tell which chat this save_image call came from, ` +
               'so it does not know which image to save. If the chat belongs to another computer, call save_image of that ' +
               'computer\'s Chat On Steroids Core instead. Otherwise call save_image directly as its own tool call, not from ' +
               'inside a JavaScript or exec step, and try again.');
@@ -704,7 +701,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           if (args.environmentId !== null) {
             return fail('apply_patch environment selection is unavailable for this turn');
           }
-          const workspace = currentWorkspace();
+          // apply_patch previously read the synchronous cwd cache, bypassing the managed
+          // lease check shared by resolveIn/resolveCwd. Validate before patch base selection.
+          const workspace = await validatedWorkspace();
           const hasRelativePath = args.hunks.some(hunk => {
             const paths = hunk.kind === 'update_file' && hunk.movePath !== null
               ? [hunk.path, hunk.movePath]
@@ -722,6 +721,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             return fail('No folder is approved, so there is nowhere to apply the patch.');
           }
           const base = await resolveIn(ctx.roots, baseVirtual);
+          await validatedWorkspace();
           return (await runParsedPatch(args, ctx.roots, base, caps)).result;
         })
     );
@@ -865,6 +865,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const useLoginShell = input.login ?? process.platform !== 'win32';
           const command = deriveExecArgs(shell, boundCommand, useLoginShell);
           try {
+            await validatedWorkspace();
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
             // the same tree-sitter-bash grammar/query as upstream.
@@ -930,6 +931,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             const ripgrep = locateRipgrep();
             const executionCommand = deriveExecArgs(shell,
               withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
+            await validatedWorkspace();
             const output = await unifiedExecManager.execCommand({
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
@@ -1093,6 +1095,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             const message = `write_stdin failed for session ${input.session_id}: ${reason} No input was sent and no output was read. This refusal concerns this process id, not Read-only mode or permission to edit files or launch other authorized work.`;
             return denied === 'unidentified' ? failIdentity(message) : fail(message);
           }
+          // A worker can keep an interactive shell running after its Git worktree has been
+          // replaced. Verify the exact current allocation before forwarding even empty polls:
+          // stdin may execute writes in the shell's now user-owned directory.
+          await validatedWorkspace();
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
           // sitting in one is attending its session rather than neglecting it.
           noteExecAttended(input.session_id);
@@ -1174,61 +1180,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
  * act on and is kept to a sentence or two; ids, states and counts are machine state and belong
  * in a shape the caller can read without parsing English.
  */
-/**
- * Re-measures how full each sleeping worker's chat is, before the prime may wake one.
- *
- * The context ceiling is what makes a stop final, and it is measured from the app's own
- * durable session for that conversation rather than from anything a model reported. The
- * broker keeps the figure in memory and in its snapshot, but a chat that grew while this app
- * was not running — or one whose snapshot predates the measurement entirely — would otherwise
- * be woken into a conversation with no room left in it. Reading it here, on the one call that
- * can wake a worker, is what makes the ceiling survive a crash rather than a restart quietly
- * handing back a worker the prime was already told was finished.
- */
-async function measureSleepingWorkers(caller: Caller): Promise<void> {
-  const state = swarmStateForCaller(caller);
-  if (state.agents.length === 0) return;
-  for (const info of state.agents) {
-    if (info.role !== 'worker' || info.state !== 'sleeping' || !info.conversationId) continue;
-    const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
-    if (summary) noteAgentContextTokens(info.conversationId, summary.contextTokens);
-  }
-  // Measurement is usually telemetry, but crossing the worker ceiling revokes durable revival
-  // authority and can terminalize a parked worker. `status` also calls this helper, so there is
-  // no later message/spawn acceptance barrier we can rely on: make every critical revision seen
-  // through the end of measurement durable before publishing the resulting state to the model.
-  try {
-    if (!(await persistCriticalSwarmNow())) {
-      throw new Error('the broker has no immediate durable persistence sink');
-    }
-  } catch (error) {
-    throw new Error(
-      `Worker context/revival state could not cross its durable barrier. Retry the agents call. (${error instanceof Error ? error.message : String(error)})`
-    );
-  }
-}
-
-/** Publish a staged broker mutation only after its exact revision is durable. */
-async function acceptAgentMutation(
-  staged: { commit(): void | boolean; rollback(): void },
-  failure: string,
-  commitFailure: string = failure
-): Promise<void> {
-  try {
-    let durable: boolean;
-    try {
-      durable = await persistCriticalSwarmNow();
-    } catch (error) {
-      throw new Error(`${failure} (${error instanceof Error ? error.message : String(error)})`);
-    }
-    if (!durable) throw new Error(failure);
-    if (staged.commit() === false) throw new Error(commitFailure);
-  } catch (error) {
-    staged.rollback();
-    throw error;
-  }
-}
-
 function registerAgentsTool(reg: SurfaceRegistrar): void {
   reg.register(
     'agents',
@@ -1350,14 +1301,22 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // Reserve under exact chat proof or the permitted transport request, atomically.
           // The request remains the reachable prime before browser attachment; later proof
           // changes its frontend projection without recreating workers or replaying spawn.
-          const staged = stageSpawn({
+          const spawnCaller = await callerNow(startedAt, { exact: true, runId: input.run_id });
+          // A stale managed worker whose family and ordinary retired-worker TTL have expired
+          // must not bootstrap a new prime family to regain local mutation authority. Session
+          // origin and durable managed tombstones are denial-only, not adoption credentials.
+          if (await managedWorkerIsolationRequired(spawnCaller) && !managedWorkerAllocationIdentity(spawnCaller)) {
+            return fail('WORKTREE_OWNER_UNAVAILABLE: a retired worker cannot create a prime run after its isolated checkout owner was lost.');
+          }
+          const { created, becamePrime, runId, defaultNotes, isolationNotes } = await spawnAgentWorkers({
             workers: input.workers,
             context: input.context ?? null,
-            caller: await callerNow(startedAt, { exact: true, runId: input.run_id })
-          });
-          await acceptAgentMutation(staged,
-            'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.');
-          const { created, becamePrime, runId, defaultNotes } = staged;
+            caller: spawnCaller
+          }, async () => {
+            const sessionId = currentCall()?.caller.sessionId;
+            return (sessionId ? await getSessionProject(sessionId) : null) ??
+              primeWorkspace(currentCaller().conversationId) ?? currentWorkspace();
+          }, () => !reg.ctx.readOnly && reg.caps.command && reg.caps.create && reg.caps.edit);
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
           // visible only after the exact broker revision above is durable.
@@ -1374,6 +1333,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
                   (defaultNotes?.length ? `${defaultNotes.join(' ')} ` : '') +
+                  (isolationNotes.length ? `${isolationNotes.join(' ')} ` : '') +
                   (sleeping.length > 0
                     ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
                     : '') +
@@ -2240,6 +2200,8 @@ const MISSING_PATH_LISTING = 40;
  */
 async function nearestFolderListing(roots: Root[], requested: string, err: unknown): Promise<string> {
   if (!(err instanceof SandboxError) || !err.message.startsWith('Not found:')) return '';
+  const meant = await pathUnderNamedRoot(roots, requested);
+  if (meant) return `\nDid you mean ${meant}? It exists under the approved root of that name.`;
   let candidate = requested;
   for (let depth = 0; depth < 8; depth++) {
     const parent = candidate.replace(/[\\/]+[^\\/]+[\\/]*$/, '');
@@ -2264,6 +2226,29 @@ async function nearestFolderListing(roots: Root[], requested: string, err: unkno
     }
   }
   return '';
+}
+
+/**
+ * A missing path that names another approved root further down, where the rest exists.
+ *
+ * Live 2026-10-12: with roots `/downloads` and `/voxelcraft`, a model read
+ * `/downloads/.Dev-projects/voxelcraft/shared/adventure.ts`, the project's disk path under the
+ * wrong root. The listing that followed showed the user's Downloads folder, unrelated to the
+ * project, instead of the file it was after.
+ */
+async function pathUnderNamedRoot(roots: Root[], requested: string): Promise<string | null> {
+  const segments = requested.split(/[\\/]+/).filter(Boolean);
+  for (let index = 1; index < segments.length - 1; index++) {
+    const root = roots.find(entry => entry.name.toLowerCase() === segments[index]!.toLowerCase());
+    if (!root) continue;
+    const candidate = `/${[root.name, ...segments.slice(index + 1)].join('/')}`;
+    try {
+      return (await resolveIn(roots, candidate, { access: 'read' })).virtual;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /**

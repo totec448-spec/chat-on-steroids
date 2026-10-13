@@ -40,7 +40,7 @@ async function workerWorld() {
   await import('../src/preload/cos-browser-worker.js');
   const nativeSendMessage = vi.fn(async () => 'native reply');
   type Namespace = Record<string, unknown>;
-  const chrome: { runtime: Namespace; tabs: Namespace; scripting: Namespace; windows?: Namespace; debugger?: Namespace; permissions?: Namespace } = {
+  const chrome: { runtime: Namespace; tabs: Namespace; scripting: Namespace; windows?: Namespace; debugger?: Namespace; permissions?: Namespace; alarms?: Namespace } = {
     runtime: {
       getManifest: () => ({ permissions: ['debugger', 'tabs', 'scripting'], host_permissions: ['https://chatgpt.com/*'] }),
       onStartup: { addListener: () => undefined, native: true }
@@ -48,7 +48,8 @@ async function workerWorld() {
     tabs: { sendMessage: nativeSendMessage, query: () => 'native query' },
     scripting: {}
   };
-  const world = vm.createContext({ chrome, __cosBrowserWorker: electron.exposed.get('__cosBrowserWorker'), console, Promise, Error, JSON, Object, Set, Map });
+  const world = vm.createContext({ chrome, __cosBrowserWorker: electron.exposed.get('__cosBrowserWorker'), console, Promise, Error, JSON, Object, Set, Map,
+    Math, Number, Date, setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id) });
   const install = electron.scripts[1]!;
   // From source text, as Electron serializes it: a reference to module scope fails here.
   vm.runInContext(`(${install.func.toString()})(...${JSON.stringify(install.args ?? [])})`, world);
@@ -111,4 +112,33 @@ it('grants exactly the permissions the manifest declares', async () => {
   await expect(contains({ permissions: ['debugger', 'tabs'] })).resolves.toBe(true);
   await expect(contains({ permissions: ['bookmarks'] })).resolves.toBe(false);
   await expect(contains({ origins: ['https://chatgpt.com/*'] })).resolves.toBe(true);
+});
+
+it('fires alarms itself, since Electron drops a due alarm without calling onAlarm (2026-10-12)', async () => {
+  // The companion re-arms its retry pass only from onAlarm. Under Electron it never fired, so after
+  // the first failure the extension stopped retrying and page events stalled for half an hour.
+  vi.useFakeTimers();
+  try {
+    const { chrome } = await workerWorld();
+    type Call = (...args: unknown[]) => unknown;
+    const alarms = chrome.alarms as unknown as { create: Call; get: Call; getAll: Call; clear: Call; onAlarm: { addListener(fn: (alarm: { name: string }) => void): void } };
+    const fired: string[] = [];
+    alarms.onAlarm.addListener(alarm => fired.push(alarm.name));
+    await alarms.create('retry', { delayInMinutes: 0.5 });
+    await alarms.create('tick', { periodInMinutes: 1 });
+    expect((await alarms.getAll() as { name: string }[]).map(alarm => alarm.name).sort()).toEqual(['retry', 'tick']);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fired).toEqual(['retry']);
+    expect(await alarms.get('retry')).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toEqual(['retry', 'tick', 'tick']);
+    // Re-creating replaces; clearing stops it; the callback style answers too.
+    expect(await alarms.clear('tick')).toBe(true);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fired).toEqual(['retry', 'tick', 'tick']);
+    let listed: unknown;
+    alarms.getAll((value: unknown) => { listed = value; });
+    expect(listed).toEqual([]);
+  } finally { vi.useRealTimers(); }
 });

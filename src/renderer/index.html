@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
+    <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
     <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
@@ -146,10 +147,30 @@
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
+      <div class="notice offer-card" id="pluginRefreshOffer" role="region" aria-labelledby="pluginRefreshOfferTitle" hidden>
+        <div class="offer-icon"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i></div>
+        <div class="offer-text">
+          <b id="pluginRefreshOfferTitle">Keep plugins up to date in ChatGPT</b>
+          <em>When an update changes a plugin's tools, Chat On Steroids refreshes it in ChatGPT for you. You can change this later in Settings.</em>
+        </div>
+        <button class="offer-later" id="pluginRefreshOfferLater" type="button">Not now</button>
+        <button class="offer-accept" id="pluginRefreshOfferAccept" type="button">Turn on</button>
+      </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
         <i class="ico ph ph-activity" aria-hidden="true"></i>
-        <span>Chat On Steroids connector tools changed. Refresh the affected connector in ChatGPT; this is separate from the browser extension.</span>
+        <span>The tools of a Chat On Steroids plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
         <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="notice" id="credentialsUnreadable" role="alert" hidden>
+        <i class="ico ph ph-lock-key" aria-hidden="true"></i>
+        <span>The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.</span>
+        <button class="btn btn-quiet" id="credentialsStartFresh" type="button">Start fresh…</button>
+      </div>
+      <div class="notice" id="recordingStorageFull" role="status" hidden>
+        <i class="ico ph ph-warning" aria-hidden="true"></i>
+        <span>Recording storage is full. New images and long texts are no longer saved in your chats.</span>
+        <button class="btn btn-quiet" id="freeRecordingStorage" type="button">Free storage</button>
+        <button class="btn btn-icon" id="dismissRecordingStorageFull" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
       </div>
 
@@ -168,9 +189,11 @@
               <header class="settings-section-head"><div><h2>Chats</h2><p>What you see while ChatGPT answers, and what your messages carry.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em>What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.</em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Keep the computer awake</b><em>While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.</em></span><input id="keepAwake" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Prefer Plugins on app-sent messages</b><em>When enabled, use the installed Chat On Steroids Plugins mention instead of Core for regular messages sent by CoS, including Goal and Loop. Workers and recovery still use Core. Only one app is mentioned; this does not affect messages you send directly in ChatGPT. Turn off for coding chats that need Core.</em></span><input id="mentionPlugins" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Prefer Plugins on app-sent messages</b><em>When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section" id="privacyScreenshotsSetting">
@@ -184,7 +207,7 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
+                <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
             </section>
           </div>
@@ -246,7 +269,7 @@
           <div class="plugins-content">
           <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
           <section class="plugin-connection" aria-labelledby="pluginsSetupTitle">
-            <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add the Chat On Steroids Plugins connector in ChatGPT once so it can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
+            <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add Chat On Steroids Plugins to ChatGPT once, so ChatGPT can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
             <button class="btn btn-solid" id="pluginsSetupLink" type="button">Set up plugins</button>
           </section>
           <div class="plugin-refresh-guide"><p>After installing, updating or changing enabled plugins, refresh <strong id="pluginsRefreshName" translate="no">Chat On Steroids Plugins</strong> in ChatGPT to make its tools available.</p><button class="btn" id="pluginsOpenChatGPT" type="button">Open ChatGPT plugins</button></div>
@@ -518,13 +541,13 @@
             <div class="setup-track">
               <nav class="setup-rail" aria-label="Setup steps">
                 <ol>
-                  <li><button type="button" data-rail-step="browser"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Extension</span></button></li>
+                  <li><button type="button" data-rail-step="browser"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Browser</span></button></li>
                   <li><button type="button" data-rail-step="folder"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Folder</span></button></li>
                   <li><button type="button" data-rail-step="access"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Access</span></button></li>
                   <li><button type="button" data-rail-step="tunnel"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Tunnel</span></button></li>
                   <li><button type="button" data-rail-step="key"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">API key</span></button></li>
                   <li><button type="button" data-rail-step="connect"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Connect</span></button></li>
-                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Plugins</span></button></li>
+                  <li><button type="button" data-rail-step="chatgpt"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">ChatGPT</span></button></li>
                   <li class="setup-rail-ready"><button type="button" data-rail-step="ready"><span class="setup-rail-mark" aria-hidden="true"><i class="ico ph ph-check"></i></span><span class="setup-rail-label">Ready</span></button></li>
                 </ol>
               </nav>
@@ -540,8 +563,8 @@
                 <div class="step-body browser-setup">
                   <div class="browser-setup-header">
                     <ol class="browser-phases" aria-label="Connect your ChatGPT">
-                    <li id="browserPhaseExtension" aria-current="step"><span class="phase-number" aria-hidden="true" translate="no">A</span><span>Install</span></li>
-                    <li id="browserPhaseLocation"><span class="phase-number" aria-hidden="true" translate="no">B</span><span>Where to use it</span></li>
+                    <li id="browserPhaseExtension" aria-current="step"><span class="phase-number" aria-hidden="true" translate="no">A</span><span>Install the extension</span></li>
+                    <li id="browserPhaseLocation"><span class="phase-number" aria-hidden="true" translate="no">B</span><span>Where ChatGPT runs</span></li>
                   </ol>
                     <div class="browser-picker">
                       <p class="step-lead">Choose your browser.</p>
@@ -551,22 +574,18 @@
                         <button type="button" role="radio" data-external-browser="brave" aria-checked="false" tabindex="-1"><img src="./browser-icons/brave.svg" alt="" /><span translate="no">Brave</span></button>
                       </div>
                       </div>
-                    <h3 id="browserExtensionTitle" tabindex="-1">First, connect your browser</h3>
+                    <h3 id="browserExtensionTitle" tabindex="-1">Connect your browser</h3>
                   </div>
                   <section id="browserExtensionStage" class="browser-stage" aria-labelledby="browserExtensionTitle">
                     <div class="browser-stage-copy">
                       <ol class="browser-install-steps">
-                        <li><div><b>Open the extensions page and turn on Developer mode.</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button><details class="browser-picture-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>See where to click</summary>                    <figure class="browser-install-figure">
-                      <div class="setup-guide" data-setup-guide="extension"></div>
-                      <figcaption><span>Shown in Chrome. The same steps apply in Edge and Brave.</span></figcaption>
-                    </figure></details></div></li>
-                        <li><div><b class="browser-install-instruction">Click Load unpacked and choose the CoS extension folder.</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
-                          <details class="browser-picture-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>See where to click</summary><figure class="browser-install-figure">
-                            <div class="setup-guide" data-setup-guide="extension-load"></div>
-                            <figcaption><span>Shown in Chrome. The same steps apply in Edge and Brave.</span></figcaption>
-                          </figure></details>
-                        </div></li>
-                        <li><div><b>Open ChatGPT in that browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
+                        <li><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
+                          <p id="extensionStepOpenHint">Click the address to copy it, then paste it into the address bar and press Enter.</p></div></li>
+                        <li><div><b id="extensionStepDev">Turn on Developer mode</b><p id="extensionStepDevWhere" hidden></p>
+                          <figure class="ext-figure" id="extensionPictureDev"></figure></div></li>
+                        <li><div><b id="extensionStepLoad">Click Load unpacked and choose the extension folder</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
+                          <figure class="ext-figure" id="extensionPictureLoad"></figure></div></li>
+                        <li><div><b id="extensionStepChatGpt">Open ChatGPT in your browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
                       </ol>
                       <details class="extension-help"><summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Need help?</summary><div class="extension-meta"><p class="extension-folder" id="extensionPath"></p><button class="btn btn-quiet" id="bridgeDownload" type="button">Download extension ZIP</button><p id="bridgeState" class="muted"></p></div></details>
                     </div>
@@ -606,7 +625,7 @@
                   <div class="step-actions">
                     <button class="btn step-link" id="wizManageFolders" type="button">Manage folders</button>
                   </div>
-                  <!-- Like Start the tunnel: the step's one action is its picture. -->
+                  <!-- Like Connect the tunnel: the step's one action is its picture. -->
                   <div class="step-art connect-art">
                     <button class="connect-toggle" id="wizAddFolder" type="button" data-tone="off">
                       <span class="connect-ring" aria-hidden="true"><svg class="setup-folder-icon" viewBox="0 0 48 48" fill="none"><path d="M6 15V11a3 3 0 0 1 3-3h10l5 6h15a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V15Z"/><path d="M6 18h36M24 24v10m-5-5h10"/></svg></span>
@@ -659,7 +678,7 @@
                   </div>
                   <div class="setup-guide" data-setup-guide="tunnel"></div>
                   <div class="field">
-                    <label for="tunnelId">Tunnel ID — Core connector</label>
+                    <label for="tunnelId">Tunnel ID — Core plugin</label>
                     <input
                       id="tunnelId"
                       class="setup-required is-empty"
@@ -668,6 +687,7 @@
                       spellcheck="false"
                       placeholder="tunnel_0123456789abcdef0123456789abcdef"
                     />
+                    <p class="hint is-required" id="tunnelIdShared" role="status" hidden></p>
                   </div>
                   <!-- Desktop is a second connector in ChatGPT, so on this method it needs a
                        second tunnel of its own. Hidden unless desktop permissions are on, so
@@ -675,16 +695,17 @@
                   <details class="setup-optional" id="desktopTunnelField" hidden>
                     <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Desktop control <span class="tag is-optional">optional</span></summary>
                     <div class="field">
-                      <label for="desktopTunnelId">Tunnel ID — Desktop connector</label>
+                      <label for="desktopTunnelId">Tunnel ID — Desktop plugin</label>
                       <input
                         id="desktopTunnelId"
                         type="text"
                         spellcheck="false"
                         placeholder="tunnel_0123456789abcdef0123456789abcdef"
                       />
+                      <p class="hint is-required" id="desktopTunnelIdShared" role="status" hidden></p>
                       <p class="hint">
-                        Screen and mouse/keyboard control are a separate connector, so they need a
-                        second tunnel. Create another one and paste its ID here. Leave it empty to
+                        Screen and mouse/keyboard control are a separate plugin in ChatGPT, so they
+                        need a second tunnel. Create another one and paste its ID here. Leave it empty to
                         keep desktop control off in ChatGPT.
                       </p>
                     </div>
@@ -698,7 +719,7 @@
                 </div>
                 <div class="step-body">
                   <h3>Create an API key</h3>
-                  <p class="step-lead">Opens your tunnel. Copy now: the key is shown only once.</p>
+                  <p class="step-lead">The app uses this key to start your tunnel. Copy it right away: it is shown only once.</p>
                   <div class="step-actions">
                     <button
                       class="btn btn-solid setup-tunnel-open"
@@ -725,13 +746,13 @@
                   <i class="ico tick ph ph-check" aria-hidden="true"></i>
                 </div>
                 <div class="step-body">
-                  <h3>Start the tunnel</h3>
+                  <h3>Connect the tunnel</h3>
                   <p class="step-lead">Click Connect and wait for Connected.</p>
                   <p class="status-pill" id="wizStatusPill" data-tone="off"></p>
                   <p class="hint is-warn" id="wizStatus" hidden></p>
                   <p class="hint step-quiet" id="backgroundRunningCopy">
-                    Leave it running while you use the connector. It stays available when you close
-                    the window.
+                    Leave it running while you use its plugins in ChatGPT. It stays available when
+                    you close the window.
                   </p>
                   <!-- The step's one action, as large as its picture would be: what the step is for. -->
                   <div class="step-art connect-art">
@@ -766,7 +787,7 @@
                   <div class="step-side">
                     <div class="setup-guide" data-setup-guide="plugin" data-moves-into="pluginMoves"></div>
                   </div>
-                  <!-- Below both columns: the connectors side by side, then the note for older ChatGPT. -->
+                  <!-- Below both columns: the connectors side by side. -->
                   <!-- One card per connector. The name and description are what ChatGPT matches
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
@@ -792,12 +813,6 @@
                     </div>
                   </details>
                   <div class="connectors step-wide" id="connectorCards"></div>
-                  <!-- Only older ChatGPT versions have this switch, so it waits folded until someone needs it. -->
-                  <details class="setup-optional setup-legacy step-wide">
-                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Developer mode (older ChatGPT versions only)</summary>
-                    <p>If your ChatGPT settings still show Developer mode, turn it on under Settings → Security and login. Newer versions of ChatGPT no longer have this switch; then skip this step.</p>
-                    <div class="setup-guide" data-setup-guide="developer"></div>
-                  </details>
                 </div>
               </li>
               <!-- 7: not a task but the proof. It reads back every check above, says plainly when
@@ -1017,6 +1032,14 @@
 
                   <label class="setting">
                     <span class="setting-text">
+                      <b>Isolate new workers in Git worktrees</b>
+                      <em>When a worker is started for a Git project, give it a separate approved workspace and branch. Requires an approved parent folder. Existing workers are unaffected; integration into your branch requires review.</em>
+                    </span>
+                    <input id="autoWorktrees" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
                       <b>End background processes of workers asleep for more than 30 minutes</b>
                       <em>The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.</em>
                     </span>
@@ -1028,22 +1051,41 @@
                     <button class="btn" id="swarmReset" type="button">Clear workers</button>
                   </div>
                 </div>
+                <section id="worktreeCleanupSection" class="worktree-cleanup-section" aria-labelledby="worktreeCleanupTitle">
+                  <header class="settings-section-head automation-section-head">
+                    <div>
+                      <h2 id="worktreeCleanupTitle" class="settings-section-title">Worker checkouts</h2>
+                      <p>Review finished or cleared workers' separate Git checkouts. Their branches and committed work are always kept.</p>
+                    </div>
+                    <button class="btn btn-solid" id="worktreeCleanupReview" type="button" data-worktree-review="true" aria-controls="worktreeCleanupList">Review checkouts</button>
+                  </header>
+                  <div class="settings-surface pane worktree-cleanup-surface">
+                    <div id="worktreeCleanupList" class="worktree-cleanup-list" aria-live="polite" aria-relevant="additions removals text">
+                      <div class="setting worktree-cleanup-empty"><span class="setting-text"><b>Checkouts appear here when reviewed.</b><em>Nothing is removed automatically.</em></span></div>
+                    </div>
+                  </div>
+                </section>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Keep the turn open</h2><p>Control plan generation and what happens near the end of a turn.</p></div></header>
                 <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
-                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Holds the turn open near its end so the next step arrives in the same turn. Goal and Loop use it with GPT-6 Pro (Astra), Loop also with older Pro models; other models only when your message asks. Turning it on changes the connector's tools, so ChatGPT needs a plugin refresh (automatic after 20 seconds with Automatic plugin refresh).</em></span><input id="finishTool" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Holds the turn open near its end so the next step arrives in the same turn. Goal and Loop use it with GPT-6 Pro (Astra), Loop also with older Pro models; other models only when your message asks. Turning it on changes the Core plugin's tools, so ChatGPT needs a plugin refresh (automatic after 20 seconds with Automatic plugin refresh).</em></span><input id="finishTool" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b id="finishLeadMinutesTitle">Requested notice</b><em>How long before its end the model should hold the turn. A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes" aria-labelledby="finishLeadMinutesTitle"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
                   <p class="muted">When the model ends the turn this way with Goal or Loop on in this chat, the next step is written from that prompt and response source. Otherwise you get a notification.</p>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
-                  <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the companion from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the browser extension from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
-                  <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT, so a permission change reaches it without a manual refresh.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Background tabs open in</b><em>The group stays collapsed in the window you used last. Chrome saves open tab groups automatically; the app's group closes with its last chat, so it is not kept. If you close that window while app chats are open, Chrome may keep the group in its saved groups, where you can delete it. Browsers without tab groups use a window.</em></span><select id="backgroundPlacement"><option value="window">Their own minimized window</option><option value="group">A tab group in your browser window</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the browser extension refresh changed plugin tools in ChatGPT, so a permission change reaches it without a manual refresh.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
+                  <div id="pluginRefreshRecovery" class="setting" hidden>
+                    <span class="setting-text"><b id="pluginRefreshRecoveryError" role="alert">Could not read plugin-refresh state</b><em>Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.</em></span>
+                    <button id="pluginRefreshReset" class="btn" type="button">Reset plugin refresh</button>
+                  </div>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
-                  <p class="muted">Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
+                  <p class="muted">Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
                   <label class="setting"><span class="setting-text"><b>Show durations in ChatGPT</b><em>Uses the same preference as the extension popup.</em></span><input id="browserDurations" type="checkbox" disabled /></label>
                   <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
@@ -1065,6 +1107,23 @@
                       <option value="thorough">Thorough · 10k–30k tokens</option>
                       <option value="standard">Standard · 4k–10k tokens</option>
                       <option value="short">Short · 2k–6k tokens</option>
+                    </select>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text"><b>Recording storage</b><em id="recordingStorageUsage">Images and long texts recorded from your chats.</em></span>
+                    <button class="btn" id="settingsFreeImageStorage" type="button">Free storage</button>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b id="recordingStorageLimitTitle">Storage size</b>
+                      <em>How much space recordings may use on this computer. When it is full, new images and the full copies of long texts are no longer kept.</em>
+                    </span>
+                    <select id="recordingStorageLimit" aria-labelledby="recordingStorageLimitTitle">
+                      <option value="2">2 GB</option>
+                      <option value="5">5 GB</option>
+                      <option value="10">10 GB</option>
+                      <option value="20">20 GB</option>
+                      <option value="50">50 GB</option>
                     </select>
                   </div>
                   </div>
@@ -1256,6 +1315,7 @@
                     </div>
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
+                  <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
@@ -1303,6 +1363,7 @@
                 </div>
               </div>
               <p id="composerStatus" role="status" aria-live="polite"></p>
+              <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>

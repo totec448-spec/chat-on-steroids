@@ -1,6 +1,6 @@
 # External MCP plugins
 
-Settings → Plugins manages external MCP integrations. Core and Desktop keep their existing
+The **Plugins** page in the app's sidebar manages external MCP integrations. Core and Desktop keep their existing
 connectors, permissions and tool registration. Plugins uses a third, separately tokenized
 endpoint and the shared **Chat On Steroids Plugins** connector.
 
@@ -12,9 +12,9 @@ The [responsible-use notice](../README.md#responsible-use-and-provider-rules) ap
    With OpenAI Secure Tunnels, create a separate Plugins tunnel, enter its ID in
    the dialog, and choose **Save & connect**. The existing API key and tunnel executable are reused.
    Cloudflare/manual transports publish the Plugins endpoint at its separate path.
-2. Create the **Chat On Steroids Plugins** connector in ChatGPT using the displayed name,
-   description and MCP URL. Keep the CoS connection running.
-3. Open Settings → Plugins and click **+**. Choose a reviewed catalog recipe or a custom server. Review
+2. Create the **Chat On Steroids Plugins** connector in ChatGPT under **Plugins → Add → Add custom MCP server**,
+   using the displayed name and description and the Plugins tunnel (or MCP URL). Keep the CoS connection running.
+3. On the app's **Plugins** page, click **+**. Choose a reviewed catalog recipe or a custom server. Review
    installation instructions and supply credentials in the secure fields.
 4. A plugin becomes **Ready** only after connection and discovery succeed. Blender also
    requires its addon to answer a read-only scene probe. Local readiness does not prove
@@ -24,10 +24,10 @@ The [responsible-use notice](../README.md#responsible-use-and-provider-rules) ap
    automatic connector refresh. Existing conversations can retain cached declarations;
    disabled tools refuse stale calls immediately.
 
-For conversations driven by CoS messages (including Goal and Loop), **Settings → General →
+For ordinary user prompts sent by CoS, **Settings → General →
 Prefer Plugins on app-sent messages** optionally mentions the installed **Chat On Steroids Plugins**
 app instead of Core. This is off by default; only one app is mentioned per CoS-managed
-message. Worker/recovery messages still use Core, and messages typed directly in ChatGPT
+message. Goal, Loop, worker and recovery messages always use Core, and messages typed directly in ChatGPT
 are untouched. CoS selects only the Plugins app whose exact name and ID ChatGPT lists
 for this installation; missing/ambiguous identity adds no token. The setting does not
 refresh a stale ChatGPT tool catalog or guarantee that ChatGPT exposes the MCP tools.
@@ -70,10 +70,11 @@ annotations cannot prove that an external process is unable to mutate. Tool anno
 otherwise relayed without making them more permissive.
 
 The Plugins surface forwards complete JSON schemas and MCP results through the SDK and the
-existing request attribution/recording dispatcher. Upstream tool names are preserved; conflicting declarations are excluded rather than renamed. Publication is normally bounded by 250 KB of schemas,
-with a separate 256-tool emergency ceiling for pathological catalogs. Catalogs larger than 64 tools
-can therefore be published in full when their complete schemas remain within the byte budget. The
-installed tool list distinguishes enabled tools from those actually published within the limit.
+existing request attribution/recording dispatcher. Upstream tool names are preserved; conflicting declarations are excluded rather than renamed. Publication is bounded by 256 tools and
+250 KB of schemas across all enabled plugins; tools past that are listed as not exposed. A server may
+declare more (up to 2,048 tools or 8 MB, an emergency guard against pathological catalogs): it is
+installed, publishes what fits, and switching tools off on its page makes room for the ones you want.
+The installed tool list distinguishes enabled tools from those actually published within the limit.
 Transport failures never automatically retry tool calls. A failed mutation can already have
 taken effect; inspect its state before deciding to retry.
 

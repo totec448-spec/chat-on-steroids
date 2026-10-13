@@ -307,6 +307,25 @@ describe('durable user input ownership', () => {
     expect(await offerToolInput(sessionId, binding.conversationId, 'later-call', now)).toEqual([]);
   });
 
+  // 2026-10-12, GPT-6 Thinking: the page kept closing a turn whose request kept calling tools, and four
+  // messages in a row were folded into tool results the user never saw and the model did not act on.
+  it.each([false, true])('never folds your text into a tool result on a model that is not Pro, even without a direct turn (explicit Inject now: %s)', async explicit => {
+    binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
+    // The newest boundary is an end the page reported early: there is no direct turn to join.
+    binding.end = { kind: 'turn_end', outcome: 'stopped', turnId: 'plain-turn', time: 900 };
+    const row = await enqueueInput(input({ text: 'Use the reference code', ...(explicit ? { delivery: 'tool' as const } : {}) }));
+    expect(row).toMatchObject({ state: 'queued' });
+    expect(row.directTurn).toBeUndefined();
+    expect(row.delivery).toBeUndefined();
+    expect(row.toolTurnId).toBeUndefined();
+    expect(row.transportIntent).not.toBe('tool');
+    expect(await offerToolInput(sessionId, binding.conversationId, 'busy-call', now)).toEqual([]);
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
+    // Once the turn is over, the browser sends it through ChatGPT's composer.
+    binding.activeTurnId = null;
+    expect((await pendingBrowserInputs()).map(entry => entry.id)).toContain(row.id);
+  });
+
   it('keeps an explicit injection on a Pro turn in its tool result without browser fallback', async () => {
     binding.model = 'gpt-5.6-pro'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
@@ -445,7 +464,8 @@ describe('durable user input ownership', () => {
     if (condition === 'helper' || condition === 'worker') binding.origin = condition;
     await enqueueInput(input());
     const result = await offerToolInputBatch(sessionId, binding.conversationId, 'ordinary-tool', now, true);
-    expect(result.messages).toHaveLength(1);
+    // On a model that is not Pro your text waits for the composer instead of a tool result (#1231).
+    expect(result.messages).toHaveLength(condition === 'other-model' ? 0 : 1);
     expect(result.reminder).toBe('');
   });
 

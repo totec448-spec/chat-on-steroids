@@ -139,10 +139,10 @@ describe('live process ownership across chat replacement', () => {
   });
 
   it('lets one request continue its terminal and upgrades that owner to the proven session', () => {
-    const temporary = executionPrincipal('wfr_exec_request', null, true);
+    const temporary = executionPrincipal('wfr_exec_request', null);
     expect(temporary).toBe('request:wfr_exec_request');
     noteExecOwner(104, temporary);
-    expect(execOwnershipFailure(104, executionPrincipal('wfr_exec_request', null, true))).toBeNull();
+    expect(execOwnershipFailure(104, executionPrincipal('wfr_exec_request', null))).toBeNull();
     const changed = vi.fn();
     const unsubscribe = onBackgroundExecChange(changed);
     changed.mockClear();
@@ -152,7 +152,7 @@ describe('live process ownership across chat replacement', () => {
     })).toBe('stored');
     expect(execOwner(104)).toBe('session-request');
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(executionPrincipal('wfr_exec_request', null, true)).toBe('session-request');
+    expect(executionPrincipal('wfr_exec_request', null)).toBe('session-request');
     expect(execOwnershipFailure(104, 'session-request')).toBeNull();
     expect(execOwnershipFailure(104, 'session-other')).toBe('different-owner');
     unsubscribe();
@@ -170,7 +170,7 @@ describe('live process ownership across chat replacement', () => {
   });
 
   it('stores durable custody when proof lands before a yielded exec publishes its owner', () => {
-    const temporary = executionPrincipal('wfr_exec_race', null, true);
+    const temporary = executionPrincipal('wfr_exec_race', null);
     expect(temporary).toBe('request:wfr_exec_race');
     expect(observeRequestCorrelation({
       requestId: 'wfr_exec_race', conversationId: 'conv-race', sessionId: 'session-race',
@@ -180,6 +180,22 @@ describe('live process ownership across chat replacement', () => {
     noteExecOwner(106, temporary);
     expect(execOwner(106)).toBe('session-race');
     expect(execOwnershipFailure(106, 'session-race')).toBeNull();
+  });
+
+  it('keeps request custody with unattributed calls blocked, so the proven chat can poll it', () => {
+    // Live 2026-10-12 (VM, "Allow unattributed calls" off): a new chat's first exec_command
+    // started a second before its request was proven. It was stored with no owner, so the same
+    // chat's write_stdin was refused as EXEC_SESSION_ANONYMOUS and the model reran the command.
+    const temporary = executionPrincipal('wfr_exec_blocked', null);
+    expect(temporary).toBe('request:wfr_exec_blocked');
+    noteExecOwner(107, temporary);
+    expect(execOwnershipFailure(107, null)).toBe('unidentified');
+    expect(observeRequestCorrelation({
+      requestId: 'wfr_exec_blocked', conversationId: 'conv-blocked', sessionId: 'session-blocked',
+      messageId: 'msg-blocked', tool: 'write_stdin', observedAt: Date.now()
+    })).toBe('stored');
+    expect(execOwner(107)).toBe('session-blocked');
+    expect(execOwnershipFailure(107, executionPrincipal('wfr_exec_blocked', 'session-blocked'))).toBeNull();
   });
 });
 

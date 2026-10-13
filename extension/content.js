@@ -271,6 +271,9 @@
   }
 
   let conversationId = null;
+  /** Chats ChatGPT said it deleted (`cos-conversation-deleted`, below). The same text is in src/shared/chat-error.ts. */
+  const CONVERSATION_DELETED = 'This chat was deleted in ChatGPT. Start a new chat to continue.';
+  const deletedConversations = new Set();
   let agent = null;
   /** The worker this chat is, as the app's durable session origin names it; label only. */
   let bootstrapAgent = null;
@@ -962,26 +965,46 @@
   function reportCorePlugin() {
     // What this page itself lists is the evidence; a remembered sighting is not a new report.
     const core = pageCoreMention();
-    const report = core ? core.path : corePluginList && ownNamesKnown && !coreCandidates.some(entry => entry.name === CLF_DOM.connectorNames()[0]) ? 'missing' : null;
+    const report = core ? core.path : corePluginList && ownNamesKnown && !ownCoreCandidate() ? 'missing' : null;
     if (!report || report === reportedCorePlugin) return;
     reportedCorePlugin = report;
     const message = report === 'missing' ? { type: 'core_plugin', missing: true } : { type: 'core_plugin', appId: report.slice('app://'.length) };
     void ask(message).catch(() => { reportedCorePlugin = null; });
   }
-  /** This install's Core app as the page lists it, or null when it is missing or ambiguous. */
+  /** This install's proven Core apps (`app://asdk_app_…`), from the app's status; may be empty. */
+  function provenCorePaths() {
+    return CLF_DOM.connectorApps().filter(app => app.surface === 'core').map(app => `app://${app.appId}`);
+  }
+  /**
+   * This install's Core in the page's app list: a proven app id first (it survives a rename in
+   * ChatGPT), else the configured name. Once a Core app is proven, a same-named app with another
+   * id is somebody else's. Until the app has said its names, the plain name stands in only as a
+   * default: on a computer with a suffix it is the other computer's Core, so nothing matches by
+   * name before then.
+   */
+  function ownCoreCandidate() {
+    const proven = provenCorePaths();
+    const byId = coreCandidates.find(entry => entry.path && proven.includes(entry.path));
+    if (byId) return byId;
+    if (!ownNamesKnown) return null;
+    const own = CLF_DOM.connectorNames()[0];
+    const byName = coreCandidates.find(entry => entry.name === own);
+    return byName && (!proven.length || (byName.path && proven.includes(byName.path))) ? byName : null;
+  }
   /** This install's Core app as this page itself lists it, or null when missing or ambiguous. */
   function pageCoreMention() {
-    const own = CLF_DOM.connectorNames()[0];
-    const match = coreCandidates.find(entry => entry.name === own);
+    const match = ownCoreCandidate();
     return match?.path ? { path: match.path, name: match.name } : null;
   }
   function currentCoreMention() {
-    const own = CLF_DOM.connectorNames()[0];
-    const match = coreCandidates.find(entry => entry.name === own);
-    if (match) return pageCoreMention();
+    if (ownCoreCandidate()) return pageCoreMention();
     // A fresh tab can send before its own plugin list arrives; then this browser's last sighting of
-    // this install's Core stands in. Never once this page's complete list says the Core is missing.
-    if (corePluginList || !knownOwnCore || knownOwnCore.name !== own) return null;
+    // this install's Core stands in. Never once this page's complete list says the Core is missing,
+    // and never against a proven Core id: a sighting is only as good as the names it was taken under.
+    const own = CLF_DOM.connectorNames()[0];
+    const proven = provenCorePaths();
+    if (corePluginList || !knownOwnCore ||
+        (proven.length ? !proven.includes(knownOwnCore.path) : !ownNamesKnown || knownOwnCore.name !== own)) return null;
     return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
   /** Only the exact Plugins app advertised by this page and named by this COS install. */
@@ -996,12 +1019,13 @@
    * Some accounts attach an app to a chat only when a message mentions it (#861), so the mention
    * stays on by default. On others ChatGPT reads it as "use this app now" and opens a plain
    * question with a probe call (#952); those users can switch it off. Workers and
-   * Continue recovery always keep Core; Goal and Loop can select Plugins by opt-in.
+   * Continue recovery, Goal and Loop always keep Core; only ordinary user's prompts
+   * may select Plugins by explicit opt-in.
    * Goal's decision helper never gets an app token: it must not use tools.
    */
   let mentionCore = true;
   // Explicit opt-in: prefer Plugins instead of Core on ordinary COS-managed sends.
-  // Workers and recovery still need Core. A missing/ambiguous Plugins identity is
+  // Goal, Loop, workers and recovery still need Core. A missing/ambiguous Plugins identity is
   // never replaced with another computer's app or an invented app id.
   let mentionPlugins = false;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
@@ -1346,6 +1370,35 @@
     }
   }
 
+  /**
+   * Keeps this page from being paused while it sits in the app's own tab group (#128).
+   *
+   * Chrome freezes the tabs of a collapsed group, and a frozen page neither sends nor records:
+   * measured on Chrome 154, 2 of 7 sends stalled for minutes. Chrome never freezes a page that
+   * holds a Web Lock, so this page holds one, under a name nothing else uses, for exactly as
+   * long as the worker says the tab is in that group. The worker turns it off when the tab
+   * leaves the group or the mode changes; the browser drops it with the document.
+   */
+  let keepAwakeRelease = null;
+  let keepAwakeRegistration = null;
+  function setKeepAwake(on) {
+    const locks = globalThis.navigator && globalThis.navigator.locks;
+    if (on && !keepAwakeRelease && locks && typeof locks.request === 'function') {
+      const name = `chat-on-steroids-keep-awake-${Math.random().toString(36).slice(2, 12).padEnd(8, '0')}`;
+      let release = null;
+      const held = new Promise((resolve) => { release = resolve; });
+      keepAwakeRelease = release;
+      Promise.resolve(locks.request(name, () => held)).catch(() => {
+        if (keepAwakeRelease === release) keepAwakeRelease = null;
+      });
+    } else if (!on && keepAwakeRelease) {
+      const release = keepAwakeRelease;
+      keepAwakeRelease = null;
+      release();
+    }
+    return Boolean(keepAwakeRelease);
+  }
+
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
@@ -1353,7 +1406,15 @@
     // across external navigation and still admit the genuinely new page, without accepting
     // delayed IPC from the dead one merely because both share a numeric tab id.
     if (!documentReady) documentReady = sendToWorker({ type: 'register_document', navigationEpoch: epoch });
-    const registered = await documentReady;
+    const registration = documentReady;
+    const registered = await registration;
+    // A tab the app placed in its own tab group starts awake: Chrome pauses tabs in a collapsed
+    // group within seconds, often before the worker's next pass could say so (#128). Once per
+    // registration, so a later `clf-keep-awake` off is never undone by a cached reply.
+    if (registered && registered.keepAwake === true && keepAwakeRegistration !== registration) {
+      keepAwakeRegistration = registration;
+      setKeepAwake(true);
+    }
     if (!registered || registered.ok !== true) {
       // A sleeping/reloading service worker is transient. Keep the document unregistered
       // (and therefore fail closed) for this call, but let the next observer tick retry.
@@ -2883,7 +2944,15 @@
             )
           }
         : result;
-      finishGeneration(ended, bounded, false);
+      // Steered, or an unfinished answer a new message replaced: ChatGPT carries that answer on past
+      // the message, under the same request id. Stop is not a reliable witness here (measured
+      // 2026-10-11: it was already gone at the tick that saw the message). The app files later calls
+      // of that request under the next turn only past an end marked so (#1301). A turn that ended
+      // with its answer is not marked: its trailing calls stay with it. Where Fiber answers, its
+      // end_turn is that proof, and interim prose without it is an unfinished answer too (live
+      // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
+      const replacedUnfinished = result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
+      finishGeneration(ended, steering || replacedUnfinished ? { ...bounded, continued: true } : bounded, false);
     }
 
     // A turn is opened by a send, and by nothing else.
@@ -2954,6 +3023,8 @@
 
       // The compaction binding is made here and only here: the first generation to open
     }
+    // ChatGPT already said this chat is deleted: a question it shows now cannot be answered.
+    endDeletedTurn();
 
     // Which generation an error first came into view during, recorded before anything reads
     // it and after this tick has opened its generation, so a banner arriving with a turn is
@@ -3627,6 +3698,7 @@
    * whole turn, so without this the same request would be re-sent on every poll.
    */
   const callsReported = new Map();
+  const sightingsReported = new Set();
   /** Exact request ids the app has ACKed as owned by a concrete conversation. */
   const requestOwnersConfirmed = new Map();
   const pendingStreamOrigins = new Map();
@@ -3703,7 +3775,9 @@
       createTime: typeof raw.createTime === 'number' && Number.isFinite(raw.createTime) ? raw.createTime : null,
       hidden,
       localCount,
-      answered: raw.answered === true
+      answered: raw.answered === true,
+      // fiber.js's ownership verdict (app id, link, then name); absent from older frames.
+      ...(typeof raw.own === 'boolean' ? { own: raw.own } : {})
     };
   }
 
@@ -3775,6 +3849,17 @@
         messageId: cap(entry.messageId, 200) || null,
         createTime: typeof entry.createTime === 'number' && isFinite(entry.createTime) ? entry.createTime : null
       });
+    }
+
+    // Connector identity sightings: ids only, never payloads. The app trusts none of them on its
+    // own; only a request id it served teaches it anything (connector-identity.ts).
+    const sightings = [];
+    for (const entry of (Array.isArray(raw.sightings) ? raw.sightings : []).slice(0, 50)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const appId = cap(entry.appId, 200);
+      const requestId = cap(entry.requestId, 100);
+      if (!requestId || !appId || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(appId)) continue;
+      sightings.push({ requestId, appId, linkId: cap(entry.linkId, 200) || null, appName: cap(entry.appName, 200) || null });
     }
 
     const messages = [];
@@ -3924,7 +4009,7 @@
     }
     const trace = turnTraceOf(raw.trace);
     if (codeModeCalls.length === 0 && kept.length === 0 && requests.length === 0 && keptMessages.length === 0 && keptActivities.length === 0 &&
-        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !trace) {
+        keptThoughtNotifications.length === 0 && keptImages.length === 0 && !endMessageId && !trace && sightings.length === 0) {
       return null;
     }
     return {
@@ -3937,11 +4022,14 @@
       calls: kept,
       codeModeCalls,
       requests,
+      sightings,
       messages: keptMessages,
       activities: keptActivities,
       thoughtNotifications: keptThoughtNotifications,
       images: keptImages,
-      trace
+      trace,
+      // #1301: the user message that opened this page turn; files its outline under the right turn.
+      ...(cap(raw.question, 200) ? { question: cap(raw.question, 200) } : {})
     };
   }
 
@@ -4221,7 +4309,7 @@
       window.addEventListener('message', onMessage);
       setTimeout(() => finish(null), FIBER_TIMEOUT_MS);
       try {
-        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames() }, location.origin);
+        window.postMessage({ source: FIBER_ASK, nonce, apps: CLF_DOM.connectorNames(), appIds: CLF_DOM.connectorApps() }, location.origin);
       } catch {
         finish(null);
       }
@@ -4675,6 +4763,14 @@
     }
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
+      // Every connector result row's ids, ours or not, once per request id. The app learns only
+      // from request ids it served itself, so a foreign row teaches nothing.
+      const newSightings = (turn.sightings || []).filter(sighting => !sightingsReported.has(sighting.requestId));
+      if (newSightings.length) {
+        if (sightingsReported.size > 2000) sightingsReported.clear();
+        for (const sighting of newSightings) sightingsReported.add(sighting.requestId);
+        emit({ kind: 'app_sightings', apps: newSightings });
+      }
       const pageConversation = concreteConversation(turn.conversationId);
       const provisionalOwnedTurn = turn.requestOwnerRequired || Boolean(
         turn === ownedPageTurn &&
@@ -4995,7 +5091,7 @@
         if (tracesReported.get(localOwner) !== signature) {
           tracesReported.delete(localOwner);
           tracesReported.set(localOwner, signature);
-          emit({ kind: 'turn_trace', turnId: localOwner, trace: turn.trace });
+          emit({ kind: 'turn_trace', turnId: localOwner, trace: turn.trace, ...(turn.question ? { question: turn.question } : {}) });
         }
       }
     }
@@ -6285,6 +6381,7 @@
 
   function ourConnectorSeen(seen) {
     if (!seen) return false;
+    if (typeof seen.own === 'boolean') return seen.own;
     if (ourConnectorApp(seen.app)) return true;
     if (typeof seen.path !== 'string' || !seen.path.startsWith('/')) return false;
     const end = seen.path.indexOf('/', 1);
@@ -11144,12 +11241,18 @@
 
   // -------------------------------------------------------------- commands
 
-  async function checkStatus() {
-    const reply = await ask({ type: 'status' });
+  /** This install's names, proven apps and remembered Core, from `status` or a redeemed command. */
+  function applyCoreIdentity(reply) {
     const known = reply?.ownCoreApp;
     knownOwnCore = known && typeof known.appId === 'string' && /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(known.appId) &&
       typeof known.name === 'string' ? { path: `app://${known.appId}`, name: known.name } : null;
     if (reply?.connectorNames && CLF_DOM.setConnectorNames(reply.connectorNames)) { ownNamesKnown = true; reportCorePlugin(); }
+    if (reply?.connectorApps && CLF_DOM.setConnectorApps(reply.connectorApps)) reportCorePlugin();
+  }
+
+  async function checkStatus() {
+    const reply = await ask({ type: 'status' });
+    applyCoreIdentity(reply);
     if (reply) {
       status = {
         connected: reply.connected === true,
@@ -11671,6 +11774,9 @@
       reportClaim(false);
       return;
     }
+    // This runs before the first status reply: the command brings this install's Core identity,
+    // so the bootstrap mentions this computer's own Core (see applyCoreIdentity).
+    if (reply.identity) applyCoreIdentity(reply.identity);
     const commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
     const commandAlive = () => commandExpiresAt === null || Date.now() < commandExpiresAt;
     const commandWaitMs = (fallbackMs, reserveMs = 0) => commandExpiresAt === null
@@ -12115,8 +12221,17 @@
    */
   const LOAD_FAILURE_SETTLE_MS = 5_000;
   const LOAD_FAILURE_BACKOFF_MS = [0, 15_000, 30_000, 60_000];
+  /*
+   * Once ChatGPT has said it is limiting this history, a press a minute is what keeps the limit
+   * alive: measured 2026-10-11, each press after Retry-After drew another 429 with a longer
+   * Retry-After (11 s → 47 s) and the chat stayed unreadable for half an hour. The first press
+   * still comes when ChatGPT said it may; the ones after it back off further, to one every 15
+   * minutes, and still never stop.
+   */
+  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000];
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
+  let loadFailureLimited = false;
   let loadFailureRoute = null;
   let loadFailureToldAt = 0;
   function recoverConversationLoad(now = Date.now()) {
@@ -12126,19 +12241,21 @@
       loadFailureToldAt = 0;
       loadFailureSince = 0;
       loadFailureRetries = 0;
+      loadFailureLimited = false;
     }
     // The provider has already told this exact history read when it may be tried again.
     // Do not spend the page's own Retry button inside that window: each click is another
     // history request and can extend the throttle. Once Retry-After expires, the
     // established settle/backoff logic below resumes unchanged.
     if (pendingHistoryRateLimit?.conversationId === route) {
+      loadFailureLimited = true;
       if (pendingHistoryRateLimit.retryAt > now) return false;
       pendingHistoryRateLimit = null;
     }
     const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
     if (!retry) {
       loadFailureSince = 0;
-      if (CLF_DOM.turns().length) loadFailureRetries = 0;
+      if (CLF_DOM.turns().length) { loadFailureRetries = 0; loadFailureLimited = false; }
       return false;
     }
     // Whoever presses Retry here, the tab may leave this chat for ChatGPT's home page. Say so first,
@@ -12148,8 +12265,8 @@
       void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
     if (!loadFailureSince) loadFailureSince = now;
-    const wait = LOAD_FAILURE_SETTLE_MS +
-      LOAD_FAILURE_BACKOFF_MS[Math.min(loadFailureRetries, LOAD_FAILURE_BACKOFF_MS.length - 1)];
+    const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
+    const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
     loadFailureRetries++;
     loadFailureSince = now;
@@ -12308,6 +12425,43 @@
     if (encoded.length > 24000 || encoded === lastUsageProjection) return;
     void ask({ type: 'usage_observation', rows, observedAt }).then((reply) => { if (reply?.ok) lastUsageProjection = encoded; });
   });
+  /**
+   * A chat ChatGPT says it deleted, read by usage.js from ChatGPT's own `conversation_deleted`
+   * answer to its history or send request (2026-10-11). Without it a message into an open deleted
+   * chat stayed "Working" until the ten-minute watchdog, and one for a closed tab either waited
+   * with no status or failed as an unconfirmed model, because the reopened tab lands on home.
+   *
+   * Only this document's chats count: its route, its recorded chat, or the chat it was loaded
+   * for (content.js can start after ChatGPT has already moved the tab home). The app ends the
+   * messages waiting for it; an open turn here ends as failed with the same reason.
+   */
+  const LOADED_CONVERSATION = (() => {
+    try { return CLF_DOM.conversationFromPath(new URL(performance.getEntriesByType('navigation')[0]?.name || location.href).pathname); }
+    catch { return null; }
+  })();
+  /**
+   * Ends this document's open turn when its chat is one ChatGPT deleted. The send's answer can
+   * arrive before the page shows the question that opens the turn (measured 2026-10-11: 2.8 s
+   * earlier), so this runs both when the answer arrives and when a turn opens after it.
+   */
+  function endDeletedTurn() {
+    if (!generating || !turnId || typeof conversationId !== 'string' || !deletedConversations.has(conversationId.toLowerCase())) return;
+    emit({ kind: 'chat_error', turnId, recoverable: false, text: CONVERSATION_DELETED });
+    finishGeneration(generationTurn(), { outcome: 'failed', detail: CONVERSATION_DELETED });
+    void flush();
+  }
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-conversation-deleted') return;
+    const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId.toLowerCase() : '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(claimed) || deletedConversations.has(claimed)) return;
+    const ours = [CLF_DOM.conversationId(), conversationId, OPENED_CONVERSATION, LOADED_CONVERSATION]
+      .some(id => typeof id === 'string' && id.toLowerCase() === claimed);
+    if (!ours) return;
+    if (deletedConversations.size >= 16) deletedConversations.delete(deletedConversations.values().next().value);
+    deletedConversations.add(claimed);
+    void ask({ type: 'conversation_deleted', conversationId: claimed }).catch(() => undefined);
+    endDeletedTurn();
+  });
   let pendingHistoryRateLimit = null;
   function publishHistoryRateLimit() {
     const limit = pendingHistoryRateLimit;
@@ -12395,6 +12549,27 @@
           ...(reported.createTime ? { time: reported.createTime, authoredTime: true, authoredAt: reported.createTime } : {}) });
       }
     }
+  });
+  // The app a connector result names, read by usage.js from this chat's response stream (#1305):
+  // the first turn of a new chat can show no tool rows to the page at all. Same shape and the same
+  // once-per-request rule as the Fiber sightings; only a request id the app served teaches it.
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-app-sighting') return;
+    if (temporaryPlannerPage()) return;
+    const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
+    if (!claimed || CLF_DOM.conversationId() !== claimed) return;
+    const fresh = [];
+    for (const entry of (Array.isArray(event.data.sightings) ? event.data.sightings : []).slice(0, 16)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const appId = cap(entry.appId, 200), requestId = cap(entry.requestId, 100);
+      if (!requestId || !appId || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(appId) || sightingsReported.has(requestId)) continue;
+      const linkId = cap(entry.linkId, 200);
+      fresh.push({ requestId, appId, linkId: linkId && /^link_[A-Za-z0-9_-]{1,160}$/.test(linkId) ? linkId : null, appName: cap(entry.appName, 200) || null });
+    }
+    if (!fresh.length) return;
+    if (sightingsReported.size > 2000) sightingsReported.clear();
+    for (const sighting of fresh) sightingsReported.add(sighting.requestId);
+    emit({ kind: 'app_sightings', apps: fresh });
   });
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
@@ -12711,8 +12886,15 @@
     }
     if (message.directTurn && (!target || ((generating || CLF_DOM.generating()) &&
         (!sourceUser || sourceTurn !== message.directTurn.id)))) return false;
-    const ownsFreshPage = () => !target && onTarget() && location.pathname === '/' &&
-      new URL(location.href).searchParams.get('cos-input') === message.id && !CLF_DOM.turns().length;
+    // A new chat of a project with a native ChatGPT Project is typed only on that Project's own
+    // page, never at the root; ChatGPT may rewrite that route, so its marker can be in the hash.
+    const project = typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : null;
+    const freshMarker = () => {
+      const url = new URL(location.href);
+      return url.searchParams.get('cos-input') === message.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === message.id;
+    };
+    const ownsFreshPage = () => !target && onTarget() && (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
+      (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length;
     if (!target && !ownsFreshPage()) return false;
     desktopInputBusy = true;
     let decision = null;
@@ -12752,13 +12934,18 @@
         return false; // No claim, insertion or Send: queued input survives recovery.
       }
       if (!composer || !onTarget() || (!message.directTurn && ((!silencePickup && generating) || CLF_DOM.generating())) || !CLF_DOM.composerVisible()) return false;
-      const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true });
+      const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
+        ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });
       const input = reply?.data?.input;
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
       if (!input) return false;
       if (!onTarget()) { noteWithdraw(offTarget()); return false; }
       withdrawableRecoveryDraft = Boolean(input.recovery) && !(input.images || []).length && !(input.attachments || []).length;
-      const fail = async (error) => { await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error }); return false; };
+      // A chat ChatGPT deleted fails every check after it (its tab moves home); say why instead.
+      const fail = async (error) => {
+        const why = target && deletedConversations.has(target.toLowerCase()) ? CONVERSATION_DELETED : error;
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why }); return false;
+      };
       // ChatGPT restores its shared home draft even in a newly opened input tab.
       // This exact claimed bootstrap owns replacement text; existing chats and
       // attachment drafts remain protected. Re-evaluate after model selection,
@@ -12926,7 +13113,7 @@
       // A person's message asking for a picture goes out without the mention (the app decides:
       // ChatGPT switches its own image tool off for a message that mentions an app).
       input.purpose === 'decision' || (input.coreMention === false && !input.recovery && !agent) ? null
-        : input.recovery || agent ? currentCoreMention()
+        : input.recovery || agent || input.finishOwner || input.automation ? currentCoreMention()
           : mentionPlugins ? currentPluginsMention() : mentionCore ? currentCoreMention() : null,
       sentRequestSince, !!message.directTurn);
       // #744: one retry when the editor was replaced before anything asked to send it.
@@ -13068,12 +13255,66 @@
     return (url.pathname === '/' && /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.hash)?.[1]) ||
       (!url.hash && /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname)?.[1]) || null;
   }
+  /**
+   * Creates a new CoS project's native ChatGPT Project through ChatGPT's own dialog (#1176).
+   *
+   * Only the helper the app opened for this exact request does it: ChatGPT's home with its marker.
+   * Before the click that creates the Project nothing can exist remotely, so any failure is a plain
+   * failure. The app records `arm` before that click; from there a missing id makes the request
+   * uncertain in the app, never retried on its own. The id is taken only from the new Project's own
+   * page, which ChatGPT opens by itself after creating it.
+   */
+  let projectCreateBusy = false;
+  async function createChatgptProject(request) {
+    if (projectCreateBusy || !request || !/^[a-f0-9-]{36}$/i.test(String(request.id)) || typeof request.name !== 'string' || !request.name) return false;
+    const marked = () => alive && location.pathname === '/' && new URL(location.href).searchParams.get('cos-project-create') === request.id;
+    if (!marked()) return false;
+    projectCreateBusy = true;
+    const report = (action, extra = {}) => ask({ type: 'project_create', action, id: request.id, ...extra });
+    const fail = async error => { await report('fail', { error }); return false; };
+    try {
+      // Claimed first, so that any failure from here is the app's `failed`, shown with Retry,
+      // rather than a request offered to this page again on every pass.
+      if ((await report('claim'))?.data?.ok !== true || !marked()) return false;
+      let revealed = false;
+      const control = await waitPageView(() => CLF_DOM.projectCreateControl() ||
+        (!revealed && (revealed = CLF_DOM.revealSidebar()) && null), marked, 20_000, 250);
+      if (!control) return fail('ChatGPT did not show its New project control');
+      control.click();
+      // A click can be lost while the page is still settling (1 of 13 live, 2026-10-10). Nothing is
+      // armed yet, so one more click on the same native control is safe.
+      let form = await waitPageView(() => CLF_DOM.projectCreateForm(), marked, 8_000, 250);
+      if (!form && marked() && CLF_DOM.projectCreateControl()) {
+        CLF_DOM.projectCreateControl().click();
+        form = await waitPageView(() => CLF_DOM.projectCreateForm(), marked, 8_000, 250);
+      }
+      if (!form) return fail('ChatGPT did not open its Create project dialog');
+      if (!CLF_DOM.fillProjectName(form.input, request.name)) return fail('The Project name could not be entered');
+      const ready = await waitPageView(() => { const now = CLF_DOM.projectCreateForm(); return now && !now.submit.disabled && now.input.value === request.name ? now : null; }, marked, 5_000, 250);
+      if (!ready) return fail('ChatGPT did not accept the Project name');
+      // The Projects ChatGPT already lists: the new one's id must not be among them, so another
+      // Project's page reached some other way can never be taken for it.
+      const existing = new Set(CLF_DOM.projectIdsShown());
+      if ((await report('arm'))?.data?.ok !== true || !marked()) return fail('The app did not confirm the Project creation');
+      ready.submit.click();
+      // ChatGPT opens the new Project's page itself; that route is the only proof of its id.
+      const id = await waitPageView(() => { const shown = CLF_DOM.projectHomeId(); return shown && !existing.has(shown) ? shown : null; },
+        () => alive, 20_000, 250);
+      if (!id) return fail('ChatGPT did not open the new Project');
+      return (await report('done', { chatgptId: id }))?.data?.ok === true;
+    } finally {
+      projectCreateBusy = false;
+    }
+  }
+
   async function refreshManagedPlugin(request) {
     if (pluginRefreshBusy || !request || !/^[a-f0-9-]{36}$/i.test(request.id) || !ownsPluginRefreshPage(request.id)) return false;
     pluginRefreshBusy = true;
-    const requestEpoch = epoch;
-    const ownsRequest = () => epoch === requestEpoch && ownsPluginRefreshPage(request.id);
-    const fail = error => ask({ type: 'plugin_refresh', action: 'fail', id: request.id, error });
+    const requestEpoch = epoch, requestHref = location.href;
+    // Settings routes share a conversation epoch. A different marked settings URL is
+    // still a navigation, never permission to act or attribute this page's failed read.
+    const ownsRequest = () => epoch === requestEpoch && location.href === requestHref && ownsPluginRefreshPage(request.id);
+    const fail = error => ownsRequest() ? ask({ type: 'plugin_refresh', action: 'fail', id: request.id, error }, ownsRequest) : null;
     const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]` : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value);
     const schemaKey = tools => Array.isArray(tools) ? canonical(tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })).sort((a, b) => a.name.localeCompare(b.name))) : null;
     try {
@@ -13088,16 +13329,33 @@
           if (!current()) return false;
           location.assign(url.href); return true;
         }
-        const buttons = await waitPageView(() => CLF_DOM.pluginInstalledButtons(request.connectorName), current, 8000);
+        let linkHref = null;
+        const buttons = await waitPageView(() => {
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName);
+          linkHref = found?.length === 1 && found[0].tagName === 'A' ? found[0].href : null;
+          return found;
+        }, current, 8000);
         if (!buttons || !current()) return false;
         if (buttons.length !== 1) {
           await fail(t(
             'content_connector_identity_ambiguous',
-            'Installed connector identity is unavailable or ambiguous'
+            'Installed plugin identity is unavailable or ambiguous'
           ));
           return false;
         }
-        buttons[0].click();
+        const button = buttons[0];
+        if (button.tagName === 'A') {
+          // The native installed link already names an exact management route. Recheck
+          // the same visible owner across the await and carry custody into navigation;
+          // reading the destination's schema is a later step, not a prerequisite here.
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName);
+          if (!current() || !button.isConnected || found?.length !== 1 || found[0] !== button || button.href !== linkHref) return false;
+          const url = new URL(linkHref, requestHref);
+          if (url.origin !== listUrl.origin || !/^\/settings\/plugins-settings\/plugin_asdk_app_[a-zA-Z0-9_-]+$/.test(url.pathname) || url.hash) return false;
+          url.searchParams.set('cos-plugin-refresh', request.id);
+          location.assign(url.href); return true;
+        }
+        button.click();
         // The provider's installed-row navigation drops the query marker. This
         // already-owned discovery may learn its resulting exact App Id, but cannot
         // claim Refresh until the management document has its marker again.
@@ -13135,7 +13393,7 @@
         // cause in the durable row, which is the opposite of the point.
         if (current()) await fail(t(
           'content_connector_settings_unreadable',
-          'The connector settings card could not be read on the page this request owns'
+          'The plugin settings card could not be read on the page this request owns'
         ));
         return false;
       }
@@ -13143,7 +13401,7 @@
       if (request.appId && view.appId !== request.appId) {
         await fail(t(
           'content_connector_settings_unverified',
-          'Exact connector settings could not be verified'
+          'Exact plugin settings could not be verified'
         ));
         return false;
       }
@@ -13151,28 +13409,37 @@
       const stillCurrent = () => current() && epoch === ownedEpoch && pluginViewAppId(location.href) === appId;
       const before = schemaKey(view.tools), expected = schemaKey(request.tools);
       if (before === expected) {
-        return (await ask({ type: 'plugin_refresh', action: 'current', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId }))?.data?.ok === true && stillCurrent();
+        return (await ask({ type: 'plugin_refresh', action: 'current', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId }, stillCurrent))?.data?.ok === true && stillCurrent();
+      }
+      if (request.observeOnly) {
+        await fail(t('content_connector_settings_unverified', 'Exact plugin settings could not be verified'));
+        return false;
       }
       if (!view.refresh || view.refresh.disabled) {
         const error = t(
           'content_connector_schema_no_refresh',
-          'Connector schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this custom app to load the current tool schema.'
+          'Plugin schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this plugin to load the current tool schema.'
         );
-        return (await ask({ type: 'plugin_refresh', action: 'manual', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId, error }))?.data?.ok === true && stillCurrent();
+        return (await ask({ type: 'plugin_refresh', action: 'manual', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId, error }, stillCurrent))?.data?.ok === true && stillCurrent();
       }
-      const claimed = await ask({ type: 'plugin_refresh', action: 'claim', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId });
+      const claimed = await ask({ type: 'plugin_refresh', action: 'claim', id: request.id, appId, connectorName: request.connectorName, tools: view.tools, tunnelId }, stillCurrent);
       if (!claimed?.data?.ok || !stillCurrent() || view.refresh.isConnected === false || view.refresh.disabled) {
         await fail(t(
           'content_connector_refresh_claim_unconfirmed',
-          'Connector refresh claim or page ownership was not confirmed'
+          'Plugin refresh claim or page ownership was not confirmed'
         ));
         return false;
       }
       view.refresh.click(); // the durable main-process attempt owns this one click
+      // The page does not show the tool list, so the new tools arriving changes no element: a
+      // wait that looked only on page changes saw them when the Refresh button turned active
+      // again, about 10 s later, and gave up at 12 s. Measured on Windows 2026-10-13, it recorded
+      // a refresh that had worked as failed in 2 of 3 runs. Look every half second, for up to a
+      // minute (the worker leaves a busy tab open); the one click stays one click.
       const after = await waitPageView(async () => {
         const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId);
         return next && before !== expected && schemaKey(next.tools) === expected ? next : null;
-      }, stillCurrent, 12000);
+      }, stillCurrent, 60000, 500);
       if (!after) {
         await fail(t(
           'content_connector_refresh_schema_unchanged',
@@ -13180,9 +13447,9 @@
         ));
         return false;
       }
-      return (await ask({ type: 'plugin_refresh', action: 'complete', id: request.id, appId, tools: after.tools, versionId: after.versionId }))?.data?.ok === true;
+      return (await ask({ type: 'plugin_refresh', action: 'complete', id: request.id, appId, tools: after.tools, versionId: after.versionId }, stillCurrent))?.data?.ok === true;
     } catch {
-      await fail(t('content_connector_refresh_unverified', 'Connector refresh could not be verified'));
+      await fail(t('content_connector_refresh_unverified', 'Plugin refresh could not be verified'));
       return false;
     }
     finally { pluginRefreshBusy = false; }
@@ -13318,6 +13585,18 @@
       if (message.type === 'clf-plugin-refresh-state') {
         sendResponse({ safe: !pluginRefreshBusy && ownsPluginRefreshPage(message.id) && CLF_DOM.pluginManagementIdle() }); return false;
       }
+      if (message.type === 'clf-project-create') {
+        void createChatgptProject(message.request).then(ok => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));
+        return true;
+      }
+      if (message.type === 'clf-project-create-state') {
+        // The helper may close once it holds nothing of the person's: no chat, no draft, no work.
+        const box = CLF_DOM.composer();
+        sendResponse({ safe: !projectCreateBusy && !CLF_DOM.conversationId() && !CLF_DOM.generating() &&
+          !(box && (box.textContent || '').trim()) && !CLF_DOM.hasComposerAttachments() &&
+          (location.pathname === '/' || !!CLF_DOM.projectHomeId()) });
+        return false;
+      }
       if (message.type === 'clf-model-catalog-state') {
         const reason = modelCatalogBusy ? 'inspection_busy' : catalogPageBlocker();
         const ready = !modelCatalogBusy && (!reason || (reason === 'composer_missing' && catalogHelper()));
@@ -13338,6 +13617,10 @@
       if (message.type === 'clf-desktop-input') {
         void acceptDesktopInput(message).then((ok) => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));
         return true;
+      }
+      if (message.type === 'clf-keep-awake') {
+        sendResponse({ ok: true, held: setKeepAwake(message.on === true) });
+        return false;
       }
       if (message.type === 'clf-recorder-ping') {
         // `busy`: this page is mid-turn or mid-handoff, so the extension must not reload under it.

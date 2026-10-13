@@ -1,81 +1,95 @@
 import { el, icon } from './dom.js';
-import { t, ui } from './i18n.js';
+import { currentLanguage, onLanguageChange, t, ui, type Language } from './i18n.js';
+import { quoted } from './extension-pictures.js';
+import pages from './setup-images/pages/manifest.json';
 import { initToolApprovalNotice } from './tool-approval.js';
 
 /** One place to click: a few words, and where it is on the picture as percentages of its size. */
-type Spot = { text: string; box: [number, number, number, number]; pin?: 'top-left' | 'bottom-left' | 'outside-left' };
+type Spot = { text: () => string; box: [number, number, number, number]; pin?: 'top-left' | 'bottom-left' | 'outside-left' };
 type Shot = { src: string; spots: Spot[] };
+type Box = [number, number, number, number];
+type Capture = { file: string; size: [number, number]; labels: Record<string, string>; spots: Record<string, Box> };
+/** A page captured by scripts/capture-setup-pages.mjs: its own words fill the move texts. */
+type Page = { scene: string; spots: Array<{ key: string; text: (labels: Record<string, string>) => string; pin?: Spot['pin'] }> };
+type Still = { src: string; spots: Array<{ text: string | (() => string); box: Box; pin?: Spot['pin'] }> };
+
+const pageFiles = import.meta.glob('./setup-images/pages/*.webp', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+
+/** The capture of a page in the app's language (ChatGPT's own words there), else in English. */
+function capture(scene: string, language: Language = currentLanguage()): Capture | null {
+  const scenes = pages as unknown as Record<string, Partial<Record<Language, Capture>>>;
+  return scenes[scene]?.[language] ?? scenes[scene]?.en ?? null;
+}
+
+/** A label ChatGPT shows in the app's language, else its English one: for steps without a capture of their own. */
+function label(scene: string, key: string): string {
+  const scenes = pages as unknown as Record<string, Partial<Record<Language, { labels: Record<string, string> }>>>;
+  return scenes[scene]?.[currentLanguage()]?.labels[key] ?? scenes[scene]!.en!.labels[key]!;
+}
 
 // Only reviewed, redacted captures belong here: placeholders stand in for every name, address and id.
-const guides: Record<string, Shot[]> = {
-  extension: [
-    { src: new URL('./setup-images/browser-extensions.png', import.meta.url).href, spots: [
-      { text: 'Turn on Developer mode.', box: [85, 3, 14, 18] }
-    ] }
-  ],
-  'extension-load': [
-    { src: new URL('./setup-images/browser-extensions.png', import.meta.url).href, spots: [
-      { text: 'Load the extension', box: [2, 25, 12.5, 15] }
-    ] }
-  ],
+// The ChatGPT and OpenAI Platform pages are re-captured with scripts/capture-setup-pages.mjs.
+const guides: Record<string, Array<Page | Still>> = {
   signin: [
     { src: new URL('./setup-images/cos-browser-sign-in.png', import.meta.url).href, spots: [
       // Two places side by side: the pins take opposite corners so neither covers the other.
-      { text: 'Click Log in', box: [72, 11.7, 8.7, 10.6], pin: 'bottom-left' },
+      { text: () => t('Click {0}', [quoted(label('signin', 'login'))]), box: [72, 11.7, 8.7, 10.6], pin: 'bottom-left' },
       { text: 'Green dot: the app is connected', box: [77.2, 2.6, 2.9, 5.1] }
     ] }
   ],
   'external-browser': [
     { src: new URL('./setup-images/external-browser-chatgpt.png', import.meta.url).href, spots: [
       { text: 'Review extension', box: [96.1, 2.8, 2.6, 5.1], pin: 'outside-left' },
-      { text: 'Click Log in', box: [91.2, 12.1, 7.5, 11.1], pin: 'bottom-left' }
+      { text: () => t('Click {0}', [quoted(label('signin', 'login'))]), box: [91.2, 12.1, 7.5, 11.1], pin: 'bottom-left' }
     ] }
   ],
   tunnel: [
-    { src: new URL('./setup-images/tunnel-create.png', import.meta.url).href, spots: [
-      { text: 'Name it', box: [3.1, 15.8, 93.8, 5.3] },
-      { text: 'Pick your ChatGPT workspace', box: [3.1, 75.3, 93.8, 6.8] },
-      { text: 'Click Create', box: [86.4, 92, 10.5, 5.4] }
+    { scene: 'tunnel-create', spots: [
+      { key: 'name', text: () => t('Name it') },
+      { key: 'workspace', text: () => t('Pick your ChatGPT workspace') },
+      { key: 'create', text: labels => t('Click {0}', [quoted(labels.create!)]) }
     ] },
-    { src: new URL('./setup-images/tunnel-id.png', import.meta.url).href, spots: [
-      { text: 'Copy the tunnel ID', box: [92.6, 40, 5.6, 26] }
-    ] }
+    { scene: 'tunnel-id', spots: [{ key: 'copy', text: () => t('Copy the tunnel ID') }] }
   ],
   key: [
-    { src: new URL('./setup-images/api-key-create.png', import.meta.url).href, spots: [
-      { text: 'Pick your project', box: [4.4, 59, 91.1, 6.1] },
-      { text: 'Choose Restricted', box: [14.4, 90.1, 20.2, 5.7] }
+    { scene: 'api-key-create', spots: [
+      { key: 'project', text: () => t('Pick your project') },
+      { key: 'restricted', text: labels => t('Choose {0}', [quoted(labels.restricted!)]) }
     ] },
-    { src: new URL('./setup-images/api-key-tunnels.png', import.meta.url).href, spots: [
-      { text: 'Tunnels: Read and Use', box: [51.4, 40.8, 47.4, 51] }
+    { scene: 'api-key-tunnels', spots: [
+      { key: 'tunnels', text: labels => t('{0}: {1} and {2}', [quoted(labels.tunnels!), quoted(labels.read!), quoted(labels.use!)]) }
     ] }
   ],
   plugin: [
-    { src: new URL('./setup-images/plugin-add.png', import.meta.url).href, spots: [
-      { text: 'Add → Create MCP App', box: [8.7, 70.1, 82.6, 16] }
+    { scene: 'plugin-add', spots: [{ key: 'item', text: labels => `${quoted(labels.add!)} → ${quoted(labels.item!)}` }] },
+    { scene: 'plugin-new', spots: [
+      { key: 'name', text: () => t('Paste the name exactly') },
+      { key: 'connection', text: labels => t('{0}, then your tunnel ID', [quoted(labels.tunnel!)]) },
+      { key: 'auth', text: labels => quoted(labels.noAuth!) },
+      { key: 'create', text: labels => t('{0}, then {1}', [quoted(labels.consent!), quoted(labels.create!)]) }
     ] },
-    { src: new URL('./setup-images/plugin-new.png', import.meta.url).href, spots: [
-      { text: 'Paste the name exactly', box: [3.3, 20, 93.3, 5.2] },
-      { text: 'Tunnel, then your tunnel ID', box: [3.3, 38.7, 93.3, 15.1] },
-      { text: 'No authentication', box: [3.3, 59.4, 93.3, 5.1] },
-      { text: 'Accept, then Create', box: [84.3, 92, 12.4, 5.3] }
-    ] },
-    // So tasks are not paused for approval: the plugin's own permissions page, in ChatGPT's words.
+    // So tasks are not paused for approval: the plugin's own permissions page, where ChatGPT has one.
     { src: new URL('./setup-images/plugin-permissions.png', import.meta.url).href, spots: [
-      { text: 'Permissions: Allow all tools', box: [3.1, 76.9, 93.9, 13.5] }
+      { text: 'Where the plugin offers permissions: allow all tools', box: [3.1, 76.9, 93.9, 13.5] }
     ] },
     // The first tool call asks for approval; this is where the app's one-time reminder points too.
     { src: new URL('./setup-images/tool-approval.jpg', import.meta.url).href, spots: [
-      { text: 'First run: Allow → Always allow', box: [85.5, 79.6, 12.2, 14.6] }
-    ] }
-  ],
-  developer: [
-    { src: new URL('./setup-images/developer-mode.png', import.meta.url).href, spots: [
-      { text: 'Security and login', box: [2, 68.6, 26, 5.8] },
-      { text: 'Turn Developer mode on', box: [88.8, 44.9, 5.7, 3.8] }
+      { text: 'First tool call: allow it, always for this plugin', box: [85.5, 79.6, 12.2, 14.6] }
     ] }
   ]
 };
+
+/** The pictures and move texts of a guide in the app's current language. */
+function shots(group: string): Shot[] {
+  return (guides[group] ?? []).flatMap(entry => {
+    if ('src' in entry) return [{ src: entry.src, spots: entry.spots.map(spot => ({ ...spot, text: typeof spot.text === 'string' ? () => t(spot.text as string) : spot.text })) }];
+    const page = capture(entry.scene);
+    const src = page ? pageFiles[`./setup-images/pages/${page.file}`] : undefined;
+    if (!page || !src) return [];
+    return [{ src, spots: entry.spots.flatMap(spot => page.spots[spot.key]
+      ? [{ box: page.spots[spot.key]!, pin: spot.pin, text: () => spot.text(capture(entry.scene)?.labels ?? page.labels) }] : []) }];
+  });
+}
 
 /** A picture with its click targets marked, numbered from `first` so pins match the moves. */
 function picture(shot: Shot, first: number): HTMLElement {
@@ -138,7 +152,7 @@ function guide(host: HTMLElement, shots: Shot[], enlarge: (shot: Shot, first: nu
       move.tabIndex = 0;
       move.dataset.shot = String(shotIndex);
       move.dataset.spot = String(firsts[shotIndex]! + index);
-      move.append(el('span', 'guide-pin', String(firsts[shotIndex]! + index + 1)), el('span', 'guide-move-text', () => t(spot.text)));
+      move.append(el('span', 'guide-pin', String(firsts[shotIndex]! + index + 1)), el('span', 'guide-move-text', spot.text));
       const light = () => show(shotIndex, firsts[shotIndex]! + index);
       move.addEventListener('pointerenter', light);
       move.addEventListener('focus', light);
@@ -180,14 +194,23 @@ export function initSetupGuide(): void {
     const legend = el('ol', 'guide-moves');
     shot.spots.forEach((spot, index) => {
       const move = el('li', 'guide-move');
-      move.append(el('span', 'guide-pin', String(first + index + 1)), el('span', 'guide-move-text', () => t(spot.text)));
+      move.append(el('span', 'guide-pin', String(first + index + 1)), el('span', 'guide-move-text', spot.text));
       legend.append(move);
     });
     large.replaceChildren(picture(shot, first), legend);
     dialog.showModal();
   };
-  for (const host of document.querySelectorAll<HTMLElement>('[data-setup-guide]')) {
-    const shots = guides[host.dataset.setupGuide!] ?? [];
-    if (shots.length) guide(host, shots, enlarge);
-  }
+  // Captured pages change with the language (ChatGPT's own words and screens), so the guides are
+  // built again on a language change, the moves a step keeps in its own column included.
+  const build = (): void => {
+    for (const host of document.querySelectorAll<HTMLElement>('[data-setup-guide]')) {
+      host.replaceChildren();
+      const slot = host.dataset.movesInto ? document.getElementById(host.dataset.movesInto) : null;
+      slot?.querySelector(':scope > .guide-moves')?.remove();
+      const pictures = shots(host.dataset.setupGuide!);
+      if (pictures.length) guide(host, pictures, enlarge);
+    }
+  };
+  build();
+  onLanguageChange(build);
 }

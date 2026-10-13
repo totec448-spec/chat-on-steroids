@@ -1,9 +1,19 @@
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 const project = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/projects.js', () => ({ getSessionProject: project }));
-const swarm = vi.hoisted(() => ({ running: false }));
-vi.mock('../src/main/agents.js', async (original) => ({ ...(await original<typeof import('../src/main/agents.js')>()), swarmRunning: () => swarm.running }));
+const swarm = vi.hoisted(() => ({ running: false, managed: false, orphanedWorker: false }));
+const leaseLookup = vi.hoisted(() => vi.fn());
+const leaseValidate = vi.hoisted(() => vi.fn());
+vi.mock('../src/main/worktrees/index.js', () => ({ lookupWorkerWorkspace: leaseLookup, validateWorkerWorkspaceLease: leaseValidate }));
+vi.mock('../src/main/agents.js', async (original) => ({
+  ...(await original<typeof import('../src/main/agents.js')>()),
+  swarmRunning: () => swarm.running,
+  managedWorkerWorktreeRequired: () => swarm.managed,
+  managedWorkerIsolationRequired: () => swarm.managed || swarm.orphanedWorker,
+  managedWorkerAllocationIdentity: () => swarm.managed ? { runId: 'owner-allocation', agentId: 'worker-1' } : null
+}));
 import { resolveCwd, resolveIn } from '../src/main/mcp/kernel.js';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
@@ -12,9 +22,17 @@ import { makeTempDir, removeTempDir, writeTree } from './helpers.js';
 let base = '';
 beforeAll(async () => { base = await makeTempDir(); await writeTree(base, { 'a/file.txt': 'a', 'b/file.txt': 'b' }); });
 afterAll(async () => { await removeTempDir(base); });
-beforeEach(() => { resetWorkspaces(); project.mockReset(); swarm.running = false; });
+beforeEach(() => {
+  resetWorkspaces(); project.mockReset(); leaseLookup.mockReset(); leaseValidate.mockReset();
+  leaseValidate.mockImplementation(async lease => lease);
+  swarm.running = false; swarm.managed = false; swarm.orphanedWorker = false;
+});
 function run<T>(id: string, fn: () => T): T {
   const context: CallContext = { startedAt: Date.now(), transportKey: null, agent: 'prime', caller: { transportKey: null, requestId: null, conversationId: `chat-${id}`, sessionId: id }, outcome: null, evidence: emptyEvidence() };
+  return runInCallContext(context, fn);
+}
+function workerRun<T>(id: string, fn: () => T): T {
+  const context: CallContext = { startedAt: Date.now(), transportKey: null, agent: 'worker-1', caller: { transportKey: null, requestId: null, conversationId: `chat-${id}`, sessionId: id }, outcome: null, evidence: emptyEvidence() };
   return runInCallContext(context, fn);
 }
 const roots = () => [{ name: 'work', path: base }];
@@ -69,4 +87,75 @@ it('tells a multi-agent chat its learned cwd was deleted instead of guessing a f
   await expect(run('w', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))
     .rejects.toThrow('has no proven workspace');
   expect((await run('w', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, '/work/b'))).virtual).toBe('/work/b');
+});
+
+it('recovers a managed worker checkout even when its session still names the prime project', async () => {
+  swarm.managed = true;
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  leaseLookup.mockReturnValue({ workspace: { virtual: '/work/b', real: path.join(base, 'b') } });
+  expect((await workerRun('managed', () => resolveIn(roots(), 'file.txt'))).real).toBe(path.join(base, 'b', 'file.txt'));
+  const cwd = await workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined));
+  expect(cwd?.virtual).toBe('/work/b');
+  expect(leaseLookup).toHaveBeenCalledWith({ runId: 'owner-allocation', agentId: 'worker-1' });
+});
+
+it('keeps an unmanaged legacy worker on its inherited project without requiring a worktree', async () => {
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  expect((await workerRun('legacy', () => resolveIn(roots(), 'file.txt'))).real).toBe(path.join(base, 'a', 'file.txt'));
+  expect((await workerRun('legacy', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))?.virtual).toBe('/work/a');
+  expect(leaseLookup).not.toHaveBeenCalled();
+});
+
+it('refuses a required worker checkout when its marker cannot be recovered, even with cached prime cwd', async () => {
+  swarm.managed = true;
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  setWorkspaceFor('chat:chat-managed', { virtual: '/work/a', real: path.join(base, 'a') });
+  leaseLookup.mockReturnValue(null);
+  await expect(workerRun('managed', () => resolveIn(roots(), 'file.txt'))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+});
+
+it('never uses inherited Prime project after the managed worker broker history was evicted', async () => {
+  // The durable exact-session worker origin outlives the broker's finite history.
+  // It is a refusal fence only, not proof that the disappeared lease can be recovered.
+  swarm.orphanedWorker = true;
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  setWorkspaceFor('chat:chat-orphan', { virtual: '/work/a', real: path.join(base, 'a') });
+  leaseLookup.mockReturnValue(null);
+  await expect(workerRun('orphan', () => resolveIn(roots(), 'file.txt'))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  await expect(workerRun('orphan', () => resolveIn(roots(), '/work/a/file.txt'))).rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  await expect(workerRun('orphan', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, '/work/a')))
+    .rejects.toThrow(/WORKTREE_OWNER_UNAVAILABLE/);
+  expect(project).not.toHaveBeenCalled();
+});
+
+it('blocks a worker relative write and command after its checked-out directory is replaced', async () => {
+  swarm.managed = true;
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  const parent = path.join(base, 'swapped-owner-test');
+  const original = path.join(parent, 'owned');
+  const relocated = path.join(parent, 'old-worktree');
+  await fs.mkdir(original, { recursive: true });
+  const identity = await fs.stat(original);
+  const lease = { workspace: { virtual: '/work/swapped-owner-test/owned', real: original } };
+  leaseLookup.mockReturnValue(lease);
+  // Simulate the manager's checked inode lease. The real validator additionally checks the
+  // marker, Git common-dir, branch and approved root; this tests that the kernel awaits it.
+  leaseValidate.mockImplementation(async current => {
+    const now = await fs.stat(current.workspace.real);
+    if (now.ino !== identity.ino || now.dev !== identity.dev) throw new Error('WORKTREE_PATH_CHANGED');
+    return current;
+  });
+  await fs.rename(original, relocated);
+  await fs.mkdir(original);
+  const notes = path.join(original, 'notes.txt');
+  await fs.writeFile(notes, 'USER-OWNED NOTES - KEEP');
+  await expect(workerRun('managed', async () => {
+    const target = await resolveIn(roots(), 'notes.txt', { allowMissing: true });
+    await fs.writeFile(target.real, 'UNAUTHORIZED');
+  })).rejects.toThrow(/WORKTREE_PATH_CHANGED/);
+  await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))
+    .rejects.toThrow(/WORKTREE_PATH_CHANGED/);
+  expect(await fs.readFile(notes, 'utf8')).toBe('USER-OWNED NOTES - KEEP');
+  expect(leaseValidate).toHaveBeenCalledTimes(2);
 });

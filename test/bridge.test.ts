@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import sharp from 'sharp';
@@ -73,6 +74,7 @@ const {
   CHAT_SILENCE_MS,
   GOAL_QUIET_MS,
   PRO_SILENCE_MS,
+  ACCESS_LIMIT_HOLD_MS,
   DELIBERATE_SILENCE_MS,
   PRO_ACTIVITY_MS,
   COMMAND_DEADLINE_MS,
@@ -87,6 +89,7 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  noteRecoverySweepTick,
   unpair,
   workerBriefForTests
 } = await import('../src/main/bridge.js');
@@ -112,6 +115,7 @@ const { completeProcessCall, createSession, deleteSession, findSessionByConversa
   '../src/main/session/store.js'
 );
 const sessionStoreModule = await import('../src/main/session/store.js');
+const { noteServedRequest, resetConnectorIdentityForTests } = await import('../src/main/connector-identity.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { requestCorrelation, resetCorrelationRegistryForTests, restoreRequestCorrelations } = await import('../src/main/session/correlation.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
@@ -137,6 +141,8 @@ const {
   cancelPrimeTransfer,
   finishAgent,
   currentRunId,
+  markStagedWorkerWorktree,
+  managedWorkerRecoveryIdentities,
   WORKER_SILENCE_MS,
   noteAgentAlive,
   noteAgentContextTokens,
@@ -147,6 +153,7 @@ const {
   requestWorkerBootstraps,
   requestWorkerRevivals,
   spawn,
+  stageSpawn,
   stageMessages,
   pendingWorkerSpawns,
   releaseQuiescentRun,
@@ -167,6 +174,8 @@ const { makeTempDir, removeTempDir, SAMPLE_BRIEF, faultGate } = await import('./
 const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
 const { getLog } = await import('../src/main/logger.js');
 const { setShippedExtensionBuildForTest } = await import('../src/main/extension-path.js');
+const { gitExecutable } = await import('../src/main/project-git.js');
+const { allocWorkerWorkspace, resetWorkerWorktreeRegistryForTests, restoreManagedWorktrees } = await import('../src/main/worktrees/index.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 /** The chat that spawns the swarm in these tests: only a proven conversation can. */
@@ -724,7 +733,7 @@ describe('who is allowed to talk to it', () => {
   // The suite binds ephemeral ports so it can never collide with the installed app, so the
   // shipped range has to be asserted directly or a typo in it would ship unnoticed.
   it('ships the fixed candidate range the extension scans', () => {
-    expect(DEFAULT_PORTS).toEqual([8765, 8766, 8767, 8768, 8769]);
+    expect(DEFAULT_PORTS).toEqual([8765, 8766, 8767, 8768, 8769, 18765, 18766, 18767, 18768, 18769, 38765, 38766, 38767, 38768, 38769]);
   });
 
   it('identifies itself to an extension without any credential', async () => {
@@ -1083,6 +1092,59 @@ describe('active agent tab discard projection', () => {
 
     finishAgent({ conversationId: workerConversation }, 'the worker is sleeping now');
     expect((await request('GET', '/status')).body.nonDiscardableConversations).toEqual([]);
+  });
+});
+
+describe('a message sent into a running answer (#1301)', () => {
+  const conversationId = 'f0f01301-1111-4111-8111-111111111111';
+  const post = (events: unknown[]) => request('POST', '/events', { body: { conversationId, events } });
+
+  it('keeps the end of a turn the user\'s message continued, and only that', async () => {
+    const { readEvents } = await import('../src/main/session/store.js');
+    await pair();
+    const at = Date.now();
+    const opened = await post([
+      { kind: 'user_message', time: at, text: 'Run six commands', messageId: 'q-1301' },
+      { kind: 'turn_start', time: at + 1, turnId: 'g-1301-0-1' },
+      { kind: 'turn_end', time: at + 2, turnId: 'g-1301-0-1', outcome: 'interrupted', continued: true },
+      { kind: 'user_message', time: at + 2, text: 'Also add STEERED', messageId: 'steer-1301' },
+      { kind: 'turn_start', time: at + 3, turnId: 'g-1301-0-2' },
+      { kind: 'turn_end', time: at + 4, turnId: 'g-1301-0-2', outcome: 'completed', continued: 'yes' }
+    ]);
+    const ends = (await readEvents(opened.body.sessionId as string, { from: 0, limit: 100 })).filter(event => event.kind === 'turn_end');
+    expect(ends.map(event => [event.turnId, (event as { continued?: boolean }).continued])).toEqual([
+      ['g-1301-0-1', true], ['g-1301-0-2', undefined]
+    ]);
+  });
+
+  it('files an outline only under the turn its opening message belongs to', async () => {
+    const { readTurnTraces } = await import('../src/main/session/store.js');
+    await pair();
+    const at = Date.now();
+    const opened = await post([
+      { kind: 'user_message', time: at, text: 'Run six commands', messageId: 'q-1301-b' },
+      { kind: 'turn_start', time: at + 1, turnId: 'g-1301b-0-1' },
+      { kind: 'turn_end', time: at + 2, turnId: 'g-1301b-0-1', outcome: 'interrupted', continued: true },
+      { kind: 'user_message', time: at + 2, text: 'Also add STEERED', messageId: 'steer-1301-b' },
+      { kind: 'turn_start', time: at + 3, turnId: 'g-1301b-0-2' }
+    ]);
+    const sessionId = opened.body.sessionId as string;
+    const before = [{ kind: 'call', id: 'call-1', tool: 'exec_command', done: true }];
+    const after = [{ kind: 'say', text: 'Steering note received.', done: true }, { kind: 'call', id: 'call-3', tool: 'exec_command', done: true }];
+    await post([
+      { kind: 'turn_trace', time: at + 5, turnId: 'g-1301b-0-1', question: 'q-1301-b', trace: before },
+      { kind: 'turn_trace', time: at + 6, turnId: 'g-1301b-0-2', question: 'steer-1301-b', trace: after }
+    ]);
+    await vi.waitFor(async () => expect(await readTurnTraces(sessionId, ['g-1301b-0-1', 'g-1301b-0-2'])).toEqual({
+      'g-1301b-0-1': before, 'g-1301b-0-2': after }));
+    // The moment the page switches turns, the newer answer must not overwrite the earlier turn's outline.
+    await post([{ kind: 'turn_trace', time: at + 7, turnId: 'g-1301b-0-1', question: 'steer-1301-b', trace: after }]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect((await readTurnTraces(sessionId, ['g-1301b-0-1']))['g-1301b-0-1']).toEqual(before);
+    // A page that cannot name the question still files it, as before.
+    const updated = [...before, { kind: 'recap', text: 'Ran the first command' }];
+    await post([{ kind: 'turn_trace', time: at + 8, turnId: 'g-1301b-0-1', trace: updated }]);
+    await vi.waitFor(async () => expect((await readTurnTraces(sessionId, ['g-1301b-0-1']))['g-1301b-0-1']).toEqual(updated));
   });
 });
 
@@ -2645,6 +2707,34 @@ describe('automatic compaction', () => {
     }
   });
 
+  it('does not report a chat as stopped when ChatGPT deleted it: its own notice already says so', async () => {
+    const told: Array<{ title: string; body: string }> = [];
+    setStuckNotifier((title, body) => { told.push({ title, body }); return true; });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000de03';
+      const deleted = 'This chat was deleted in ChatGPT. Start a new chat to continue.';
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'one more thing', messageId: 'm-deleted' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'turn-deleted' }
+      ] } });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'turn-deleted', recoverable: false, text: deleted },
+        { kind: 'turn_end', time: Date.now(), turnId: 'turn-deleted', outcome: 'failed', detail: deleted }
+      ] } });
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(told.map(item => item.title)).not.toContain('A chat stopped');
+    } finally {
+      setStuckNotifier(null);
+      vi.useRealTimers();
+    }
+  });
+
   it('observes Astra per chat, refuses automatic tickets, and preserves manual compaction', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac90';
@@ -3271,6 +3361,82 @@ describe('automatic compaction', () => {
    * otherwise be reloaded every two minutes for as long as it exists. After the first burst and two
    * slowed bursts the ticket is abandoned as a manual one is, and the next working turn opens anew.
    */
+  // 2026-10-12: an automatic ticket filed while the crossing turn still worked spent all its pickups
+  // reloading a generating page and gave up (handoff_never_sent) just after the turn ended.
+  it('does not spend pickups on an automatic ticket while its source turn is still working', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0b';
+      await request('POST', '/events', {
+        body: { conversationId, events: [
+          { kind: 'user_message', time: Date.now(), text: 'a long multi-agent turn', messageId: 'm-auto-working' },
+          { kind: 'turn_start', time: Date.now(), turnId: 'long-turn' }
+        ] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const token = filed.body.token as string;
+      const takeRepair = async (): Promise<{ token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      // Half an hour of work: no pickup, no reload, and the ticket is still the same one.
+      for (let minute = 0; minute < 30; minute += 2) {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'long-turn' },
+          { kind: 'assistant_message', time: Date.now(), turnId: 'long-turn', text: `still working ${minute}`, messageId: 'a-long', state: 'streaming', activeNow: true }] } });
+        expect(await takeRepair(), `minute ${minute + 2}`).toBeNull();
+      }
+      expect(continuationForSession(filed.body.sessionId as string)?.token).toBe(token);
+      // Meanwhile this app says the chat is waiting to be compacted, not idle.
+      expect((await sessionControlsFor(filed.body.sessionId as string)).recovery).toEqual([
+        expect.objectContaining({ kind: 'compaction', phase: 'waiting' })
+      ]);
+      // The turn ends: now the page is asked for the handoff.
+      await request('POST', '/events', { body: { conversationId, events: [{ kind: 'turn_end', time: Date.now(), turnId: 'long-turn', outcome: 'completed' }] } });
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      expect(await takeRepair()).toMatchObject({ reason: 'compaction' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 2026-10-12: the page lost its stream, the model went quiet with its turn still open, and silence
+  // recovery left the chat to the ticket while the ticket waited for that turn: nothing moved.
+  it('asks for the handoff once a working turn falls silent', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0c';
+      await request('POST', '/events', {
+        body: { conversationId, events: [
+          { kind: 'user_message', time: Date.now(), text: 'a turn that goes quiet', messageId: 'm-auto-silent' },
+          { kind: 'turn_start', time: Date.now(), turnId: 'quiet-turn' }
+        ] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const takeRepair = async (): Promise<{ token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      // Still working: no pickup.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await request('POST', '/events', { body: { conversationId, events: [{ kind: 'assistant_message', time: Date.now(), turnId: 'quiet-turn',
+        text: 'working', messageId: 'a-quiet', state: 'streaming', activeNow: true }] } });
+      expect(await takeRepair()).toBeNull();
+      // No turn end ever arrives; the turn only goes quiet.
+      let handout: { token: string; reason: string } | null = null;
+      for (let minute = 0; minute < 12 && !handout; minute += 2) {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        handout = await takeRepair();
+      }
+      expect(handout).toMatchObject({ reason: 'compaction' });
+      expect(continuationForSession(filed.body.sessionId as string)?.token).toBe(filed.body.token);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('abandons an automatic ticket that never reaches Send after its bounded retry bursts', async () => {
     vi.useFakeTimers();
     try {
@@ -3558,6 +3724,25 @@ describe('capturing a sent handoff from the recorder', () => {
     expect(saved?.text).toContain('… the middle of this brief was longer');
     expect(saved?.text.length).toBeLessThanOrEqual(96_000);
     expect(saved?.text.endsWith('END_OF_BRIEF')).toBe(true);
+  });
+
+  // 2026-10-12: the source turn was stopped and its end arrived with the handoff request, so the
+  // brief's interval held two turns and the finished brief was refused as ambiguous.
+  it('captures a handoff when the source turn reports its end after the request', async () => {
+    await pair();
+    const conversationId = 'c0c0c0c0-7870-4000-8000-000000000006';
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'source-turn' }] } });
+    const { token, anchor } = await sentHandoff(conversationId);
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_end', time: Date.now(), turnId: 'source-turn', outcome: 'completed' },
+      ...generation('handoff-turn', 'assistant-final', `carry on
+
+${SAMPLE_BRIEF}`)
+    ] } });
+
+    const bound = await request('POST', '/compact', { body: { conversationId, token, sourceMessageId: anchor } });
+    expect(bound.status).toBe(200);
+    expect(bound.body).toMatchObject({ bound: true, stored: true });
   });
 
   it('refuses a later Retry final that reused the same handoff user message', async () => {
@@ -4276,6 +4461,108 @@ describe('delivering a bootstrap', () => {
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('redeems a restored broker-owned worktree as the worker cwd, preserves source instructions and rejects a lost lease', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject, assignSessionProject } = await import('../src/main/projects.js');
+    const sourcePath = path.join(dir, 'managed-bootstrap-source');
+    const roots = [{ name: 'project', path: dir }];
+    const git = (args: string[]) => {
+      const env = { ...process.env };
+      for (const key of Object.keys(env)) if (/^GIT_/i.test(key)) delete env[key];
+      execFileSync(gitExecutable(), args, { cwd: sourcePath, env, windowsHide: true });
+    };
+    await fs.mkdir(sourcePath, { recursive: true });
+    git(['init']);
+    git(['config', 'user.name', 'Bridge Test']);
+    git(['config', 'user.email', 'bridge-test@example.invalid']);
+    await fs.writeFile(path.join(sourcePath, 'AGENTS.md'), 'SOURCE_GUIDELINES_PRESERVED');
+    await fs.writeFile(path.join(sourcePath, 'file.txt'), 'original source');
+    git(['add', '-A']);
+    git(['commit', '-m', 'source baseline']);
+    await saveConfig({ ...suiteConfig, roots });
+    const project = await addProject(sourcePath);
+    const conversationId = 'managed-bootstrap-prime';
+    const source = await createSession({ title: 'Managed source', conversationId });
+    await assignSessionProject(source.id, project.id);
+    await pair();
+
+    const stage = stageSpawn({ caller: { conversationId }, workers: [{ task: 'WORK_IN_ISOLATED_CHECKOUT' }] });
+    const lease = await allocWorkerWorkspace({ runId: stage.runId, agentId: 'worker-1',
+      primeWorkspace: { real: sourcePath, virtual: '/project/managed-bootstrap-source' }, approvedRoots: roots });
+    markStagedWorkerWorktree(stage.runId, 'worker-1');
+    stage.prepareDurability();
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    stage.commit();
+    expect(requestWorkerBootstraps(['worker-1'], stage.runId)).toBe(1);
+    await flushDurable();
+    const pending = pendingCommands().find(row => row.what.includes('worker-1'));
+    expect(pending).toBeDefined();
+    // The first page leased the command but lost the HTTP response before typing. Restore
+    // must permit that same document to redeem again, with the restored owned checkout.
+    await redeem(pending!.id);
+    await flushDurable();
+    const durableCommands = await readDurable<any>('bridge-commands');
+    expect(durableCommands?.commands?.find((row: any) => row.id === pending!.id)?.phase).toBe('leased');
+
+    // Reconstruct both durable broker and command state after an app restart. Only the
+    // immutable broker allocation plus marker can recover the checkout after reset.
+    const savedBroker = structuredClone(snapshotSwarm());
+    const savedCommands = structuredClone(await readDurable<any>('bridge-commands'));
+    // Restore the broker while the test bridge's existing listener is still wired. Its
+    // synchronous replay can schedule a fresh duplicate browser command; discard this
+    // in-memory replay and put the pre-crash leased receipt back as durable authority.
+    restoreSwarm(savedBroker);
+    resetBridgeForTests();
+    setBrowserOpener(async url => { opened.push(url); });
+    await writeDurableNow('bridge-commands', savedCommands);
+    expect(pendingWorkerSpawns().some(row => row.runId === stage.runId && row.id === 'worker-1')).toBe(true);
+    expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === pending!.id)).toBe(true);
+    resetWorkerWorktreeRegistryForTests();
+    const restored = await restoreManagedWorktrees(roots, managedWorkerRecoveryIdentities());
+    expect(restored.rejected).toEqual([]);
+    expect(restored.restored).toHaveLength(1);
+    await restoreCommands();
+    expect(pendingCommands().some(row => row.id === pending!.id)).toBe(true);
+    const command = await redeem(pending!.id);
+    expect(command.text).toContain(`Worker working directory (allocated Git worktree): ${lease.workspace.virtual}`);
+    expect(command.text).toContain('SOURCE_GUIDELINES_PRESERVED');
+    expect(command.text).not.toContain('Selected project directory: /project/managed-bootstrap-source');
+    expect(command.text).not.toContain('Use this directory as your default working directory and keep task work there');
+    expect(userPromptText(command.text)).toContain('WORK_IN_ISOLATED_CHECKOUT');
+
+    // A removed/corrupt marker must never silently hand the original project cwd to this worker.
+    resetWorkerWorktreeRegistryForTests();
+    const refused = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-1' } });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('worker_worktree_unavailable');
+
+    const recovery = await restoreManagedWorktrees(roots, managedWorkerRecoveryIdentities());
+    expect(recovery.restored).toHaveLength(1);
+    const workerConversation = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const acknowledged = await request('POST', '/commands/ack', { body: {
+      id: command.id, client: 'tab-1', conversationId: workerConversation, agent: 'worker-1', status: 'sent'
+    } });
+    expect(acknowledged.status).toBe(200);
+    expect(acknowledged.body.committed).toBe(true);
+    finishAgent({ conversationId: workerConversation }, 'First task completed');
+    const next = stageMessages({ conversationId }, [{ to: 'worker-1', text: 'CONTINUE_IN_WORKTREE' }]);
+    next.commit();
+    expect(next.waking).toEqual(['worker-1']);
+    expect(requestWorkerRevivals(next.waking, stage.runId)).toBe(1);
+    const revival = pendingCommands().find(row => row.what === `revive:${stage.runId}:worker-1`);
+    expect(revival).toBeDefined();
+    const reopened = await request('POST', '/commands/redeem', { body: {
+      id: revival!.id, client: 'revival-page', conversationId: workerConversation
+    } });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.command.text).toContain('CONTINUE_IN_WORKTREE');
+    expect(reopened.body.command.text).toContain(lease.workspace.virtual);
+    expect(reopened.body.command.text).not.toContain('Selected project directory: /project/managed-bootstrap-source');
+    expect(reopened.body.command.text).not.toContain('SOURCE_GUIDELINES_PRESERVED');
+    resetWorkerWorktreeRegistryForTests();
   });
 
   /**
@@ -7860,7 +8147,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenanceBatch(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened' | 'present'
+    repairAction?: 'reloaded' | 'reopened' | 'present' | 'preserved'
   ): Promise<Array<{ conversationId: string; token: string; reason: string }>> {
     const path = repaired
       ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
@@ -7879,7 +8166,7 @@ describe('unattributed activity recovery', () => {
    */
   async function maintenance(
     repaired?: string,
-    repairAction?: 'reloaded' | 'reopened' | 'present'
+    repairAction?: 'reloaded' | 'reopened' | 'present' | 'preserved'
   ): Promise<{ conversationId: string; token: string; reason: string } | null> {
     const batch = await maintenanceBatch(repaired, repairAction);
     expect(batch.length).toBeLessThanOrEqual(1);
@@ -9023,6 +9310,49 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 
+  // 2026-10-12: the browser leaves a silent page that still shows ChatGPT's transport error as it
+  // is (no reload) and confirms the repair as preserved; the automatic Continue must still follow.
+  it('files the automatic Continue when the silence repair kept the page instead of reloading it', async () => {
+    const input = await import('../src/main/session/input.js');
+    const { recoveryHeldByCalls, recoveryInputAllowed, sessionInputActivity } = await import('../src/main/bridge.js');
+    input.configureInputDelivery({ recoveryAllowed: recoveryInputAllowed, callsHoldRecovery: recoveryHeldByCalls,
+      activity: sessionInputActivity, applyAutomation: async () => {}, changed: () => {} });
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turnId = 'interrupted-turn';
+      await events(chat, [
+        { kind: 'user_message', messageId: 'question', text: 'Port the renderer', time: Date.now(), authoredNow: true },
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn(turnId)
+      ]);
+      await attributed(chat, false, Date.now());
+      await events(chat, [endTurn(turnId, 'failed')]);
+      let repair = null;
+      for (let pass = 0; pass < 4 && !repair; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        repair = await maintenance();
+      }
+      // Automatic recovery is on, so the browser is told a Continue follows and may keep the page.
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence', continueFollows: true });
+      await maintenance(repair!.token, 'preserved');
+      const session = (await findSessionByConversation(chat))!;
+      let continues: Awaited<ReturnType<typeof input.listInputs>> = [];
+      for (let pass = 0; pass < 6 && !continues.length; pass++) {
+        await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
+        await sweepStaleSwarm(Date.now());
+        continues = (await input.listInputs()).filter(row => row.sessionId === session.id && row.recovery);
+      }
+      expect(continues).toHaveLength(1);
+    } finally {
+      input.configureInputDelivery(null as never);
+      await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); await saveConfig(previous);
+    }
+  });
+
   it('lets calls of no known chat hold a silent chat only for a while, then recovers it anyway (#1086)', async () => {
     const input = await import('../src/main/session/input.js');
     const { recoveryHeldByCalls, recoveryInputAllowed, sessionInputActivity } = await import('../src/main/bridge.js');
@@ -9607,7 +9937,14 @@ describe('unattributed activity recovery', () => {
         requestWorkerRevivals(staged.waking);
         await gate.entered;
         if (scenario === 'manual-close') await request('POST', '/closed', { body: { conversationId: WORKER, manual: true } });
-        else if (scenario === 'wake-finished') finishAgent({ conversationId: WORKER }, 'No follow-up remains');
+        else if (scenario === 'wake-finished') {
+          // The woken worker's own turn ends the wake (finishing a worker that is still waking is
+          // ignored), and it then finishes the follow-up.
+          expect(noteAgentAlive(WORKER, 'turn', Date.now() + 1)?.revived).toBe(true);
+          finishAgent({ conversationId: WORKER }, 'No follow-up remains');
+          // The read must outlive a wake that really ended, not one that is still pending.
+          expect(pendingWorkerRevivals(), 'the wake ended during the read').toEqual([]);
+        }
         else if (scenario === 'page-returned') await events(WORKER, [openTurn(`wake-returned-${scenario}`)]);
         else if (scenario === 'recovery-off') await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
         else if (scenario === 'redeemed') {
@@ -9850,6 +10187,89 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {
+    // A throttled history answered every retry with the same limit: eight identical blocking notices
+    // stacked up in eight minutes. One notice says it; the hold still follows each new Retry-After.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [
+        { kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('history-limit-repeat')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      const limit = 'ChatGPT temporarily rate-limited loading this conversation history.';
+      let retryAt = 0, firstRetryAt = 0;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt) await vi.advanceTimersByTimeAsync(60_000);
+        retryAt = Date.now() + 30_000 + attempt * 1000;
+        if (!attempt) firstRetryAt = retryAt;
+        await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt, text: limit }]);
+      }
+      const session = (await findSessionByConversation(PRIME))!;
+      const { readRecentEvents } = await import('../src/main/session/store.js');
+      const notices = async () => (await readRecentEvents(session.id, 50, { kinds: ['chat_error'] })).filter(event => event.kind === 'chat_error' && event.message.text === limit);
+      expect(await notices()).toHaveLength(1);
+      // The one notice keeps the first deadline ChatGPT gave, for the timeline to show (#1355).
+      expect((await notices())[0]).toMatchObject({ blocking: true, retryAt: firstRetryAt });
+      // Whichever hold shows, its deadline is the newest Retry-After, though only one notice was written.
+      expect((await sessionControlsFor(session.id)).recovery?.map(hold => hold.deadline)).toEqual([retryAt]);
+      // A passing failure in between does not change the limit: it is still one notice (2026-10-12).
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, text: 'Something else failed' }]);
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now() + 1, turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt: Date.now() + 30_000, text: limit }]);
+      expect(await notices()).toHaveLength(1);
+      // Another blocking failure in between makes the next limit a new notice again.
+      await vi.advanceTimersByTimeAsync(60_000);
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, blocking: true, text: 'Another blocking failure' }]);
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now() + 1, turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt: Date.now() + 30_000, text: limit }]);
+      expect(await notices()).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('leaves a newer turn\'s silence watch alone when an older sweep finishes late (#1360)', async () => {
+    // A sweep finds a grant spent, then awaits tickets and pickups before it retires that grant. A
+    // new turn that starts during those awaits owns a new grant; retiring it by chat id left the
+    // new turn without its silence deadline and without its one reload.
+    const inputModule = await import('../src/main/session/input.js');
+    const gate = faultGate();
+    const original = inputModule.pendingQueuedPickups;
+    const held = vi.spyOn(inputModule, 'pendingQueuedPickups').mockImplementationOnce(async () => {
+      await gate.hold();
+      return original();
+    });
+    try {
+      await pair();
+      // A turn without a local call: its silence is spent without a reload.
+      await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }, openTurn('stale-sweep-old')]);
+      const session = (await findSessionByConversation(PRIME))!;
+      const sweeping = sweepStaleSwarm(Date.now() + CHAT_SILENCE_MS + 1);
+      await gate.entered;
+
+      // New work in the same chat while the old sweep is still awaiting.
+      await events(PRIME, [
+        { kind: 'user_message', time: Date.now(), messageId: 'stale-sweep-question', text: 'Next question' },
+        openTurn('stale-sweep-new')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      const watched = (await sessionControlsFor(session.id)).recovery?.find(hold => hold.kind === 'silence');
+      expect(watched, 'the new turn is watched').toBeDefined();
+
+      gate.release();
+      await sweeping;
+      expect((await sessionControlsFor(session.id)).recovery?.find(hold => hold.kind === 'silence'), 'the old sweep left the new grant alone')
+        .toEqual(watched);
+      // And the new turn still gets its one reload at its own deadline.
+      const reloads = () => getLog().filter(entry => entry.message.includes('asking the browser to reload ' + PRIME)).length;
+      const before = reloads();
+      await sweepStaleSwarm(watched!.deadline + 1);
+      expect(reloads() - before).toBe(1);
+    } finally {
+      gate.release(); held.mockRestore();
+    }
+  });
+
   it('refuses a pre-existing repair handout while a newer history Retry-After is active', async () => {
     vi.useFakeTimers();
     try {
@@ -9949,6 +10369,28 @@ describe('unattributed activity recovery', () => {
       await notice();
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps a chat that continues unfinished work under watch past a provider access limit with no Retry-After (2026-10-12)', async () => {
+    // A long turn dropped, its recovery reload met ChatGPT's access limit with no Retry-After, and the
+    // chat's watch was retired: nothing reloaded or continued it again, though the page came back.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      getConfig().ui.autoContinue = true;
+      await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }, openTurn('limited-continue')]);
+      await attributed(PRIME, false, Date.now());
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'limited-continue',
+        recoverable: false, blocking: true, text: 'provider access limit' }]);
+      // No reload against the live limit.
+      await vi.advanceTimersByTimeAsync(ACCESS_LIMIT_HOLD_MS - 1000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      // Once the limit's few minutes are over, the ordinary silence recovery takes the chat back.
+      await vi.advanceTimersByTimeAsync(2000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'silence' });
     } finally { vi.useRealTimers(); }
   });
 
@@ -10475,6 +10917,61 @@ describe('unattributed activity recovery', () => {
       const next = await maintenance();
       expect(chatOf(next)).toBe(FRESH);
       expect(next?.reason).toBe('assistant-error');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 2026-10-12: a delivery timeout ended the prime's turn, the error reload opened a new local turn
+  // for the same question, and silence recovery refused that turn: its calls were on the old one.
+  it('recovers a silent turn that a reload opened for the same question', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'user_message', time: Date.now(), text: 'port the renderer', messageId: 'q-reloaded' }, openTurn('turn-before-reload')]);
+      await attributed(OTHER, false, Date.now());
+      await events(OTHER, [endTurn('turn-before-reload', 'failed')]);
+      await events(OTHER, [openTurn('turn-after-reload'),
+        { kind: 'assistant_message', time: Date.now(), turnId: 'turn-after-reload', text: 'Conexão interrompida', messageId: 'a-reloaded', state: 'streaming', activeNow: true }]);
+      let handout = null;
+      for (let pass = 0; pass < 3 && !handout; pass += 1) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        handout = await maintenance();
+      }
+      expect(chatOf(handout)).toBe(OTHER);
+      expect(handout?.reason).toBe('silence');
+      // Automatic recovery is off here and no Goal is armed: no Continue would follow, so the
+      // browser is not allowed to keep an error page instead of reloading it.
+      expect(handout).not.toHaveProperty('continueFollows');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The lid closes on a working chat. While the computer sleeps no timer runs, so on waking every
+  // activity deadline is long past: the first sweep called each working chat silent and reloaded
+  // them all in the same second, before one page had reconnected and reported.
+  it('gives working chats time to report after the computer wakes, instead of reloading them at once', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-asleep')]);
+      await attributed(OTHER, false, Date.now());
+      await events(OTHER, [endTurn('turn-asleep', 'failed')]);
+      // The sweep's timer ticks while the chat works, then the computer sleeps for an hour:
+      // the clock moves and no timer fires. The next tick is the first thing that runs.
+      noteRecoverySweepTick(Date.now());
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      noteRecoverySweepTick(Date.now());
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      // Nothing reported within the grace: now it is a silent chat like any other.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const handout = await maintenance();
+      expect(chatOf(handout)).toBe(OTHER);
+      expect(handout?.reason).toBe('silence');
     } finally {
       vi.useRealTimers();
     }
@@ -15487,6 +15984,43 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); }
   });
+
+  const placement = async (value: 'window' | 'group') => {
+    const config = getConfig();
+    await saveConfig({ ...config, ui: { ...config.ui, backgroundPlacement: value } });
+  };
+
+  it('asks for no follow when background tabs go to a tab group', async () => {
+    await pair();
+    await background(true);
+    await placement('group');
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); await placement('window'); }
+  });
+
+  it('drops a pending follow once the placement switches to a tab group', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      await placement('group');
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+    } finally { await close(socket); await placement('window'); }
+  });
+
+  it.each(['window', 'group'] as const)('publishes the background placement %s in /status', async (value) => {
+    await pair();
+    await placement(value);
+    try {
+      expect((await poll(BROWSER_B, [])).backgroundPlacement).toBe(value);
+    } finally { await placement('window'); }
+  });
 });
 
 describe('worker brief on a computer with its own connector names', () => {
@@ -15501,5 +16035,129 @@ describe('worker brief on a computer with its own connector names', () => {
       expect(workerBriefForTests('worker-1', 'Check the tests'))
         .toContain('Report to prime through the agents tool of Chat On Steroids Core (Windows VM) — ');
     } finally { await saveConfig(previous); }
+  });
+});
+
+/**
+ * 2026-10-11: ChatGPT keeps a connector's app id across a rename (measured on VM 141). The page
+ * reports what it sees as app sightings; only a request this app served may teach an identity.
+ */
+describe('connector identity through the bridge', () => {
+  beforeEach(() => resetConnectorIdentityForTests());
+
+  it('learns a renamed Core from an app_sightings observation of a served request and publishes it', async () => {
+    await pair();
+    noteServedRequest('req-renamed', 'core');
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d1';
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'app_sightings', time: Date.now(), apps: [
+      { requestId: 'req-renamed', appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', appName: 'My tools' },
+      { requestId: 'not-ours', appId: 'asdk_app_foreign', linkId: null, appName: 'Chat On Steroids Core' }
+    ] }] } });
+    const status = (await request('GET', '/status')).body;
+    expect(status.connectorApps.core).toEqual([{ appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', name: 'My tools' }]);
+    expect(status.connectorApps.desktop).toEqual([]);
+  });
+
+  it('keeps the name a newer chat showed when an older chat still reports the old one', async () => {
+    await pair();
+    const app = { appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f' };
+    noteServedRequest('req-newer-chat', 'core');
+    noteServedRequest('req-older-chat', 'core');
+    await request('POST', '/events', { body: { conversationId: '6acb532d-fe08-83ed-96e2-e22cd7008cb8', events: [{ kind: 'app_sightings', time: Date.now(),
+      apps: [{ requestId: 'req-newer-chat', ...app, appName: 'Renamed' }] }] } });
+    await request('POST', '/events', { body: { conversationId: '6acb3e79-2cd4-83eb-b54b-f9d66653cf07', events: [{ kind: 'app_sightings', time: Date.now(),
+      apps: [{ requestId: 'req-older-chat', ...app, appName: 'Original' }] }] } });
+    expect((await request('GET', '/status')).body.connectorApps.core[0].name).toBe('Renamed');
+  });
+
+  it('does not store app_sightings as transcript content', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d2';
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'app_sightings', time: Date.now(), apps: [] }] } });
+    expect(await findSessionByConversation(conversationId)).toBeNull();
+  });
+});
+
+/** #1176: a new CoS project's native ChatGPT Project, and its new chats only in that Project. */
+describe('native ChatGPT Project for a new CoS project', () => {
+  const nativeId = `g-p-${'c'.repeat(32)}`;
+  async function newProject(name: string) {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject } = await import('../src/main/projects.js');
+    const folder = path.join(dir, name);
+    await fs.mkdir(folder, { recursive: true });
+    await saveConfig({ ...suiteConfig, roots: [{ name: 'project', path: folder }] });
+    return addProject(folder);
+  }
+
+  it('lets only the page that claimed and armed it report the Project id', async () => {
+    await pair();
+    const project = await newProject('native-route');
+    const id = (project.chatgpt as { requestId: string }).requestId;
+    const create = (body: Record<string, unknown>) => request('POST', '/project-create', { body: { id, ...body } });
+    const pending = async () => ((await request('POST', '/status', { body: { openConversations: [] } })).body.projectCreateRequests as Array<{ id: string }>)
+      .filter(row => row.id === id);
+    expect(await pending()).toEqual([expect.objectContaining({ id, projectId: project.id, state: 'requested' })]);
+    expect((await create({ action: 'claim', client: 'doc-a' })).body.ok).toBe(true);
+    expect((await create({ action: 'arm', client: 'doc-b' })).body.ok).toBe(false);
+    expect((await create({ action: 'arm', client: 'doc-a' })).body.ok).toBe(true);
+    expect((await create({ action: 'done', client: 'doc-b', chatgptId: nativeId })).body.ok).toBe(false);
+    expect((await create({ action: 'done', client: 'doc-a', chatgptId: nativeId })).body.ok).toBe(true);
+    expect(await pending()).toEqual([]);
+  });
+
+  it("claims a new chat of a linked project only from that Project's page, never from the root", async () => {
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const project = await newProject('native-claim');
+    const id = (project.chatgpt as { requestId: string }).requestId;
+    const row = await input.enqueueInput({ id: randomUUID(), projectId: project.id, sessionId: null, text: 'Start here', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+    const claim = (body: Record<string, unknown>) => request('POST', '/input/claim', { body: { id: row.id, owner: '9:page:0', conversationId: null, ...body } });
+    // Not yet created: no page may take it, wherever it is.
+    expect((await claim({ project: nativeId })).body.input).toBeNull();
+    await request('POST', '/project-create', { body: { id, action: 'claim', client: 'doc' } });
+    await request('POST', '/project-create', { body: { id, action: 'arm', client: 'doc' } });
+    await request('POST', '/project-create', { body: { id, action: 'done', client: 'doc', chatgptId: nativeId } });
+    const offered = ((await request('POST', '/status', { body: { openConversations: [] } })).body.inputs as Array<{ id: string; project?: string }>)
+      .find(entry => entry.id === row.id);
+    expect(offered).toMatchObject({ project: nativeId });
+    expect((await claim({})).body.input).toBeNull();
+    expect((await claim({ project: `g-p-${'d'.repeat(32)}` })).body.input).toBeNull();
+    expect((await claim({ project: nativeId })).body.input).toMatchObject({ id: row.id });
+  });
+});
+
+/** A chat ChatGPT says it deleted (`conversation_deleted`, read by the page from ChatGPT's own answer). */
+describe('a chat deleted in ChatGPT', () => {
+  it('ends only the messages still waiting for that chat, with the real reason', async () => {
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const gone = randomUUID(), other = randomUUID();
+    const deleted = await createSession({ conversationId: gone });
+    const alive = await createSession({ conversationId: other });
+    const enqueue = (sessionId: string, text: string) => input.enqueueInput({ id: randomUUID(), sessionId, text, mode: 'auto',
+      dueAt: Date.now(), model: null, reasoningEffort: null });
+    try {
+      const waiting = await enqueue(deleted.id, 'Into the deleted chat');
+      const kept = await enqueue(alive.id, 'Into a chat that still exists');
+      expect((await request('POST', '/conversation-deleted', { body: { conversationId: 'not a chat' } })).status).toBe(400);
+      const reply = await request('POST', '/conversation-deleted', { body: { conversationId: gone } });
+      expect(reply.body).toEqual({ ok: true, ended: 1 });
+      const rows = await input.listInputs();
+      expect(rows.find(row => row.id === waiting.id)).toMatchObject({ state: 'failed',
+        error: 'This chat was deleted in ChatGPT. Start a new chat to continue.' });
+      expect(rows.find(row => row.id === kept.id)).toMatchObject({ state: 'queued' });
+      expect(rows.find(row => row.id === kept.id)?.error).toBeUndefined();
+      // Said again (another page, a replay), it ends nothing more.
+      expect((await request('POST', '/conversation-deleted', { body: { conversationId: gone } })).body).toEqual({ ok: true, ended: 0 });
+    } finally {
+      input.resetInputForTests();
+      await writeDurableNow('session-input', []);
+    }
   });
 });
