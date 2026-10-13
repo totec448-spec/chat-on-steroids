@@ -13,7 +13,7 @@ export function paintSharedTunnel(note: HTMLElement, tunnel: ConnectorTunnelIds,
   note.hidden = others.length === 0;
   const names = others.map(id => CONNECTOR[id]).join(', ');
   ui(note, 'textContent', () => others.length ? t(
-    "This tunnel ID is also set for {0}. Each connector needs its own tunnel; otherwise ChatGPT sends some calls to the wrong connector and they fail with UNKNOWN_TOOL.",
+    "This tunnel ID is also set for {0}. Each plugin needs its own tunnel; otherwise ChatGPT sends some calls to the wrong plugin and they fail with UNKNOWN_TOOL.",
     [names]
   ) : '');
 }

@@ -273,25 +273,25 @@
     "message": "Cuộc trò chuyện worker luôn ở lại cuộc trò chuyện hiện có và không bao giờ được thu gọn hoặc tiếp tục thủ công."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Danh tính connector đã cài đặt không khả dụng hoặc không rõ ràng"
+    "message": "Danh tính plugin đã cài đặt không khả dụng hoặc không rõ ràng"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Không xác nhận được yêu cầu làm mới connector hoặc quyền sở hữu trang"
+    "message": "Không xác nhận được yêu cầu làm mới plugin hoặc quyền sở hữu trang"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Đã yêu cầu làm mới nhưng không quan sát thấy schema phù hợp đã thay đổi"
   },
   "content_connector_refresh_unverified": {
-    "message": "Không thể xác minh việc làm mới connector"
+    "message": "Không thể xác minh việc làm mới plugin"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Schema connector khác nhưng ChatGPT không hiển thị điều khiển Làm mới. Hãy tạo lại hoặc phát hành lại ứng dụng tùy chỉnh này để tải schema công cụ hiện tại."
+    "message": "Schema plugin khác nhưng ChatGPT không hiển thị điều khiển Làm mới. Hãy tạo lại hoặc phát hành lại plugin này để tải schema công cụ hiện tại."
   },
   "content_connector_settings_unreadable": {
-    "message": "Không thể đọc thẻ cài đặt connector trên trang thuộc về yêu cầu này"
+    "message": "Không thể đọc thẻ cài đặt plugin trên trang thuộc về yêu cầu này"
   },
   "content_connector_settings_unverified": {
-    "message": "Không thể xác minh chính xác cài đặt connector"
+    "message": "Không thể xác minh chính xác cài đặt plugin"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Chuyển tệp đính kèm thất bại. Tin nhắn chưa được gửi."
@@ -741,7 +741,7 @@
     "message": "Kết nối ChatGPT với Chat On Steroids và điều khiển các tab trình duyệt ở chế độ nền bằng DOM, ảnh chụp màn hình và công cụ dành cho nhà phát triển."
   },
   "extension_name": {
-    "message": "Tiện ích đồng hành Chat On Steroids"
+    "message": "Tiện ích trình duyệt Chat On Steroids"
   },
   "popup_advanced": {
     "message": "Nâng cao"
@@ -1038,7 +1038,7 @@
     "message": "Thử lại"
   },
   "popup_version_mismatch_help": {
-    "message": "Ứng dụng v$1 (giao thức $2); tiện ích đồng hành v$3 (giao thức $4). Mở trang Tiện ích mở rộng của trình duyệt, bật Chế độ dành cho nhà phát triển, rồi Cập nhật / Tải lại tiện ích đồng hành này. Nếu vẫn không khớp, dùng Mở thư mục tiện ích mở rộng trong Chat On Steroids và tải thư mục đó. Tải lại các tab ChatGPT khi công việc đang chạy của chúng đã hoàn tất."
+    "message": "Ứng dụng v$1 (giao thức $2); tiện ích v$3 (giao thức $4). Mở trang Tiện ích mở rộng của trình duyệt, bật Chế độ dành cho nhà phát triển, rồi Cập nhật / Tải lại tiện ích này. Nếu vẫn không khớp, dùng Mở thư mục tiện ích mở rộng trong Chat On Steroids và tải thư mục đó. Tải lại các tab ChatGPT khi công việc đang chạy của chúng đã hoàn tất."
   },
   "popup_yes": {
     "message": "có"

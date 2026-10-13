@@ -226,11 +226,17 @@ export async function* readFileStream(path: string): AsyncGenerator<Buffer, void
   }
 }
 
-/** `ExecutorFileSystem::read_file_text`: `read_file` plus a strict UTF-8 decode. */
+/**
+ * `ExecutorFileSystem::read_file_text`: `read_file` plus a strict UTF-8 decode.
+ *
+ * A leading byte-order mark stays in the text as U+FEFF, as it does in Rust's `String`. The
+ * decoder's default drops it, and a file rewritten from that text lost its mark: a PowerShell
+ * script with non-ASCII text is then read as ANSI by Windows PowerShell 5.1.
+ */
 export async function readFileText(path: string): Promise<string> {
   const bytes = await readFile(path);
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     const error = new Error('stream did not contain valid UTF-8') as NodeJS.ErrnoException;
     error.code = 'EILSEQ';

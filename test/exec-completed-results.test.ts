@@ -32,7 +32,7 @@ it('rereads an immediately completed command without executing it again or accep
   expect(b.rawOutput.equals(first.rawOutput)).toBe(true);
   expect(a).toMatchObject({ replayed: true, exitCode: 7, processId: null });
   expect(execCommandStructuredOutput(a)).toMatchObject({ output_replayed: true, exit_code: 7 });
-  expect(execCommandStructuredOutput(a)).not.toHaveProperty('benign_exit');
+  expect(execCommandStructuredOutput(a)).not.toHaveProperty('expected_exit');
   expect(m.backgroundState(new Set([id]))).toEqual({ running: [], exitedUnread: [] });
   await expect(poll(m, id, 'input')).rejects.toThrow('already completed');
   expect((await poll(m, id)).rawOutput.equals(first.rawOutput)).toBe(true);
@@ -97,7 +97,8 @@ it('carries the same proven classification through asynchronous completion and r
   await expect(poll(m, id)).resolves.toMatchObject({ exitCode: 1, benignExit: true });
   const reread = await poll(m, id);
   expect(reread).toMatchObject({ exitCode: 1, benignExit: true, replayed: true });
-  expect(execCommandStructuredOutput(reread)).toMatchObject({ exit_code: 1, benign_exit: true, output_replayed: true });
+  expect(execCommandStructuredOutput(reread)).toMatchObject({ exit_code: 1, expected_exit: true, output_replayed: true });
+  expect(execCommandStructuredOutput(reread)).not.toHaveProperty('benign_exit');
   const random = vi.spyOn(Math, 'random').mockReturnValueOnce((id - 1000) / 99000).mockReturnValueOnce(.99999);
   const next = m.allocateProcessId();
   expect(next).not.toBe(id);

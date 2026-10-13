@@ -273,25 +273,25 @@
     "message": "Worker chats stay in their existing conversation and are never manually compacted or resumed."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Installed connector identity is unavailable or ambiguous"
+    "message": "Installed plugin identity is unavailable or ambiguous"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Connector refresh claim or page ownership was not confirmed"
+    "message": "Plugin refresh claim or page ownership was not confirmed"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Refresh was requested, but a changed matching schema was not observed"
   },
   "content_connector_refresh_unverified": {
-    "message": "Connector refresh could not be verified"
+    "message": "Plugin refresh could not be verified"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Connector schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this custom app to load the current tool schema."
+    "message": "Plugin schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this plugin to load the current tool schema."
   },
   "content_connector_settings_unreadable": {
-    "message": "The connector settings card could not be read on the page this request owns"
+    "message": "The plugin settings card could not be read on the page this request owns"
   },
   "content_connector_settings_unverified": {
-    "message": "Exact connector settings could not be verified"
+    "message": "Exact plugin settings could not be verified"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Attachment transfer failed. The message was not sent."
@@ -741,7 +741,7 @@
     "message": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools."
   },
   "extension_name": {
-    "message": "Chat On Steroids companion"
+    "message": "Chat On Steroids browser extension"
   },
   "popup_advanced": {
     "message": "Advanced"
@@ -1038,7 +1038,7 @@
     "message": "Try again"
   },
   "popup_version_mismatch_help": {
-    "message": "App v$1 (protocol $2); companion v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this companion. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished."
+    "message": "App v$1 (protocol $2); extension v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this extension. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished."
   },
   "popup_yes": {
     "message": "yes"
@@ -1167,6 +1167,6 @@
     "message": "Transfer failed. Start sign-in again from CoS."
   },
   "popup_app_not_running_help": {
-    "message": "Make sure Chat On Steroids is open on this computer. The companion connects on its own."
+    "message": "Make sure Chat On Steroids is open on this computer. The extension connects on its own."
   }
 }

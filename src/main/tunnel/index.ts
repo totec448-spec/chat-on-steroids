@@ -21,7 +21,41 @@ import { childEnv, terminateProcessTree } from '../exec.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 import { ago, POLL_FRESH_MS, readClientStatus, readPollHealth } from './health.js';
 import { locateBinary } from './locate.js';
+import { proxyEnvironment, proxyForLog } from './proxy.js';
 import { noteTunnelClientConnected } from './route-settle.js';
+
+type ProxyResolver = (url: string) => Promise<string>;
+let resolveSystemProxy: ProxyResolver | null = null;
+const PROXY_LOOKUP_MS = 3_000;
+/** Where tunnel-client connects out to; the system's proxy rules are asked about this address. */
+const TUNNEL_CONTROL_PLANE = 'https://api.openai.com/';
+
+/** Main supplies the browser engine's proxy lookup. Without it, only the environment is read. */
+export function setSystemProxyResolver(resolver: ProxyResolver | null): void {
+  resolveSystemProxy = resolver;
+}
+
+/** The proxy variables tunnel-client needs on this computer (#1255); see `proxy.ts`. */
+async function tunnelProxyEnvironment(tag: string): Promise<Record<string, string>> {
+  let resolution = 'DIRECT';
+  if (resolveSystemProxy) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // A proxy script that cannot be fetched may take long to answer; the tunnel does not wait for it.
+      resolution = await Promise.race([
+        resolveSystemProxy(TUNNEL_CONTROL_PLANE),
+        new Promise<string>(resolve => { timer = setTimeout(() => resolve('DIRECT'), PROXY_LOOKUP_MS); })
+      ]);
+    } catch (err) {
+      logWarn(`${tag}: the system proxy could not be read: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const variables = proxyEnvironment(resolution, process.env);
+  if (variables['HTTPS_PROXY']) logInfo(`${tag}: tunnel-client connects through the proxy ${proxyForLog(variables['HTTPS_PROXY'])}`);
+  return variables;
+}
 
 export interface TunnelReport {
   state: ConnectionState;
@@ -94,6 +128,14 @@ function lineReader(onLine: (line: string) => void): (chunk: Buffer) => void {
 }
 
 /** Only a rejected control-plane request can invalidate the tunnel credentials. */
+/** A log field as text: an object is spelled out, never "[object Object]". */
+export function tunnelEventText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') { try { return JSON.stringify(value); } catch { return ''; } }
+  return String(value as number | boolean | bigint);
+}
+
 function tunnelAuthRejected(message: string, error: string, statusCode?: unknown): boolean {
   const controlPlane = /^(?:poll failed(?:;\s*backing off)?|tunnel metadata fetch failed)$/i.test(message) ||
     /\bcontrolplane (?:client|responder):/i.test(error);
@@ -515,6 +557,9 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     // A stale URL from the previous run would otherwise be read as this run's.
     await fs.rm(healthFile, { force: true }).catch(() => {});
     if (stopped || current) return;
+    // Read on every launch: a proxy switched on or off applies from the next reconnect.
+    const proxy = await tunnelProxyEnvironment(tag);
+    if (stopped || current) return;
 
     opts.report({
       state: 'connecting-tunnel',
@@ -532,7 +577,8 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       env: childEnv({
         CONTROL_PLANE_API_KEY: opts.apiKey ?? '',
         MCP_SERVER_URL: `url=${opts.localUrl},channel=main`,
-        ...(discoveryHeaders ? { MCP_DISCOVERY_EXTRA_HEADERS: discoveryHeaders } : {})
+        ...(discoveryHeaders ? { MCP_DISCOVERY_EXTRA_HEADERS: discoveryHeaders } : {}),
+        ...proxy
       }),
       windowsHide: true,
       // Own a POSIX process group so stopTree terminates any helpers the client starts.
@@ -574,8 +620,8 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       // warnings are followed by a healthy /readyz and are not actionable for users.
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
-        const level = String(event['level'] ?? '').toUpperCase();
-        const message = String(event['msg'] ?? 'tunnel-client event');
+        const level = tunnelEventText(event['level']).toUpperCase();
+        const message = tunnelEventText(event['msg']) || 'tunnel-client event';
         if (
           level === 'WARN' &&
           message === 'harpoon host auto-registration failed' &&
@@ -585,7 +631,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         }
         if (isBenignHarpoonChannelEvent(level, message, event)) return;
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
-          const errText = event['error'] ? String(event['error']) : '';
+          const errText = tunnelEventText(event['error']);
           if (tunnelAuthRejected(message, errText, event['status_code'])) {
             rejectAuthentication();
             return;

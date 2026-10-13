@@ -12,7 +12,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { app, dialog, shell, type BrowserWindow } from 'electron';
+import { app, dialog, shell, webContents, type BrowserWindow } from 'electron';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
@@ -33,8 +33,12 @@ export interface DiagnosticsReportSources {
   /** Free text the user or ChatGPT wrote that the log may quote: tasks, labels, results. */
   workerTexts: string[];
   log: string;
+  /** Every process of the app with what it is for; numbers only. */
+  memory?: ProcessMemory[];
   now: number;
 }
+
+export interface ProcessMemory { kind: 'main' | 'window' | 'chatgpt' | 'page' | 'gpu' | 'other'; megabytes: number }
 
 /** Settings keys that name, address or unlock something. Never reported, whatever their value. */
 const PRIVATE_SETTING = /(tunnel|profile|path|root|folder|prompt|url|key|token|secret|name|email|instruction|objective|allowlist|rules|binary|suffix|^id$|Id$)/i;
@@ -63,6 +67,45 @@ function json(value: unknown): string[] {
   return value === null || value === undefined ? [] : JSON.stringify(value, null, 2).split('\n');
 }
 
+/**
+ * Where the app's memory is. A ChatGPT page in the built-in browser is a whole chatgpt.com tab
+ * inside the app, so "the app uses 7 GB" is usually those pages (#1312); the sizes are listed
+ * largest first so one runaway page stands out.
+ */
+function memoryLines(processes: ProcessMemory[]): string[] {
+  const of = (kind: ProcessMemory['kind']) => processes.filter(process => process.kind === kind).map(process => process.megabytes).sort((a, b) => b - a);
+  const sum = (sizes: number[]) => Math.round(sizes.reduce((total, size) => total + size, 0));
+  const line = (label: string, sizes: number[], count = false) => sizes.length ? [`${label}${count ? ` (${sizes.length})` : ''}: ${sum(sizes)} MB`] : [];
+  const pages = of('chatgpt');
+  return [
+    `Total: ${sum(processes.map(process => process.megabytes))} MB in ${processes.length} processes`,
+    ...(pages.length ? [`ChatGPT pages in the built-in browser (${pages.length}): ${sum(pages)} MB — ${pages.map(size => Math.round(size)).join(', ')}`] : []),
+    ...line('App window', of('window')),
+    ...line('Main process', of('main')),
+    ...line('Graphics', of('gpu')),
+    ...line('Other pages', of('page'), true),
+    ...line('Helpers', of('other'), true)
+  ];
+}
+
+/** The app's processes as the system reports them, each named by what runs in it. */
+export function memoryFacts(window: BrowserWindow | null): ProcessMemory[] {
+  try {
+    const appWindow = window && !window.isDestroyed() ? window.webContents.getOSProcessId() : null;
+    const chatgpt = new Set<number>();
+    for (const contents of webContents.getAllWebContents()) {
+      let host = '';
+      try { host = new URL(contents.getURL()).hostname; } catch { /* a page without an address */ }
+      if (host === 'chatgpt.com' || host.endsWith('.chatgpt.com') || host === 'chat.openai.com') chatgpt.add(contents.getOSProcessId());
+    }
+    return app.getAppMetrics().map(metric => ({
+      kind: metric.type === 'Browser' ? 'main' as const : metric.type === 'GPU' ? 'gpu' as const
+        : metric.type !== 'Tab' ? 'other' as const : metric.pid === appWindow ? 'window' as const : chatgpt.has(metric.pid) ? 'chatgpt' as const : 'page' as const,
+      megabytes: metric.memory.workingSetSize / 1024
+    }));
+  } catch { return []; }
+}
+
 export function renderDiagnosticsReport(sources: DiagnosticsReportSources): string {
   const context: ScrubContext = {
     home: sources.home,
@@ -86,9 +129,9 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
     '',
     `Created ${new Date(sources.now).toISOString()}.`,
     'This file is meant for a bug report. It contains versions, settings (on/off values, numbers and option names),',
-    'the connection state, pending work (step names and times) and the app log. Personal details are replaced:',
-    'your user name, folder and file names, chat titles, tasks, email addresses, keys and private addresses',
-    'become tags like <p:1a2b>. Please read it before you share it.'
+    'the connection state, memory use per kind of process, pending work (step names and times) and the app log.',
+    'Personal details are replaced: your user name, folder and file names, chat titles, tasks, email addresses,',
+    'keys and private addresses become tags like <p:1a2b>. Please read it before you share it.'
   ];
   const body = [
     section('App', [
@@ -101,6 +144,7 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
       ? [sources.selfTest.summary, ...sources.selfTest.checks.map(check => `- ${check.name}: ${check.status} — ${check.detail}`)].map(scrub)
       : ['(not available)']),
     section('Settings', reportableSettings(getConfig())),
+    ...(sources.memory?.length ? [section('Memory', memoryLines(sources.memory))] : []),
     section('Chats', [`${sources.sessions.length} chat(s), ${ended} ended, ${sources.projects.length} project(s)`]),
     section('Pending work', [...sources.commands, ...sources.workers].map(row => JSON.stringify(scrubValue(row)))),
     section('Log (most recent last)', [scrub(sources.log)])
