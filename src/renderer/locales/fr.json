@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Mettre de côté le fichier illisible et repartir sans clé enregistrée ? Vos clés API et les secrets des plugins devront être saisis à nouveau, et l'extension de navigateur devra peut-être être reconnectée. L'ancien fichier est conservé comme sauvegarde.",
   "Started fresh. Enter your keys again.": "Reparti de zéro. Saisissez à nouveau vos clés.",
   "The saved keys can be read again. Nothing was changed.": "Les clés enregistrées sont de nouveau lisibles. Rien n'a été modifié.",
-  "Could not start fresh.": "Impossible de repartir de zéro."
+  "Could not start fresh.": "Impossible de repartir de zéro.",
+  "Recording storage": "Stockage des enregistrements",
+  "Images and long texts recorded from your chats, up to 2 GB.": "Images et longs textes enregistrés depuis vos chats, jusqu'à 2 Go.",
+  "Compact & Resume · waiting for this turn to end": "Compacter et reprendre · attente de la fin de ce tour",
+  "Compact & Resume · asking ChatGPT for the handoff": "Compacter et reprendre · demande du relais à ChatGPT",
+  "The handoff request is sent as soon as this turn ends.": "La demande de relais part dès la fin de ce tour.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids envoie à ChatGPT la demande de rédiger le résumé d’un nouveau chat."
 }

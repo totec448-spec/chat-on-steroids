@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Để tệp không đọc được sang một bên và bắt đầu lại mà không có khóa đã lưu? Bạn sẽ phải nhập lại các khóa API và bí mật của plugin, và có thể phải kết nối lại tiện ích trình duyệt. Tệp cũ được giữ lại làm bản sao lưu.",
   "Started fresh. Enter your keys again.": "Đã bắt đầu lại. Hãy nhập lại các khóa của bạn.",
   "The saved keys can be read again. Nothing was changed.": "Các khóa đã lưu đã đọc được trở lại. Không có gì thay đổi.",
-  "Could not start fresh.": "Không thể bắt đầu lại."
+  "Could not start fresh.": "Không thể bắt đầu lại.",
+  "Recording storage": "Bộ nhớ ghi lại",
+  "Images and long texts recorded from your chats, up to 2 GB.": "Hình ảnh và văn bản dài được ghi lại từ các cuộc trò chuyện của bạn, tối đa 2 GB.",
+  "Compact & Resume · waiting for this turn to end": "Compact & Resume · đang chờ lượt này kết thúc",
+  "Compact & Resume · asking ChatGPT for the handoff": "Compact & Resume · đang yêu cầu ChatGPT bàn giao",
+  "The handoff request is sent as soon as this turn ends.": "Yêu cầu bàn giao sẽ được gửi ngay khi lượt này kết thúc.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids đang gửi cho ChatGPT yêu cầu viết bản tóm tắt cho cuộc trò chuyện mới."
 }

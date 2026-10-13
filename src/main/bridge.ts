@@ -6875,7 +6875,7 @@ async function silenceContinuationAllowed(conversationId: string, sessionId?: st
   const starts = await readRecentEvents(session.id, 1, { kinds: ['turn_start'] });
   const start = starts[0];
   if (!start || start.turnId !== sourceTurnId) return false;
-  if (!await turnHasMcpCall(session.id, conversationId, sourceTurnId)) return false;
+  if (!await answerHasMcpCall(session.id, conversationId, sourceTurnId)) return false;
   if (pending && loopAfterTurnFor(conversationId)) {
     const work = await readRecentEvents(session.id, 1, { kinds: ['user_message', 'assistant_message', 'tool_call', 'page_tool', 'turn_start'] });
     // A refresh can discover an older interim for the first time, or replace its
@@ -7096,7 +7096,7 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
   const repair = repairsInFlight.get(conversationId);
   if (!grant?.turnId || now - grant.evidenceAt < silenceWindowMs(grant) ||
       repair?.reason !== 'silence' || repair.state !== 'done' || repair.sessionId !== grant.sessionId ||
-      !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId)) return false;
+      !await answerHasMcpCall(grant.sessionId, conversationId, grant.turnId)) return false;
   const current = () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === repair &&
     !stopRequestedFor(conversationId) && !isChatBlocked(conversationId) &&
     !continuationForSession(grant.sessionId) && !silenceHeldByCalls(conversationId, grant) &&
@@ -7272,7 +7272,19 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   const boundary = await readRecoveryBoundary(sessionId, activeUntil.get(conversationId)?.turnId);
   const session = await getSession(sessionId);
   if (session?.conversationId !== conversationId || session.browserRecoveryDismissedAt !== undefined || isChatBlocked(conversationId) || stopRequestedFor(conversationId) ||
-      continuationForSession(sessionId) || supersededSourceConversations().includes(conversationId)) return [];
+      supersededSourceConversations().includes(conversationId)) return [];
+  // An automatic Compact & Resume owns this chat's recovery while it is open. Its wait for the turn
+  // to end was shown only on ChatGPT's page; this app showed an idle chat with nothing happening
+  // (2026-10-12). Say where it stands. "Waiting for this turn" only while the turn really works:
+  // a dead turn under that label read as a chat waiting on nothing.
+  if (continuationForSession(sessionId)) {
+    const compaction = compactionWatch.get(conversationId);
+    // Only before the request goes out: from then on the chat's own Compact & Resume row shows
+    // the brief being written, saved and the new chat opening, and a second row repeated it.
+    const phase = compaction?.phase !== 'asking' ? null : sessionInputActivity(session).exact ? 'waiting' : 'asking';
+    return compaction && phase && pendingContinuations().some(entry => entry.from === conversationId && entry.token === compaction.token)
+      ? [{ kind: 'compaction', phase, deadline: Math.max(compaction.nextAt, Date.now()) }] : [];
+  }
   const result: import('../shared/recovery.js').RecoveryCountdown[] = [];
   const pendingRepair = repairsInFlight.get(conversationId);
   if (pendingRepair?.sessionId === sessionId && pendingRepair.state !== 'done' && workerRecoveryAllowed(conversationId) && departureAllowsRepair(session)) {
@@ -7353,7 +7365,7 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   const source = boundary?.kind === 'turn_start' || boundary?.kind === 'turn_end' ? boundary.turnId : null;
   if (!source || (session.activeTurnId && session.activeTurnId !== source)) return result;
   if (boundary?.kind === 'turn_end' && boundary.outcome === 'stopped') return result;
-  if (!await turnHasMcpCall(sessionId, conversationId, source)) return result;
+  if (!await answerHasMcpCall(sessionId, conversationId, source)) return result;
   const repair = repairsInFlight.get(conversationId);
   const confirmed = repair?.reason === 'silence' && repair.state === 'done' && repair.sessionId === sessionId;
   const owned = grant?.sessionId === sessionId && grant.turnId === source;
@@ -7576,7 +7588,7 @@ async function silenceRepairCurrent(conversationId: string, repair: Repair): Pro
 
 /** Scheduler, page return and pre-action claim share the same durable source verdict. */
 async function silenceSourceCurrent(conversationId: string, grant: ActivityGrant): Promise<boolean> {
-  if (!grant.turnId || !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId) ||
+  if (!grant.turnId || !await answerHasMcpCall(grant.sessionId, conversationId, grant.turnId) ||
       await readCompletedFinal(grant.sessionId, conversationId, grant.turnId)) return false;
   const boundary = await readRecoveryBoundary(grant.sessionId, grant.turnId);
   const session = await getSession(grant.sessionId);
@@ -8459,6 +8471,25 @@ function browserRecoveryMonitoring(): boolean {
  * seventeen quiet minutes. Repeated sweeps of the same grant say nothing new.
  */
 const silenceNotes = new Set<string>();
+
+/**
+ * Whether the answer this turn belongs to made a recorded local call. A page reloaded after a lost
+ * stream opens a new local turn for the same question, and that turn holds none of the calls made
+ * before the reload: on 2026-10-12 a prime's turn reopened that way after a delivery timeout, went
+ * silent, and silence recovery refused it as having no tool call while every call sat on the turn
+ * before it. An earlier turn answering the same question counts.
+ */
+async function answerHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  if (await turnHasMcpCall(sessionId, conversationId, turnId)) return true;
+  const turns = (await getSession(sessionId))?.timelineTurns;
+  const turn = turns?.[turnId];
+  if (!turn?.questionId) return false;
+  for (const [id, earlier] of Object.entries(turns!)) {
+    if (id !== turnId && earlier.questionId === turn.questionId && earlier.origin < turn.origin &&
+        await turnHasMcpCall(sessionId, conversationId, id)) return true;
+  }
+  return false;
+}
 function noteSilence(conversationId: string, grant: ActivityGrant, reason: string): void {
   const key = `${conversationId}:${grant.turnId ?? '-'}:${grant.sessionId}:${reason}`;
   if (silenceNotes.has(key)) return;
@@ -8497,7 +8528,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     }
     // Observation owns liveness, never permission to interrupt the native page.
     // Only an exactly recorded local call in this source turn earns silence repair.
-    if (!grant.turnId || !await turnHasMcpCall(grant.sessionId, conversationId, grant.turnId)) {
+    if (!grant.turnId || !await answerHasMcpCall(grant.sessionId, conversationId, grant.turnId)) {
       if (activeUntil.get(conversationId) === grant) {
         noteSilence(conversationId, grant, grant.turnId
           ? `not available: turn ${grant.turnId} has no tool call recorded for this chat (calls from ChatGPT's code mode are often not attributed)`
@@ -9504,6 +9535,8 @@ async function takePendingRepairs(
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
     requiresClaim?: boolean;
+    /** A silence repair whose confirmation files an automatic Continue, so an error page may be kept. */
+    continueFollows?: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
     // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy.
@@ -9564,7 +9597,8 @@ async function takePendingRepairs(
         !stopRequestedFor(conversationId))
       {
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
-          ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}) });
+          ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
+          ...(repair.reason === 'silence' && recoveryInputAllowed(repair.sessionId, conversationId) ? { continueFollows: true } : {}) });
       }
   }
   if (ready.length) logInfo(`bridge: handing the browser ${ready.length} repair(s): ` +

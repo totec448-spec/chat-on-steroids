@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Отложить нечитаемый файл и начать без сохранённых ключей? Ключи API и секреты плагинов придётся ввести снова, а расширение браузера, возможно, подключить заново. Старый файл сохранится как резервная копия.",
   "Started fresh. Enter your keys again.": "Начато заново. Введите ключи ещё раз.",
   "The saved keys can be read again. Nothing was changed.": "Сохранённые ключи снова читаются. Ничего не изменено.",
-  "Could not start fresh.": "Не удалось начать заново."
+  "Could not start fresh.": "Не удалось начать заново.",
+  "Recording storage": "Хранилище записей",
+  "Images and long texts recorded from your chats, up to 2 GB.": "Изображения и длинные тексты, записанные из ваших чатов, до 2 ГБ.",
+  "Compact & Resume · waiting for this turn to end": "Сжать и продолжить · ждём окончания этого хода",
+  "Compact & Resume · asking ChatGPT for the handoff": "Сжать и продолжить · запрос передачи у ChatGPT",
+  "The handoff request is sent as soon as this turn ends.": "Запрос на передачу будет отправлен, как только закончится этот ход.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids отправляет ChatGPT запрос написать сводку для нового чата."
 }

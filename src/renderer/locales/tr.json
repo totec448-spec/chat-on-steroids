@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Okunamayan dosya kenara alınıp kayıtlı anahtar olmadan sıfırdan başlansın mı? API anahtarlarınızı ve eklenti gizli bilgilerini yeniden girmeniz gerekir; tarayıcı uzantısını da yeniden bağlamanız gerekebilir. Eski dosya yedek olarak saklanır.",
   "Started fresh. Enter your keys again.": "Sıfırdan başlandı. Anahtarlarınızı yeniden girin.",
   "The saved keys can be read again. Nothing was changed.": "Kayıtlı anahtarlar yeniden okunabiliyor. Hiçbir şey değiştirilmedi.",
-  "Could not start fresh.": "Sıfırdan başlanamadı."
+  "Could not start fresh.": "Sıfırdan başlanamadı.",
+  "Recording storage": "Kayıt depolama alanı",
+  "Images and long texts recorded from your chats, up to 2 GB.": "Sohbetlerinizden kaydedilen görseller ve uzun metinler, en fazla 2 GB.",
+  "Compact & Resume · waiting for this turn to end": "Sıkıştır ve sürdür · bu turun bitmesi bekleniyor",
+  "Compact & Resume · asking ChatGPT for the handoff": "Sıkıştır ve sürdür · ChatGPT'den devir isteniyor",
+  "The handoff request is sent as soon as this turn ends.": "Devir isteği bu tur biter bitmez gönderilir.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids, yeni bir sohbet için özeti yazma isteğini ChatGPT'ye gönderiyor."
 }
