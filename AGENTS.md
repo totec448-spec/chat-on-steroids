@@ -867,6 +867,14 @@ escapes, live revocation during an await, and preserving an unrelated user's new
 **Intent:** a chat consistently works in its selected local folder, and workers/resumed chats
 retain that choice. Sidebar organization must not destroy work or grant access.
 
+Project headings come from the whole catalog, chats from the newest page of all history. So a
+project's chats can all lie outside that page (#1190): `sessions:list` takes an optional
+`projectId` and then pages that project's sessions alone, with the same bounded cursor (`total`
+stays the whole history). The renderer asks once when a project is first expanded and merges only
+those rows; a page of workers shows no chat, so it reads on while the project is open and still
+looks empty. "Show more" continues with the project's cursor once everything loaded is shown. It
+never selects a chat, and a failed read is retried on the next expand.
+
 `projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
 Adding uses the native folder selection/approved-root flow, resolves the real directory and
 deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
