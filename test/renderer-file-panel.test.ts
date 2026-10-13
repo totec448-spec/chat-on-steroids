@@ -319,6 +319,53 @@ it('searches a comparison branch without checking out and keeps the chosen diff 
   expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectB.id, undefined);
 });
 
+it('compares against a code checkpoint and asks main to restore one file or all of them with that revision', async () => {
+  const id = 'c'.repeat(32), ref = `checkpoint:${id}`;
+  const checkpoints = [{ ref, createdAt: Date.UTC(2026, 9, 13, 9, 30), reason: 'turn' as const }];
+  let changes: ProjectGitSnapshot['changes'] = [
+    { status: 'M', path: 'README.md', additions: 1, deletions: 1, binary: false },
+    { status: 'A', path: 'src/new.ts', additions: 3, deletions: 0, binary: false }
+  ];
+  (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok({
+    ...cleanGit(), currentBranch: 'feature', branches: [{ ref: 'refs/heads/feature', label: 'feature' }], checkpoints,
+    ...(selected ? { comparison: { ref: selected, label: '', baseOid: 'a'.repeat(40), headOid: 'b'.repeat(40), checkpoint: true },
+      revision: `checkpoint-${changes.length}`, changes } : {})
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({
+    projectId: projectA.id, status: 'M', path: 'README.md', additions: 1, deletions: 1,
+    binary: false, tooLarge: false, baseText: 'before', currentText: 'after'
+  }));
+  const restore = vi.fn(async (_project: string, _id: string, paths: string[] | null) => {
+    changes = paths ? changes.filter(change => !paths.includes(change.path)) : [];
+    return { ok: true, data: { confirmed: true, restored: paths ?? ['README.md', 'src/new.ts'], skipped: [], undoRef: `checkpoint:${'d'.repeat(32)}` } };
+  });
+  Object.assign(window.api, { restoreCheckpoint: restore });
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  expect(host.querySelector('.file-checkpoint-bar')).toBeNull();
+
+  host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
+  expect(document.querySelector('.file-branch-section')?.textContent).toBe('Checkpoints');
+  const option = [...document.querySelectorAll<HTMLButtonElement>('.file-branch-option')].at(-1)!;
+  expect(option.textContent).toMatch(/^Before turn · /);
+  option.click(); await tick();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, ref);
+  expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/Before turn · /);
+  expect(host.querySelector<HTMLElement>('.file-branch-stats')?.title).toBe('Changes since this checkpoint, local work included');
+
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
+  expect(window.api.getProjectGitDiff).toHaveBeenLastCalledWith(projectA.id, 'README.md', ref, 'checkpoint-2');
+  [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.textContent === 'Restore file')!.click();
+  await tick(); await tick();
+  expect(restore).toHaveBeenLastCalledWith(projectA.id, id, ['README.md'], 'checkpoint-2');
+  expect(document.querySelector('.toast')?.textContent).toBe('Restored 1 of 1 files');
+  expect(host.querySelector('.file-change-row[data-path="README.md"]')).toBeNull();
+
+  host.querySelector<HTMLButtonElement>('.file-checkpoint-bar button')!.click(); await tick(); await tick();
+  expect(restore).toHaveBeenLastCalledWith(projectA.id, id, null, 'checkpoint-1');
+  expect(host.textContent).toContain('No changes since this checkpoint');
+});
+
 it('lets Review leave a comparison whose branch disappeared', async () => {
   const baseRef = 'refs/heads/removed';
   (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok(selected

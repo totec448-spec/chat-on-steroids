@@ -4109,6 +4109,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-branch-option:hover, .file-branch-option:focus-visible { background: var(--hover); outline: none; }
 .file-branch-option .ico { flex: 0 0 auto; color: var(--accent); }
 .file-branch-empty { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-section { margin: 8px 0 0; padding: 6px 7px 4px; border-top: 1px solid var(--line); color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; }
+.file-checkpoint-bar { display: flex; justify-content: flex-end; padding: 0 1px 8px; }
 .file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }
 .file-change-group + .file-change-group { margin-top: 12px; }
 .file-change-group-title { margin: 0; padding: 4px 8px 6px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .015em; }

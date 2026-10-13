@@ -73,7 +73,13 @@ app.whenReady().then(async () => {
         watchProjectFiles:()=>ok(true),previewProjectFile:(id,name)=>ok(info(id,name)),
         getProjectGitSnapshot:(id,baseRef)=>ok({projectId:id,state:'ready',truncated:false,revision:baseRef?'fixture-compared':'fixture-dirty',
           currentBranch:'feature',branches:[{ref:'refs/remotes/origin/main',label:'origin/main'},{ref:'refs/heads/feature',label:'feature'}],
-          ...(baseRef?{comparison:{ref:baseRef,label:'origin/main',baseOid:'a'.repeat(40),headOid:'b'.repeat(40)}}:{}),changes:baseRef?[
+          checkpoints:[{ref:'checkpoint:'+'d'.repeat(32),createdAt:Date.UTC(2026,9,13,9,42),reason:'restore'},
+            {ref:'checkpoint:'+'c'.repeat(32),createdAt:Date.UTC(2026,9,13,9,30),reason:'turn'}],
+          ...(baseRef?{comparison:{ref:baseRef,label:baseRef.startsWith('checkpoint:')?'':'origin/main',baseOid:'a'.repeat(40),headOid:'b'.repeat(40),
+            ...(baseRef.startsWith('checkpoint:')?{checkpoint:true}:{})}}:{}),changes:baseRef?.startsWith('checkpoint:')?[
+          {status:'M',path:'README.md',additions:2,deletions:1,binary:false},
+          {status:'A',path:'src/created.ts',additions:12,deletions:0,binary:false}
+        ]:baseRef?[
           {status:'M',path:'README.md',additions:2,deletions:1,binary:false}
         ]:[
           {status:'M',path:'README.md',additions:2,deletions:1,binary:false},
@@ -159,6 +165,16 @@ app.whenReady().then(async () => {
     await screenshot('review-branch-compare');
     await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
     await until(`document.querySelectorAll('.review-panel .file-change-row').length===2`);
+    await js(`document.querySelector('.review-panel .file-branch-trigger').click()`);
+    await until('document.querySelector(".file-branch-menu .file-branch-section")?.textContent==="Checkpoints"');
+    assert.deepEqual(await js(`[...document.querySelectorAll('.file-branch-option')].slice(-2).map(option=>option.textContent.split(' · ')[0])`),
+      ['Before restore', 'Before turn']);
+    await screenshot('review-checkpoint-menu');
+    await js(`[...document.querySelectorAll('.file-branch-option')].at(-1).click()`);
+    await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith('Before turn') && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);
+    await screenshot('review-checkpoint-compare');
+    await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
+    await until(`document.querySelectorAll('.review-panel .file-change-row').length===2 && !document.querySelector('.review-panel .file-checkpoint-bar')`);
     assert.equal(await js('document.querySelector(".review-panel .file-change-row[data-path=\\"README.md\\"] .file-change-status").textContent'),'M');
     assert.ok(await js(`!document.querySelector('.review-panel .file-panel-toolbar') && !!document.querySelector('.review-panel .file-changes-header .file-panel-refresh')`));
     assert.deepEqual(await js(`[...document.querySelectorAll('.header-dock-controls > button')].map(button=>button.id)`),
