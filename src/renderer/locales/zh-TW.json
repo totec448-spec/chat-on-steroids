@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Windows 語音辨識意外停止。",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "未安裝 Windows 語音辨識器。請安裝 Windows 語音語言套件。",
   "Windows speech recognition could not start": "無法啟動 Windows 語音辨識",
-  "Windows speech recognition exited unexpectedly": "Windows 語音辨識意外結束"
+  "Windows speech recognition exited unexpectedly": "Windows 語音辨識意外結束",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "記錄儲存空間已滿。新的圖片和長文字不再儲存到你的聊天中。"
 }

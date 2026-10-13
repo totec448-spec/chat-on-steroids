@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Windows konuşma tanıma beklenmedik şekilde durdu.",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Yüklü bir Windows konuşma tanıyıcısı yok. Bir Windows konuşma dil paketi yükleyin.",
   "Windows speech recognition could not start": "Windows konuşma tanıma başlatılamadı",
-  "Windows speech recognition exited unexpectedly": "Windows konuşma tanıma beklenmedik şekilde kapandı"
+  "Windows speech recognition exited unexpectedly": "Windows konuşma tanıma beklenmedik şekilde kapandı",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Kayıt depolama alanı dolu. Yeni görseller ve uzun metinler artık sohbetlerinize kaydedilmiyor."
 }

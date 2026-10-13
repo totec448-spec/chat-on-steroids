@@ -1690,7 +1690,11 @@ owner, node and source revision must survive each await. At most two captures ru
 Previews are WebP, at most 384,000 encoded bytes, 1,600 pixels per edge and 2.56 million decoded
 pixels; source images above 30 million pixels retain metadata without a preview. Main fully
 decodes previews before asset admission. The existing 2 GiB global asset budget remains exact;
-quota failures retain the canonical row and explicitly report storage full. There is no automatic
+quota failures retain the canonical row and explicitly report storage full. The store keeps that as
+one state (`recordingStorageFull()`, set by a write the global limit refused, cleared by an admitted
+write or a clean-up that leaves room): it is logged once per change, travels as
+`AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
+There is no automatic
 eviction. The adjacent Free image storage action offers explicit oldest-1-GiB or all-recorded-image
 cleanup with confirmation; chat text, original files and pending attachments remain. Store owns
 serialized image inventory, durable reference retirement and physical removal. A removed native

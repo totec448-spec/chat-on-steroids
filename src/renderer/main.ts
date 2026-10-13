@@ -4,6 +4,7 @@ import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
+import { paintRecordingStorageNotice } from './image-storage.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -1530,6 +1531,7 @@ function apply(next: AppState): void {
   paintUpdate(next);
   paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
+  paintRecordingStorageNotice(next.recordingStorageFull === true);
 
   // ---- health numbers and facts
   paintClock();

@@ -2258,5 +2258,6 @@
   "Windows speech recognition stopped unexpectedly.": "Windows の音声認識が予期せず停止しました。",
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Windows の音声認識エンジンがインストールされていません。Windows の音声言語パックをインストールしてください。",
   "Windows speech recognition could not start": "Windows の音声認識を開始できませんでした",
-  "Windows speech recognition exited unexpectedly": "Windows の音声認識が予期せず終了しました"
+  "Windows speech recognition exited unexpectedly": "Windows の音声認識が予期せず終了しました",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "記録用ストレージがいっぱいです。新しい画像と長いテキストはチャットに保存されなくなりました。"
 }
