@@ -124,11 +124,12 @@ export function createWorkspaceDocks(host: HTMLElement) {
     for (const kind of ['review', 'terminal', 'files', 'agents'] as DockView[]) {
       const enabled = kind === 'terminal' ? rightTerminal?.canCreate() ?? false : views.get(kind)?.available() ?? false;
       // A greyed-out entry says why, instead of leaving the user to guess.
-      const reason = enabled ? '' : kind === 'agents' ? t('Open a chat to see its sub-agents') : t('Open a project to use Files and Review');
       for (const button of [menu, launch].map(root => root.querySelector<HTMLButtonElement>(`[data-view="${kind}"]`))) {
         if (!button) continue;
         button.toggleAttribute('disabled', !enabled);
-        if (reason) button.title = reason; else button.removeAttribute('title');
+        // Bound, so the reason follows a language change; an enabled entry has no title.
+        ui(button, 'title', () => enabled ? '' : kind === 'agents' ? t('Open a chat to see its sub-agents') : t('Open a project to use Files and Review'));
+        if (enabled) button.removeAttribute('title');
       }
     }
   };

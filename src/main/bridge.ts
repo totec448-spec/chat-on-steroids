@@ -8915,7 +8915,13 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     // filed mid-turn spent all ten pickups on a generating page, wrote "Trying to reload chat to
     // recover a handoff request that has not been sent" each time, and gave up (handoff_never_sent)
     // just after the turn finally ended. Wait for the turn instead, without counting.
-    if (phase === 'asking' && session && sessionInputActivity(session).exact) {
+    // A turn whose activity window ran out a pickup interval ago is silent, not working. Silence recovery leaves a
+    // compacting chat to this ticket, so waiting on that turn too left both waiting on each other:
+    // on 2026-10-12 a page lost its stream, the model stopped calling tools, and the open turn kept
+    // the handoff from being asked for until someone intervened.
+    const grant = activeUntil.get(entry.from);
+    const silent = grant?.sessionId === entry.sessionId && grant.until + schedule.every <= now && runningToolProgress(entry.from) === null;
+    if (phase === 'asking' && session && !silent && sessionInputActivity(session).exact) {
       watch.nextAt = now + schedule.every;
       continue;
     }

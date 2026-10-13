@@ -9,11 +9,12 @@
  *
  * So: write to a temp file, rename over the target (atomic on NTFS), and coalesce
  * bursts on a short timer so a chatty broker does not rewrite the file per message.
- * A parse failure returns null rather than throwing — a corrupt state file must cost
- * the pending work, never the app's ability to start.
+ * Reads normally return null on corruption so the app can start. Authority ledgers
+ * can require strict reads: unreadable state must not become a fresh grant.
  */
 
-import { promises as fs } from 'node:fs';
+import { constants, promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { logWarn } from './logger.js';
 
@@ -44,13 +45,20 @@ function fileFor(name: string): string {
   return path.join(root, `${name}.json`);
 }
 
-export async function readDurable<T>(name: string): Promise<T | null> {
+export async function readDurable<T>(name: string, options: { strict?: boolean } = {}): Promise<T | null> {
   if (!root) return null;
   try {
     const raw = await fs.readFile(fileFor(name), 'utf8');
-    return JSON.parse(raw) as T;
+    const value = JSON.parse(raw) as T;
+    // writeDurableNow(null) removes the file; an on-disk null is not that reset receipt.
+    if (options.strict && value === null) throw new Error('Invalid null state');
+    return value;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
+    if (options.strict && code !== 'ENOENT') {
+      // JSON parser diagnostics can contain stored content. Keep the public error generic.
+      throw new Error(`Could not read ${name} state`);
+    }
     if (code && code !== 'ENOENT') {
       logWarn(`could not read ${name} state: ${(err as Error).message}`);
     }
@@ -71,6 +79,25 @@ function enqueue(name: string, write: () => Promise<void>): Promise<void> {
   });
   inFlight.set(name, tracked);
   return queued;
+}
+
+/** Explicit recovery only: preserve the original before atomically replacing it.
+ * The ledger owner must serialize validation and recovery with its other operations.
+ * Unlike an ordinary write, failed recovery never schedules a replacement on retry.
+ */
+export async function recoverDurable(name: string, value: unknown): Promise<void> {
+  if (!root) throw new Error('State storage is unavailable');
+  const target = fileFor(name);
+  const timer = timers.get(name);
+  if (timer) clearTimeout(timer);
+  timers.delete(name); pending.delete(name); retryAttempts.delete(name);
+  await enqueue(name, async () => {
+    // Do not replace a directory or follow a link out of the state store.
+    if (!(await fs.lstat(target)).isFile()) throw new Error('State file is unavailable');
+    await fs.copyFile(target, path.join(root, `${name}.recovery-${randomUUID()}.json`), constants.COPYFILE_EXCL);
+    await fs.writeFile(`${target}.tmp`, JSON.stringify(value), 'utf8');
+    await fs.rename(`${target}.tmp`, target);
+  });
 }
 
 function enqueueSlot(name: string, slot: PendingWrite): Promise<void> {

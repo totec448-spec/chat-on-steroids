@@ -36,7 +36,7 @@ import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
-import { confirmedPluginSchemas, pluginRefreshPublications } from './plugin-refresh.js';
+import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -72,7 +72,7 @@ import { runningToolActivity } from './mcp/call-context.js';
 import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
-import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
+import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
@@ -526,6 +526,7 @@ async function buildState(): Promise<AppState> {
       pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
     ),
     confirmedConnectorSchemas: confirmedPluginSchemas(),
+    pluginRefreshUnreadable: await pluginRefreshUnreadable(),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
@@ -613,6 +614,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return buildState();
   });
   handle('usage:get', () => usageOverview());
+  handle('plugin-refresh:reset', async () => {
+    await resetPluginRefreshLedger();
+    return buildState();
+  });
   handle('state:get', async () => {
     const state = await buildState();
     // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike
@@ -1127,6 +1132,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       projects: await listProjects().catch(() => []),
       workerTexts: workers.flatMap(worker => [worker.task ?? '', worker.label ?? '', worker.result ?? '']),
       log: await readRecentLog(),
+      memory: memoryFacts(getWindow()),
       now: Date.now()
     });
     return saveDiagnosticsReport(text, getWindow());
