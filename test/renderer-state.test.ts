@@ -3157,6 +3157,18 @@ it('shows unreadable refresh state and allows one explicit reset, including fail
   button.click(); expect(reset).toHaveBeenCalledTimes(2);
 });
 
+// Codex's turn-completion notifications: on unless switched off in General.
+it('notifies when a chat finishes unless switched off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const notify = w.document.getElementById('turnNotifications') as HTMLInputElement;
+  expect(notify.checked).toBe(true);
+  notify.checked = false;
+  notify.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
+});
+
 // Codex's "Follow-up behavior", in General.
 it('offers the follow-up behavior, starting at joining the running turn, and saves waiting', async () => {
   const mounted = await mountChat({});
