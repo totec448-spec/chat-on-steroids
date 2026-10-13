@@ -22,6 +22,13 @@ const WRITE_DELAY_MS = 300;
 const RETRY_MAX_MS = 5_000;
 
 let root = '';
+let revision = 0;
+const revisions = new Map<string, number>();
+/** Process-local invalidation for projections owned by a named ledger. */
+export function durableRevision(name: string): number {
+  if (!revisions.has(name)) revisions.set(name, revision);
+  return revisions.get(name)!;
+}
 interface PendingWrite {
   generation: number;
   value: unknown;
@@ -38,6 +45,7 @@ let nextGeneration = 1;
 
 export function initDurableStore(userDataDir: string): void {
   root = path.join(userDataDir, 'state');
+  revisions.clear(); revision++;
 }
 
 function fileFor(name: string): string {
@@ -98,6 +106,7 @@ export async function recoverDurable(name: string, value: unknown): Promise<void
     await fs.writeFile(`${target}.tmp`, JSON.stringify(value), 'utf8');
     await fs.rename(`${target}.tmp`, target);
   });
+  revisions.set(name, ++revision);
 }
 
 function enqueueSlot(name: string, slot: PendingWrite): Promise<void> {
@@ -154,6 +163,7 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
 
   // A newer generation may have arrived while this one was on disk. Completing the older
   // write is still useful, but it must never erase the newer pending snapshot.
+  revisions.set(name, ++revision);
   if (pending.get(name)?.generation === slot.generation) {
     pending.delete(name);
     retryAttempts.delete(name);
@@ -227,6 +237,7 @@ export async function flushDurable(): Promise<void> {
 
 /** Test seam: drops queued writes without touching disk. */
 export function resetDurableForTests(): void {
+  revisions.clear(); revision++;
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
   pending.clear();
