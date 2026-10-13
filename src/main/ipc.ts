@@ -582,8 +582,14 @@ export async function openSessionChat(id: string): Promise<void> {
   if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
     throw new Error('This session has no valid ChatGPT conversation');
   }
-  // The extension's own browser first: the OS may pick another browser or account (#882).
-  // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
+  // The selected browser owns this explicit action. In particular, a connected companion in
+  // Chrome/Edge must not override the user's choice to open the chat in the CoS browser.
+  if (getConfig().ui.chatBrowser === 'cos') {
+    await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
+    return;
+  }
+  // For an explicitly selected external browser, reveal its existing chat first; otherwise open
+  // the conversation in that same preferred browser (never the system default by accident).
   if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
 }
 
