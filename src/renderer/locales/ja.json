@@ -2311,5 +2311,10 @@
   "Join the running turn": "実行中のターンに加える",
   "Wait until the turn ends": "ターンの終了を待つ",
   "Notify when a chat finishes": "チャットが終わったら通知",
-  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "このウィンドウがバックグラウンドにある間にチャットの回答が完了すると通知します。ワーカーと、ゴールまたはループがオンのチャットは通知しません。"
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "このウィンドウがバックグラウンドにある間にチャットの回答が完了すると通知します。ワーカーと、ゴールまたはループがオンのチャットは通知しません。",
+  "Find in chat": "チャット内を検索",
+  "{0} of {1}": "{0}/{1}",
+  "No matches": "一致なし",
+  "Previous match": "前の一致",
+  "Next match": "次の一致"
 }

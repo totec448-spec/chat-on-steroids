@@ -5,7 +5,7 @@ import { initDurableStore, flushDurable, resetDurableForTests } from '../src/mai
 import {
   createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
 } from '../src/main/session/store.js';
-import { foldCase, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
+import { findInSession, foldCase, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
 import { positionOf } from '../src/shared/chronology.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -181,4 +181,23 @@ it('locates the first message holding the query, so a result opens there', async
   // Nothing said matches (a title-only match): no place to open at.
   expect(await locateSearchMatch(id, 'planning')).toBeNull();
   expect(await locateSearchMatch(id, '   ')).toBeNull();
+});
+
+// Find in chat (Codex's ⌘F): every message holding the phrase, in the order they were said, from the
+// whole recording rather than the page the window happens to hold.
+it('finds every message of one chat that holds a phrase, in order', async () => {
+  const id = await chat('Release planning', [
+    ['user', 'Check the Windows installer'],
+    ['assistant', 'The windows   INSTALLER builds; the bridge is next.'],
+    ['user', 'And the installer for macOS?'],
+    ['assistant', 'Both installers are signed.']
+  ]);
+  const said = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
+  const found = await findInSession(id, 'Windows installer');
+  // Case and runs of spaces do not matter; the whole phrase must be there.
+  expect(found.map(location => location.seq)).toEqual([said[0]!.seq, said[1]!.seq]);
+  expect(found[0]).toEqual({ seq: said[0]!.seq, kind: 'user_message', messageId: (said[0] as { messageId?: string }).messageId ?? null, position: positionOf(said[0]!) });
+  expect((await findInSession(id, 'installer')).map(location => location.seq)).toEqual(said.map(event => event.seq));
+  expect(await findInSession(id, 'linux')).toEqual([]);
+  expect(await findInSession(id, '  ')).toEqual([]);
 });
