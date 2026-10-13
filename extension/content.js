@@ -13416,10 +13416,14 @@
         return false;
       }
       view.refresh.click(); // the durable main-process attempt owns this one click
+      // ChatGPT reads the tools through the tunnel after the click: 7 s in one measured run on
+      // Windows (2026-10-13), past 12 s in another, which then recorded a refresh that had
+      // worked as failed. The page holds no other work meanwhile (the worker leaves a busy tab
+      // open), so the wait is generous; the one click stays one click.
       const after = await waitPageView(async () => {
         const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId);
         return next && before !== expected && schemaKey(next.tools) === expected ? next : null;
-      }, stillCurrent, 12000);
+      }, stillCurrent, 60000);
       if (!after) {
         await fail(t(
           'content_connector_refresh_schema_unchanged',

@@ -35,6 +35,28 @@ it('claims before exactly one click and completes only a newly observed matching
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
   expect(h.ask.mock.invocationCallOrder[0]).toBeLessThan(h.click.mock.invocationCallOrder[0]!);
 });
+// Measured on Windows 2026-10-13 (2.1.36 release round): after the click, ChatGPT showed the
+// new tools 7 s later in one run and later than 12 s in another. Waiting only 12 s recorded a
+// refresh that had worked as failed, and the "tools changed" reminder stayed up.
+it('completes a refresh whose new tools take 20 seconds to appear', async () => {
+  let clicked = false;
+  const click = vi.fn(() => { clicked = true; });
+  const href = `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`;
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1,
+    t: (_key: string, fallback: string) => fallback,
+    location: { pathname: new URL(href).pathname, href },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: { click }, tools: clicked ? tools : [{ ...tools[0], description: 'Old description.' }] }) }
+  });
+  const ask = vi.fn(async (_message: { action: string }) => ({ data: { ok: true } }));
+  context.ask = ask;
+  context.isClicked = () => clicked;
+  // A wait shorter than 20 s after the click ends before ChatGPT shows the new tools.
+  vm.runInContext(`${section}\nwaitPageView = async (read, current, ms = 0) => !current() ? null : isClicked() && ms < 20000 ? null : read(); globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
+});
 it.each([false, true])('waits for readable tool schemas before claim (navigation=%s)', async navigate => {
   const dom = new JSDOM('<html><body></body></html>');
   let ready = false, refreshed = false;
