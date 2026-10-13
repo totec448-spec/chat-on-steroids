@@ -13,6 +13,18 @@ export function imageStorageButton(): HTMLButtonElement {
   return button;
 }
 
+// Dismissing lasts while the store stays full; a store that fills up again says so again.
+let noticeDismissed = false;
+
+/** The notice for a full recording store (#1406): before it, only the log knew. */
+export function paintRecordingStorageNotice(full: boolean): void {
+  const notice = document.getElementById('recordingStorageFull')!;
+  if (!full) noticeDismissed = false;
+  notice.hidden = !full || noticeDismissed;
+  document.getElementById('freeRecordingStorage')!.onclick = () => showImageStorage();
+  document.getElementById('dismissRecordingStorageFull')!.onclick = () => { noticeDismissed = true; notice.hidden = true; };
+}
+
 function showImageStorage(): void {
   if (document.querySelector('.image-storage-dialog')) return;
   const dialog = document.createElement('dialog');

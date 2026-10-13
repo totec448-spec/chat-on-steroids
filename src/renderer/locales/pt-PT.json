@@ -2249,5 +2249,6 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "A reposição guarda uma cópia do estado ilegível e permite reiniciar a atualização automática dos plugins. A atualização pode afetar conversas existentes do ChatGPT.",
   "A calm capybara who lifts, chills and never panics.": "Uma capivara calma que levanta pesos, relaxa e nunca entra em pânico.",
   "A tiny hamster with a big pre-workout attitude.": "Um hamster minúsculo com muita atitude de pré-treino.",
-  "The built-in Chat On Steroids companion.": "O companheiro incluído no Chat On Steroids."
+  "The built-in Chat On Steroids companion.": "O companheiro incluído no Chat On Steroids.",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "O armazenamento de gravações está cheio. As novas imagens e os textos longos já não são guardados nos seus chats."
 }

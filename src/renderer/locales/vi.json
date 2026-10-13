@@ -2249,5 +2249,6 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Đặt lại sẽ sao lưu trạng thái không đọc được và cho phép khởi động lại việc tự động làm mới plugin. Làm mới có thể ảnh hưởng đến các cuộc trò chuyện ChatGPT hiện có.",
   "A calm capybara who lifts, chills and never panics.": "Một chú capybara điềm tĩnh, tập tạ, thư giãn và không bao giờ hoảng hốt.",
   "A tiny hamster with a big pre-workout attitude.": "Một chú chuột hamster tí hon với tinh thần trước buổi tập đầy khí thế.",
-  "The built-in Chat On Steroids companion.": "Người bạn đồng hành có sẵn của Chat On Steroids."
+  "The built-in Chat On Steroids companion.": "Người bạn đồng hành có sẵn của Chat On Steroids.",
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Bộ nhớ ghi lại đã đầy. Hình ảnh mới và văn bản dài không còn được lưu trong các cuộc trò chuyện của bạn."
 }
