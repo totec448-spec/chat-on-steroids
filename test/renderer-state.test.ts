@@ -2042,6 +2042,19 @@ it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's langu
   setLanguage('en');
 });
 
+it("keeps a worker's delivery line in the app's language when the language changes", async () => {
+  const worker = { id: 'worker-1', role: 'worker', label: 'Docs', task: 'Update the docs', jobTitle: 'Docs', runId: 'run-1', reasoningEffort: null, model: null, state: 'active',
+    createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
+  const mounted = await mountChat({}, [], { getSwarm: async () => ({ ok: true, data: { enabled: true, running: true, runId: 'run-1', agents: [worker], maxWorkers: 2, pendingReports: 0 } }) });
+  const line = () => mounted.window.document.querySelector('#swarmList .model-sub')?.textContent;
+  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered · chat bound'));
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // The line was joined once when the list was painted, so it stayed English.
+  expect(line()).toBe('0 ausstehend · 1 zugestellt · Chat verknüpft');
+  setLanguage('en');
+});
+
 it('highlights missing required setup fields while respecting drafts and a stored API key', async () => {
   const mounted = await mountChat();
   const doc = mounted.window.document;
