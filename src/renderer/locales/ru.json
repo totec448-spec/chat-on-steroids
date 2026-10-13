@@ -2304,6 +2304,8 @@
   "Send now": "Отправить сейчас",
   "Send into the running turn now": "Отправить сейчас в текущий ход",
   "The turn ended before this message could join it. It stays queued.": "Ход завершился раньше, чем это сообщение успело в него попасть. Оно остаётся в очереди.",
+  "Keep the computer awake": "Не давать компьютеру уснуть",
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Пока чат работает, компьютер не переходит в сон, и долгие задачи продолжаются. Экран при этом может выключаться.",
   "Messages during a running turn": "Сообщения во время хода",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Что по умолчанию делает сообщение, отправленное, пока ChatGPT работает. ⌘⇧Enter (Ctrl+Shift+Enter в Windows и Linux) отправляет его другим способом.",
   "Join the running turn": "Добавить в текущий ход",
