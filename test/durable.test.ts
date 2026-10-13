@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  durableRevision,
   flushDurable,
   initDurableStore,
   readDurable,
+  recoverDurable,
   resetDurableForTests,
   writeDurableNow,
   writeDurableSoon,
@@ -14,6 +16,21 @@ import {
 } from '../src/main/durable.js';
 
 const cleanup: string[] = [];
+
+it('invalidates only the recovered ledger projection after a successful atomic recovery', async () => {
+  const dir = await tempStore();
+  await writeDurableNow('probe', []);
+  const before = durableRevision('probe'), other = durableRevision('other');
+  const file = path.join(dir, 'state', 'probe.json');
+  await fs.writeFile(file, '{broken');
+  const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('injected recovery failure'));
+  await expect(recoverDurable('probe', [])).rejects.toThrow('injected recovery failure');
+  expect(durableRevision('probe')).toBe(before);
+  rename.mockRestore();
+  await recoverDurable('probe', []);
+  expect(durableRevision('probe')).toBeGreaterThan(before);
+  expect(durableRevision('other')).toBe(other);
+});
 
 afterEach(async () => {
   vi.restoreAllMocks();
