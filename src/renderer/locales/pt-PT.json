@@ -2268,8 +2268,8 @@
   "Could not start fresh.": "Não foi possível começar do zero.",
   "Recording storage": "Armazenamento de gravações",
   "Images and long texts recorded from your chats, up to 2 GB.": "Imagens e textos longos gravados dos seus chats, até 2 GB.",
-  "Compact & Resume · waiting for this turn to end": "Compactar e retomar · a aguardar o fim desta vez",
+  "Compact & Resume · waiting for this turn to end": "Compactar e retomar · a aguardar o fim deste turno",
   "Compact & Resume · asking ChatGPT for the handoff": "Compactar e retomar · a pedir a passagem ao ChatGPT",
-  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "Este chat passou o limite de contexto. O pedido de passagem é enviado assim que este turno terminar.",
-  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Este chat passou o limite de contexto. O Chat On Steroids está a enviar ao ChatGPT o pedido para escrever o resumo de um novo chat."
+  "The handoff request is sent as soon as this turn ends.": "O pedido de passagem é enviado assim que este turno terminar.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "O Chat On Steroids está a enviar ao ChatGPT o pedido para escrever o resumo de um novo chat."
 }

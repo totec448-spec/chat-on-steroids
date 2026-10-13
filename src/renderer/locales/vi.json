@@ -2269,7 +2269,7 @@
   "Recording storage": "Bộ nhớ ghi lại",
   "Images and long texts recorded from your chats, up to 2 GB.": "Hình ảnh và văn bản dài được ghi lại từ các cuộc trò chuyện của bạn, tối đa 2 GB.",
   "Compact & Resume · waiting for this turn to end": "Compact & Resume · đang chờ lượt này kết thúc",
-  "Compact & Resume · asking ChatGPT for the handoff": "Nén và tiếp tục · đang yêu cầu ChatGPT bàn giao",
-  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "Cuộc trò chuyện này đã vượt giới hạn ngữ cảnh. Yêu cầu bàn giao sẽ được gửi ngay khi lượt này kết thúc.",
-  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Cuộc trò chuyện này đã vượt giới hạn ngữ cảnh. Chat On Steroids đang gửi cho ChatGPT yêu cầu viết bản tóm tắt cho cuộc trò chuyện mới."
+  "Compact & Resume · asking ChatGPT for the handoff": "Compact & Resume · đang yêu cầu ChatGPT bàn giao",
+  "The handoff request is sent as soon as this turn ends.": "Yêu cầu bàn giao sẽ được gửi ngay khi lượt này kết thúc.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids đang gửi cho ChatGPT yêu cầu viết bản tóm tắt cho cuộc trò chuyện mới."
 }
