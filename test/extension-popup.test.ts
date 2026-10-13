@@ -85,7 +85,7 @@ it('reports only app reachability from compatible health and pairing', () => {
   expect(document.getElementById('state')!.textContent).toBe('App not reachable');
   // Unreachable is the state people report as "it doesn't work": say what to do, right there.
   expect(hint.hidden).toBe(false);
-  expect(hint.textContent).toBe('Make sure Chat On Steroids is open on this computer. The companion connects on its own.');
+  expect(hint.textContent).toBe('Make sure Chat On Steroids is open on this computer. The extension connects on its own.');
   expect(document.getElementById('unpairBtn')).toBeNull();
   (popup!.window as any).paintHeader({ connected: true, paired: false, disconnected: true, compatible: true, port: 8765 });
   expect(document.getElementById('retryBtn')!.textContent).toBe('Connect');

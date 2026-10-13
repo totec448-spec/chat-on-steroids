@@ -741,7 +741,7 @@
     "message": "Подключает ChatGPT к Chat On Steroids и управляет вкладками браузера в фоне через DOM, скриншоты и инструменты разработчика."
   },
   "extension_name": {
-    "message": "Компаньон Chat On Steroids"
+    "message": "Расширение браузера Chat On Steroids"
   },
   "popup_advanced": {
     "message": "Дополнительно"
@@ -1038,7 +1038,7 @@
     "message": "Повторить"
   },
   "popup_version_mismatch_help": {
-    "message": "Приложение v$1 (протокол $2); компаньон v$3 (протокол $4). Откройте страницу Extensions браузера, включите Developer mode, затем Update / Reload для компаньона. Если версии всё ещё не совпадают, используйте Open extension folder в Chat On Steroids и загрузите эту папку. Перезагрузите вкладки ChatGPT после завершения активной работы."
+    "message": "Приложение v$1 (протокол $2); расширение v$3 (протокол $4). Откройте страницу Extensions браузера, включите Developer mode, затем Update / Reload для этого расширения. Если версии всё ещё не совпадают, используйте Open extension folder в Chat On Steroids и загрузите эту папку. Перезагрузите вкладки ChatGPT после завершения активной работы."
   },
   "popup_yes": {
     "message": "да"

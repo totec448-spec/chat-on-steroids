@@ -741,7 +741,7 @@
     "message": "Conecta ChatGPT con Chat On Steroids y controla pestañas del navegador en segundo plano mediante DOM, capturas de pantalla y herramientas para desarrolladores."
   },
   "extension_name": {
-    "message": "Extensión complementaria de Chat On Steroids"
+    "message": "Extensión de navegador de Chat On Steroids"
   },
   "popup_advanced": {
     "message": "Avanzado"
