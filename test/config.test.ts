@@ -402,6 +402,15 @@ describe('settings migration', () => {
     expect((await loadConfig()).sessions.storageLimitGiB).toBe(20);
   });
 
+  it('joins the running turn by default, and loads a broken follow-up behavior as that default', async () => {
+    const config = defaultConfig();
+    expect(config.ui.followUp).toBe('steer');
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, ui: { ...config.ui, followUp: 'later' } }), 'utf8');
+    expect((await loadConfig()).ui.followUp).toBe('steer');
+    await saveConfig({ ...config, ui: { ...config.ui, followUp: 'queue' } });
+    expect((await loadConfig()).ui.followUp).toBe('queue');
+  });
+
   it('keeps the thorough handoff length for older and broken configs, and saves a choice', async () => {
     const config = defaultConfig();
     expect(config.compaction.handoffLength).toBe('thorough');
