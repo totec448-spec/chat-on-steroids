@@ -5514,7 +5514,10 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
     cancelWorkerCommands(reason, undefined, runId);
   });
   if (staleSwarmTimer) clearInterval(staleSwarmTimer);
+  // A stopped bridge is not a sleeping computer: the first tick of a new timer measures no gap.
+  lastRecoverySweepTickAt = 0;
   staleSwarmTimer = setInterval(() => {
+    noteRecoverySweepTick(Date.now());
     void runStaleSwarmSweep().catch((err: Error) => logWarn(`stale swarm sweep failed: ${err.message}`));
     void retryUnclaimedBrowserInputs().catch((err: Error) => logWarn(`unclaimed browser input recovery failed: ${err.message}`));
   }, STALE_SWARM_SWEEP_MS);
@@ -6669,6 +6672,32 @@ interface ActivityGrant {
 }
 
 const activeUntil = new Map<string, ActivityGrant>();
+
+/** How long a working chat gets to report again after the computer wakes, before any recovery. */
+export const WAKE_GRACE_MS = 90_000;
+/** The sweep ticks every 30 seconds; a gap this long means nothing ran in between. */
+const WAKE_GAP_MS = 2 * 60_000;
+let lastRecoverySweepTickAt = 0;
+/**
+ * Called on every tick of the recovery sweep's timer. While the computer sleeps (or this process
+ * is stopped) no timer fires, so on waking every activity deadline is long past and the first
+ * sweep would call each working chat silent and reload them all in the same second, before one
+ * page had reconnected and reported. Reloads of several chats at once are also what draws
+ * ChatGPT's history limit. A tick that comes much later than its timer allows gives every
+ * working chat a fresh, short deadline instead.
+ */
+export function noteRecoverySweepTick(now: number): boolean {
+  const gap = lastRecoverySweepTickAt === 0 ? 0 : now - lastRecoverySweepTickAt;
+  lastRecoverySweepTickAt = now;
+  if (gap < WAKE_GAP_MS) return false;
+  let held = 0;
+  for (const grant of activeUntil.values()) {
+    if (grant.until >= now + WAKE_GRACE_MS) continue;
+    grant.until = now + WAKE_GRACE_MS; held += 1;
+  }
+  logInfo(`bridge: nothing ran for ${Math.round(gap / 60_000)} minute(s) (the computer slept, or this app was paused) — ${held} working chat(s) get ${WAKE_GRACE_MS / 1000} seconds to report before any recovery`);
+  return true;
+}
 
 /** Chats reloaded by the app whose page has given no sign of life since. */
 const awaitingReturn = new Set<string>();
@@ -10922,6 +10951,7 @@ export function resetBridgeForTests(): void {
   providerHistoryBackoffUntil.clear();
   providerDeferredColdStarts.clear();
   activeUntil.clear();
+  lastRecoverySweepTickAt = 0;
   awaitingReturn.clear();
   lastAttributedCallAt.clear();
   fiberHealth.clear();
