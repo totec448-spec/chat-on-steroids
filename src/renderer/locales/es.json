@@ -2250,5 +2250,14 @@
   "A calm capybara who lifts, chills and never panics.": "Un capibara tranquilo que levanta pesas, se relaja y nunca pierde la calma.",
   "A tiny hamster with a big pre-workout attitude.": "Un hámster diminuto con mucha actitud de preentreno.",
   "The built-in Chat On Steroids companion.": "El compañero integrado de Chat On Steroids.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Escuchando con precisión básica. Para obtener puntuación y mejores resultados, activa el reconocimiento de voz en línea en la configuración de Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "No hay ningún micrófono disponible. Conecta uno o permite el acceso al micrófono en la configuración de Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows bloquea el acceso al micrófono para las aplicaciones de escritorio. Permítelo en la configuración de Windows.",
+  "Windows speech recognition lost its internet connection.": "El reconocimiento de voz de Windows perdió la conexión a Internet.",
+  "The microphone signal was too poor to recognize speech.": "La señal del micrófono era demasiado mala para reconocer la voz.",
+  "Windows speech recognition stopped unexpectedly.": "El reconocimiento de voz de Windows se detuvo de forma inesperada.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "No hay ningún reconocedor de voz de Windows instalado. Instala un paquete de idioma de voz de Windows.",
+  "Windows speech recognition could not start": "No se pudo iniciar el reconocimiento de voz de Windows",
+  "Windows speech recognition exited unexpectedly": "El reconocimiento de voz de Windows se cerró de forma inesperada",
   "Recording storage is full. New images and long texts are no longer saved in your chats.": "El almacenamiento de grabaciones está lleno. Las imágenes nuevas y los textos largos ya no se guardan en tus chats."
 }
