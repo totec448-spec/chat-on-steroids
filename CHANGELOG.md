@@ -42,7 +42,7 @@ Long runs recover more reliably, the tunnel to ChatGPT works behind a proxy, and
 
 - **Setup in your language.** Setup shows ChatGPT's and OpenAI's screens as they look today, in your language, names ChatGPT's buttons the way ChatGPT shows them, and its first step opens your browser's own extensions page with the address copied for you.
 - **Two plugins on one tunnel ID** (which makes about every second call fail with UNKNOWN_TOOL) is now flagged in Setup, in the Plugins dialog and by the connection self-test.
-- **Automatic plugin refresh** is safer when tunnels or setup profiles change, and recovers by itself from a saved state that could not be read for a moment.
+- **Automatic plugin refresh** is confirmed as soon as ChatGPT has the new tools; before, a refresh that had worked was sometimes reported as failed and the "tools changed" reminder stayed up. It is also safer when tunnels or setup profiles change, and recovers by itself from a saved state that could not be read for a moment.
 - **Translations:** each feature has one name throughout each language, German says "du" everywhere, the browser extension is called that everywhere, and the bundled pets describe themselves in your language.
 - **The diagnostics report** shows how much memory the app's parts use, including each ChatGPT page of the built-in browser.
 - **Worker checkouts** are listed under the worker's job, not under the last message it received.
