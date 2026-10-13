@@ -16,6 +16,21 @@ describe('opt-in Windows dictation IPC contract', () => {
     expect(parseDictationEvent('{"type":"start","text":"ignore"}')).toBeNull();
   });
 
+  it('says which Windows engine is listening, and nothing else', () => {
+    expect(parseDictationEvent('{"type":"status","status":"listening","engine":"modern"}')).toEqual({
+      type: 'status', status: 'listening', engine: 'modern'
+    });
+    expect(parseDictationEvent('{"type":"status","status":"listening","engine":"legacy"}')).toEqual({
+      type: 'status', status: 'listening', engine: 'legacy'
+    });
+    expect(parseDictationEvent('{"type":"status","status":"listening","engine":"cloud"}')).toEqual({
+      type: 'status', status: 'listening'
+    });
+    expect(parseDictationEvent('{"type":"status","status":"stopped","engine":"legacy"}')).toEqual({
+      type: 'status', status: 'stopped'
+    });
+  });
+
   it('rejects malformed messages and bounds transcript/error length', () => {
     expect(parseDictationEvent('not json')).toBeNull();
     expect(parseDictationEvent('null')).toBeNull();

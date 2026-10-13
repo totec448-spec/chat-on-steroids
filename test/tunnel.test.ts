@@ -9,15 +9,7 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ago, parseClientStatus, parsePollHealth, readMetric } from '../src/main/tunnel/health.js';
-import {
-  describeNetworkError,
-  isBenignHarpoonChannelEvent,
-  isUnreachableError,
-  NO_OUTAGE,
-  outageConfirmed,
-  outageRecovered,
-  routeObservation
-} from '../src/main/tunnel/index.js';
+import { describeNetworkError, isBenignHarpoonChannelEvent, isUnreachableError, NO_OUTAGE, outageConfirmed, outageRecovered, routeObservation, tunnelEventText } from '../src/main/tunnel/index.js';
 import { describeRoute, describeSeparateTunnels, metadataErrorIsCurrent } from '../src/main/diagnostics.js';
 import { commonBinaryDirsForPlatform, locateBinary, tunnelExecutableName } from '../src/main/tunnel/locate.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -370,6 +362,19 @@ describe('self-test: one tunnel ID per connector', () => {
   it('passes with separate IDs and says nothing when only Core is set up', () => {
     expect(describeSeparateTunnels({ tunnelId: 'a', desktopTunnelId: 'b', pluginsTunnelId: '' })).toMatchObject({ status: 'pass', ok: true });
     expect(describeSeparateTunnels({ tunnelId: 'a', desktopTunnelId: '', pluginsTunnelId: '' })).toBeNull();
+  });
+});
+
+// tunnel-client writes structured JSON lines. A field that is itself an object was turned into
+// text with String(), so the connection error shown to the user read "[object Object]" and the
+// checks for an unreachable network or a rejected key had nothing to match.
+describe('text of a tunnel-client log field', () => {
+  it('keeps strings, spells out objects, and treats a missing field as empty', () => {
+    expect(tunnelEventText('dial tcp: connection refused')).toBe('dial tcp: connection refused');
+    expect(tunnelEventText({ code: 'ECONNREFUSED', message: 'dial tcp: connection refused' })).toBe('{"code":"ECONNREFUSED","message":"dial tcp: connection refused"}');
+    expect(tunnelEventText(503)).toBe('503');
+    expect(tunnelEventText(undefined)).toBe('');
+    expect(tunnelEventText(null)).toBe('');
   });
 });
 

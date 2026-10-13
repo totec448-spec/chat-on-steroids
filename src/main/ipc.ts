@@ -1226,7 +1226,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // A browser opens its own internal pages only from its address bar: given on the command line,
     // chrome://extensions and edge://extensions both open a new tab instead (measured 2026-10-12).
     // So the address goes on the clipboard and the browser comes up with a new tab to paste it into.
-    clipboard.writeText(`${browser}://extensions`);
+    await clipboard.writeText(`${browser}://extensions`);
     await openInPreferredBrowser('about:blank', { browser, reveal: true });
     return true;
   });
