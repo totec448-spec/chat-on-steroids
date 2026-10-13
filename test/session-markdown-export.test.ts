@@ -55,3 +55,10 @@ it('says a copy failed when the clipboard refuses it, instead of "copied"', asyn
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null)).rejects.toThrow('clipboard unavailable');
 });
 
+
+// ChatGPT's link cards are private-use markup in the raw text; the copy gets a real Markdown link.
+it('copies link cards as Markdown links instead of their raw markers', async () => {
+  store.readOverflowText.mockResolvedValue('Open urlthe comparisonhttps://github.com/o/r/compare and merge it.');
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenCalledWith('Open [the comparison](https://github.com/o/r/compare) and merge it.\n');
+});

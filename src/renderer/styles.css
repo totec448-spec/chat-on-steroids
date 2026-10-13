@@ -4754,3 +4754,22 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .diff-code .tok-string { color: var(--syntax-string); }
 .diff-code .tok-number, .diff-code .tok-bool { color: var(--syntax-number); }
 .diff-code .tok-comment { color: var(--syntax-comment); }
+
+/* Find in chat (⌘F / Ctrl+F): a quiet bar above the open chat, like the ⌘K search field. */
+/* It lives in the subhead row (the card's grid has one row per child) and takes that row's full width. */
+/* The row hides while its status note is empty or mirrored; an open find bar keeps it, and keeps it visible over an empty chat. */
+.card.is-session > .subhead:has(> #chatFind:not([hidden])) { display: flex; flex-wrap: wrap; visibility: visible; }
+.card.is-session > .subhead:has(> #chatFind:not([hidden])) > #chatState.is-mirrored, .card.is-session > .subhead:has(> #chatFind:not([hidden])) > #chatState:empty { display: none; }
+.chat-find { display: flex; align-items: center; gap: 4px; flex: 1 1 100%; order: -1; margin: 0; padding: 0 4px 0 12px; height: 38px;
+  border: 1px solid var(--edge); border-radius: var(--r-md, 10px); background: var(--raise); box-shadow: var(--lift); animation: chat-find-in 140ms cubic-bezier(.2, .8, .2, 1); }
+.chat-find[hidden] { display: none; }
+.chat-find > .ico { color: var(--faint); flex: none; }
+.chat-find input { flex: 1 1 auto; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); padding: 0 4px; }
+.chat-find input::placeholder { color: var(--faint); }
+.chat-find-count { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; padding: 0 6px; white-space: nowrap; }
+.chat-find .btn-icon { width: 28px; height: 28px; }
+.chat-find .btn-icon:disabled { opacity: .4; }
+@keyframes chat-find-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .chat-find { animation: none; } }
+::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
+::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
