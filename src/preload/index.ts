@@ -256,7 +256,7 @@ const api = {
 
   // Sessions, compaction and the browser bridge. Everything here is read-only or a
   // named action; there is still no channel that takes a path or a command.
-  listSessions: (options?: { cursor?: SessionListCursor; limit?: number }) =>
+  listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),

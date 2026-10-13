@@ -1380,6 +1380,108 @@ it('loads recorded tool images on expansion and hides truncated binary envelopes
   expect(tool.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,YQ==');
 });
 
+// #1190: project headings come from the whole project list, chats from the newest page of all
+// history. A project whose chats are all older looked empty, and expanding it did nothing.
+async function olderProjectFixture(projectPages?: SessionSummary[][]) {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Older workspace', path: '/fixture', createdAt: 1 };
+  const recent = { ...summary([]), id: 'recent-unfiled', projectId: undefined, updatedAt: T0 + 400 };
+  const worker = { ...summary([]), id: 'older-worker', projectId: project.id, updatedAt: T0 + 3,
+    origin: { kind: 'worker' as const, fromSessionId: 'older-parent', agentId: 'worker-1', task: 'Inspect' } };
+  const parent = { ...summary([]), id: 'older-parent', conversationId: 'older-chat', projectId: project.id, updatedAt: T0 + 2 };
+  const unused = { ...summary([]), id: 'oldest-unfiled', projectId: undefined, updatedAt: T0 + 1 };
+  // The newest page of everything shows no chat of the project; the project's own pages do.
+  const all = [[recent], [unused]];
+  const own = projectPages ?? [[worker], [parent]];
+  const { w, append } = await boot([], false, [], [project], { sessions: [recent] });
+  const list = vi.fn(async (options: any) => {
+    const pages = options?.projectId === project.id ? own : all;
+    const index = options?.cursor ? pages.findIndex(rows => rows.at(-1)?.id === options.cursor.id) + 1 : 0;
+    const rows = pages[index] ?? [];
+    return { ok: true, data: { sessions: rows, total: 4, nextCursor: index < pages.length - 1 ? { updatedAt: rows.at(-1)!.updatedAt, id: rows.at(-1)!.id } : null,
+      activeId: null, pressure: [], blocked: [] } };
+  });
+  (w as any).api.listSessions = list;
+  await append([]); list.mockClear();
+  const heading = () => w.document.querySelector('.project-heading') as HTMLElement;
+  const projectCalls = () => list.mock.calls.map(([options]) => options).filter(options => options?.projectId);
+  return { w, list, heading, parent, worker, own, project, append, projectCalls };
+}
+
+it("shows a project's older chats when it is expanded, asking for that project's pages only", async () => {
+  const f = await olderProjectFixture(); f.heading().click(); await settle();
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+  // A page of workers alone shows no chat, so the next page of the project follows.
+  expect(f.projectCalls()).toEqual([
+    { projectId: f.project.id, limit: 60 },
+    { projectId: f.project.id, limit: 60, cursor: { updatedAt: f.worker.updatedAt, id: f.worker.id } }
+  ]);
+  // The rest of the history is not paged for it, no chat is selected, and the project stays open.
+  expect(f.list.mock.calls.every(([options]) => !!options?.projectId)).toBe(true);
+  expect(f.w.document.querySelector('[data-id="oldest-unfiled"]')).toBeNull();
+  expect(f.w.document.querySelector('.sess.is-sel')).toBeNull();
+  expect((f.w.document.querySelector('.project-group') as HTMLDetailsElement).open).toBe(true);
+});
+
+it("keeps a project's older chats through the sidebar's next refresh", async () => {
+  const f = await olderProjectFixture(); f.heading().click(); await settle();
+  await f.append([]); await settle();
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+  // Asked once: the refresh and another expand do not read the project again.
+  f.heading().click(); f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(2);
+});
+
+it('stops reading a project when it is collapsed while a page is on its way', async () => {
+  const f = await olderProjectFixture();
+  let resolve!: (value: any) => void;
+  f.list.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(1);
+  f.heading().click();
+  resolve({ ok: true, data: { sessions: f.own[0], total: 4, nextCursor: { updatedAt: f.worker.updatedAt, id: f.worker.id }, activeId: null, pressure: [], blocked: [] } });
+  await settle();
+  expect(f.projectCalls()).toHaveLength(1);
+  expect((f.w.document.querySelector('.project-group') as HTMLDetailsElement).open).toBe(false);
+  // Expanding again continues where it stopped.
+  f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(2);
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+});
+
+it('does not loop when a project page cannot be read, and tries again on the next expand', async () => {
+  const f = await olderProjectFixture();
+  f.list.mockResolvedValueOnce({ ok: false, error: 'Fixture read failure' } as any);
+  f.heading().click(); await settle();
+  expect(f.projectCalls()).toHaveLength(1);
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).toBeNull();
+  f.heading().click(); f.heading().click(); await settle();
+  expect(f.w.document.querySelector('.project-group [data-id="older-parent"]')).not.toBeNull();
+});
+
+it('asks an empty project once', async () => {
+  const f = await olderProjectFixture([[]]);
+  f.heading().click(); await settle();
+  f.heading().click(); f.heading().click(); await settle();
+  expect(f.projectCalls()).toEqual([{ projectId: f.project.id, limit: 60 }]);
+  expect(f.w.document.querySelectorAll('.project-group .sess')).toHaveLength(0);
+});
+
+it('continues with the project\'s older pages from "Show more"', async () => {
+  const task = (index: number): SessionSummary => ({ ...summary([]), id: `project-task-${index}`, conversationId: `chat-${index}`, title: `Task ${index}`,
+    projectId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', updatedAt: T0 + 100 - index });
+  const f = await olderProjectFixture([[0, 1, 2, 3, 4].map(task), [5, 6].map(task)]);
+  f.heading().click(); await settle();
+  const shown = () => [...f.w.document.querySelectorAll<HTMLElement>('.project-group .sess')].map(row => row.dataset.id);
+  expect(shown()).toHaveLength(5);
+  // Everything loaded is on screen, and the project has more: the button reads on from there.
+  const more = f.w.document.querySelector('.project-show-more') as HTMLElement;
+  expect(more).not.toBeNull();
+  more.click(); await settle();
+  expect(f.projectCalls()).toHaveLength(2);
+  expect(shown()).toEqual([0, 1, 2, 3, 4, 5, 6].map(index => `project-task-${index}`));
+  expect(f.w.document.querySelector('.project-show-more')).toBeNull();
+});
+
 it('pages project tasks as complete parent/worker groups and keeps the selected task visible after reordering', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Paged', path: '/paged', createdAt: 1 };
   const tasks = Array.from({ length: 8 }, (_, index) => ({ ...summary([]), id: `project-task-${index}`, conversationId: `chat-${index}`, title: `Task ${index}`, projectId: project.id }));
