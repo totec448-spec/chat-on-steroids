@@ -1427,7 +1427,8 @@ describe('the window in which a replacement chat is expected', () => {
     const create = vi.spyOn(store, 'createSession');
     const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
     const observation = sessionForConversation(destination);
-    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2));
+    // Both gate checks come after disk reads, not timers; a busy Windows runner takes over a second.
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
     await vi.advanceTimersByTimeAsync(6_000);
 
     // The command still owns its sixty-second claim. Five seconds without its ACK
@@ -1490,7 +1491,8 @@ describe('the window in which a replacement chat is expected', () => {
     const unrelated = reason === 'abort' ? '93939393-1111-4222-8333-444444444444' : '94949494-1111-4222-8333-444444444444';
     const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
     const observation = sessionForConversation(unrelated);
-    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2));
+    // Both gate checks come after disk reads, not timers; a busy Windows runner takes over a second.
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
     if (reason === 'abort') abortContinuation(token, 'cancelled before destination');
     await vi.advanceTimersByTimeAsync(reason === 'expiry' ? RESUME_CLAIM_WINDOW_MS + 100 : 100);
     const sessionId = await observation;
