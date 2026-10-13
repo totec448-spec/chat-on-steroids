@@ -2267,5 +2267,9 @@
   "The saved keys can be read again. Nothing was changed.": "Kayıtlı anahtarlar yeniden okunabiliyor. Hiçbir şey değiştirilmedi.",
   "Could not start fresh.": "Sıfırdan başlanamadı.",
   "Recording storage": "Kayıt depolama alanı",
-  "Images and long texts recorded from your chats, up to 2 GB.": "Sohbetlerinizden kaydedilen görseller ve uzun metinler, en fazla 2 GB."
+  "Images and long texts recorded from your chats, up to 2 GB.": "Sohbetlerinizden kaydedilen görseller ve uzun metinler, en fazla 2 GB.",
+  "Compact & Resume · waiting for this turn to end": "Sıkıştır ve sürdür · bu turun bitmesi bekleniyor",
+  "Compact & Resume · asking ChatGPT for the handoff": "Sıkıştır ve sürdür · ChatGPT'den devir isteniyor",
+  "The handoff request is sent as soon as this turn ends.": "Devir isteği bu tur biter bitmez gönderilir.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids, yeni bir sohbet için özeti yazma isteğini ChatGPT'ye gönderiyor."
 }

@@ -2267,5 +2267,9 @@
   "The saved keys can be read again. Nothing was changed.": "已儲存的金鑰又可以讀取了。未做任何變更。",
   "Could not start fresh.": "無法重新開始。",
   "Recording storage": "記錄儲存空間",
-  "Images and long texts recorded from your chats, up to 2 GB.": "從你的聊天中記錄的圖片和長文字，最多 2 GB。"
+  "Images and long texts recorded from your chats, up to 2 GB.": "從你的聊天中記錄的圖片和長文字，最多 2 GB。",
+  "Compact & Resume · waiting for this turn to end": "壓縮並繼續 · 正在等待本輪結束",
+  "Compact & Resume · asking ChatGPT for the handoff": "壓縮並繼續 · 正在向 ChatGPT 請求交接",
+  "The handoff request is sent as soon as this turn ends.": "本輪結束後會立即送出交接請求。",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids 正在請求 ChatGPT 為新聊天撰寫摘要。"
 }

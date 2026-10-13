@@ -2267,5 +2267,9 @@
   "The saved keys can be read again. Nothing was changed.": "Les clés enregistrées sont de nouveau lisibles. Rien n'a été modifié.",
   "Could not start fresh.": "Impossible de repartir de zéro.",
   "Recording storage": "Stockage des enregistrements",
-  "Images and long texts recorded from your chats, up to 2 GB.": "Images et longs textes enregistrés depuis vos chats, jusqu'à 2 Go."
+  "Images and long texts recorded from your chats, up to 2 GB.": "Images et longs textes enregistrés depuis vos chats, jusqu'à 2 Go.",
+  "Compact & Resume · waiting for this turn to end": "Compacter et reprendre · attente de la fin de ce tour",
+  "Compact & Resume · asking ChatGPT for the handoff": "Compacter et reprendre · demande du relais à ChatGPT",
+  "The handoff request is sent as soon as this turn ends.": "La demande de relais part dès la fin de ce tour.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids envoie à ChatGPT la demande de rédiger le résumé d’un nouveau chat."
 }

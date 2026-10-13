@@ -1,6 +1,8 @@
 /** Read-only projection of an existing recovery deadline. Never authorizes an action. */
 export type RecoveryCountdown = {
-  kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped' | 'provider-limit';
+  kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped' | 'provider-limit' | 'compaction';
+  /** For `compaction`: whether the source turn still works or the handoff request is being sent. */
+  phase?: 'waiting' | 'asking';
   deadline: number;
   /** Attempts already spent for a pickup that stopped at its durable limit. */
   attempts?: number;
