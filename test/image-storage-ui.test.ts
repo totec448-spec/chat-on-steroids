@@ -82,3 +82,26 @@ it('allows cleanup before usage loads, closes while running and rejoins the same
   expect(cleanup).toHaveBeenCalledTimes(1);
   expect((dom.window as any).api.getImageStorage).toHaveBeenCalledTimes(1);
 });
+
+// #1406: long texts fill the store as well, and only old chats can give them up.
+it('frees about 1 GB from old chats after its own confirmation', async () => {
+  let finish!: (value: unknown) => void;
+  cleanup.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { imageStorageButton } = await import('../src/renderer/image-storage.js');
+  imageStorageButton().click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const action = [...document.querySelectorAll('.image-storage-actions button')].find(button => button.textContent === 'Free 1 GB from old chats') as HTMLButtonElement;
+  expect(action).toBeTruthy();
+  const confirm = vi.fn((_question: string) => false);
+  dom.window.confirm = confirm;
+  action.click();
+  expect(cleanup).not.toHaveBeenCalled();
+  expect(confirm.mock.calls[0]?.[0]).toContain('unused for a week');
+  dom.window.confirm = vi.fn(() => true);
+  action.click();
+  expect(cleanup).toHaveBeenCalledExactlyOnceWith('old-chats-gib');
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('Freeing space in the background.');
+  finish({ ok: true, data: { freedBytes: 2 ** 30, removedFiles: 40, usedBytes: 2 ** 30, limitBytes: 2 ** 31 } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('[role="status"]')?.textContent).toBe('Freed 1024.0 MB. 1.00 GB of recording storage is now available.');
+});
