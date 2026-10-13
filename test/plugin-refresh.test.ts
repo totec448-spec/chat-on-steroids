@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
@@ -57,7 +59,7 @@ it.each(['claimed', 'manual', 'completed'] as const)('preserves unscoped legacy 
     expect(await claim(observation)).toBe(false);
   } finally { get.mockRestore(); }
 });
-it.each(['claimed', 'manual', 'completed'] as const)('shows failed legacy %s rechecks without borrowing verification or another refresh click', async state => {
+it.each(['claimed', 'manual'] as const)('shows failed legacy %s rechecks without borrowing verification or another refresh click', async state => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
   let tunnel = { ...original.tunnel, kind: 'openai' as const, tunnelId };
   const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel }));
@@ -67,7 +69,6 @@ it.each(['claimed', 'manual', 'completed'] as const)('shows failed legacy %s rec
       tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual outcome' });
     else {
       expect(await claim(first)).toBe(true);
-      if (state === 'completed') expect(await completePluginRefresh({ ...first, appId, tools })).toBe(true);
     }
     const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
     await writeDurableNow('plugin-refresh', legacy);
@@ -111,6 +112,131 @@ it.each(['claimed', 'manual', 'completed'] as const)('shows failed legacy %s rec
       tools: retry.tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true }, false)).toBe(true);
     expect((await pluginRefreshStatuses()).core?.state).toBe('current');
   } finally { get.mockRestore(); }
+});
+it.each([{ automatic: true, inspectionFailure: false }, { automatic: false, inspectionFailure: false }, { automatic: true, inspectionFailure: true }])('refreshes a completed legacy receipt once after proven app/tunnel migration: %j', async ({ automatic, inspectionFailure }) => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    expect(await claim(first)).toBe(true);
+    expect(await completePluginRefresh({ ...first, appId, tools })).toBe(true);
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    const next = [{ ...tools[0]!, description: 'New declarations' }]; publish('2', next);
+    if (!automatic) await requestPluginRefreshes(APP_VERSION);
+    let request = (await pendingPluginRefreshes(automatic))[0]!;
+    if (inspectionFailure) {
+      expect(await failPluginRefresh({ id: request.id, error: 'Temporary unreadable settings page' })).toBe(true);
+      request = (await pendingPluginRefreshes(automatic))[0]!;
+    }
+    expect(request.observeOnly).not.toBe(true);
+    const input = { ...request, appId, connectorName: request.connectorName, tools, tunnelId, ownsTunnel: () => true };
+    const saved = await readDurable('plugin-refresh');
+    for (const wrong of [{ appId: 'asdk_app_foreign' }, { tunnelId: undefined }, { tunnelId: 'tunnel_other00000001' }, { ownsTunnel: () => false }]) {
+      expect(await claimPluginRefresh({ ...input, ...wrong }, automatic)).toBe(false);
+    }
+    expect(await readDurable('plugin-refresh')).toEqual(saved);
+    const actions: string[] = []; let refreshed = false;
+    const click = vi.fn(() => {
+      const row = JSON.parse(readFileSync(`${directory}/state/plugin-refresh.json`, 'utf8'))[0];
+      expect(row).toMatchObject({ tunnelKey: `openai:${original.tunnel.profileId ?? 'default'}:${tunnelId}`, schemaId: request.schemaId, attempted: true, observe: false });
+      expect(row.completedSchemaId).not.toBe(request.schemaId);
+      actions.push('click'); refreshed = true;
+    });
+    const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+    const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
+    const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1,
+      t: (_key: string, fallback: string) => fallback,
+      location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${request.id}#settings/Plugins/plugin_${appId}` },
+      CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+        pluginRefreshView: () => ({ appId, tunnelId, refresh: { click }, tools: refreshed ? next : tools }) },
+      ask: async (message: any) => {
+        actions.push(message.action);
+        const ok = message.action === 'claim' ? await claimPluginRefresh({ ...message, ownsTunnel: () => true }, automatic)
+          : message.action === 'complete' ? await completePluginRefresh(message)
+          : message.action === 'current' ? await claimPluginRefresh({ ...message, alreadyCurrent: true, ownsTunnel: () => true }, automatic) : false;
+        return { data: { ok } };
+      }
+    });
+    vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+    expect(await (context.run as Function)(request)).toBe(true);
+    expect(actions).toEqual(['claim', 'click', 'complete']);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+    expect(await claimPluginRefresh(input, automatic)).toBe(false);
+    expect(await pendingPluginRefreshes(automatic)).toEqual([]);
+  } finally { get.mockRestore(); }
+});
+it.each(['parked', 'error', 'unconfirmed', 'same-schema'] as const)('keeps a legacy %s receipt read-only even with proven app and tunnel', async outcome => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    await claim(first); await completePluginRefresh({ ...first, appId, tools });
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    if (outcome === 'parked') Object.assign(legacy[0], { parked: true, parkedBy: APP_VERSION });
+    if (outcome === 'error') legacy[0].error = 'Uncertain saved outcome';
+    if (outcome === 'unconfirmed') legacy[0].completedSchemaId = null;
+    await writeDurableNow('plugin-refresh', legacy);
+    publish('2', outcome === 'same-schema' ? tools : [{ ...tools[0]!, description: 'New declarations' }]);
+    await requestPluginRefreshes(APP_VERSION);
+    const request = (await pendingPluginRefreshes(false))[0]!;
+    expect(request.observeOnly).toBe(true);
+    const input = { ...request, appId, connectorName: request.connectorName, tools: [{ ...tools[0]!, description: 'Stale provider' }], tunnelId, ownsTunnel: () => true };
+    expect(await claimPluginRefresh(input, false)).toBe(false);
+    expect(await requireManualPluginRefresh({ ...input, error: 'No Refresh control' })).toBe(false);
+    expect((await readDurable('plugin-refresh') as any[])[0].tunnelKey).toBeUndefined();
+  } finally { get.mockRestore(); }
+});
+it('records a proven completed legacy migration as manual when the provider has no Refresh control', async () => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    await claim(first); await completePluginRefresh({ ...first, appId, tools });
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
+    await writeDurableNow('plugin-refresh', legacy);
+    publish('2', [{ ...tools[0]!, description: 'New declarations' }]);
+    const request = (await pendingPluginRefreshes())[0]!;
+    const input = { ...request, appId, connectorName: request.connectorName, tools, tunnelId, ownsTunnel: () => true, error: 'No Refresh control' };
+    expect(await requireManualPluginRefresh({ ...input, tunnelId: undefined })).toBe(false);
+    expect(await requireManualPluginRefresh(input)).toBe(true);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('manual');
+    expect(await claimPluginRefresh(input)).toBe(false);
+    expect(await pendingPluginRefreshes()).toEqual([]);
+  } finally { get.mockRestore(); }
+});
+it('retries a transient ledger read on the next state push without Reset, replacement or browser work', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(request)).toBe(true);
+  expect(await completePluginRefresh({ ...request, appId, tools })).toBe(true);
+  initDurableStore(directory); wake.mockClear();
+  const file = `${directory}/state/plugin-refresh.json`, before = await fs.readFile(file, 'utf8');
+  const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(new Error('Transient private diagnostics'));
+  expect(await pluginRefreshUnreadable()).toBe(true);
+  expect(confirmedPluginSchemas()).toEqual({});
+  const [status, unreadable] = await Promise.all([pluginRefreshStatuses(), pluginRefreshUnreadable(), hasRequestedPluginRefresh()]);
+  expect(status.core?.state).toBe('current'); expect(unreadable).toBe(false);
+  expect(confirmedPluginSchemas()).toEqual({ core: request.schemaId });
+  expect(read).toHaveBeenCalledTimes(2); read.mockRestore();
+  expect(await fs.readFile(file, 'utf8')).toBe(before);
+  expect(wake).not.toHaveBeenCalled();
+});
+it.each(['success', 'failure'] as const)('does not publish an older %s read after Reset commits recovery', async outcome => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  await claim(request); await completePluginRefresh({ ...request, appId, tools });
+  initDurableStore(directory);
+  const bytes = await fs.readFile(`${directory}/state/plugin-refresh.json`, 'utf8');
+  let release!: (value: string) => void, reject!: (reason: Error) => void;
+  const held = new Promise<string>((resolve, fail) => { release = resolve; reject = fail; });
+  vi.spyOn(fs, 'readFile').mockImplementationOnce(() => held as any).mockRejectedValueOnce(new Error('Reset inspection failed'));
+  const beforeReset = pluginRefreshStatuses();
+  await resetPluginRefreshLedger();
+  if (outcome === 'success') release(bytes); else reject(new Error('Late read failed'));
+  expect((await beforeReset).core?.state).toBe('unknown');
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  expect(confirmedPluginSchemas()).toEqual({});
+  expect(await readDurable('plugin-refresh')).toEqual([]);
 });
 it.each(['manual', 'cloudflared'] as const)('never binds an old Secure Tunnel observation to a current %s publication', async replacement => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
