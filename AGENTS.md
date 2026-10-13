@@ -3977,7 +3977,9 @@ session-scoped actions inside that dialog. Normal/Goal/Loop and Plan use their e
 the Goal row opens the objective editor, including before the first message. The mode menu's Goal
 and Loop pencils open that editor without switching automation; Save applies objective and mode,
 then closes the menu. The Plan toolbar toggle only arms planning, even over an existing draft;
-Send/Enter generates. Queued and prepared plan stages show up to three lines. The model menu lists
+Send/Enter generates. In a chat with a turn running, the written plan is queued at that turn's
+Session finish at once; in a new chat, or one known to be idle (#1428), it is shown and Send/Enter
+starts it now (the choice is made again when it is sent). Queued and prepared plan stages show up to three lines. The model menu lists
 every observed model separately behind its model-name disclosure; the compact popover leads
 with the selected effort and the slider only adjusts that model. Closing the popover resets
 the disclosure; Escape closes the list before the popover and returns focus to its trigger.
