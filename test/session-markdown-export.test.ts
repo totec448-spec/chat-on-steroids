@@ -48,3 +48,10 @@ it('writes nothing when the save dialog is cancelled, and refuses unfinished tur
   expect(files.writeFile).not.toHaveBeenCalled();
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 'open-turn', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
 });
+
+// The clipboard write is asynchronous. It was not awaited, so a failed copy still answered "copied".
+it('says a copy failed when the clipboard refuses it, instead of "copied"', async () => {
+  electron.clipboard.writeText.mockRejectedValueOnce(new Error('clipboard unavailable'));
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null)).rejects.toThrow('clipboard unavailable');
+});
+

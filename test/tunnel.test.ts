@@ -9,16 +9,8 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ago, parseClientStatus, parsePollHealth, readMetric } from '../src/main/tunnel/health.js';
-import {
-  describeNetworkError,
-  isBenignHarpoonChannelEvent,
-  isUnreachableError,
-  NO_OUTAGE,
-  outageConfirmed,
-  outageRecovered,
-  routeObservation
-} from '../src/main/tunnel/index.js';
-import { describeRoute, metadataErrorIsCurrent } from '../src/main/diagnostics.js';
+import { describeNetworkError, isBenignHarpoonChannelEvent, isUnreachableError, NO_OUTAGE, outageConfirmed, outageRecovered, routeObservation, tunnelEventText } from '../src/main/tunnel/index.js';
+import { describeRoute, describeSeparateTunnels, metadataErrorIsCurrent } from '../src/main/diagnostics.js';
 import { commonBinaryDirsForPlatform, locateBinary, tunnelExecutableName } from '../src/main/tunnel/locate.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -352,3 +344,37 @@ describe('self-test route check', () => {
     expect(describeRoute(null, null, T).ok).toBeNull();
   });
 });
+
+// #1401: Core and Plugins shared one tunnel ID, ChatGPT lost Core's tools, and the self-test said
+// "Every required check passed" while the app's own log named the cause.
+describe('self-test: one tunnel ID per connector', () => {
+  it('fails when two connectors share a tunnel ID, and names them without the ID', () => {
+    const check = describeSeparateTunnels({ tunnelId: ' tunnel_shared ', desktopTunnelId: '', pluginsTunnelId: 'tunnel_shared' });
+    expect(check).toMatchObject({ name: 'One tunnel per connector', status: 'fail', ok: false });
+    expect(check!.detail).toContain('Core and Plugins use the same tunnel ID');
+    expect(check!.detail).not.toContain('tunnel_shared');
+  });
+
+  it('names all three when they all share one', () => {
+    expect(describeSeparateTunnels({ tunnelId: 'a', desktopTunnelId: 'a', pluginsTunnelId: 'a' })!.detail).toContain('Core, Desktop and Plugins use the same tunnel ID');
+  });
+
+  it('passes with separate IDs and says nothing when only Core is set up', () => {
+    expect(describeSeparateTunnels({ tunnelId: 'a', desktopTunnelId: 'b', pluginsTunnelId: '' })).toMatchObject({ status: 'pass', ok: true });
+    expect(describeSeparateTunnels({ tunnelId: 'a', desktopTunnelId: '', pluginsTunnelId: '' })).toBeNull();
+  });
+});
+
+// tunnel-client writes structured JSON lines. A field that is itself an object was turned into
+// text with String(), so the connection error shown to the user read "[object Object]" and the
+// checks for an unreachable network or a rejected key had nothing to match.
+describe('text of a tunnel-client log field', () => {
+  it('keeps strings, spells out objects, and treats a missing field as empty', () => {
+    expect(tunnelEventText('dial tcp: connection refused')).toBe('dial tcp: connection refused');
+    expect(tunnelEventText({ code: 'ECONNREFUSED', message: 'dial tcp: connection refused' })).toBe('{"code":"ECONNREFUSED","message":"dial tcp: connection refused"}');
+    expect(tunnelEventText(503)).toBe('503');
+    expect(tunnelEventText(undefined)).toBe('');
+    expect(tunnelEventText(null)).toBe('');
+  });
+});
+

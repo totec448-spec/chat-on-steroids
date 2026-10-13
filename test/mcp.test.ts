@@ -24,7 +24,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import * as identity from '../src/main/connector-identity.js';
 import { connectorName } from '../src/shared/connector-names.js';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
-import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5 } from '../src/main/codex/tool-specs.js';
+import { EXEC_COMMAND_CMD_DESCRIPTION, LAUNCHES_WINDOWS_POWERSHELL_5, WINDOWS_SHELL_GUIDANCE } from '../src/main/codex/tool-specs.js';
 import { skillCatalogInstructions } from '../src/main/skills.js';
 import { lastRequestAt, selfTestHeaders, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from '../src/main/mcp/server.js';
 import { lastToolCallAt, type ToolContext } from '../src/main/mcp/tools.js';
@@ -964,7 +964,18 @@ describe('surface boundaries', () => {
     // shared context once instead of per worker, to batch messages into one call, and to
     // hand back RESULT/CHANGES/VALIDATION/BLOCKERS — bytes spent once at discovery to save
     // a great many in every run that follows.
+    // #1417: ChatGPT's approval reviewer stopped long runs with "Suspicious instruction: the tool
+    // description tries to dictate the classification and the handling of sensitive or suspicious
+    // content". What we declare describes; it does not rule on risk. (Checked on the constant as
+    // well, because the Windows text is only part of the declaration on Windows.)
+    const RULES_ON_RISK = /safety rules|\bbenign|harmless|suspicious/i;
+    expect(WINDOWS_SHELL_GUIDANCE).not.toMatch(RULES_ON_RISK);
+    // The Windows notes were a list of prohibitions; other tools use these words to describe what they do.
+    expect(WINDOWS_SHELL_GUIDANCE).not.toMatch(/\bnever\b|\bdo not\b|\bdestructive\b/i);
+    // The advice itself stays.
+    for (const fact of ['-LiteralPath', 'Remove-Item', 'Move-Item', '-WindowStyle Hidden', 'cmd /c']) expect(WINDOWS_SHELL_GUIDANCE).toContain(fact);
     for (const tool of [...coreTools, ...desktopTools]) {
+      expect(JSON.stringify(tool), `${tool.name} declaration`).not.toMatch(RULES_ON_RISK);
       const bytes = Buffer.byteLength(JSON.stringify(tool), 'utf8');
       const budget =
         (BROWSER_TOOLS as readonly string[]).includes(tool.name)
@@ -983,8 +994,8 @@ describe('surface boundaries', () => {
               ? 3_645
               : tool.name === 'exec_command'
                 // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
-                // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a
-                // budget. The non-Windows number is the one that says whether *our* additions have
+                // carries Codex's own shell advice in full (reworded for #1417) — it is not ours
+                // to trim to fit a budget. The non-Windows number is the one that says whether *our* additions have
                 // grown, so both are asserted rather than one loose bound covering both.
                 ? (process.platform === 'win32' ? 3_800 : 3_500)
                 : 3_000;
