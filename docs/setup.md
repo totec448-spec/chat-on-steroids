@@ -101,12 +101,16 @@ off whenever the API is off, and left off when you turn the API back on), it als
 a model that reads those messages can act under the permissions you have granted.**
 With the switch off, these routes all answer 403 and nothing changes.
 
-The API also serves GET `/v1/workers/{ownerId}` and `.../reports` for worker status and
-unread reports. With **Allow actions** enabled, POST `.../spawn`, `.../message` and
-`.../ack` permit direct broker control. A trusted local
-orchestrator owns a durable local UUID rather than a ChatGPT prime conversation. See the
-[direct bridge contract](t3-code-bridge.md#api-contract) for request bodies and report receipts.
+Local agents can also control workers through this API. Enable workers in CoS and save
+a lowercase UUID as `ownerId`. `GET /v1/workers/{ownerId}` lists that caller's workers.
+`GET /v1/workers/{ownerId}/reports` returns unread reports. With Allow actions enabled,
+the caller can send POST requests to `/v1/workers/{ownerId}/spawn` to start workers,
+`/v1/workers/{ownerId}/message` to send them messages, and `/v1/workers/{ownerId}/ack`
+to acknowledge report IDs. Reports repeat until the caller acknowledges them.
 
+T3 Code or another local agent can use `scripts/t3-code-bridge.mjs` with Node 22 or later.
+The [cos-bridge skill](../.agents/skills/cos-bridge/SKILL.md) lists every CLI command and
+its request fields.
 
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
 A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.
@@ -114,9 +118,6 @@ Turning the switch off, or quitting, stops the listener and removes both files. 
 them behind, so a caller should treat a refused connection as "not running".
 
 ## Permissions and plugins
-
-For T3 Code or another local coding agent, see the [CoS command-line bridge](t3-code-bridge.md)
-to control broker workers directly and read delivery, worker status and updates.
 
 | Plugin in ChatGPT | What it adds |
 | --- | --- |

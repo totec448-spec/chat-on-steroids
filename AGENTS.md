@@ -4527,9 +4527,9 @@ principal under the existing filesystem token grant, not a new secret or chat pr
 may select an approved Local Project; MCP and local callers share `agent-admission.ts`.
 The adapter owns no second worker ledger. Reports repeat until their explicit receipt ids
 are acknowledged; reading status does not consume them. `scripts/t3-code-bridge.mjs` is a
-dependency-free caller that checks the advertised surface, uses compact status/report deltas,
-and refuses unsupported builds without silently opening a coordinator. See
-`docs/t3-code-bridge.md` and `.agents/skills/cos-bridge/SKILL.md` for the CLI contract.
+dependency-free caller that checks the advertised routes, uses compact status/report deltas,
+and refuses unsupported builds without silently opening a coordinator. For CLI commands
+and request fields, read `.agents/skills/cos-bridge/SKILL.md`.
 
 Cancel is narrower than the app's own cancel. It reads the row first and refuses, without asking
 the owner, a `sent` or `tool` row, a claim whose Send was authorized (it may already be in ChatGPT,

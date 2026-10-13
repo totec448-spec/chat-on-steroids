@@ -35,4 +35,4 @@ After an uncertain worker mutation, inspect `agents` and `reports` before retryi
 `updates.nextFrom` and use a small limit for new progress; upsert revisions by message id.
 An end frame ends a read, not the task. For ordinary `send`, persist a new UUID first;
 inspect `inputs` after failures and never resend unconfirmed delivery. `interrupt:true`
-requires consent to stop the current answer. Details: `docs/t3-code-bridge.md` in the checkout.
+requires consent to stop the current answer.
