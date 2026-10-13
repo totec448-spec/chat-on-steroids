@@ -72,7 +72,7 @@ import { runningToolActivity } from './mcp/call-context.js';
 import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
-import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts } from './diagnostics-report.js';
+import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
@@ -1132,6 +1132,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       projects: await listProjects().catch(() => []),
       workerTexts: workers.flatMap(worker => [worker.task ?? '', worker.label ?? '', worker.result ?? '']),
       log: await readRecentLog(),
+      memory: memoryFacts(getWindow()),
       now: Date.now()
     });
     return saveDiagnosticsReport(text, getWindow());

@@ -45,10 +45,11 @@ This notice states the project's intended use; it does not certify compliance or
 
 ## Get started
 
-1. **Install CoS** and approve your project folder in **Settings → Workspace**.
-2. **Connect Core** through **Settings → Setup** and add it in ChatGPT under **Plugins → Add → Add custom MCP server**. [Tunnel setup →](docs/setup.md#tunnel-setup)
-3. **Load the companion extension** in Chrome, Edge or Brave. Setup's first step walks you through it with pictures of your browser's own extensions page: turn on **Developer mode**, click **Load unpacked** and choose the folder that **Open extension folder** shows. Pairing is automatic.
-4. **Choose a model, write your task and send.**
+1. **Install CoS** and open **Settings → Setup**. It walks you through seven short steps, with pictures of what to click.
+2. **Connect your browser** (step 1): load the companion extension in Chrome, Edge or Brave. Setup shows your browser's own extensions page in your language: turn on **Developer mode**, click **Load unpacked** and choose the folder that **Open extension folder** shows. Pairing is automatic.
+3. **Share a folder and choose access** (steps 2–3): the folder ChatGPT may work in, and what it may do there.
+4. **Connect Core** (steps 4–7): create a tunnel and a restricted API key at OpenAI, press **Connect**, then add the app in ChatGPT under **Plugins → Add → Add custom MCP server**. [Tunnel setup →](docs/setup.md#tunnel-setup)
+5. **Choose a model, write your task and send.**
 
 <details>
 <summary>Requirements &amp; installation notes</summary>
