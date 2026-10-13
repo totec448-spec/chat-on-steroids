@@ -4409,6 +4409,8 @@ const turnStatusLine = turnLine('turn-worked turn-status');
  */
 /** Whether the latest turn was working at the last paint; the status line's class is never cleared. */
 let turnWorking = false;
+/** A redraw is scheduled to retire the running turn's lines after it ended. */
+let staleTurnRedraw = false;
 const turnNow = el('p', 'meta is-progress thinking-line turn-now');
 const turnNowIcon = el('span', 'turn-now-icon');
 const turnNowText = el('span', 'turn-now-text');
@@ -4802,6 +4804,11 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
   const pending = messageOnItsWay();
+  // A message sent while a turn already runs does not open that turn: the turn keeps its line under its
+  // own question. Parked after the pending message, the line said the chat had moved on to it, and the
+  // rows jumped again once it was delivered or cancelled (2026-10-12). Only a message that will open
+  // the work parks the line after it.
+  const runningBefore = working && openTurnId(events) !== null;
   // A page of history read further up ends before the chat does: its newest question is not the one
   // the running turn answers, so it keeps its own worked line and the live one stays off it.
   const live = working && timelineReachesEnd();
@@ -4810,7 +4817,7 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   for (let i = asks.length - 1; i >= 0; i--) {
     const { index, asked } = asks[i]!;
     const latest = i === asks.length - 1;
-    if (latest && live && !pending) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
+    if (latest && live && (!pending || runningBefore)) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
     if (seconds === undefined || (latest && live)) continue;
     rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
@@ -4878,6 +4885,16 @@ function paintStateLine(): void {
   const developer = deps.state()?.config.ui.developerMode;
   if (!developer && !turnStatusLine.closest('#timeline')) parkTurnStatus(working === true);
   if (!developer && working === true) paintTurnStatus({ text: note.textContent ?? '', tone, working, ticking });
+  // The turn's end can reach this line after the rows were last drawn: the header already said
+  // "Worked for", while the timeline kept "Working for" and "Thinking" frozen until the next event
+  // (2026-10-12). Only a redraw of the rows retires them; one, after this repaint. The guard holds
+  // until the stale state itself ends: a redraw that cannot retire the lines (no rows to redraw)
+  // would otherwise schedule the next one from its own repaint, forever.
+  if (developer || working === true || !turnWorking) staleTurnRedraw = false;
+  else if (!staleTurnRedraw) {
+    staleTurnRedraw = true;
+    queueMicrotask(() => { if (turnWorking && stateLine().working !== true) paintDetail(); });
+  }
   // The turn lines carry the caption outside developer mode; the header keeps developer detail.
   note.classList.toggle('is-mirrored', !developer);
   const recovering = paintRecoveryStatus();
