@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Phần này tách biệt với quyền của plugin, và lời nhắc này không phê duyệt lệnh gọi công cụ nào.",
   "Choose a folder to share — step {0}.": "Chọn thư mục để chia sẻ — bước {0}.",
   "Create a tunnel and paste its ID — step {0}.": "Tạo tunnel và dán ID — bước {0}.",
-  "Add a restricted API key — step {0}.": "Thêm API key hạn chế — bước {0}."
+  "Add a restricted API key — step {0}.": "Thêm API key hạn chế — bước {0}.",
+  "Could not read plugin-refresh state": "Không thể đọc trạng thái làm mới plugin",
+  "Could not reset plugin-refresh state": "Không thể đặt lại trạng thái làm mới plugin",
+  "Reset plugin refresh": "Đặt lại làm mới plugin",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Đặt lại sẽ sao lưu trạng thái không đọc được và cho phép khởi động lại việc tự động làm mới plugin. Làm mới có thể ảnh hưởng đến các cuộc trò chuyện ChatGPT hiện có."
 }

@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "这与插件的权限设置无关，此提醒也不会批准任何工具调用。",
   "Choose a folder to share — step {0}.": "选择要共享的文件夹 — 第 {0} 步。",
   "Create a tunnel and paste its ID — step {0}.": "创建隧道并粘贴 ID — 第 {0} 步。",
-  "Add a restricted API key — step {0}.": "添加受限 API 密钥 — 第 {0} 步。"
+  "Add a restricted API key — step {0}.": "添加受限 API 密钥 — 第 {0} 步。",
+  "Could not read plugin-refresh state": "无法读取插件刷新状态",
+  "Could not reset plugin-refresh state": "无法重置插件刷新状态",
+  "Reset plugin refresh": "重置插件刷新",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "重置会备份无法读取的状态，并允许重新开始自动刷新插件。刷新可能影响现有的 ChatGPT 对话。"
 }

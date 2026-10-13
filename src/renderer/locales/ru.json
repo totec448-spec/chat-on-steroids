@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Это не связано с разрешениями плагина, и это напоминание не одобряет вызов инструмента.",
   "Choose a folder to share — step {0}.": "Выберите папку для доступа — шаг {0}.",
   "Create a tunnel and paste its ID — step {0}.": "Создайте туннель и вставьте его ID — шаг {0}.",
-  "Add a restricted API key — step {0}.": "Добавьте API-ключ с ограниченными правами — шаг {0}."
+  "Add a restricted API key — step {0}.": "Добавьте API-ключ с ограниченными правами — шаг {0}.",
+  "Could not read plugin-refresh state": "Не удалось прочитать состояние обновления плагинов",
+  "Could not reset plugin-refresh state": "Не удалось сбросить состояние обновления плагинов",
+  "Reset plugin refresh": "Сбросить обновление плагинов",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Сброс сохраняет копию нечитаемого состояния и позволяет возобновить автоматическое обновление плагинов. Обновление может повлиять на существующие чаты ChatGPT."
 }
