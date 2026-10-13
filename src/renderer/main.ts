@@ -159,6 +159,12 @@ const GROUPS: Group[] = [
 ];
 
 let state: AppState | null = null;
+let updateAllError: string | null = null;
+function paintUpdateOperation(): void {
+  const error = $('updateAllError');
+  error.hidden = !updateAllError;
+  ui(error, 'textContent', () => updateAllError ? t('Update all could not finish: {0}', [t(updateAllError)]) + '\n' + t('Choose Update all to retry.') : '');
+}
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1537,6 +1543,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
+  paintUpdateOperation();
   paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
   paintRecordingStorageNotice(next.recordingStorageFull === true);
@@ -2495,6 +2502,32 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
+const updateAllButton = $<HTMLButtonElement>('updateAll');
+updateAllButton.addEventListener('click', async () => {
+  if (updateAllButton.disabled) return;
+  updateAllButton.disabled = true;
+  updateAllButton.setAttribute('aria-busy', 'true');
+  ui(updateAllButton, 'textContent', () => t('Updating…'));
+  updateAllError = null;
+  paintUpdateOperation();
+  try {
+    const reply = await api.updateAll();
+    if (!reply.ok) { updateAllError = reply.error; toast(t(reply.error)); return; }
+    const result = reply.data;
+    if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
+    else if (result === 'checking-connectors') toast(t('Connector checks requested. Any remaining steps are shown in Update status.'));
+    else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
+  } catch (error) {
+    updateAllError = error instanceof Error ? error.message : String(error);
+  } finally {
+    updateAllButton.disabled = false;
+    updateAllButton.removeAttribute('aria-busy');
+    ui(updateAllButton, 'textContent', () => t('Update all'));
+    paintUpdateOperation();
+  }
+});
+
 
 /**
  * Install the update that is already downloaded.

@@ -2,7 +2,7 @@ import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { setMainTextTranslations } from './main-texts.js';
+import { mainText, setMainTextTranslations } from './main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -154,6 +154,7 @@ import { onConnectorProofChange } from './connector-proof.js';
 import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import { openInPreferredBrowser } from './browser.js';
 import { checkForUpdatesIfStale, manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
+import { updateAll } from './update-all.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -1220,6 +1221,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // artifact makes that mean anything. The quit is what applies it, at the end of the same
   // shutdown sequence every other quit runs; refusing here is how a press with nothing staged
   // avoids closing the app for no reason.
+  handle('update:all', async () => updateAll(quitToInstall, url => shell.openExternal(url), async version => {
+    const window = getWindow();
+    if (!window || window.isDestroyed()) return false;
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'question', title: 'Chat On Steroids',
+      message: mainText('Restart to install the update?'),
+      detail: `${version}\n${mainText('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.')}`,
+      buttons: [mainText('Keep working'), mainText('Restart and install')],
+      defaultId: 0, cancelId: 0, noLink: true
+    });
+    return response === 1 && getWindow() === window && !window.isDestroyed();
+  }));
   handle('update:install', async () => {
     if (!markInstallOnQuit()) throw new Error('There is no downloaded update to install yet');
     logInfo('update: install requested; quitting to hand the update over');

@@ -712,6 +712,9 @@ export interface UpdateStatus {
   checkedAt: number | null;
 }
 
+/** Receipt only; authoritative component state still establishes completion. */
+export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'cancelled';
+
 /** Where an installation that cannot update itself gets the new version by hand. */
 export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
 

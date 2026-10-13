@@ -52,6 +52,10 @@
 .settings-page-head { display: grid; align-items: initial; gap: 0; min-height: 0; margin-bottom: 30px; padding: 0; border: 0; }
 .settings-page-head h1 { margin: 0; font-size: calc(30px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.8px; line-height: 1.2; }
 .settings-page-head p { max-width: 68ch; margin: 9px 0 0; color: var(--soft); font-size: calc(14px * var(--text-scale, 1)); line-height: 1.6; }
+.activity-content { grid-template-rows: auto auto minmax(0, 1fr); }
+.update-actions { margin-bottom: 20px; padding: 20px; }
+.update-actions .btn { width: max-content; padding-inline: 20px; }
+#updateAllError { white-space: pre-line; }
 .workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 28px; }
 .workspace-column { display: contents; }
 .workspace-section { grid-column: 1; min-width: 0; }
