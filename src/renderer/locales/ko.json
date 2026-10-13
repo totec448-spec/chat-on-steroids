@@ -1670,7 +1670,7 @@
   "These files no longer differ from the checkpoint": "이 파일들은 더 이상 체크포인트와 다르지 않습니다",
   "Too many changes to restore at once. Restore files one by one.": "한 번에 복원하기에는 변경 사항이 너무 많습니다. 파일을 하나씩 복원하세요.",
   "Restore files from this checkpoint?": "이 체크포인트에서 파일을 복원할까요?",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "각 파일은 체크포인트 버전으로 돌아가고, 그때 없던 파일은 삭제됩니다. 현재 파일을 먼저 체크포인트로 저장하므로 리뷰에서 되돌릴 수 있습니다.",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "파일이 체크포인트 버전으로 돌아가고 이후에 추가된 파일은 제거됩니다. 현재 파일은 먼저 저장되므로 Review에서 되돌릴 수 있습니다.",
   "More files are not shown.": "더 많은 파일은 표시되지 않습니다.",
   "Keep current files": "현재 파일 유지",
   "Restore files": "파일 복원",

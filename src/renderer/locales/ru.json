@@ -1669,7 +1669,7 @@
   "These files no longer differ from the checkpoint": "Эти файлы больше не отличаются от контрольной точки",
   "Too many changes to restore at once. Restore files one by one.": "Слишком много изменений, чтобы восстановить их за один раз. Восстанавливайте файлы по одному.",
   "Restore files from this checkpoint?": "Восстановить файлы из этой контрольной точки?",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "Каждый файл вернётся к версии из контрольной точки, а файл, которого тогда не было, будет удалён. Сначала текущие файлы сохраняются как контрольная точка, поэтому это можно отменить в «Проверке».",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "Файлы вернутся к версии контрольной точки, добавленные после неё будут удалены. Текущие файлы сначала сохраняются, так что это можно отменить в Review.",
   "More files are not shown.": "Остальные файлы не показаны.",
   "Keep current files": "Оставить текущие файлы",
   "Restore files": "Восстановить файлы",

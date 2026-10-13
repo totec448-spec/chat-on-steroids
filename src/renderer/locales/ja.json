@@ -1670,7 +1670,7 @@
   "These files no longer differ from the checkpoint": "これらのファイルはもうチェックポイントと違いがありません",
   "Too many changes to restore at once. Restore files one by one.": "一度に復元するには変更が多すぎます。ファイルを 1 つずつ復元してください。",
   "Restore files from this checkpoint?": "このチェックポイントからファイルを復元しますか？",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "各ファイルはチェックポイントの版に戻り、当時存在しなかったファイルは削除されます。先に現在のファイルをチェックポイントとして保存するので、レビューから元に戻せます。",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "ファイルはチェックポイントの版に戻り、その後に追加されたファイルは削除されます。現在のファイルは先に保存されるので、Review で元に戻せます。",
   "More files are not shown.": "ほかのファイルは表示されていません。",
   "Keep current files": "現在のファイルを残す",
   "Restore files": "ファイルを復元",

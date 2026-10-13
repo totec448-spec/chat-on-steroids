@@ -1670,7 +1670,7 @@
   "These files no longer differ from the checkpoint": "这些文件与检查点已没有差异",
   "Too many changes to restore at once. Restore files one by one.": "更改太多，无法一次恢复。请逐个恢复文件。",
   "Restore files from this checkpoint?": "要从此检查点恢复文件吗？",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "每个文件都会回到检查点中的版本，当时不存在的文件会被删除。当前文件会先保存为一个检查点，因此你可以在审阅中撤销此操作。",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "文件会恢复到检查点版本，之后新增的文件会被移除。当前文件会先保存，因此你可以在 Review 中撤销。",
   "More files are not shown.": "更多文件未显示。",
   "Keep current files": "保留当前文件",
   "Restore files": "恢复文件",

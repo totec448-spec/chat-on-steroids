@@ -1670,7 +1670,7 @@
   "These files no longer differ from the checkpoint": "Bu dosyalar artık denetim noktasından farklı değil",
   "Too many changes to restore at once. Restore files one by one.": "Bir kerede geri yüklenemeyecek kadar çok değişiklik var. Dosyaları tek tek geri yükleyin.",
   "Restore files from this checkpoint?": "Dosyalar bu denetim noktasından geri yüklensin mi?",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "Her dosya denetim noktasındaki sürümüne döner ve o sırada var olmayan bir dosya kaldırılır. Geçerli dosyalar önce bir denetim noktası olarak kaydedilir, böylece bunu İnceleme bölümünden geri alabilirsiniz.",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "Dosyalar kontrol noktası sürümüne döner; sonradan eklenenler kaldırılır. Geçerli dosyalar önce kaydedilir, böylece bunu İnceleme’de geri alabilirsiniz.",
   "More files are not shown.": "Diğer dosyalar gösterilmiyor.",
   "Keep current files": "Geçerli dosyaları koru",
   "Restore files": "Dosyaları geri yükle",

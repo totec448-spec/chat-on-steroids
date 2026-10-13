@@ -1670,7 +1670,7 @@
   "These files no longer differ from the checkpoint": "Các tệp này không còn khác với điểm kiểm tra",
   "Too many changes to restore at once. Restore files one by one.": "Có quá nhiều thay đổi để khôi phục cùng lúc. Hãy khôi phục từng tệp.",
   "Restore files from this checkpoint?": "Khôi phục các tệp từ điểm kiểm tra này?",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "Mỗi tệp sẽ trở về phiên bản trong điểm kiểm tra, và tệp nào khi đó chưa có sẽ bị xóa. Các tệp hiện tại được lưu thành một điểm kiểm tra trước, nên bạn có thể hoàn tác trong Xem lại.",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "Các tệp trở về phiên bản điểm kiểm tra; tệp thêm sau đó bị xóa. Tệp hiện tại được lưu trước, nên bạn có thể hoàn tác trong Review.",
   "More files are not shown.": "Không hiển thị thêm tệp.",
   "Keep current files": "Giữ các tệp hiện tại",
   "Restore files": "Khôi phục tệp",
