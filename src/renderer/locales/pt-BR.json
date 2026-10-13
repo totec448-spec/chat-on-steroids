@@ -2249,5 +2249,14 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "A redefinição faz uma cópia do estado ilegível e permite reiniciar a atualização automática dos plugins. A atualização pode afetar chats existentes do ChatGPT.",
   "A calm capybara who lifts, chills and never panics.": "Uma capivara tranquila que puxa ferro, relaxa e nunca entra em pânico.",
   "A tiny hamster with a big pre-workout attitude.": "Um hamster minúsculo com muita atitude de pré-treino.",
-  "The built-in Chat On Steroids companion.": "O companheiro que já vem com o Chat On Steroids."
+  "The built-in Chat On Steroids companion.": "O companheiro que já vem com o Chat On Steroids.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Ouvindo com precisão básica. Para ter pontuação e resultados melhores, ative o reconhecimento de fala online nas configurações do Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Nenhum microfone disponível. Conecte um ou permita o acesso ao microfone nas configurações do Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "O Windows bloqueia o acesso ao microfone para aplicativos de área de trabalho. Permita nas configurações do Windows.",
+  "Windows speech recognition lost its internet connection.": "O reconhecimento de fala do Windows perdeu a conexão com a internet.",
+  "The microphone signal was too poor to recognize speech.": "O sinal do microfone estava ruim demais para reconhecer a fala.",
+  "Windows speech recognition stopped unexpectedly.": "O reconhecimento de fala do Windows parou inesperadamente.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Nenhum reconhecedor de fala do Windows está instalado. Instale um pacote de idioma de fala do Windows.",
+  "Windows speech recognition could not start": "Não foi possível iniciar o reconhecimento de fala do Windows",
+  "Windows speech recognition exited unexpectedly": "O reconhecimento de fala do Windows foi encerrado inesperadamente"
 }

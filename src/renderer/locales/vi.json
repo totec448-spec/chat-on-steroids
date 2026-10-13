@@ -2249,5 +2249,14 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Đặt lại sẽ sao lưu trạng thái không đọc được và cho phép khởi động lại việc tự động làm mới plugin. Làm mới có thể ảnh hưởng đến các cuộc trò chuyện ChatGPT hiện có.",
   "A calm capybara who lifts, chills and never panics.": "Một chú capybara điềm tĩnh, tập tạ, thư giãn và không bao giờ hoảng hốt.",
   "A tiny hamster with a big pre-workout attitude.": "Một chú chuột hamster tí hon với tinh thần trước buổi tập đầy khí thế.",
-  "The built-in Chat On Steroids companion.": "Người bạn đồng hành có sẵn của Chat On Steroids."
+  "The built-in Chat On Steroids companion.": "Người bạn đồng hành có sẵn của Chat On Steroids.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Đang nghe với độ chính xác cơ bản. Để có dấu câu và kết quả tốt hơn, hãy bật nhận dạng giọng nói trực tuyến trong cài đặt Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Không có micrô nào. Hãy cắm micrô hoặc cho phép truy cập micrô trong cài đặt Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows đang chặn quyền truy cập micrô của ứng dụng máy tính. Hãy cho phép trong cài đặt Windows.",
+  "Windows speech recognition lost its internet connection.": "Nhận dạng giọng nói của Windows đã mất kết nối internet.",
+  "The microphone signal was too poor to recognize speech.": "Tín hiệu micrô quá kém để nhận dạng giọng nói.",
+  "Windows speech recognition stopped unexpectedly.": "Nhận dạng giọng nói của Windows đã dừng đột ngột.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Chưa cài trình nhận dạng giọng nói của Windows. Hãy cài gói ngôn ngữ giọng nói của Windows.",
+  "Windows speech recognition could not start": "Không thể khởi động nhận dạng giọng nói của Windows",
+  "Windows speech recognition exited unexpectedly": "Nhận dạng giọng nói của Windows đã thoát đột ngột"
 }

@@ -2249,5 +2249,14 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "La réinitialisation sauvegarde l’état illisible et permet de relancer l’actualisation automatique des plugins. L’actualisation peut affecter les chats ChatGPT existants.",
   "A calm capybara who lifts, chills and never panics.": "Un capybara zen qui soulève de la fonte, se détend et ne panique jamais.",
   "A tiny hamster with a big pre-workout attitude.": "Un tout petit hamster avec une grosse énergie de pré-entraînement.",
-  "The built-in Chat On Steroids companion.": "Le compagnon intégré de Chat On Steroids."
+  "The built-in Chat On Steroids companion.": "Le compagnon intégré de Chat On Steroids.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Écoute avec une précision de base. Pour la ponctuation et de meilleurs résultats, activez la reconnaissance vocale en ligne dans les paramètres de Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Aucun microphone n’est disponible. Branchez-en un ou autorisez l’accès au microphone dans les paramètres de Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows bloque l’accès au microphone pour les applications de bureau. Autorisez-le dans les paramètres de Windows.",
+  "Windows speech recognition lost its internet connection.": "La reconnaissance vocale de Windows a perdu sa connexion Internet.",
+  "The microphone signal was too poor to recognize speech.": "Le signal du microphone était trop faible pour reconnaître la parole.",
+  "Windows speech recognition stopped unexpectedly.": "La reconnaissance vocale de Windows s’est arrêtée de manière inattendue.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Aucun module de reconnaissance vocale Windows n’est installé. Installez un module linguistique vocal Windows.",
+  "Windows speech recognition could not start": "La reconnaissance vocale de Windows n’a pas pu démarrer",
+  "Windows speech recognition exited unexpectedly": "La reconnaissance vocale de Windows s’est fermée de manière inattendue"
 }
