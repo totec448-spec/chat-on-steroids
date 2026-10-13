@@ -60,6 +60,12 @@ it('reports readiness only from checked versions and current connector evidence'
   const emptyCore = structuredClone(ready); emptyCore.status.surfaces[0].tools = []; emptyCore.connectorRefresh = {};
   expect(updateReadiness(emptyCore).find(row => row.id === 'core')!.status).toBe('not-run');
   const { setLanguage } = await import('../src/renderer/i18n.js');
+  const olderExtension = structuredClone(ready); olderExtension.bridge.extensionVersion = '2.0.1';
+  expect(updateReadiness(olderExtension).find(row => row.id === 'extension')!.nextStep)
+    .toBe('Let active chats finish, then reload the browser extension in your browser.');
+  const missingExtension = structuredClone(ready); missingExtension.bridge.present = false;
+  expect(updateReadiness(missingExtension).find(row => row.id === 'extension')!.nextStep)
+    .toBe('Open ChatGPT with the browser extension enabled, then choose Review setup.');
   setLanguage('ja'); expect(updateReadiness(ready).find(row => row.id === 'app')!.detail).toContain('最新版です');
 });
 
@@ -90,8 +96,8 @@ it('uses live macOS permission verdicts only for the enabled Desktop capabilitie
   const off = structuredClone(missing); off.status.surfaces[1].state = 'off'; expect(desktop(off).status).toBe('skipped');
   const windows = structuredClone(missing); windows.platform.family = 'windows'; expect(desktop(windows).status).toBe('pass');
   missing.connectorRefresh.desktop = { schemaId: 'desktop-a', state: 'failed', failure: 'inspection' };
-  expect(desktop(missing).reason).toContain('Could not inspect the installed connector');
-  expect(desktop(missing).nextStep).toContain("Open this connector's settings in ChatGPT");
+  expect(desktop(missing).reason).toContain('Could not inspect the installed plugin');
+  expect(desktop(missing).nextStep).toContain("Open this plugin's settings in ChatGPT");
   expect(desktop(missing).nextStep).toContain('check macOS permissions');
 });
 
@@ -122,7 +128,7 @@ it.each(['2.1.33', '2.1.34', '2.1.35', null])('guides extension %s in the correc
   const { updateReadiness } = await import('../src/renderer/update-readiness-state.js');
   const next = state(); next.bridge.extensionVersion = version;
   const row = updateReadiness(next).find(row => row.id === 'extension')!;
-  if (version === '2.1.33') expect(row.nextStep).toContain('reload the companion');
+  if (version === '2.1.33') expect(row.nextStep).toContain('reload the browser extension');
   else if (version === '2.1.34') expect(row.nextStep).toBeUndefined();
   else if (version === '2.1.35') {
     expect(row.nextStep).not.toContain('reload');
