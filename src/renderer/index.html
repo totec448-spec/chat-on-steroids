@@ -912,7 +912,15 @@
                 <button data-view="compact" type="button">Handoff</button>
               </span>
               <span class="subhead-note" id="chatState"></span>
-
+              <!-- Find in chat (⌘F / Ctrl+F): searches the whole recording of the open chat. -->
+              <div class="chat-find" id="chatFind" role="search" aria-label="Find in chat" hidden>
+                <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+                <input id="chatFindField" type="text" placeholder="Find in chat" aria-label="Find in chat" spellcheck="false" autocomplete="off" />
+                <span class="chat-find-count" id="chatFindCount" aria-live="polite"></span>
+                <button class="btn btn-icon" id="chatFindPrev" type="button" title="Previous match" aria-label="Previous match"><i class="ico ph ph-caret-up" aria-hidden="true"></i></button>
+                <button class="btn btn-icon" id="chatFindNext" type="button" title="Next match" aria-label="Next match"><i class="ico ph ph-caret-down" aria-hidden="true"></i></button>
+                <button class="btn btn-icon" id="chatFindClose" type="button" title="Close" aria-label="Close"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+              </div>
             </div>
 
             <div class="scroll" id="chatBody">
