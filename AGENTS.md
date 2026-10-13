@@ -2632,6 +2632,12 @@ A pre-Send withdrawal reports which fence ended it (`left-chat`, `stop-requested
 `new-user-message`, `turn-changed`, `turn-progressed`, `page-final`, `page-unreadable`,
 `journal-pending`, `app-refused` or `lease-lost`), so the log can tell a moving page from a lost claim.
 
+After the computer sleeps (or the process is stopped), every activity deadline is already past.
+`noteRecoverySweepTick` runs on each tick of the 30-second sweep timer; a tick more than two minutes
+after the previous one gives every working chat a fresh `WAKE_GRACE_MS` (90 s) deadline, so pages can
+reconnect and report before silence recovery reloads anything. It grants no activity and changes no
+other recovery clock.
+
 Continue also refreshes the current native assistant response before recovery Stop and
 before and after asynchronous Send authorization. Its exact final message vetoes Continue
 even when the browser journal has not reached the app or a stale Stop control remains.
