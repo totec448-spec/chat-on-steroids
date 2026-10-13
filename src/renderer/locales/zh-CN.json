@@ -2309,5 +2309,9 @@
   "Messages during a running turn": "正在进行的轮次中的消息",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "在 ChatGPT 工作时发送的消息默认如何处理。⌘⇧Enter（Windows 和 Linux 上为 Ctrl+Shift+Enter）按另一种方式发送。",
   "Join the running turn": "加入正在进行的这一轮",
-  "Wait until the turn ends": "等待这一轮结束"
+  "Wait until the turn ends": "等待这一轮结束",
+  "Send messages with": "发送消息的按键",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "用哪个键发送你输入的内容。选择 ⌘Enter（Windows 和 Linux 上为 Ctrl+Enter）时，Enter 用于换行。",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }

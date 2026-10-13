@@ -2309,5 +2309,9 @@
   "Messages during a running turn": "Devam eden bir tur sırasında mesajlar",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT çalışırken gönderdiğin bir mesajın varsayılan davranışı. ⌘⇧Enter (Windows ve Linux'ta Ctrl+Shift+Enter) onu diğer şekilde gönderir.",
   "Join the running turn": "Devam eden tura katıl",
-  "Wait until the turn ends": "Tur bitene kadar bekle"
+  "Wait until the turn ends": "Tur bitene kadar bekle",
+  "Send messages with": "Mesajları şununla gönder",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Yazdığını hangi tuşun gönderdiği. ⌘Enter (Windows ve Linux'ta Ctrl+Enter) seçiliyken Enter yeni satır başlatır.",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }

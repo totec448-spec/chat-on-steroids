@@ -2309,5 +2309,9 @@
   "Messages during a running turn": "Сообщения во время хода",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Что по умолчанию делает сообщение, отправленное, пока ChatGPT работает. ⌘⇧Enter (Ctrl+Shift+Enter в Windows и Linux) отправляет его другим способом.",
   "Join the running turn": "Добавить в текущий ход",
-  "Wait until the turn ends": "Ждать окончания хода"
+  "Wait until the turn ends": "Ждать окончания хода",
+  "Send messages with": "Отправлять сообщения клавишей",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Какая клавиша отправляет набранный текст. С ⌘Enter (Ctrl+Enter в Windows и Linux) Enter начинает новую строку.",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }
