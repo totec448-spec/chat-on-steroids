@@ -1593,8 +1593,13 @@ function pendingComposerInput(): InputEntry | undefined {
       pendingNewInput?.generation === selectionGeneration && pendingNewInput.id === entry.id));
 }
 let durationTimer: number | undefined;
+/** Whether the selected chat's running turn takes a message now (Send directly). */
+function canSendQueuedNow(): boolean {
+  return selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledCanSendDirectly;
+}
 function paintDeliveryControls(): void {
   paintGoalProgress();
+  for (const button of document.querySelectorAll<HTMLButtonElement>('#finishQueue .queue-send-now')) button.hidden = !canSendQueuedNow();
   const working = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledTurnId !== null;
   const queueAtFinish = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledQueueAtFinish;
   const canInject = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledCanInject;
@@ -6112,6 +6117,24 @@ async function refreshInputQueue(): Promise<void> {
         } else cancel.disabled = false;
       };
       if (entry.recovery) { card.append(cancel); return card; }
+      // Like Codex's Steer: send a message that waits for the end of the turn into the turn now.
+      if (entry.mode === 'after-turn' && !entry.attachments?.length && !entry.images?.length && !entry.stages?.length) {
+        const now = dockAction(() => t("Send now"), 'i-arrow-up', () => {});
+        now.classList.add('queue-send-now');
+        ui(now, 'title', () => t("Send into the running turn now"));
+        now.hidden = !canSendQueuedNow();
+        now.onclick = async () => {
+          if (now.disabled || !card.isConnected || selection !== selectionGeneration) return;
+          now.disabled = true;
+          const sent = await run(api.sendQueuedInputNow(entry.id));
+          if (!card.isConnected || selection !== selectionGeneration) return;
+          if (sent === false) toast(t("The turn ended before this message could join it. It stays queued."));
+          if (sent !== true) now.disabled = false;
+          inputQueueGeneration++;
+          void refreshInputQueue();
+        };
+        card.append(now);
+      }
       const queueSessionSummary = sessions.find(row => row.id === selectedId);
       const modelSelection = queueSessionSummary?.selectedModel;
       if (entry.mode === 'finish' && modelSelection?.conversationId === queueSessionSummary?.conversationId && isAstraModel(modelSelection?.model, modelSelection?.reasoningEffort)) {
