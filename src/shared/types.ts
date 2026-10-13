@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from './session.js';
+import type { PluginRefreshStatus } from './plugin-refresh.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from './browser-control.js';
 import type { CommandAllowlistSettings } from './command-allowlist.js';
@@ -694,6 +695,9 @@ export interface UpdateStatus {
   checkedAt: number | null;
 }
 
+/** Receipt only; authoritative component state still establishes completion. */
+export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'cancelled';
+
 /** Where an installation that cannot update itself gets the new version by hand. */
 export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
 
@@ -745,8 +749,12 @@ export interface AppState {
    * local contract only; they are not evidence that ChatGPT has refreshed its cached tools.
    */
   connectorSchemas: Partial<Record<SurfaceId, string>>;
+  /** Provider declaration evidence scoped to the current local schema. */
+  connectorRefresh?: Partial<Record<SurfaceId, PluginRefreshStatus>>;
   /** Per surface, the declaration ChatGPT confirmed after a plugin refresh (or found already current). */
   confirmedConnectorSchemas?: Partial<Record<SurfaceId, string>>;
+  /** Read-only ledger health; no stored content or filesystem paths cross IPC. */
+  pluginRefreshUnreadable?: boolean;
   platform: PlatformInfo;
   /** Only packaged Windows builds may change the login item. */
   loginStartupAvailable?: boolean;

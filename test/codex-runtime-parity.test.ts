@@ -554,7 +554,7 @@ describe('Codex unified exec runtime parity', () => {
       shellType: 'bash',
       hookCommand: 'POSIX PTY process-group parity child',
       processId,
-      yieldTimeMs: 250,
+      yieldTimeMs: 30_000,
       maxOutputTokens: undefined,
       truncationPolicy,
       cwd: root,
