@@ -3169,6 +3169,19 @@ it('notifies when a chat finishes unless switched off', async () => {
   expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
 });
 
+// Codex's "Follow-up behavior", in General.
+it('offers the follow-up behavior, starting at joining the running turn, and saves waiting', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const followUp = w.document.getElementById('followUp') as HTMLSelectElement;
+  expect(followUp.value).toBe('steer');
+  expect([...followUp.options].map(option => option.value)).toEqual(['steer', 'queue']);
+  followUp.value = 'queue';
+  followUp.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.followUp).toBe('queue');
+});
+
 // Codex's "Prevent sleep while running": on unless switched off in General.
 it('keeps the computer awake while a chat works unless switched off', async () => {
   const mounted = await mountChat({});

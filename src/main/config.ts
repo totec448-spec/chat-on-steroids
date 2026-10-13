@@ -346,6 +346,7 @@ const configSchema = z.object({
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional().default(true),
     backgroundPlacement: z.enum(['window', 'group']).optional().default('window').catch('window'),
+    followUp: z.enum(['steer', 'queue']).optional().default('steer').catch('steer'),
     browserBridgePort: browserBridgePortSchema.optional().default('auto'),
     browserOnly: z.boolean().optional().default(false),
     autoRefreshPlugins: z.boolean().optional().default(false),
@@ -569,7 +570,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, turnNotifications: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, turnNotifications: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

@@ -2306,6 +2306,10 @@
   "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente.",
   "Keep the computer awake": "Garder l'ordinateur éveillé",
   "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Pendant qu'un chat travaille, l'ordinateur ne se met pas en veille, pour que les longues tâches continuent. L'écran peut tout de même s'éteindre.",
+  "Messages during a running turn": "Messages pendant un tour en cours",
+  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Ce que fait par défaut un message envoyé pendant que ChatGPT travaille. ⌘⇧Entrée (Ctrl+Maj+Entrée sous Windows et Linux) l'envoie dans l'autre sens.",
+  "Join the running turn": "Rejoindre le tour en cours",
+  "Wait until the turn ends": "Attendre la fin du tour",
   "Notify when a chat finishes": "Prévenir quand un chat a terminé",
   "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Une notification quand la réponse d'un chat est prête alors que cette fenêtre est en arrière-plan. Les workers et les chats avec Goal ou Loop activé ne préviennent pas."
 }
