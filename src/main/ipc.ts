@@ -2,7 +2,7 @@ import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { setMainTextTranslations } from './main-texts.js';
+import { mainText, setMainTextTranslations } from './main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -36,7 +36,7 @@ import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
-import { confirmedPluginSchemas, pluginRefreshPublications } from './plugin-refresh.js';
+import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -149,6 +149,7 @@ import { onConnectorProofChange } from './connector-proof.js';
 import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import { openInPreferredBrowser } from './browser.js';
 import { checkForUpdatesIfStale, manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
+import { updateAll } from './update-all.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -525,7 +526,9 @@ async function buildState(): Promise<AppState> {
     connectorSchemas: Object.fromEntries(
       pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
     ),
+    connectorRefresh: await pluginRefreshStatuses(),
     confirmedConnectorSchemas: confirmedPluginSchemas(),
+    pluginRefreshUnreadable: await pluginRefreshUnreadable(),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
@@ -613,6 +616,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return buildState();
   });
   handle('usage:get', () => usageOverview());
+  handle('plugin-refresh:reset', async () => {
+    await resetPluginRefreshLedger();
+    return buildState();
+  });
   handle('state:get', async () => {
     const state = await buildState();
     // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike
@@ -1163,6 +1170,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // artifact makes that mean anything. The quit is what applies it, at the end of the same
   // shutdown sequence every other quit runs; refusing here is how a press with nothing staged
   // avoids closing the app for no reason.
+  handle('update:all', async () => updateAll(quitToInstall, url => shell.openExternal(url), async version => {
+    const window = getWindow();
+    if (!window || window.isDestroyed()) return false;
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'question', title: 'Chat On Steroids',
+      message: mainText('Restart to install the update?'),
+      detail: `${version}\n${mainText('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.')}`,
+      buttons: [mainText('Keep working'), mainText('Restart and install')],
+      defaultId: 0, cancelId: 0, noLink: true
+    });
+    return response === 1 && getWindow() === window && !window.isDestroyed();
+  }));
   handle('update:install', async () => {
     if (!markInstallOnQuit()) throw new Error('There is no downloaded update to install yet');
     logInfo('update: install requested; quitting to hand the update over');
@@ -1859,6 +1878,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);
   onConnectorProofChange(pushState);
+  onPluginRefreshChange(pushState);
   // A project's native ChatGPT Project changes from the browser; the sidebar and a waiting new chat say so.
   onProjectLinkChange(() => push('session:changed'));
   // A creation armed before the app last quit becomes uncertain on time, not on the browser's next pass.

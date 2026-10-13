@@ -4,6 +4,8 @@ import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
+import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js';
+import { updateErrorText } from './update-error.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -65,6 +67,30 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+let pluginRefreshResetBusy = false;
+let pluginRefreshResetFailed = false;
+function paintPluginRefreshRecovery(next: AppState): void {
+  if (next.pluginRefreshUnreadable !== true) pluginRefreshResetFailed = false;
+  $('pluginRefreshRecovery').hidden = next.pluginRefreshUnreadable !== true;
+  $<HTMLButtonElement>('pluginRefreshReset').disabled = pluginRefreshResetBusy;
+  ui($('pluginRefreshRecoveryError'), 'textContent', () => t(pluginRefreshResetFailed
+    ? 'Could not reset plugin-refresh state' : 'Could not read plugin-refresh state'));
+}
+$('pluginRefreshReset').addEventListener('click', async () => {
+  if (pluginRefreshResetBusy || state?.pluginRefreshUnreadable !== true) return;
+  pluginRefreshResetBusy = true;
+  paintPluginRefreshRecovery(state);
+  try {
+    const reply = await api.resetPluginRefresh();
+    if (!reply.ok) throw new Error('Could not reset plugin-refresh state');
+    pluginRefreshResetFailed = false;
+    apply(reply.data);
+  } catch { pluginRefreshResetFailed = true; }
+  finally {
+    pluginRefreshResetBusy = false;
+    if (state) paintPluginRefreshRecovery(state);
+  }
+});
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 // The tray menu and desktop notices come from the main process, which has no catalogs.
 publishMainTexts(texts => api.setMainTexts?.(texts));
@@ -131,6 +157,7 @@ const GROUPS: Group[] = [
 ];
 
 let state: AppState | null = null;
+let updateAllError: string | null = null;
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1504,6 +1531,8 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
+  paintUpdateReadiness(next, updateAllError);
+  paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
 
   // ---- health numbers and facts
@@ -2452,6 +2481,33 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
+initUpdateReadiness();
+$('updateReviewSetup').addEventListener('click', () => showTab('setup'));
+const updateAllButton = $<HTMLButtonElement>('updateAll');
+updateAllButton.addEventListener('click', async () => {
+  if (updateAllButton.disabled) return;
+  updateAllButton.disabled = true;
+  updateAllButton.setAttribute('aria-busy', 'true');
+  ui(updateAllButton, 'textContent', () => t('Updating…'));
+  updateAllError = null;
+  if (state) paintUpdateReadiness(state, updateAllError);
+  try {
+    const reply = await api.updateAll();
+    if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
+    const result = reply.data;
+    if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
+    else if (result === 'checking-connectors') toast(t('Connector checks requested. Any remaining steps are shown in Update status.'));
+    else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
+  } catch (error) {
+    updateAllError = error instanceof Error ? error.message : String(error);
+  } finally {
+    updateAllButton.disabled = false;
+    updateAllButton.removeAttribute('aria-busy');
+    ui(updateAllButton, 'textContent', () => t('Update all'));
+    if (state) paintUpdateReadiness(state, updateAllError);
+  }
+});
 
 /**
  * Install the update that is already downloaded.
@@ -2495,16 +2551,20 @@ for (const id of ['copyLog', 'copyLogText']) {
 }
 
 // One file for a bug report; the main process removes personal details and shows the saved file.
-$('saveDiagnosticsReport').addEventListener('click', async () => {
-  const button = $<HTMLButtonElement>('saveDiagnosticsReport');
-  button.disabled = true;
+const diagnosticsButtons = [$<HTMLButtonElement>('saveDiagnosticsReport'), $<HTMLButtonElement>('updateDiagnosticsReport')];
+async function saveDiagnosticsReport(): Promise<void> {
+  if (diagnosticsButtons.some(button => button.disabled)) return;
+  for (const button of diagnosticsButtons) button.disabled = true;
   try {
     const result = await run(api.saveDiagnosticsReport());
     if (result?.saved) toast(t('Diagnostics report saved as {0}. Read it before you share it.', [result.name]));
+  } catch (error) {
+    toast(t(error instanceof Error ? error.message : String(error)));
   } finally {
-    button.disabled = false;
+    for (const button of diagnosticsButtons) button.disabled = false;
   }
-});
+}
+for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());

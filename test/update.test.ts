@@ -469,6 +469,12 @@ describe('a download that survives the process that fetched it', () => {
  * the one the user can see - the app comes back.
  */
 describe('installing on request', () => {
+  it('refuses an Update all handoff for a different release than the verified staged artifact', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit('98.0.0')).toBe(false);
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+  });
   it('asks the installer to start the app again', async () => {
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());

@@ -2411,6 +2411,114 @@ it('says nothing about being current until the check has actually answered', asy
 /**
  * A staged update is not "up to date", and it is not a failure either.
  */
+it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  expect(w.document.querySelector('.update-readiness')!.textContent).toContain('asked before the app restarts');
+  expect(button.getAttribute('aria-describedby')).toBe('updateAllNotice');
+  button.click(); button.click(); push(structuredClone(state));
+  expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
+  resolve({ ok: false, error: 'Network unavailable' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(button.textContent).toBe('Update all');
+  button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
+  resolve({ ok: true, data: 'manual' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(w.document.body.textContent).toContain('Download link opened. Install the app to continue');
+});
+
+it.each(['reply', 'transport'])('retains the update command %s error across state pushes', async kind => {
+  const updateAll = vi.fn(() => kind === 'reply' ? Promise.resolve({ ok: false, error: 'Network unavailable' }) : Promise.reject(new Error('Network unavailable')));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+  push(structuredClone(state));
+  expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
+  expect(w.document.getElementById('updateAllError')!.textContent).toContain('Network unavailable');
+  expect(updateAll).toHaveBeenCalledTimes(1);
+});
+
+it('reports update readiness only from checked versions and current connector evidence', async () => {
+  const { window: w, state, push } = await mountChat();
+  const ready = structuredClone(state);
+  ready.update.checkedAt = Date.now();
+  ready.bridge = { ...ready.bridge, paired: true, present: true, extensionVersion: ready.update.current };
+  ready.status = { ...ready.status, state: 'connected', surfaces: [{ id: 'core', connectorName: 'Chat On Steroids Core', optional: false,
+    available: true, state: 'live', detail: '', description: 'Core connector', cardSummary: 'Files and terminal', localUrl: null, publicUrl: null,
+    lastRequestAt: Date.now(), lastToolCallAt: null, tools: ['read'] }] };
+  ready.connectorSchemas = { core: 'schema-a' };
+  ready.connectorRefresh = { core: { schemaId: 'schema-a', state: 'current' } };
+  const summary = () => w.document.getElementById('updateReadinessSummary')!;
+  push(ready);
+  expect(summary()?.dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(ready.update.current);
+  expect(w.document.querySelector('[data-update-part="extension"]')!.textContent).toContain(ready.update.current);
+
+  const notReady = [
+    (s: any) => { s.update.checkedAt = null; },
+    (s: any) => { s.update.stage = 'failed'; },
+    (s: any) => { s.update.latest = '2.0.3'; s.update.stage = 'ready'; },
+    (s: any) => { s.bridge.present = false; },
+    (s: any) => { s.bridge.paired = false; },
+    (s: any) => { s.bridge.extensionVersion = null; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.1'; },
+    (s: any) => { s.bridge.extensionVersion = '2.0.3'; },
+    (s: any) => { s.status.state = 'offline'; },
+    (s: any) => { s.status.surfaces[0].state = 'error'; },
+    (s: any) => { s.status.surfaces[0].lastRequestAt = null; s.status.surfaces[0].proof = { requestAt: Date.now() }; },
+    (s: any) => { s.connectorRefresh = {}; },
+    (s: any) => { s.connectorRefresh.core.schemaId = 'old-schema'; },
+    (s: any) => { s.connectorRefresh.core.state = 'refreshing'; },
+    (s: any) => { s.status.surfaces = []; }
+  ];
+  for (const change of notReady) {
+    const next = structuredClone(ready); change(next); push(next);
+    expect(summary().dataset.ready).toBe('false');
+    expect(summary().textContent).not.toBe('All checks passed');
+  }
+  const working = structuredClone(ready);
+  working.connectorRefresh = { core: { schemaId: 'schema-a', state: 'unknown', responding: true } };
+  push(working);
+  expect(summary().dataset.ready).toBe('true');
+  expect(summary().textContent).toBe('Ready to use; tool definitions not fully verified');
+  expect(w.document.getElementById('updateReadinessDetails')!.hasAttribute('open')).toBe(true);
+  push(ready);
+  const optionalOff = structuredClone(ready);
+  optionalOff.status.surfaces.push({ ...ready.status.surfaces[0], id: 'desktop', connectorName: 'Desktop', optional: true, state: 'off', available: false } as any);
+  push(optionalOff);
+  expect(summary().dataset.ready).toBe('true');
+  expect(w.document.querySelector('[data-update-part="desktop"]')!.textContent).toContain('Not enabled');
+  const emptyPlugins = structuredClone(ready);
+  emptyPlugins.status.surfaces.push({ ...ready.status.surfaces[0], id: 'plugins', connectorName: 'Plugins', optional: true, tools: [], lastRequestAt: null } as any);
+  emptyPlugins.connectorSchemas.plugins = 'empty-schema';
+  emptyPlugins.connectorRefresh.plugins = { schemaId: 'empty-schema', state: 'pending' };
+  push(emptyPlugins);
+  expect(summary().textContent).toBe('All checks passed');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.textContent).toContain('No tools published');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.textContent).not.toContain('Not enabled');
+  expect(w.document.querySelector('[data-update-part="plugins"]')!.classList.contains('is-skipped')).toBe(true);
+  const enabledPlugins = structuredClone(emptyPlugins);
+  enabledPlugins.status.surfaces.at(-1)!.tools = ['plugin_tool'];
+  push(enabledPlugins);
+  expect(summary().dataset.ready).toBe('false');
+  const emptyCore = structuredClone(ready);
+  emptyCore.status.surfaces[0].tools = [];
+  emptyCore.connectorRefresh = {};
+  push(emptyCore);
+  expect(summary().dataset.ready).toBe('false');
+  push(ready);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ja');
+  expect(summary().textContent).toBe('すべての確認が完了しました');
+  expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain('最新版です');
+  setLanguage('en');
+});
+
 it('reports a staged update in the Activity line and the header bar', async () => {
   const mounted = await mountChat();
   const staged = structuredClone(mounted.state) as any;
@@ -3097,4 +3205,32 @@ it('shows a computer name set elsewhere and opens its section, so the suffixed c
   await settle();
   expect((doc.getElementById('connectorSuffix') as HTMLInputElement).value).toBe('Windows');
   expect((doc.getElementById('connectorSuffixField') as HTMLDetailsElement).open).toBe(true);
+});
+
+it('shows unreadable refresh state and allows one explicit reset, including failure and retry', async () => {
+  let finish!: (value: any) => void;
+  const reset = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const mounted = await mountChat({ pluginRefreshUnreadable: true }, [], { resetPluginRefresh: reset });
+  const doc = mounted.window.document;
+  const recovery = doc.getElementById('pluginRefreshRecovery')!;
+  const button = doc.getElementById('pluginRefreshReset') as HTMLButtonElement;
+  expect(recovery.hidden).toBe(false);
+  expect(recovery.textContent).toContain('Could not read plugin-refresh state');
+  expect(reset).not.toHaveBeenCalled();
+  button.click(); button.click();
+  expect(button.disabled).toBe(true); expect(reset).toHaveBeenCalledTimes(1);
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: true });
+  expect(button.disabled).toBe(true);
+  finish({ ok: false, error: 'private filesystem diagnostics' }); await settle();
+  expect(recovery.hidden).toBe(false); expect(button.disabled).toBe(false);
+  expect(recovery.textContent).toContain('Could not reset plugin-refresh state');
+  expect(recovery.textContent).not.toContain('private filesystem');
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: false });
+  expect(recovery.hidden).toBe(true);
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: true });
+  expect(recovery.textContent).toContain('Could not read plugin-refresh state');
+  button.click(); expect(reset).toHaveBeenCalledTimes(2);
+  finish({ ok: true, data: { ...mounted.state, pluginRefreshUnreadable: false } }); await settle();
+  expect(recovery.hidden).toBe(true);
+  button.click(); expect(reset).toHaveBeenCalledTimes(2);
 });
