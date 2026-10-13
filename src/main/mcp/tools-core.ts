@@ -208,7 +208,7 @@ const unifiedExecOutputSchema = z
       .optional()
       .describe('Session ID while running.'),
     completed_session_id: z.number().optional().describe('Use as write_stdin session_id to reread completed output.'),
-    benign_exit: z.boolean().optional().describe('Non-zero exit is an expected result, not a failure.'),
+    expected_exit: z.boolean().optional().describe('Non-zero exit is an expected result, not a failure.'),
     output_replayed: z.boolean().optional().describe('Retained output; command was not run again.'),
     original_token_count: z.number().optional().describe('Approximate token count before output truncation.'),
     output: z.string().describe('Command output text, possibly truncated.'),

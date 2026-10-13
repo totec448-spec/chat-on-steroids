@@ -1028,8 +1028,9 @@ Every successful launch also returns a session id when it finishes immediately. 
 `write_stdin` calls can reread completed output after direct polling or automatic delivery;
 structured results keep `session_id` for running work and use `completed_session_id` for
 finished work, so existing polling loops still stop. Either id is the `write_stdin` input.
-On every OS, structured `output_replayed` marks a retained reread and `benign_exit` marks a
-proven expected non-zero result; raw exit codes remain intact. ChatGPT gives the model the
+On every OS, structured `output_replayed` marks a retained reread and `expected_exit` marks a
+proven expected non-zero result (`benign_exit` until 2.1.35; renamed with the Windows shell notes
+for #1417, because ChatGPT's approval reviewer read both as a tool ruling on risk); raw exit codes remain intact. ChatGPT gives the model the
 structured result rather than the text, so `exec_command`'s advisory `Note:` lines (batch
 exit codes, benign exits, recovery hints, a still-running identical command) are also carried
 in structured `supplemental_context`; delivery appends its own app context there after them.
