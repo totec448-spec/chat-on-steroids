@@ -2265,5 +2265,16 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "読み取れないファイルを退避して、保存済みのキーなしでやり直しますか？ API キーとプラグインのシークレットは再入力が必要になり、ブラウザー拡張機能の再接続が必要になる場合があります。古いファイルはバックアップとして残ります。",
   "Started fresh. Enter your keys again.": "最初からやり直しました。キーをもう一度入力してください。",
   "The saved keys can be read again. Nothing was changed.": "保存されているキーを再び読み取れるようになりました。何も変更していません。",
-  "Could not start fresh.": "やり直せませんでした。"
+  "Could not start fresh.": "やり直せませんでした。",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "長時間の実行がより安定し、プロキシ環境でもトンネルが動作し、ChatGPT と同じ言葉を使います。",
+  "Steadier long runs": "長時間の実行がより安定",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "スリープ後も含めてチャットがより確実に復旧し、タイムラインは長いターンを正しい順序に保ちます。",
+  "Works behind a proxy": "プロキシ環境で動作",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "ChatGPT へのトンネルが、システムのプロキシを自動で使います。",
+  "Better dictation on Windows": "Windows の音声入力が向上",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "音声入力に Windows 自体の音声認識を使い、句読点付きで精度が大きく向上しました。",
+  "Plugins, as ChatGPT calls them": "ChatGPT と同じ「プラグイン」",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "アプリは ChatGPT と同じく「プラグイン」と呼ぶようになり、ツールの多いプラグインもインストールできます。",
+  "Start chats from your own tools": "自分のツールからチャットを開始",
+  "The Local control API can start a new chat and send its events as they happen.": "ローカル制御 API で新しいチャットを開始し、そのイベントを発生と同時に受け取れます。"
 }

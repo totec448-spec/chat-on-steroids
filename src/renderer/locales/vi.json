@@ -2265,5 +2265,16 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Để tệp không đọc được sang một bên và bắt đầu lại mà không có khóa đã lưu? Bạn sẽ phải nhập lại các khóa API và bí mật của plugin, và có thể phải kết nối lại tiện ích trình duyệt. Tệp cũ được giữ lại làm bản sao lưu.",
   "Started fresh. Enter your keys again.": "Đã bắt đầu lại. Hãy nhập lại các khóa của bạn.",
   "The saved keys can be read again. Nothing was changed.": "Các khóa đã lưu đã đọc được trở lại. Không có gì thay đổi.",
-  "Could not start fresh.": "Không thể bắt đầu lại."
+  "Could not start fresh.": "Không thể bắt đầu lại.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Các lượt chạy dài ổn định hơn, tunnel hoạt động sau proxy và dùng đúng từ ngữ của ChatGPT.",
+  "Steadier long runs": "Các lượt chạy dài ổn định hơn",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Cuộc trò chuyện khôi phục đáng tin cậy hơn, kể cả sau khi máy tính ngủ, và dòng thời gian giữ đúng thứ tự các lượt dài.",
+  "Works behind a proxy": "Hoạt động sau proxy",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "Tunnel đến ChatGPT tự dùng proxy của hệ thống.",
+  "Better dictation on Windows": "Đọc chính tả tốt hơn trên Windows",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "Đọc chính tả dùng nhận dạng giọng nói của chính Windows, có dấu câu và chính xác hơn nhiều.",
+  "Plugins, as ChatGPT calls them": "Plugin, như ChatGPT gọi",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "Ứng dụng giờ gọi là plugin giống ChatGPT, và có thể cài các plugin có nhiều công cụ.",
+  "Start chats from your own tools": "Bắt đầu cuộc trò chuyện từ công cụ của bạn",
+  "The Local control API can start a new chat and send its events as they happen.": "API điều khiển cục bộ có thể bắt đầu cuộc trò chuyện mới và gửi các sự kiện của nó ngay khi xảy ra."
 }

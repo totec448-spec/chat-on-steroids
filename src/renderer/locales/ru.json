@@ -2265,5 +2265,16 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Отложить нечитаемый файл и начать без сохранённых ключей? Ключи API и секреты плагинов придётся ввести снова, а расширение браузера, возможно, подключить заново. Старый файл сохранится как резервная копия.",
   "Started fresh. Enter your keys again.": "Начато заново. Введите ключи ещё раз.",
   "The saved keys can be read again. Nothing was changed.": "Сохранённые ключи снова читаются. Ничего не изменено.",
-  "Could not start fresh.": "Не удалось начать заново."
+  "Could not start fresh.": "Не удалось начать заново.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Более стабильные длинные запуски, туннель, работающий через прокси, и собственные слова ChatGPT.",
+  "Steadier long runs": "Более стабильные длинные запуски",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Чаты надёжнее восстанавливаются, в том числе после сна компьютера, а лента сохраняет порядок длинных ходов.",
+  "Works behind a proxy": "Работает через прокси",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "Туннель к ChatGPT сам использует системный прокси.",
+  "Better dictation on Windows": "Улучшенная диктовка в Windows",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "Диктовка использует собственное распознавание речи Windows — с пунктуацией и гораздо точнее.",
+  "Plugins, as ChatGPT calls them": "Плагины, как их называет ChatGPT",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "Приложение теперь говорит «плагин», как ChatGPT, а плагины с большим числом инструментов можно установить.",
+  "Start chats from your own tools": "Запуск чатов из ваших инструментов",
+  "The Local control API can start a new chat and send its events as they happen.": "Локальный API управления может начать новый чат и передавать его события по мере появления."
 }

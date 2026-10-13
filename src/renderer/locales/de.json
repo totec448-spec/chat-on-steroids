@@ -2265,5 +2265,16 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Die unlesbare Datei beiseitelegen und ohne gespeicherte Schlüssel neu beginnen? Deine API-Schlüssel und Plugin-Geheimnisse musst du erneut eingeben, und die Browser-Erweiterung muss eventuell neu verbunden werden. Die alte Datei bleibt als Sicherung erhalten.",
   "Started fresh. Enter your keys again.": "Neu begonnen. Gib deine Schlüssel erneut ein.",
   "The saved keys can be read again. Nothing was changed.": "Die gespeicherten Schlüssel sind wieder lesbar. Es wurde nichts geändert.",
-  "Could not start fresh.": "Neubeginn nicht möglich."
+  "Could not start fresh.": "Neubeginn nicht möglich.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Stabilere lange Läufe, ein Tunnel, der hinter einem Proxy funktioniert, und ChatGPTs eigene Begriffe.",
+  "Steadier long runs": "Stabilere lange Läufe",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Chats erholen sich zuverlässiger, auch nachdem dein Computer geschlafen hat, und die Zeitleiste hält lange Durchläufe in Ordnung.",
+  "Works behind a proxy": "Funktioniert hinter einem Proxy",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "Der Tunnel zu ChatGPT nutzt den Proxy deines Systems von selbst.",
+  "Better dictation on Windows": "Bessere Diktierfunktion unter Windows",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "Das Diktieren nutzt die Spracherkennung von Windows selbst, mit Satzzeichen und viel höherer Genauigkeit.",
+  "Plugins, as ChatGPT calls them": "Plugins, wie ChatGPT sie nennt",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "Die App sagt jetzt Plugin, wie ChatGPT, und Plugins mit vielen Tools lassen sich installieren.",
+  "Start chats from your own tools": "Chats aus deinen eigenen Tools starten",
+  "The Local control API can start a new chat and send its events as they happen.": "Die lokale Steuerungs-API kann einen neuen Chat starten und seine Ereignisse senden, sobald sie geschehen."
 }

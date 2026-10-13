@@ -2265,5 +2265,16 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "將無法讀取的檔案移到一旁，並在沒有已儲存金鑰的情況下重新開始？你需要重新輸入 API 金鑰和外掛程式密鑰，瀏覽器擴充功能可能也需要重新連線。舊檔案會保留作為備份。",
   "Started fresh. Enter your keys again.": "已重新開始。請重新輸入你的金鑰。",
   "The saved keys can be read again. Nothing was changed.": "已儲存的金鑰又可以讀取了。未做任何變更。",
-  "Could not start fresh.": "無法重新開始。"
+  "Could not start fresh.": "無法重新開始。",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "長時間執行更穩定，隧道可在代理伺服器後運作，並使用 ChatGPT 自己的說法。",
+  "Steadier long runs": "長時間執行更穩定",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "聊天恢復更可靠，電腦睡眠後也一樣，時間軸也會讓長回合保持正確順序。",
+  "Works behind a proxy": "可在代理伺服器後運作",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "通往 ChatGPT 的隧道會自動使用系統的代理伺服器。",
+  "Better dictation on Windows": "Windows 上更好的聽寫",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "聽寫使用 Windows 內建的語音辨識，加上標點，準確度大幅提升。",
+  "Plugins, as ChatGPT calls them": "外掛，與 ChatGPT 的叫法一致",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "應用程式現在和 ChatGPT 一樣稱之為外掛，工具很多的外掛也可以安裝了。",
+  "Start chats from your own tools": "從你自己的工具開始聊天",
+  "The Local control API can start a new chat and send its events as they happen.": "本機控制 API 可以開始新聊天，並在事件發生時立即傳送。"
 }
