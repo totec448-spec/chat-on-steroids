@@ -1,139 +1,115 @@
-# T3 Code to ChatGPT through CoS
+# Direct T3 Code orchestration through CoS
 
-`scripts/t3-code-bridge.mjs` is a dependency-free Node 22+ command-line bridge for T3 Code and
-other local agents. It connects to CoS's existing authenticated local control API. CoS remains
-the owner of chats, message delivery and workers; the bridge keeps no separate task database.
+The Node 22+ CLI `scripts/t3-code-bridge.mjs` lets a local T3 Code agent own orchestration
+and drive CoS's native broker workers directly. There is no ChatGPT coordinator conversation:
 
-```text
-T3 Code -> CLI -> CoS local control API -> ChatGPT coordinator -> CoS agents workers
-T3 Code <- CLI <- session events / delivery receipts / worker state
-```
+`T3 orchestrator -> CLI -> CoS local API -> existing broker -> ChatGPT workers`
 
-Delegation is a request to a ChatGPT coordinator to use the CoS `agents` tool. Acceptance by
-the outbox does not prove the coordinator followed the instruction or spawned workers. Check
-the coordinator's recorded updates and actual broker state. Direct writes into worker chats
-remain refused by CoS; send corrections or worker follow-up requests to the coordinator.
+The broker still owns capacity, identity, durable admission, workspace isolation, messages,
+sleep/reuse and reports. MCP and local callers share admission code in `agent-admission.ts`.
+The CLI stores no separate worker database and makes no model calls of its own.
 
-## Setup
+## Setup and updates
 
-1. Install and connect CoS and its ChatGPT Core connector as described in [Setup](setup.md).
-2. Enable multi-agent workers in CoS and retain your preferred model/effort defaults.
-3. In **Settings -> General -> For developers**, enable **Local control API**. Enable
-   **Allow actions** for delegation and messages. These switches grant the access documented
-   in [Local control API](setup.md#local-control-api); the bridge never changes them itself.
-4. Keep this checkout on the same computer as CoS. Give T3 Code the absolute script path.
+Use a CoS build containing the v1 worker routes below. Enable **Local control API** and
+**Allow actions** in Settings -> General -> For developers, enable multi-agent workers,
+and complete CoS's normal ChatGPT/Core/browser setup. See [Setup](setup.md).
 
-No additional MCP server, API key, public tunnel or T3 source patch is required for the CLI.
-The short [`cos-bridge` skill](../.agents/skills/cos-bridge/SKILL.md) lists every command for
-agents using this checkout. To use it across projects, link its folder into your user skills
-directory; its checkout resolution uses the linked folder's real location.
-The existing CoS-to-ChatGPT connection still needs its normal setup. Credentials are read
-from CoS's per-launch `control-api` files and stay out of arguments and results. The CLI binds
-requests to `127.0.0.1`, follows no redirects, and never retries a mutation automatically.
+The short [cos-bridge skill](../.agents/skills/cos-bridge/SKILL.md) lists every CLI operation.
+Link its folder into your user skills directory to use it across projects; resolve the
+checkout using the skill folder's real location. No extra MCP server or API key is needed.
 
-## Invoke from T3 Code
+The bridge discovers the ephemeral loopback endpoint and per-launch token from CoS userData.
+Credentials stay out of arguments/results; requests go only to 127.0.0.1 without redirects.
+The existing filesystem token and action grant protect local worker control, just as they
+protect ordinary chat sends. `ownerId` is a durable routing identity, not an authentication
+secret or a claimed ChatGPT conversation. MCP tool arguments cannot set that local principal.
 
-Write requests as UTF-8 JSON files rather than interpolating messages into shell commands:
+The client uses advertised versioned API routes, not Electron internals, database writes,
+private browser endpoints or imported application modules. Additive CoS changes need no CLI
+change; a build without the v1 worker surface returns `worker_broker_unavailable` before
+a worker mutation. It never falls back to a coordinator. Older installed versions require
+an updated CoS build. Maintaining the upstream API preserves this integration across releases;
+a future breaking API change still requires deliberate client adaptation.
 
-```powershell
-node "C:/path/to/chat-on-steroids/scripts/t3-code-bridge.mjs" health
-node "C:/path/to/chat-on-steroids/scripts/t3-code-bridge.mjs" sessions
-node "C:/path/to/chat-on-steroids/scripts/t3-code-bridge.mjs" delegate --request-file delegate.json
-```
+## Requests
 
-`--data-dir <directory>` overrides the CoS user data directory for a custom installation.
-Otherwise it uses `%APPDATA%/chat-on-steroids` on Windows, `~/Library/Application Support/chat-on-steroids`
-on macOS, or `$XDG_CONFIG_HOME/chat-on-steroids` (default `~/.config`) on Linux.
+Write UTF-8 JSON files; use a persistent lowercase UUID `ownerId` for each T3 task.
+Preserve returned `runId` and worker ids; a sleeping family gets a fresh incarnation when
+revived, and the broker keeps bounded former-run selectors for its own caller.
 
-Generate a fresh lowercase UUID for each intended message and store it **before sending**.
-Keep that UUID and request file for delivery reconciliation. Example `delegate.json`:
+`node /path/to/chat-on-steroids/scripts/t3-code-bridge.mjs delegate --request-file job.json`
+
+Example `job.json`:
 
 ```json
 {
-  "id": "11111111-1111-4111-8111-111111111111",
-  "sessionId": "22222222-2222-4222-8222-222222222222",
-  "context": "Repository /path/to/project. Read AGENTS.md. Read-only audit; do not edit files.",
+  "ownerId": "11111111-1111-4111-8111-111111111111",
+  "context": "Repo /path/to/project. Read AGENTS.md. Read-only audit; report specific evidence.",
   "workers": [
-    { "label": "Architecture", "task": "Inspect the module boundaries and report specific findings." },
-    { "label": "Tests", "task": "Inspect test coverage and report missing behavioral cases." }
+    { "label": "Architecture", "task": "Inspect module boundaries." },
+    { "label": "Tests", "task": "Inspect behavioral test coverage." }
   ]
 }
 ```
 
-Use an explicitly selected coordinator session from `sessions`. Current GitHub builds also
-allow omitting `sessionId` to open a new coordinator, optionally with `projectId`. The new
-session id equals the input UUID. Some installed builds report the same protocol/version
-but require an existing `sessionId`; an `invalid_body` response does not trigger a retry or
-automatic chat selection. Create a chat in CoS and supply its exact session id in that case.
+An optional known `projectId` selects CoS's approved project workspace. When automatic
+worktrees are enabled, this uses the same allocation and permission checks as MCP worker
+spawn. Without a project, supply approved absolute repo paths in context; no workspace is
+guessed. Worker models/effort come from saved CoS defaults. A spawn admits workers as invited;
+it does not prove the browser has started or completed their assignments.
 
-The bridge asks the coordinator to reuse suitable sleeping workers, respect capacity,
-omit model/effort overrides, prohibit nested delegation, report run/worker ids and collect
-reports before finalizing. There may be fewer concurrent slots than requested assignments.
+All commands print JSON lines and exit nonzero on failure. Unknown fields are refused.
+`--data-dir <directory>` overrides CoS userData; defaults are the normal Windows APPDATA,
+macOS Application Support or Linux XDG config locations for `chat-on-steroids`.
 
-## Commands and request fields
+| Command | Request fields |
+| --- | --- |
+| `health`, `status` | None: advertised capabilities or connection/browser/runtime state. |
+| `delegate` | `ownerId`, `workers` (1–8; task/label), optional `runId`, `context`, `projectId`. |
+| `message` | `ownerId`, `messages` (1–16; to/text/optional label), optional `runId`. |
+| `agents` | `ownerId`, optional `runId`: compact worker state, exact session ids, free slots and parked history. |
+| `reports` | `ownerId`, optional `runId`: unread messages/reports with receipt ids and run ids. |
+| `ack` | `ownerId`, `messageIds` (1–128 opaque returned ids), optional `runId`. |
+| `sessions` | Optional `limit` (1–50; default 20), `cursor`: one session page. |
+| `session` | `sessionId`: exact session and live projection. |
+| `updates` | `sessionId`, optional `from` (default 0), `durationMs` (1–45000; default 30000), `limit` (1–100; default 100). |
+| `send` | Ordinary chat: `id`, `text`, optional `sessionId`, `projectId`, `interrupt`. |
+| `inputs` | Optional ordinary message `id`: exact delivery receipt or recent outbox rows. |
 
-Each invocation prints JSON lines on stdout and exits nonzero on failure. Unknown fields and
-malformed ids are refused before a request is sent. Commands with no fields need no request file.
+Worker task/context/message text is limited to 4,000 characters; labels to 60. Reuse a
+suitable sleeping worker with `message` before spawning a replacement. Broker status omits
+task bodies and results; read `reports` only when collecting new work. Reports are offered
+at least once: save them before `ack`, and deduplicate receipt ids when re-reading. A status
+read never acknowledges reports. Local owner ids persist in the broker's existing v7 snapshot
+through parking/restart; they cannot select another owner or an unrelated ChatGPT prime.
 
-| Command | JSON request | Result |
-| --- | --- | --- |
-| `health` | none | App version, protocol, advertised routes and action grant. |
-| `status` | none | Existing connection, browser bridge and in-flight tool state. |
-| `sessions` | Optional `limit` (1–50, default 20), `cursor`. | One session page, including `nextCursor`. |
-| `session` | `sessionId`. | Exact session plus its existing `live` projection. |
-| `agents` | Optional `runId`. | Existing broker state, optionally filtered by exact run incarnation. |
-| `delegate` | `id`, `workers` (1–8); optional `sessionId`, `projectId`, `context`, `interrupt`. | Outbox response plus `delegation: "requested"`. |
-| `send` | `id`, `text`; optional `sessionId`, `projectId`, `interrupt`. | Outbox admission/replay response. |
-| `inputs` | Optional `id`. | Recent outbox rows, or the exact row and a retention warning. |
-| `updates` | `sessionId`; optional `from` (default 0), `durationMs` (1–45000, default 30000), `limit` (1–100, default 100). | Event lines, then `{ "end": "…", "nextFrom": … }`. |
+After a timeout or lost response, inspect status/reports before retrying a worker mutation.
+The CLI never automatically retries it. Use `updates` with a worker's returned `sessionId`
+to inspect progress; save the final `nextFrom` cursor. Streaming is used when advertised,
+otherwise one cursor page is returned. Sequence revisions need not be chronological; upsert
+by message id. End reasons `duration`, `limit`, `page`, `stopped` and `max_duration`
+finish the read, not the task. Failed streams return a consumed cursor and exit nonzero.
+Raw tool arguments/results are excluded. Keep private returned history local.
 
-`projectId` applies only to a new chat. `interrupt:true` explicitly consents to a send that
-would stop the answer being written. Ordinary messages never set it by default. Worker tasks
-and shared context are limited to 4,000 characters, matching the CoS agents schema. Message
-text, including serialized delegation assignments and coordinator instructions, is limited
-to 64,000 characters. Use saved defaults for model and effort.
+Ordinary `send` is separate from broker messaging. Persist a new UUID before each intended
+chat message, inspect `inputs` for delivery, and never resend `unconfirmed` delivery. Missing
+outbox history does not prove non-delivery. Worker chats are controlled with `message`, not
+ordinary `send`. `interrupt:true` consents to stopping an ordinary chat's current answer.
 
-## Follow work and send updates
+## API contract
 
-After admission, use `inputs` with `{ "id": "<input UUID>" }` to inspect delivery. The verdicts
-come from CoS: `pending`, `sent`, `not_sent`, or `unconfirmed`. A timeout or a lost connection
-can happen after admission; the error includes `inputId` so you can reconcile it. **Never
-resend an unconfirmed delivery.** A missing row can be evicted history, so it does not prove
-that the message never arrived. Idempotent replay lasts only as long as CoS retains the row.
-
-Use `updates` with `{ "sessionId": "<coordinator session>", "from": 0 }`. It streams when
-`health.routes` advertises the stream route; otherwise it returns one existing event page.
-Each event has a `nextFrom` sequence cursor. Persist the final cursor and pass it back on the
-next read. Revisions to the same message get new sequences; a timeline should upsert by
-message id rather than append every revision as a separate message. `duration`, `limit` and
-`page` end a read, **not the task**. An interrupted stream returns the last consumed cursor
-and a nonzero exit. The bridge does not automatically reconnect.
-
-Updates include user/assistant messages, progress, agent messages, turn boundaries and chat
-errors. They exclude raw tool arguments/results. Text is already redacted and bounded by CoS,
-but arbitrary private text can still be present: keep returned history local.
-
-To give ChatGPT a correction, use `send` with a fresh UUID, the exact coordinator `sessionId`,
-and `text`. To follow up with a worker, ask that coordinator to message the returned worker
-id within its exact run. `agents` is the global local-control projection, distinct from the
-caller-scoped MCP `agents status`; a `runId` filter does not grant additional authority.
-
-Suggested standing instruction for a T3 task:
-
-> Use the CoS bridge at the supplied absolute path. Delegate only authorized bounded work.
-> Persist a UUID and request JSON before sending. Distinguish admission, delivery, worker
-> activity and completion. Read updates with the saved cursor, and return factual worker
-> reports to me. Keep messages, credentials and local paths out of public evidence.
+Authenticated GET `/v1/workers/{ownerId}` and `.../reports` accept optional `runId`.
+POST `.../spawn`, `.../message` and `.../ack` use the corresponding command bodies without
+`ownerId` (it is in the path). They share the existing action gate, framing, size/rate bounds,
+serialization and deadlines. Saved model defaults and browser handout remain broker-owned.
 
 ## Verification
 
-```powershell
-npx vitest run test/t3-code-bridge.test.ts
-npm run verify
-```
+`npx vitest run test/t3-code-bridge.test.ts test/control-api-workers.test.ts`
 
-The CLI tests use real child processes and an isolated loopback HTTP server with fixture-only
-credentials. They cover delegation, messages, delivery, runtime projections, streaming/page
-cursors, fragmented UTF-8, bounded reads, refusals and lost acknowledgements. They contact no
-installed CoS app or provider. Live acceptance additionally requires sending a harmless task
-to an explicitly chosen coordinator and observing its actual worker result.
+CLI tests use fixture credentials and real loopback HTTP; direct-control tests also use the
+real broker/durable admission with provider/browser boundaries simulated. They cover spawning
+without a ChatGPT prime, worker reports/ack/reuse, restart ownership, foreign-run refusal,
+action revocation during persistence, event cursors and transport failures. `npm run verify`
+is the full project gate. Live direct-worker acceptance requires a build advertising this API.
