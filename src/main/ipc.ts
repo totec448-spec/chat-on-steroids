@@ -223,6 +223,7 @@ const settingsPatch = z.object({
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional(),
     backgroundPlacement: z.enum(['window', 'group']).optional(),
+    followUp: z.enum(['steer', 'queue']).optional(),
     browserBridgePort: browserBridgePortSchema.optional(),
     browserOnly: z.boolean().optional(),
     autoRefreshPlugins: z.boolean().optional(),
@@ -393,6 +394,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       finishLeadMinutes: pick(current.ui.finishLeadMinutes, base.ui.finishLeadMinutes, wanted.ui.finishLeadMinutes),
       backgroundChats: pick(current.ui.backgroundChats, base.ui.backgroundChats, wanted.ui.backgroundChats),
       backgroundPlacement: pick(current.ui.backgroundPlacement, base.ui.backgroundPlacement, wanted.ui.backgroundPlacement),
+      followUp: pick(current.ui.followUp, base.ui.followUp, wanted.ui.followUp),
       browserBridgePort: wanted.ui.browserBridgePort === undefined ? current.ui.browserBridgePort
         : pick(current.ui.browserBridgePort ?? 'auto', base.ui.browserBridgePort ?? 'auto', wanted.ui.browserBridgePort),
       browserOnly: pick(current.ui.browserOnly, base.ui.browserOnly, wanted.ui.browserOnly),

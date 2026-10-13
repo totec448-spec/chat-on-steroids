@@ -2303,5 +2303,9 @@
   "Freed {0} MB. {1} GB of recording storage is now available.": "Đã giải phóng {0} MB. Hiện có {1} GB bộ nhớ ghi lại trống.",
   "Send now": "Gửi ngay",
   "Send into the running turn now": "Gửi ngay vào lượt đang chạy",
-  "The turn ended before this message could join it. It stays queued.": "Lượt đã kết thúc trước khi tin nhắn này kịp tham gia. Tin nhắn vẫn nằm trong hàng đợi."
+  "The turn ended before this message could join it. It stays queued.": "Lượt đã kết thúc trước khi tin nhắn này kịp tham gia. Tin nhắn vẫn nằm trong hàng đợi.",
+  "Messages during a running turn": "Tin nhắn trong lượt đang chạy",
+  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Điều mà tin nhắn bạn gửi khi ChatGPT đang làm việc thực hiện theo mặc định. ⌘⇧Enter (Ctrl+Shift+Enter trên Windows và Linux) sẽ gửi theo cách còn lại.",
+  "Join the running turn": "Tham gia lượt đang chạy",
+  "Wait until the turn ends": "Chờ đến khi lượt kết thúc"
 }
