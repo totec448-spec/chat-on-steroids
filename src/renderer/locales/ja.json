@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "読み取れないファイルを退避して、保存済みのキーなしでやり直しますか？ API キーとプラグインのシークレットは再入力が必要になり、ブラウザー拡張機能の再接続が必要になる場合があります。古いファイルはバックアップとして残ります。",
   "Started fresh. Enter your keys again.": "最初からやり直しました。キーをもう一度入力してください。",
   "The saved keys can be read again. Nothing was changed.": "保存されているキーを再び読み取れるようになりました。何も変更していません。",
-  "Could not start fresh.": "やり直せませんでした。"
+  "Could not start fresh.": "やり直せませんでした。",
+  "Recording storage": "記録用ストレージ",
+  "Images and long texts recorded from your chats, up to 2 GB.": "チャットから記録した画像と長いテキスト（最大 2 GB）。",
+  "Compact & Resume · waiting for this turn to end": "圧縮して再開 · このターンの終了を待っています",
+  "Compact & Resume · asking ChatGPT for the handoff": "圧縮して再開 · ChatGPT に引き継ぎを依頼中",
+  "The handoff request is sent as soon as this turn ends.": "このターンが終わり次第、引き継ぎの依頼を送信します。",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids が新しいチャット用の要約を書くよう ChatGPT に依頼しています。"
 }

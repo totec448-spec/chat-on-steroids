@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "将无法读取的文件移到一边，并在没有已保存密钥的情况下重新开始？你需要重新输入 API 密钥和插件机密，浏览器扩展可能也需要重新连接。旧文件会作为备份保留。",
   "Started fresh. Enter your keys again.": "已重新开始。请重新输入你的密钥。",
   "The saved keys can be read again. Nothing was changed.": "已保存的密钥又可以读取了。未做任何更改。",
-  "Could not start fresh.": "无法重新开始。"
+  "Could not start fresh.": "无法重新开始。",
+  "Recording storage": "记录存储空间",
+  "Images and long texts recorded from your chats, up to 2 GB.": "从你的聊天中记录的图片和长文本，最多 2 GB。",
+  "Compact & Resume · waiting for this turn to end": "压缩并继续 · 正在等待本轮结束",
+  "Compact & Resume · asking ChatGPT for the handoff": "压缩并继续 · 正在向 ChatGPT 请求交接",
+  "The handoff request is sent as soon as this turn ends.": "本轮结束后会立即发送交接请求。",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids 正在请求 ChatGPT 为新聊天撰写摘要。"
 }

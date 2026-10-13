@@ -2265,5 +2265,11 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "읽을 수 없는 파일을 따로 보관하고 저장된 키 없이 새로 시작할까요? API 키와 플러그인 시크릿을 다시 입력해야 하며, 브라우저 확장 프로그램을 다시 연결해야 할 수도 있습니다. 기존 파일은 백업으로 보관됩니다.",
   "Started fresh. Enter your keys again.": "새로 시작했습니다. 키를 다시 입력하세요.",
   "The saved keys can be read again. Nothing was changed.": "저장된 키를 다시 읽을 수 있습니다. 변경된 내용은 없습니다.",
-  "Could not start fresh.": "새로 시작할 수 없습니다."
+  "Could not start fresh.": "새로 시작할 수 없습니다.",
+  "Recording storage": "기록 저장 공간",
+  "Images and long texts recorded from your chats, up to 2 GB.": "채팅에서 기록한 이미지와 긴 텍스트입니다(최대 2GB).",
+  "Compact & Resume · waiting for this turn to end": "압축 후 계속 · 이 턴이 끝나기를 기다리는 중",
+  "Compact & Resume · asking ChatGPT for the handoff": "압축 후 계속 · ChatGPT에 인계 요청 중",
+  "The handoff request is sent as soon as this turn ends.": "이 턴이 끝나는 즉시 인계 요청을 보냅니다.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids가 새 채팅용 요약을 작성하도록 ChatGPT에 요청을 보내는 중입니다."
 }
