@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -196,7 +196,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
       ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
@@ -5575,4 +5575,29 @@ it.each([
   [{ metaKey: true }, 'queue', 'auto'], [{ ctrlKey: true }, 'queue', 'auto']
 ] as const)('sends the other way with %o + Shift + Enter (default %s)', async (modifier, followUp, mode) => {
   expect((await sendDuringTurn(followUp, { ...modifier, shiftKey: true })).sent.mode).toBe(mode);
+});
+
+// Codex's "Enter key behavior": Enter sends, or Cmd/Ctrl+Enter sends and Enter adds a line.
+async function pressInComposer(enterSends: boolean | undefined, keys: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }) {
+  const app = await boot([], true, [], [], enterSends === undefined ? {} : { enterSends });
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Run the tests';
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  const event = new app.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...keys });
+  input.dispatchEvent(event);
+  await settle(300);
+  return { sent: app.live.sent.length, prevented: event.defaultPrevented };
+}
+
+it('sends with Enter by default', async () => {
+  expect(await pressInComposer(undefined, {})).toEqual({ sent: 1, prevented: true });
+});
+it('keeps Shift+Enter as a new line', async () => {
+  expect(await pressInComposer(undefined, { shiftKey: true })).toEqual({ sent: 0, prevented: false });
+});
+it('adds a line with Enter when Cmd/Ctrl+Enter is chosen to send', async () => {
+  expect(await pressInComposer(false, {})).toEqual({ sent: 0, prevented: false });
+});
+it.each([{ metaKey: true }, { ctrlKey: true }])('sends with %o + Enter when that is chosen', async modifier => {
+  expect(await pressInComposer(false, modifier)).toEqual({ sent: 1, prevented: true });
 });

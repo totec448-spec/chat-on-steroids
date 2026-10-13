@@ -2316,5 +2316,9 @@
   "{0} of {1}": "{0}/{1}",
   "No matches": "一致なし",
   "Previous match": "前の一致",
-  "Next match": "次の一致"
+  "Next match": "次の一致",
+  "Send messages with": "メッセージの送信キー",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "入力した内容を送信するキーです。⌘Enter（Windows と Linux では Ctrl+Enter）にすると、Enter で改行します。",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }
