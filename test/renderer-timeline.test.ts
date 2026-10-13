@@ -3557,6 +3557,32 @@ it('queues every generated stage in an existing session without Send and preserv
   expect(live.sent).toHaveLength(1);
 });
 
+// #1428: in a chat with nothing running, the plan used to be queued "at Session finish" right
+// away, and Session finish only comes at the end of a turn. Nothing started until the person
+// sent some other message.
+it('shows the plan in an idle chat and starts it with Enter, like in a new chat', async () => {
+  const { w, live } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = (id: string) => Promise.resolve({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  // Selected again, so the chat's state is read with nothing running.
+  w.document.getElementById('newChat')!.click(); await settle();
+  (w.document.querySelector(`[data-id="${summary([]).id}"]`) as HTMLButtonElement).click(); await settle();
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
+  // Written out for review, not queued behind a turn that will not come.
+  expect(live.sent).toHaveLength(0);
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(2);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Start full plan');
+  expect(w.document.querySelector('.plan-stage-heading')!.getAttribute('title')).not.toMatch(/Session finish/);
+  input.focus();
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: summary([]).id, text: 'Build foundation', stages: ['Verify it'], objective: 'Build the whole task', authoredSource: 'objective', mode: 'auto' });
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(0);
+});
+
 it('retries a materialized finish checkpoint without recreating its already independent siblings', async () => {
   const { w, live, append } = await boot([]);
   live.inputs = [{ id: 'failed-first-checkpoint', sessionId: summary([]).id, text: 'Retry just this checkpoint', stages: ['Deleted sibling'],

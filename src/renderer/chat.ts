@@ -1631,7 +1631,7 @@ function paintDeliveryControls(): void {
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
   if (stop && !working && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
-  const planAction = selectedId ? t("Queue plan at Session finish") : t("Start full plan");
+  const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
   else if (planMode && !stop) ui(send, 'aria-label', () => t("Generate plan"));
   send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
@@ -1694,6 +1694,14 @@ type TaskPlanDraft = { text: string; requestId: string | null; stages: string[] 
 // Planning belongs to its draft key. Completed stages own their captured objective
 // independently of composer edits; existing sessions hand them to the durable queue.
 const taskPlans = new Map<string, TaskPlanDraft>();
+/**
+ * Whether this chat is known to have no turn running (#1428). A plan in a running chat waits for
+ * its Session finish; in an idle one that finish never comes, so the plan is shown and Enter
+ * starts it, as in a new chat. A chat whose state is not known here keeps waiting for its turn.
+ */
+function chatKnownIdle(sessionId: string): boolean {
+  return controlledSessionId === sessionId && controlledSelection === selectionGeneration && controlledTurnId === null;
+}
 function currentPreparedPlan(): (TaskPlanDraft & { stages: string[] }) | null {
   const plan = taskPlans.get(draftKey());
   return plan?.stages ? plan as TaskPlanDraft & { stages: string[] } : null;
@@ -1750,7 +1758,7 @@ async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
       // unchanged source draft, before queue admission can yield to new typing.
       inputDrafts.delete(key);
       if (draftKey() === key) { replaceComposerDraft(); input.value = ''; skillPicker?.restore(); }
-      if (sessionId) await queuePreparedPlan(key, plan as TaskPlanDraft & { stages: string[] }, sessionId, projectId);
+      if (sessionId && !chatKnownIdle(sessionId)) await queuePreparedPlan(key, plan as TaskPlanDraft & { stages: string[] }, sessionId, projectId);
     }
     else plan.error = result.error;
   } catch (error) {
@@ -1789,7 +1797,7 @@ function paintPreparedPlan(): void {
       if (plan.stages.length) { paintPreparedPlan(); paintDeliveryControls(); } else cancelTaskPlan();
     });
     edit.disabled = remove.disabled = field.disabled = plan.sending;
-    ui(heading, 'title', () => selectedId ? t("Queued at Session finish; edit or delete this checkpoint independently.") : index === 0 ? t("Send includes your complete request and the full plan. Later stages are queued as verification checkpoints.") : t("Included in the first message, then queued as a checkpoint at Session finish or after a completed answer when enabled."));
+    ui(heading, 'title', () => selectedId && !chatKnownIdle(selectedId) ? t("Queued at Session finish; edit or delete this checkpoint independently.") : index === 0 ? t("Send includes your complete request and the full plan. Later stages are queued as verification checkpoints.") : t("Included in the first message, then queued as a checkpoint at Session finish or after a completed answer when enabled."));
     heading.append(label, text, edit, remove); row.append(heading, field, error); return row;
   }));
 }
@@ -1797,8 +1805,14 @@ async function sendPreparedPlan(): Promise<void> {
   const key = draftKey(), plan = currentPreparedPlan();
   if (!plan || plan.sending) return;
   if (selectedId) {
-    await queuePreparedPlan(key, plan, selectedId, sessions.find(row => row.id === selectedId)?.projectId ?? null);
-    return;
+    // Decided when it is sent: the chat may have started or finished a turn since the plan was written.
+    const target = selectedId, selection = selectionGeneration;
+    await refreshSessionControls();
+    if (selectedId !== target || selectionGeneration !== selection || taskPlans.get(key) !== plan || plan.sending) return;
+    if (!chatKnownIdle(target)) {
+      await queuePreparedPlan(key, plan, target, sessions.find(row => row.id === target)?.projectId ?? null);
+      return;
+    }
   }
   const tasks = plan.stages.map(stage => stage.trim());
   if (!tasks.length || tasks.some(task => !task) || JSON.stringify(tasks).length > 12000) { toast(t("Keep every stage nonempty and the plan below 12,000 characters.")); return; }
