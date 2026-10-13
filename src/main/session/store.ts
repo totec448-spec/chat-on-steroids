@@ -2881,6 +2881,8 @@ function comesAfterCursor(summary: SessionSummary, cursor: SessionListCursor): b
 export async function listSessionPage(options: {
   limit?: number;
   cursor?: SessionListCursor;
+  /** Only this project's sessions (#1190). `total` stays the whole retained history. */
+  projectId?: string;
 } = {}): Promise<SessionPage> {
   const catalog = await ensureAttachmentCatalog();
   const limit = Math.max(1, Math.min(MAX_LISTED_SESSIONS, Math.floor(options.limit ?? MAX_LISTED_SESSIONS)));
@@ -2891,6 +2893,7 @@ export async function listSessionPage(options: {
   // or a handful, so overlay them explicitly instead of rebuilding/sorting every retained row.
   for (const entry of open.values()) {
     if (entry.summary.origin?.kind === 'helper') continue;
+    if (options.projectId && entry.summary.projectId !== options.projectId) continue;
     if (options.cursor && !comesAfterCursor(entry.summary, options.cursor)) continue;
     candidates.push({ ...entry.summary, chatIds: [...entry.summary.chatIds], agents: [...entry.summary.agents] });
   }
@@ -2904,6 +2907,7 @@ export async function listSessionPage(options: {
     if (openIds.has(id)) continue;
     const summary = catalog.summaries.get(id);
     if (!summary || summary.origin?.kind === 'helper' || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
+    if (options.projectId && summary.projectId !== options.projectId) continue;
     if (durableEligible > limit) {
       durableHasMore = true;
       break;
