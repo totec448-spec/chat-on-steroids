@@ -54,4 +54,6 @@ it('says the answer is ready when there is no answer text to show', () => {
   expect(noticeText('   ')).toBe('ChatGPT finished.');
   expect(noticeText(`# Heading\n${'word '.repeat(80)}`).length).toBeLessThanOrEqual(140);
   expect(noticeText('[the docs](https://example.com) are `updated`')).toBe('the docs are updated');
+  // ChatGPT's link cards come as private-use markup; the notice shows their label.
+  expect(noticeText('Open \uE200url\uE202the comparison\uE202https://github.com/o/r/compare\uE201 to merge.')).toBe('Open the comparison to merge.');
 });
