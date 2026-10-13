@@ -101,8 +101,9 @@ off whenever the API is off, and left off when you turn the API back on), it als
 a model that reads those messages can act under the permissions you have granted.**
 With the switch off, these routes all answer 403 and nothing changes.
 
-The same action grant also permits direct broker control: GET `/v1/workers/{ownerId}`
-and `.../reports`, and POST `.../spawn`, `.../message` and `.../ack`. A trusted local
+The API also serves GET `/v1/workers/{ownerId}` and `.../reports` for worker status and
+unread reports. With **Allow actions** enabled, POST `.../spawn`, `.../message` and
+`.../ack` permit direct broker control. A trusted local
 orchestrator owns a durable local UUID rather than a ChatGPT prime conversation. See the
 [direct bridge contract](t3-code-bridge.md#api-contract) for request bodies and report receipts.
 
