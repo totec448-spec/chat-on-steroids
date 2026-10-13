@@ -14,6 +14,7 @@ import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
+import { refreshAppProxy } from './app-proxy.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
@@ -665,6 +666,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
     // system theme until restart (and startup still defaulted to system before index.ts applies it).
+    // A changed Goal provider address may be one the system reaches directly.
+    void refreshAppProxy();
     setRecordingStorageLimit(next.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
     nativeTheme.themeSource = next.ui.theme;
     if (process.platform === 'win32') getWindow()?.setTitleBarOverlay(titleBarOverlayForTheme(next.ui.theme, next.ui.appearance));
