@@ -2306,6 +2306,10 @@
   "The turn ended before this message could join it. It stays queued.": "このメッセージが加わる前にターンが終了しました。キューに残っています。",
   "Keep the computer awake": "コンピューターをスリープさせない",
   "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "チャットが作業している間はコンピューターがスリープしないので、長い作業が止まりません。画面はオフになることがあります。",
+  "Messages during a running turn": "実行中のターン中のメッセージ",
+  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT の作業中に送ったメッセージの既定の動作です。⌘⇧Enter（Windows と Linux では Ctrl+Shift+Enter）でもう一方の方法で送信します。",
+  "Join the running turn": "実行中のターンに加える",
+  "Wait until the turn ends": "ターンの終了を待つ",
   "Notify when a chat finishes": "チャットが終わったら通知",
   "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "このウィンドウがバックグラウンドにある間にチャットの回答が完了すると通知します。ワーカーと、ゴールまたはループがオンのチャットは通知しません。"
 }
