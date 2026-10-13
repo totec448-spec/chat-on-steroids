@@ -1,8 +1,9 @@
+import { promises as fs } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, confirmedPluginSchemas, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { PLUGIN_REFRESH_FAILURE_LIMIT, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, confirmedPluginSchemas, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, pluginRefreshUnreadable, resetPluginRefreshLedger, publishPluginSurface, rearmPluginRefresh, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests, PLUGIN_REFRESH_TUNNEL_GRACE_MS, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { APP_VERSION } from '../src/main/version.js';
 import { buildServer } from '../src/main/mcp/tools.js';
@@ -12,10 +13,26 @@ const appId = 'asdk_app_example';
 const tools: PluginToolSchema[] = [{ name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }];
 let directory = '';
 beforeEach(async () => { vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); wake.mockClear(); resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0); resetDurableForTests(); directory = await makeTempDir(); initDurableStore(directory); });
-afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); await removeTempDir(directory); vi.useRealTimers(); });
+afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); vi.restoreAllMocks(); await removeTempDir(directory); vi.useRealTimers(); });
 const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
+it.each(['malformed', 'null', 'invalid', 'duplicate'] as const)('preserves a %s ledger without creating new refresh authority', async kind => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(request)).toBe(true);
+  const saved = await readDurable('plugin-refresh') as object[];
+  const broken = kind === 'malformed' ? '{"private":"fixture-only"' : kind === 'null' ? 'null'
+    : JSON.stringify(kind === 'duplicate' ? [...saved, ...saved] : [{ surface: 'private-invalid' }]);
+  const file = `${directory}/state/plugin-refresh.json`;
+  await fs.writeFile(file, broken); resetPluginRefreshForTests(); publish();
+  await expect(pendingPluginRefreshes()).rejects.toThrow(/^Could not read plugin-refresh state$/);
+  await expect(claim(request)).rejects.toThrow(/^Could not read plugin-refresh state$/);
+  expect(await fs.readFile(file, 'utf8')).toBe(broken);
+  // An independently restored receipt remains consumed; the failed read did not rearm it.
+  await fs.writeFile(file, JSON.stringify(saved));
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  expect(await claim(request)).toBe(false);
+});
 it('debounces only changed declarations for twenty seconds and fences stale claims', async () => {
   publish(); const old = (await pendingPluginRefreshes())[0]!;
   const change = (description: string) => publishPluginSurface('core', 'Chat On Steroids Core', '1', 'Instructions', [{ ...tools[0]!, description }]);
@@ -368,4 +385,61 @@ it('does not take an older completion as current after an unconfirmed click for 
   const back = await pendingPluginRefreshes();
   expect(back).toHaveLength(1); // ChatGPT may hold the narrower schema, so the original is due again
   expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ completedSchemaId: null, attempted: false });
+});
+
+it('projects unreadable state without repairing legacy receipts or waking work', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  const legacy = [{ ...request, appId: null, attempted: true, completedSchemaId: null, parked: true, parkedBy: 'old' }];
+  await writeDurableNow('plugin-refresh', legacy); wake.mockClear();
+  resetPluginRefreshForTests(); confirmedPluginSchemas();
+  expect(await pluginRefreshUnreadable()).toBe(false);
+  expect(await readDurable('plugin-refresh')).toEqual(legacy);
+  await fs.writeFile(`${directory}/state/plugin-refresh.json`, '{broken');
+  expect(await pluginRefreshUnreadable()).toBe(true);
+  expect(wake).not.toHaveBeenCalled();
+});
+it.each(['{broken', 'null', '[{}]'])('archives an unreadable ledger only on explicit reset: %s', async broken => {
+  publish(); const old = (await pendingPluginRefreshes())[0]!;
+  expect(await claim(old)).toBe(true);
+  expect(await completePluginRefresh({ ...old, appId, tools })).toBe(true);
+  expect(confirmedPluginSchemas().core).toBe(old.schemaId);
+  await fs.writeFile(`${directory}/state/plugin-refresh.json`, broken); wake.mockClear();
+  expect(await pluginRefreshUnreadable()).toBe(true);
+  await Promise.all([resetPluginRefreshLedger(), resetPluginRefreshLedger()]);
+  expect(await readDurable('plugin-refresh')).toEqual([]);
+  expect(confirmedPluginSchemas()).toEqual({});
+  const backups = (await fs.readdir(`${directory}/state`)).filter(name => name.includes('.recovery-'));
+  expect(backups).toHaveLength(1);
+  expect(await fs.readFile(`${directory}/state/${backups[0]}`, 'utf8')).toBe(broken);
+  expect(wake).toHaveBeenCalledTimes(1);
+  const fresh = (await pendingPluginRefreshes())[0]!;
+  expect(fresh.id).not.toBe(old.id);
+  expect(await claim(old)).toBe(false);
+  expect(await completePluginRefresh({ ...old, appId, tools })).toBe(false);
+  expect(await claim(fresh)).toBe(true);
+});
+it('leaves healthy and missing ledgers unchanged when a stale Reset arrives', async () => {
+  await resetPluginRefreshLedger();
+  await expect(fs.stat(`${directory}/state/plugin-refresh.json`)).rejects.toMatchObject({ code: 'ENOENT' });
+  publish(); const request = (await pendingPluginRefreshes())[0]!; await claim(request);
+  const before = await fs.readFile(`${directory}/state/plugin-refresh.json`, 'utf8'); wake.mockClear();
+  await resetPluginRefreshLedger();
+  expect(await fs.readFile(`${directory}/state/plugin-refresh.json`, 'utf8')).toBe(before);
+  expect(await fs.readdir(`${directory}/state`)).toEqual(['plugin-refresh.json']);
+  expect(wake).not.toHaveBeenCalled();
+});
+it.each(['copyFile', 'writeFile', 'rename'] as const)('retains the unreadable ledger when recovery %s fails', async operation => {
+  publish(); await pendingPluginRefreshes();
+  const file = `${directory}/state/plugin-refresh.json`; await fs.writeFile(file, '{broken'); wake.mockClear();
+  const fault = vi.spyOn(fs, operation).mockRejectedValueOnce(new Error('private filesystem diagnostics'));
+  await expect(resetPluginRefreshLedger()).rejects.toThrow(/^Could not reset plugin-refresh state$/);
+  fault.mockRestore();
+  expect(await fs.readFile(file, 'utf8')).toBe('{broken');
+  expect(await pluginRefreshUnreadable()).toBe(true);
+  await expect(pendingPluginRefreshes()).rejects.toThrow('Could not read plugin-refresh state');
+  vi.advanceTimersByTime(10_000);
+  expect(await fs.readFile(file, 'utf8')).toBe('{broken');
+  expect(wake).not.toHaveBeenCalled();
+  await resetPluginRefreshLedger();
+  expect(await pluginRefreshUnreadable()).toBe(false);
 });

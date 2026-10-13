@@ -175,7 +175,8 @@ service-worker lifetime, and local session vs frontend id are recurring sources 
 guarantee. `writeDurableNow()` is the required barrier before an acknowledged control transition
 or browser side effect. Per-file queues allow independent writes; cross-file semantic ordering
 must be explicit in the caller. Missing/corrupt auxiliary state logs and reads as null so the app
-can start; restore may only reconstruct facts from independent durable proof.
+can start; authority ledgers can opt into strict reads, where only a missing file is empty
+and unreadable data throws a generic error. Restore may only reconstruct facts from independent durable proof.
 
 ## 3. Intent, current source and evidence
 
@@ -4000,6 +4001,15 @@ and reload backing follow the persisted palette. `scripts/verify-appearance.cjs`
 production renderer in isolated Electron with color, queue/push, theme, reset, reload and narrow
 layout checks. It does not operate the installed app or a provider conversation.
 
+Unreadable plugin-refresh ledgers fail closed. `pluginRefreshUnreadable()` validates without
+repairing or rearming; `AppState.pluginRefreshUnreadable` exposes only that boolean. Settings
+shows the read error beside Automatic plugin refresh even when it is off. The explicit
+`plugin-refresh:reset` / `resetPluginRefresh()` action rechecks under the ledger owner's lock;
+a healthy or missing ledger is a no-op. `recoverDurable()` copies the bad file to a unique
+`state/plugin-refresh.recovery-<uuid>.json` before atomically installing an empty ledger.
+Failed backup/replacement retains the original and never queues a recovery retry. Only a
+successful reset clears cached confirmation and wakes browser work; old request IDs stay fenced.
+
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
 in ChatGPT. It compares `AppState.connectorSchemas` (the declaration fingerprints the local
 MCP server publishes per surface) with the ones acknowledged in
@@ -4201,6 +4211,12 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+
+Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid rows,
+duplicate surfaces and I/O failures leave the ledger intact and reject new work with
+`Could not read plugin-refresh state`; parser contents stay private. A missing file still
+allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
+
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
@@ -4229,8 +4245,23 @@ Page side: fiber.js decides ownership once (`ownResult`, `ownRequestPath`, `ownS
 proven app id, then proven link, then the configured/proven name, except that a name match on a
 surface with a proven app but a different id is foreign. Rows carry `own`; content.js trusts it.
 Turns carry `sightings` for every connector's result rows, emitted once per request id as
-`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, installed-row names) and the
+`app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, native installed-link IDs) and the
 Plugins catalog limit use proven ids first.
+
+**Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
+and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
+A unique surface with account-proven App IDs accepts only its proven IDs, permitting
+renames before learned names catch up; a same-named foreign ID never falls back.
+First enrollment and legacy buttons use the unique configured/learned name leaf.
+Unknown, catalog, external, transcript, hidden or ambiguous rows grant no authority.
+After awaits, the same unique connected visible link must retain its exact href;
+the elected helper adds its request marker before navigating/reading the card.
+Legacy buttons retain their flow. Each invocation fences its starting URL/epoch,
+including document registration before claim/result dispatch; navigation cannot
+inherit click authority or misattribute an old failed read. Name collisions fail
+closed, while an enrolled exact App ID retains its surface and declaration budget.
+Initial enrollment and a legitimately recreated, proven identity remain supported.
+
 An explicit successful Plugin Restart may rearm matching unclaimed, non-manual, unfinished
 refresh debt with a fresh request ID. The existing serialized ledger publishes that ID before
 waking browser work; ordinary status polling and a closed helper do not grant another attempt.
@@ -4649,8 +4680,9 @@ diagnostics, not restart authority; secrets must never be printed to investigate
 
 Activity › Diagnostics report (`diagnostics:saveReport`, `diagnostics-report.ts`) saves one plain-text
 file for bug reports: versions, bridge/companion state, the connection self-test, settings,
-pending commands/workers and the newest 3 MB of `app.log`, then reveals it so the user reads
-it first. Everything passes `report-scrub.ts`: credentials, emails, `KEY=value`/`Bearer`, private
+memory per kind of process (`memoryFacts`: main, app window, each built-in-browser ChatGPT page,
+graphics, helpers; megabytes only), pending commands/workers and the newest 3 MB of `app.log`,
+then reveals it so the user reads it first. Everything passes `report-scrub.ts`: credentials, emails, `KEY=value`/`Bearer`, private
 hosts and IPs are masked; the home folder becomes `~`; every other path segment becomes a stable
 `<p:xxxx>` tag that keeps its extension (ids, dated session ids and structural/app folder names stay
 readable); known personal values (project paths/names, chat titles, worker tasks/labels/results,

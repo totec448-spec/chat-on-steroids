@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { readDurable, writeDurableNow } from './durable.js';
+import { readDurable, recoverDurable, writeDurableNow } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { logInfo, logWarn } from './logger.js';
 import { notePluginInstalled } from './connector-proof.js';
@@ -46,9 +46,33 @@ function remember(current: Row[]): void {
   confirmedLoaded = true;
 }
 async function save(current: Row[]): Promise<void> { await writeDurableNow('plugin-refresh', current); remember(current); }
+async function readRows(): Promise<Row[]> {
+  let result: Row[];
+  try {
+    result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh', { strict: true }) ?? []);
+    if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+  } catch {
+    // Neither a corrupt ledger nor its parser diagnostics may grant new Refresh authority.
+    throw new Error('Could not read plugin-refresh state');
+  }
+  return result;
+}
+/** A state projection must never repair, unpark or grant refresh authority. */
+export function pluginRefreshUnreadable(): Promise<boolean> {
+  return serial(async () => { try { await readRows(); return false; } catch { return true; } });
+}
+/** Only an explicit Settings action may replace an unreadable ledger. */
+export function resetPluginRefreshLedger(): Promise<void> {
+  return serial(async () => {
+    try { await readRows(); return; } catch { /* Recheck under the owner's lock. */ }
+    try { await recoverDurable('plugin-refresh', []); }
+    catch { throw new Error('Could not reset plugin-refresh state'); }
+    remember([]);
+    wakeBrowserWork();
+  });
+}
 async function rows(): Promise<Row[]> {
-  const result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh') ?? []);
-  if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+  const result = await readRows();
   // Legacy fail() marked discovery failures as clicks. A real claim always commits a
   // concrete appId, so null proves these rows never crossed the refresh boundary.
   let repaired = false;
@@ -171,7 +195,7 @@ export function rearmPluginRefresh(surface: PluginSurface): Promise<boolean> {
  * Synchronous for state pushes; the first call loads the records once in the background.
  */
 export function confirmedPluginSchemas(): Partial<Record<PluginSurface, string>> {
-  if (!confirmedLoaded) { confirmedLoaded = true; void serial(rows).catch(() => { confirmedLoaded = false; }); }
+  if (!confirmedLoaded) { confirmedLoaded = true; void serial(readRows).then(remember).catch(() => { confirmedLoaded = false; }); }
   return { ...confirmed };
 }
 /** App IDs are stable connector identities. The browser must prove current installation. */
