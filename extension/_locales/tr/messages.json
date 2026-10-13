@@ -741,7 +741,7 @@
     "message": "ChatGPT'yi Chat On Steroids'a bağlar ve tarayıcı sekmelerini DOM, ekran görüntüleri ve geliştirici araçlarıyla arka planda denetler."
   },
   "extension_name": {
-    "message": "Chat On Steroids yardımcı eklentisi"
+    "message": "Chat On Steroids tarayıcı uzantısı"
   },
   "popup_advanced": {
     "message": "Gelişmiş"
@@ -1038,7 +1038,7 @@
     "message": "Yeniden dene"
   },
   "popup_version_mismatch_help": {
-    "message": "Uygulama v$1 (protokol $2); yardımcı eklenti v$3 (protokol $4). Tarayıcınızın Uzantılar sayfasını açın, Geliştirici modunu etkinleştirin ve bu yardımcı eklentiyi Güncelle / Yeniden yükle ile yenileyin. Uyumsuzluk sürerse Chat On Steroids'ta Uzantı klasörünü aç seçeneğini kullanın ve o klasörü yükleyin. Etkin çalışmaları bittiğinde ChatGPT sekmelerini yeniden yükleyin."
+    "message": "Uygulama v$1 (protokol $2); uzantı v$3 (protokol $4). Tarayıcınızın Uzantılar sayfasını açın, Geliştirici modunu etkinleştirin ve bu uzantıyı Güncelle / Yeniden yükle ile yenileyin. Uyumsuzluk sürerse Chat On Steroids'ta Uzantı klasörünü aç seçeneğini kullanın ve o klasörü yükleyin. Etkin çalışmaları bittiğinde ChatGPT sekmelerini yeniden yükleyin."
   },
   "popup_yes": {
     "message": "evet"

@@ -741,7 +741,7 @@
     "message": "将 ChatGPT 连接到 Chat On Steroids，并通过 DOM、截图和开发者工具在后台控制浏览器标签页。"
   },
   "extension_name": {
-    "message": "Chat On Steroids 配套扩展"
+    "message": "Chat On Steroids 浏览器扩展"
   },
   "popup_advanced": {
     "message": "高级"
@@ -1038,7 +1038,7 @@
     "message": "重试"
   },
   "popup_version_mismatch_help": {
-    "message": "应用 v$1（协议 $2）；配套扩展 v$3（协议 $4）。打开浏览器的“扩展程序”页面，启用“开发者模式”，然后更新 / 重新加载此配套扩展。如果仍不匹配，请在 Chat On Steroids 中使用“打开扩展文件夹”，并加载该文件夹。待 ChatGPT 标签页中的活动工作完成后，再重新加载这些标签页。"
+    "message": "应用 v$1（协议 $2）；扩展 v$3（协议 $4）。打开浏览器的“扩展程序”页面，启用“开发者模式”，然后更新 / 重新加载此扩展。如果仍不匹配，请在 Chat On Steroids 中使用“打开扩展文件夹”，并加载该文件夹。待 ChatGPT 标签页中的活动工作完成后，再重新加载这些标签页。"
   },
   "popup_yes": {
     "message": "是"
