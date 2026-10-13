@@ -2310,6 +2310,8 @@
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT가 작업하는 동안 보낸 메시지의 기본 동작입니다. ⌘⇧Enter(Windows와 Linux에서는 Ctrl+Shift+Enter)를 누르면 다른 방식으로 보냅니다.",
   "Join the running turn": "진행 중인 턴에 합류",
   "Wait until the turn ends": "턴이 끝날 때까지 기다리기",
+  "Notify when a chat finishes": "채팅이 끝나면 알림",
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "이 창이 백그라운드에 있는 동안 채팅의 답변이 완료되면 알림을 보냅니다. 워커와 Goal 또는 Loop가 켜진 채팅은 알리지 않습니다.",
   "Find in chat": "채팅에서 찾기",
   "{0} of {1}": "{1}개 중 {0}",
   "No matches": "일치 항목 없음",
