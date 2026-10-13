@@ -351,3 +351,13 @@ it('calls each feature by the language\'s own name in every sentence', () => {
   }
   expect(offenders).toEqual([]);
 });
+
+// One word for it: the interface, the extension and its name in the browser say "browser
+// extension". "Companion" was a second name for the same thing in 20 texts (2026-10-13). The pets
+// are companions of another kind and keep the word.
+it('calls the browser extension an extension, not a companion', () => {
+  const page = readFileSync('src/renderer/index.html', 'utf8').replace(/<!--[\s\S]*?-->/g, '').replace(/desktop companions/g, '');
+  expect(page.match(/[^<>"]*\bcompanion\b[^<>"]*/gi) ?? []).toEqual([]);
+  const extension = JSON.parse(readFileSync('extension/_locales/en/messages.json', 'utf8')) as Record<string, { message: string }>;
+  expect(Object.entries(extension).filter(([, entry]) => /\bcompanion\b/i.test(entry.message)).map(([key]) => key)).toEqual([]);
+});

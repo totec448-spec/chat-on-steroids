@@ -741,7 +741,7 @@
     "message": "Conecta o ChatGPT ao Chat On Steroids e controla abas do navegador em segundo plano com DOM, capturas de tela e ferramentas de desenvolvedor."
   },
   "extension_name": {
-    "message": "Companheiro do Chat On Steroids"
+    "message": "Extensão de navegador do Chat On Steroids"
   },
   "popup_advanced": {
     "message": "Avançado"
@@ -1038,7 +1038,7 @@
     "message": "Tentar novamente"
   },
   "popup_version_mismatch_help": {
-    "message": "App v$1 (protocolo $2); companheiro v$3 (protocolo $4). Abra a página de extensões do navegador, ative o Modo do desenvolvedor e use Atualizar / Recarregar neste companheiro. Se a incompatibilidade continuar, use Abrir pasta da extensão no Chat On Steroids e carregue essa pasta. Recarregue as abas do ChatGPT quando o trabalho ativo delas terminar."
+    "message": "App v$1 (protocolo $2); extensão v$3 (protocolo $4). Abra a página de extensões do navegador, ative o Modo do desenvolvedor e use Atualizar / Recarregar nesta extensão. Se a incompatibilidade continuar, use Abrir pasta da extensão no Chat On Steroids e carregue essa pasta. Recarregue as abas do ChatGPT quando o trabalho ativo delas terminar."
   },
   "popup_yes": {
     "message": "sim"

@@ -741,7 +741,7 @@
     "message": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools."
   },
   "extension_name": {
-    "message": "Chat On Steroids companion"
+    "message": "Chat On Steroids browser extension"
   },
   "popup_advanced": {
     "message": "Advanced"
@@ -1038,7 +1038,7 @@
     "message": "Try again"
   },
   "popup_version_mismatch_help": {
-    "message": "App v$1 (protocol $2); companion v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this companion. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished."
+    "message": "App v$1 (protocol $2); extension v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this extension. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished."
   },
   "popup_yes": {
     "message": "yes"
@@ -1167,6 +1167,6 @@
     "message": "Transfer failed. Start sign-in again from CoS."
   },
   "popup_app_not_running_help": {
-    "message": "Make sure Chat On Steroids is open on this computer. The companion connects on its own."
+    "message": "Make sure Chat On Steroids is open on this computer. The extension connects on its own."
   }
 }

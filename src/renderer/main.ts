@@ -1209,7 +1209,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     );
     tone = 'bad';
   }
-  if (missing) { lines.push(t("Browser extension not connected. Open ChatGPT and check the companion in Setup to load models and send messages.")); tone = 'bad'; }
+  if (missing) { lines.push(t("Browser extension not connected. Open ChatGPT and check the extension in Setup to load models and send messages.")); tone = 'bad'; }
   return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale || missing), extensionAction: stale ? t("Update extension") : missing ? t("Check extension") : null };
 }
 
