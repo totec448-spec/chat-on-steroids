@@ -2265,5 +2265,7 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Die unlesbare Datei beiseitelegen und ohne gespeicherte Schlüssel neu beginnen? Deine API-Schlüssel und Plugin-Geheimnisse musst du erneut eingeben, und die Browser-Erweiterung muss eventuell neu verbunden werden. Die alte Datei bleibt als Sicherung erhalten.",
   "Started fresh. Enter your keys again.": "Neu begonnen. Gib deine Schlüssel erneut ein.",
   "The saved keys can be read again. Nothing was changed.": "Die gespeicherten Schlüssel sind wieder lesbar. Es wurde nichts geändert.",
-  "Could not start fresh.": "Neubeginn nicht möglich."
+  "Could not start fresh.": "Neubeginn nicht möglich.",
+  "Recording storage": "Aufzeichnungsspeicher",
+  "Images and long texts recorded from your chats, up to 2 GB.": "Bilder und lange Texte, die aus deinen Chats aufgezeichnet wurden, bis zu 2 GB."
 }
