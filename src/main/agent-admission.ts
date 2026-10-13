@@ -1,5 +1,5 @@
 import nodePath from 'node:path';
-import { getConfig, effectiveCapabilities } from './config.js';
+import { getConfig } from './config.js';
 import { noteAgentContextTokens, persistCriticalSwarmNow, stageSpawn, markStagedWorkerWorktree, swarmStateForCaller, type Caller, type SpawnInput } from './agents.js';
 import { logWarn } from './logger.js';
 import { setWorkspaceFor } from './workspace.js';
@@ -7,7 +7,7 @@ import { findSessionByConversation } from './session/store.js';
 import { isGitRepository } from './toolchain.js';
 import { allocWorkerWorkspace, validateWorkerWorkspaceLease, WorkerWorktreeError, type WorkerWorktreeLease, type WorkerWorkspace } from './worktrees/index.js';
 
-/** Re-measure native sleeping-worker context before status or wake, then persist revoked revival authority. */
+/** Measure sleeping workers before status or wake, then persist revoked revival authority. */
 export async function measureSleepingWorkers(caller: Caller): Promise<void> {
   const state = swarmStateForCaller(caller);
   if (state.agents.length === 0) return;
@@ -71,10 +71,12 @@ export async function acceptAgentMutation(
   }
 }
 
-
-/** Shared broker admission for MCP primes and authenticated local orchestrators. */
-export async function spawnAgentWorkers(input: SpawnInput, workspace: () => Promise<WorkerWorkspace | null>, authorize: () => void = () => undefined) {
-  authorize();
+/** Allocate and accept new workers before publishing their workspaces or opening chats. */
+export async function spawnAgentWorkers(
+  input: SpawnInput,
+  workspace: () => Promise<WorkerWorkspace | null>,
+  canIsolate: () => boolean
+) {
   const staged = stageSpawn(input);
   // Newly staged admissions alone may own Git branches. A repeated spawn may show
   // existing workers in `created`, but must never reallocate their checkouts.
@@ -83,20 +85,17 @@ export async function spawnAgentWorkers(input: SpawnInput, workspace: () => Prom
   const isolationNotes: string[] = [];
   let sourceDirty = false;
   let allocationAttempted = false;
-  let source: WorkerWorkspace | null = null;
   try {
-    source = await workspace();
     if (staged.newlyStaged && getConfig().multiAgent.autoWorktrees === true) {
       // A selected Local Project is durable even before this prime has made its first
       // file call. Fetch that binding explicitly instead of relying on the cwd cache.
+      const source = await workspace();
       // Unfiled chats without any selected/learned folder can still delegate ordinary
       // work. Once a source exists, a Git checkout must pass strict isolation checks.
       if (!source) {
         isolationNotes.push('No workspace is selected; workers were spawned without isolated Git worktrees.');
       } else if (isGitRepository(source.real)) {
-        const config = getConfig();
-        const caps = effectiveCapabilities(config);
-        if (config.readOnly || !caps.command || !caps.create || !caps.edit) {
+        if (!canIsolate()) {
           throw new Error('WORKTREE_PERMISSION_REQUIRED: worker isolation requires Command, Create and Edit, with Read-only disabled.');
         }
         for (const agentId of staged.newlyStagedWorkerIds) {
@@ -130,15 +129,13 @@ export async function spawnAgentWorkers(input: SpawnInput, workspace: () => Prom
     await acceptAgentMutation(staged,
       'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.',
       undefined,
-      {
+      admittedLeases.length ? {
         validate: async () => {
           for (const lease of admittedLeases) {
             await validateWorkerWorkspaceLease(lease, getConfig().roots);
           }
         },
         assertCurrent: () => {
-          authorize();
-          if (!admittedLeases.length) return;
           const liveConfig = getConfig();
           if (liveConfig.multiAgent.autoWorktrees !== true) {
             throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
@@ -150,7 +147,7 @@ export async function spawnAgentWorkers(input: SpawnInput, workspace: () => Prom
             }
           }
         }
-      });
+      } : undefined);
   } catch (error) {
     staged.rollback();
     // An unaccepted spawn never opened a worker chat, but user files can appear in a
@@ -182,8 +179,6 @@ export async function spawnAgentWorkers(input: SpawnInput, workspace: () => Prom
   for (const lease of admittedLeases) {
     setWorkspaceFor(`agent:${lease.runId}:${lease.agentId}`, lease.workspace);
   }
-  if (source) for (const agentId of staged.newlyStagedWorkerIds) {
-    if (!admittedLeases.some(lease => lease.agentId === agentId)) setWorkspaceFor(`agent:${staged.runId}:${agentId}`, source);
-  }
-  return { ...staged, isolationNotes };
+  const { created, becamePrime, runId, defaultNotes } = staged;
+  return { created, becamePrime, runId, defaultNotes, isolationNotes };
 }

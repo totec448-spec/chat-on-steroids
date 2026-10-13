@@ -1,4 +1,3 @@
-import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from '../agent-admission.js';
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
 import { goalWorkerChat, imageExportCapable } from '../bridge.js';
@@ -36,6 +35,7 @@ import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
 import { currentWorkspace, primeWorkspace } from '../workspace.js';
 import { getSessionProject } from '../projects.js';
+import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from '../agent-admission.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -1308,11 +1308,15 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           if (await managedWorkerIsolationRequired(spawnCaller) && !managedWorkerAllocationIdentity(spawnCaller)) {
             return fail('WORKTREE_OWNER_UNAVAILABLE: a retired worker cannot create a prime run after its isolated checkout owner was lost.');
           }
-          const sessionId = currentCall()?.caller.sessionId;
           const { created, becamePrime, runId, defaultNotes, isolationNotes } = await spawnAgentWorkers({
-            workers: input.workers, context: input.context ?? null, caller: spawnCaller
-          }, async () => (sessionId ? await getSessionProject(sessionId) : null) ??
-            primeWorkspace(currentCaller().conversationId) ?? currentWorkspace());
+            workers: input.workers,
+            context: input.context ?? null,
+            caller: spawnCaller
+          }, async () => {
+            const sessionId = currentCall()?.caller.sessionId;
+            return (sessionId ? await getSessionProject(sessionId) : null) ??
+              primeWorkspace(currentCaller().conversationId) ?? currentWorkspace();
+          }, () => !reg.ctx.readOnly && reg.caps.command && reg.caps.create && reg.caps.edit);
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
           // visible only after the exact broker revision above is durable.
