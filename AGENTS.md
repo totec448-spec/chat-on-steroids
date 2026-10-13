@@ -4735,6 +4735,14 @@ off/empty optional connectors skip. Successful tools may show operational readin
 schema caveat, never erase failed or manual checks. Missing macOS grants block; unknown stays
 unverified and reads request no grant. State regressions belong in `update-readiness-state.test.ts`.
 
+**Activity component status.** `renderer/update-readiness.ts` renders the projected rows.
+Failure and recovery stay visible outside native details. Identical pushes preserve disclosure
+choice/focus; meaningful owner changes reopen attention. A keyboard button controls native
+details and a separate polite live region announces changed status. The card keeps the event
+feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
+save owner with both buttons disabled during saving, and does not retry updates. Disclosure and
+action regressions stay with the view; real-Electron cross-feature acceptance is added separately.
+
 ## 19. Debugging, tests and working here
 
 Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one
