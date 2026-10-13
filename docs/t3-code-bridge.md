@@ -24,6 +24,9 @@ remain refused by CoS; send corrections or worker follow-up requests to the coor
 4. Keep this checkout on the same computer as CoS. Give T3 Code the absolute script path.
 
 No additional MCP server, API key, public tunnel or T3 source patch is required for the CLI.
+The short [`cos-bridge` skill](../.agents/skills/cos-bridge/SKILL.md) lists every command for
+agents using this checkout. To use it across projects, link its folder into your user skills
+directory; its checkout resolution uses the linked folder's real location.
 The existing CoS-to-ChatGPT connection still needs its normal setup. Credentials are read
 from CoS's per-launch `control-api` files and stay out of arguments and results. The CLI binds
 requests to `127.0.0.1`, follows no redirects, and never retries a mutation automatically.
@@ -87,7 +90,8 @@ malformed ids are refused before a request is sent. Commands with no fields need
 `projectId` applies only to a new chat. `interrupt:true` explicitly consents to a send that
 would stop the answer being written. Ordinary messages never set it by default. Worker tasks
 and shared context are limited to 4,000 characters, matching the CoS agents schema. Message
-text is limited to 64,000 characters. Use saved defaults for model and effort.
+text, including serialized delegation assignments and coordinator instructions, is limited
+to 64,000 characters. Use saved defaults for model and effort.
 
 ## Follow work and send updates
 
