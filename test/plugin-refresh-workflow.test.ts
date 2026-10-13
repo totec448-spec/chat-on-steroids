@@ -35,6 +35,31 @@ it('claims before exactly one click and completes only a newly observed matching
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
   expect(h.ask.mock.invocationCallOrder[0]).toBeLessThan(h.click.mock.invocationCallOrder[0]!);
 });
+// Measured on Windows 2026-10-13 (2.1.36 release round). ChatGPT's plugin page does not show the
+// tool list, so the new tools arriving after the click change no element on the page. The only
+// change the wait could notice was the Refresh button turning active again, about 10 s later; when
+// that came after 12 s, a refresh that had worked was recorded as failed (2 of 3 runs).
+it('notices refreshed tools that arrive without any change on the page', async () => {
+  const dom = new JSDOM('<html><body></body></html>');
+  let clickedAt = 0;
+  const click = vi.fn(() => { clickedAt = Date.now(); });
+  const ask = vi.fn(async (_message: { action: string }) => ({ data: { ok: true } }));
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, setInterval, clearInterval, pageViewChecks: new Set(), MutationObserver: dom.window.MutationObserver,
+    document: dom.window.document, alive: true, generating: false, epoch: 1, ask, t: (_key: string, fallback: string) => fallback,
+    location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      // The page's data, not its elements: new tools 300 ms after the click.
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: { click },
+        tools: clickedAt && Date.now() - clickedAt >= 300 ? tools : [{ ...tools[0], description: 'Old description.' }] }) }
+  });
+  vm.runInContext(`${section}\nglobalThis.run = refreshManagedPlugin;`, context);
+  const started = Date.now();
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(Date.now() - started).toBeLessThan(4000);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
+  dom.window.close();
+}, 10_000);
 it.each([false, true])('waits for readable tool schemas before claim (navigation=%s)', async navigate => {
   const dom = new JSDOM('<html><body></body></html>');
   let ready = false, refreshed = false;
