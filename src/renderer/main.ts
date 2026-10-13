@@ -719,6 +719,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       backgroundPlacement: $<HTMLSelectElement>('backgroundPlacement').value === 'group' ? 'group' : 'window',
+      followUp: $<HTMLSelectElement>('followUp').value === 'queue' ? 'queue' : 'steer',
       browserBridgePort: (selectedBridgePort === 'auto' ? 'auto' : Number(selectedBridgePort)) as BrowserBridgePort,
       autoContinue: $<HTMLInputElement>('autoContinue').checked,
       browserOnly: $<HTMLInputElement>('browserOnly').checked,
@@ -1611,6 +1612,7 @@ function apply(next: AppState): void {
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
+  applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
   const bridgePortControl = $<HTMLSelectElement>('browserBridgePort');
   applyValue(bridgePortControl, String(config.ui.browserBridgePort ?? 'auto'), String(previousState?.config.ui.browserBridgePort ?? 'auto'));
   bridgePortControl.disabled = next.bridge.portOverridden === true;
@@ -2605,6 +2607,7 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'followOutput',
+  'followUp',
   'mentionCore',
   'controlApiEnabled',
   'controlApiAllowActions',

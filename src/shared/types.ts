@@ -176,6 +176,8 @@ export interface UiPrefs {
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
+  /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
+  followUp?: 'steer' | 'queue';
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */

@@ -2303,5 +2303,9 @@
   "Freed {0} MB. {1} GB of recording storage is now available.": "Se liberaron {0} MB. Ahora hay {1} GB disponibles para grabaciones.",
   "Send now": "Enviar ahora",
   "Send into the running turn now": "Enviar ahora al turno en curso",
-  "The turn ended before this message could join it. It stays queued.": "El turno terminó antes de que este mensaje pudiera unirse. Sigue en la cola."
+  "The turn ended before this message could join it. It stays queued.": "El turno terminó antes de que este mensaje pudiera unirse. Sigue en la cola.",
+  "Messages during a running turn": "Mensajes durante un turno en curso",
+  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Lo que hace por defecto un mensaje que envías mientras ChatGPT trabaja. ⌘⇧Intro (Ctrl+Mayús+Intro en Windows y Linux) lo envía de la otra forma.",
+  "Join the running turn": "Unirse al turno en curso",
+  "Wait until the turn ends": "Esperar a que termine el turno"
 }
