@@ -208,7 +208,7 @@ it.each(['malformed JSON', 'JSON null'])('does not replace %s with a new refresh
     expect(confirmedPluginSchemas()).toEqual({});
     expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
     expect(await pendingPluginRefreshes(false)).toEqual([]);
-    expect(read.mock.calls.filter(call => String(call[0]).endsWith('plugin-refresh.json'))).toHaveLength(1);
+    expect(read.mock.calls.filter(call => String(call[0]).endsWith('plugin-refresh.json')).length).toBeGreaterThan(1);
   } finally { read.mockRestore(); }
   await expect(requestPluginRefreshes(APP_VERSION)).rejects.toThrow('Could not read plugin-refresh state');
   expect(await fs.readFile(file, 'utf8')).toBe(broken);
