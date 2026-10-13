@@ -2305,5 +2305,9 @@
   "Send into the running turn now": "진행 중인 턴에 지금 보내기",
   "The turn ended before this message could join it. It stays queued.": "이 메시지가 합류하기 전에 턴이 끝났습니다. 대기열에 남아 있습니다.",
   "Keep the computer awake": "컴퓨터 깨어 있게 유지",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "채팅이 작업하는 동안 컴퓨터가 잠자기 상태로 전환되지 않아 긴 작업이 계속됩니다. 화면은 꺼질 수 있습니다."
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "채팅이 작업하는 동안 컴퓨터가 잠자기 상태로 전환되지 않아 긴 작업이 계속됩니다. 화면은 꺼질 수 있습니다.",
+  "Messages during a running turn": "진행 중인 턴 동안의 메시지",
+  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT가 작업하는 동안 보낸 메시지의 기본 동작입니다. ⌘⇧Enter(Windows와 Linux에서는 Ctrl+Shift+Enter)를 누르면 다른 방식으로 보냅니다.",
+  "Join the running turn": "진행 중인 턴에 합류",
+  "Wait until the turn ends": "턴이 끝날 때까지 기다리기"
 }
