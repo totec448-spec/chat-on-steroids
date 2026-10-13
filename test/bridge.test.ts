@@ -89,6 +89,7 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  noteRecoverySweepTick,
   unpair,
   workerBriefForTests
 } = await import('../src/main/bridge.js');
@@ -10883,6 +10884,34 @@ describe('unattributed activity recovery', () => {
    * finished its answer, as the manual reload then showed — went unreloaded for twenty minutes.
    * A failure restarts the watch instead; a completed answer still spends it.
    */
+  // The lid closes on a working chat. While the computer sleeps no timer runs, so on waking every
+  // activity deadline is long past: the first sweep called each working chat silent and reloaded
+  // them all in the same second, before one page had reconnected and reported.
+  it('gives working chats time to report after the computer wakes, instead of reloading them at once', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-asleep')]);
+      await attributed(OTHER, false, Date.now());
+      await events(OTHER, [endTurn('turn-asleep', 'failed')]);
+      // The sweep's timer ticks while the chat works, then the computer sleeps for an hour:
+      // the clock moves and no timer fires. The next tick is the first thing that runs.
+      noteRecoverySweepTick(Date.now());
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      noteRecoverySweepTick(Date.now());
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      // Nothing reported within the grace: now it is a silent chat like any other.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      const handout = await maintenance();
+      expect(chatOf(handout)).toBe(OTHER);
+      expect(handout?.reason).toBe('silence');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a chat whose turn failed on the silence watch and reloads it two minutes later', async () => {
     vi.useFakeTimers();
     try {
