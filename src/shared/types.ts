@@ -749,6 +749,8 @@ export interface AppState {
   confirmedConnectorSchemas?: Partial<Record<SurfaceId, string>>;
   /** Read-only ledger health; no stored content or filesystem paths cross IPC. */
   pluginRefreshUnreadable?: boolean;
+  /** True while the 2 GiB recording store refuses new images and long texts. */
+  recordingStorageFull?: boolean;
   platform: PlatformInfo;
   /** Only packaged Windows builds may change the login item. */
   loginStartupAvailable?: boolean;

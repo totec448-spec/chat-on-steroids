@@ -113,6 +113,8 @@ import { APP_VERSION, extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
   clearImageStorage,
+  onRecordingStorageFullChange,
+  recordingStorageFull,
   clearSessionName,
   renameSession,
   getSession,
@@ -527,6 +529,7 @@ async function buildState(): Promise<AppState> {
     ),
     confirmedConnectorSchemas: confirmedPluginSchemas(),
     pluginRefreshUnreadable: await pluginRefreshUnreadable(),
+    recordingStorageFull: recordingStorageFull(),
     platform: hostPlatformInfo(),
     loginStartupAvailable: supportsLoginStartup(process.platform, app.isPackaged),
     secureStorage: await secureStorageStatus(),
@@ -1861,6 +1864,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
   };
   onStatusChange(pushState);
+  onRecordingStorageFullChange(pushState);
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);
   onConnectorProofChange(pushState);
