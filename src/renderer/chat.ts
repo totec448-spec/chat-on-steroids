@@ -61,13 +61,16 @@ import type {
   StoredText,
   SwarmState,
   WorkerWorktreeCleanupOffer,
-  TokenPressure
+  TokenPressure,
+  RecordingStorageLimitGiB
 } from '../shared/session.js';
 import {
   ATTRIBUTION_LABELS,
   CHAT_ACTIVE_MS,
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
+  DEFAULT_RECORDING_STORAGE_GIB,
+  RECORDING_STORAGE_LIMITS_GIB,
   TURN_OUTCOME_LABELS,
   foldProgress,
   toolCallSummary
@@ -5290,7 +5293,10 @@ export function chatSettingsPatch(current: Config): {
       retainDays: 0,
       // Both follow the single threshold above rather than being typed separately.
       advisoryTokens: threshold,
-      limitTokens: urgentFrom(threshold)
+      limitTokens: urgentFrom(threshold),
+      storageLimitGiB: (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(Number($<HTMLSelectElement>('recordingStorageLimit').value))
+        ? Number($<HTMLSelectElement>('recordingStorageLimit').value) as RecordingStorageLimitGiB
+        : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB
     },
     compaction: {
       auto: $<HTMLInputElement>('autoCompact').checked,
@@ -5726,6 +5732,7 @@ const CHAT_INPUTS = [
   'goalReasoning',
   'handoffPrompt',
   'handoffLength',
+  'recordingStorageLimit',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt'
@@ -5787,6 +5794,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLSelectElement>('handoffLength'),
     config.compaction.handoffLength ?? DEFAULT_HANDOFF_LENGTH,
     previous?.compaction.handoffLength
+  );
+  applyChatValue(
+    $<HTMLSelectElement>('recordingStorageLimit'),
+    String(config.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB),
+    previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
   );
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;

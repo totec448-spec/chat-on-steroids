@@ -1221,7 +1221,7 @@ it('keeps generated-image metadata visible when recording storage is full', asyn
   expect(row.querySelector('.generated-image-frame')).toBeTruthy();
   expect(row.querySelector('img')).toBeNull();
   expect(row.querySelector('.generated-image-frame')?.classList.contains('is-unavailable')).toBe(true);
-  expect(row.querySelector('button')?.textContent).toBe('Free image storage');
+  expect(row.querySelector('button')?.textContent).toBe('Free storage');
 });
 
 it('does not group images across an intervening authored message or another turn', async () => {
