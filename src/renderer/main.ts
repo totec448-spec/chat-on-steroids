@@ -727,6 +727,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoSelectSkills: $<HTMLInputElement>('autoSelectSkills').checked,
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
+      turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
       keepAwake: $<HTMLInputElement>('keepAwake').checked,
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
@@ -1627,6 +1628,7 @@ function apply(next: AppState): void {
   $('startAtLoginRow').hidden = next.loginStartupAvailable !== true;
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
+  applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
   applyChecked($<HTMLInputElement>('keepAwake'), config.ui.keepAwake !== false, previousState ? previousState.config.ui.keepAwake !== false : undefined);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
@@ -2611,6 +2613,7 @@ for (const id of [
   'playfulStatus',
   'followOutput',
   'followUp',
+  'turnNotifications',
   'mentionCore',
   'controlApiEnabled',
   'controlApiAllowActions',

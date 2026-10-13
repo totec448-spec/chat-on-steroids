@@ -2310,6 +2310,8 @@
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "在 ChatGPT 工作時傳送的訊息預設如何處理。⌘⇧Enter（Windows 和 Linux 上為 Ctrl+Shift+Enter）以另一種方式傳送。",
   "Join the running turn": "加入進行中的這一回合",
   "Wait until the turn ends": "等待這一回合結束",
+  "Notify when a chat finishes": "聊天完成時通知",
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "當此視窗在背景時，聊天的回答完成後傳送通知。工作者以及開啟了目標或循環的聊天不會通知。",
   "Pin": "釘選",
   "Status": "狀態",
   "Init": "Init",
