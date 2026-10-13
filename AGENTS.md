@@ -4302,6 +4302,14 @@ tunnel state or recovery. No raw tunnel detail or secret identifier enters the n
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
 
+tunnel-client reads proxies only from its environment (Go: `HTTPS_PROXY`, `NO_PROXY`). On every
+launch `tunnel/proxy.ts` derives them (#1255): an existing `HTTPS_PROXY` is left alone; otherwise
+`ALL_PROXY` is passed on when Go can use it; otherwise the system's proxy for the control plane
+(`session.resolveProxy`, supplied by main through `setSystemProxyResolver`, 3 s limit) becomes
+`HTTPS_PROXY`, with loopback kept direct unless `NO_PROXY` is set. SOCKS4 and malformed entries are
+skipped. A failed or slow lookup means no proxy, never a tunnel that does not start. The quick
+tunnel (cloudflared) is unchanged.
+
 For a few seconds after a new OpenAI tunnel-client process connects (app start, update, or a
 client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
 process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
