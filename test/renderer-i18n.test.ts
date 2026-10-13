@@ -329,3 +329,25 @@ it('addresses the person as "du" throughout the German catalog', () => {
   const extension = JSON.parse(readFileSync('extension/_locales/de/messages.json', 'utf8')) as Record<string, { message: string }>;
   expect(Object.entries(extension).filter(([, entry]) => formal.test(entry.message)).map(([key, entry]) => `${key} → ${entry.message}`)).toEqual([]);
 });
+
+// A feature has one name per language. Sentences kept the English name ("Wie viel ein Compact &
+// Resume-Bericht behält") beside the translated one ("Komprimieren & Fortsetzen"), or a second
+// translation of it, so one settings page named the same feature three ways (2026-10-13).
+it('calls each feature by the language\'s own name in every sentence', () => {
+  // The names hold no regular-expression characters.
+  const word = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}-])${name}(?![\\p{L}\\p{N}-])`, 'u');
+  const offenders: string[] = [];
+  for (const [language, catalog] of Object.entries(catalogs)) {
+    for (const [name, entry] of [['Compact & Resume', 'Compact & Resume:'], ['Goal', 'Goal'], ['Loop', 'Loop'], ['Activity', 'Activity']] as const) {
+      const own = catalog![entry]?.replace(/[:：]\s*$/, '').trim();
+      if (!own || own === name) continue;
+      for (const [key, value] of Object.entries(catalog!)) {
+        if (!word(name).test(key)) continue;
+        if (word(name).test(value)) offenders.push(`${language}: "${name}" left in → ${value}`);
+        // The handoff feature is always named in full; a second translation of it is a second name.
+        else if (name === 'Compact & Resume' && !value.toLowerCase().includes(own.toLowerCase())) offenders.push(`${language}: not "${own}" → ${value}`);
+      }
+    }
+  }
+  expect(offenders).toEqual([]);
+});
