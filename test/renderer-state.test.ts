@@ -3156,3 +3156,15 @@ it('shows unreadable refresh state and allows one explicit reset, including fail
   expect(recovery.hidden).toBe(true);
   button.click(); expect(reset).toHaveBeenCalledTimes(2);
 });
+
+// Codex's "Prevent sleep while running": on unless switched off in General.
+it('keeps the computer awake while a chat works unless switched off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const keepAwake = w.document.getElementById('keepAwake') as HTMLInputElement;
+  expect(keepAwake.checked).toBe(true);
+  keepAwake.checked = false;
+  keepAwake.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.keepAwake).toBe(false);
+});

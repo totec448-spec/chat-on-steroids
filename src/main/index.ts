@@ -6,7 +6,8 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
@@ -33,9 +34,9 @@ import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTrans
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
-import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, initSessionStore, setRecordingStorageLimit } from './session/store.js';
+import { flushSessions, initSessionStore, listSessions, setRecordingStorageLimit } from './session/store.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -44,6 +45,7 @@ import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
+  onSessionChange,
   queueDeterministicAttributionRepair,
   setAgentBinder,
   setAgentConversationLookup
@@ -436,6 +438,16 @@ void app.whenReady().then(async () => {
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
   for (const surface of await enrolledPluginSurfaces()) notePluginInstalled(surface);
   await pluginManager.initialize(userData);
+  // Codex's "Prevent sleep while running": a sleeping computer stops a long run (#1086).
+  const keepAwake = createKeepAwake({
+    sessions: async () => (await listSessions()).map(summary => ({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) })),
+    enabled: () => getConfig().ui.keepAwake !== false,
+    blocker: { start: () => powerSaveBlocker.start('prevent-app-suspension'), stop: id => { if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id); } }
+  });
+  installKeepAwake(keepAwake);
+  onSessionChange(() => void keepAwake.refresh());
+  setInterval(() => void keepAwake.refresh(), 60_000).unref();
+  void keepAwake.refresh();
   // The app's own requests follow the system proxy too, not only the tunnel (#1255).
   configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
     ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),
