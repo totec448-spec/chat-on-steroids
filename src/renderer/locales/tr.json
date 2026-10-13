@@ -2246,5 +2246,8 @@
   "Could not read plugin-refresh state": "Eklenti yenileme durumu okunamadı",
   "Could not reset plugin-refresh state": "Eklenti yenileme durumu sıfırlanamadı",
   "Reset plugin refresh": "Eklenti yenilemeyi sıfırla",
-  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Sıfırlama, okunamayan durumun yedeğini alır ve otomatik eklenti yenilemenin yeniden başlamasını sağlar. Yenileme mevcut ChatGPT sohbetlerini etkileyebilir."
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Sıfırlama, okunamayan durumun yedeğini alır ve otomatik eklenti yenilemenin yeniden başlamasını sağlar. Yenileme mevcut ChatGPT sohbetlerini etkileyebilir.",
+  "A calm capybara who lifts, chills and never panics.": "Ağırlık kaldıran, keyfine bakan ve asla paniğe kapılmayan sakin bir kapibara.",
+  "A tiny hamster with a big pre-workout attitude.": "Antrenman öncesi enerjisi yüksek minik bir hamster.",
+  "The built-in Chat On Steroids companion.": "Chat On Steroids ile gelen yerleşik yol arkadaşı."
 }

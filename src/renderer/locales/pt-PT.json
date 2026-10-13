@@ -2246,5 +2246,8 @@
   "Could not read plugin-refresh state": "Não foi possível ler o estado de atualização dos plugins",
   "Could not reset plugin-refresh state": "Não foi possível repor o estado de atualização dos plugins",
   "Reset plugin refresh": "Repor atualização dos plugins",
-  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "A reposição guarda uma cópia do estado ilegível e permite reiniciar a atualização automática dos plugins. A atualização pode afetar conversas existentes do ChatGPT."
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "A reposição guarda uma cópia do estado ilegível e permite reiniciar a atualização automática dos plugins. A atualização pode afetar conversas existentes do ChatGPT.",
+  "A calm capybara who lifts, chills and never panics.": "Uma capivara calma que levanta pesos, relaxa e nunca entra em pânico.",
+  "A tiny hamster with a big pre-workout attitude.": "Um hamster minúsculo com muita atitude de pré-treino.",
+  "The built-in Chat On Steroids companion.": "O companheiro incluído no Chat On Steroids."
 }

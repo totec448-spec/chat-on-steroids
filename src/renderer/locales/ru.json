@@ -2246,5 +2246,8 @@
   "Could not read plugin-refresh state": "Не удалось прочитать состояние обновления плагинов",
   "Could not reset plugin-refresh state": "Не удалось сбросить состояние обновления плагинов",
   "Reset plugin refresh": "Сбросить обновление плагинов",
-  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Сброс сохраняет копию нечитаемого состояния и позволяет возобновить автоматическое обновление плагинов. Обновление может повлиять на существующие чаты ChatGPT."
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Сброс сохраняет копию нечитаемого состояния и позволяет возобновить автоматическое обновление плагинов. Обновление может повлиять на существующие чаты ChatGPT.",
+  "A calm capybara who lifts, chills and never panics.": "Спокойная капибара, которая качается, отдыхает и никогда не паникует.",
+  "A tiny hamster with a big pre-workout attitude.": "Крошечный хомяк с большим предтренировочным настроем.",
+  "The built-in Chat On Steroids companion.": "Встроенный компаньон Chat On Steroids."
 }

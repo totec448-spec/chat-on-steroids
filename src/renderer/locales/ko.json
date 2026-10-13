@@ -2246,5 +2246,8 @@
   "Could not read plugin-refresh state": "플러그인 새로고침 상태를 읽을 수 없습니다",
   "Could not reset plugin-refresh state": "플러그인 새로고침 상태를 초기화할 수 없습니다",
   "Reset plugin refresh": "플러그인 새로고침 초기화",
-  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "초기화하면 읽을 수 없는 상태를 백업하고 자동 플러그인 새로고침을 다시 시작할 수 있습니다. 새로고침은 기존 ChatGPT 채팅에 영향을 줄 수 있습니다."
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "초기화하면 읽을 수 없는 상태를 백업하고 자동 플러그인 새로고침을 다시 시작할 수 있습니다. 새로고침은 기존 ChatGPT 채팅에 영향을 줄 수 있습니다.",
+  "A calm capybara who lifts, chills and never panics.": "운동도 하고 느긋하게 쉬며 절대 당황하지 않는 차분한 카피바라.",
+  "A tiny hamster with a big pre-workout attitude.": "운동 전 의욕이 넘치는 아주 작은 햄스터.",
+  "The built-in Chat On Steroids companion.": "Chat On Steroids에 기본으로 들어 있는 친구."
 }
