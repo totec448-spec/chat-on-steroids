@@ -274,7 +274,7 @@ function paintAlert(status, info) {
   const text = incompatible
     ? t(
       'popup_version_mismatch_help',
-      "App v$1 (protocol $2); companion v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this companion. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished.",
+      "App v$1 (protocol $2); extension v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this extension. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished.",
       [status.appVersion || '?', status.appProtocol ?? '?', status.extensionVersion || '?', status.extensionProtocol ?? '?']
     )
     : pairError && pairError.message

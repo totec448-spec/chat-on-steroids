@@ -16,7 +16,7 @@ const handlers = new Map<string, Handler>();
 vi.mock('electron', () => ({
   ipcMain: { handle: (name: string, handler: Handler) => handlers.set(name, handler), removeHandler: (name: string) => handlers.delete(name) },
   BrowserWindow: class {}, clipboard: {}, dialog: {}, shell: {}, nativeTheme: { themeSource: 'system' },
-  app: { on: vi.fn(), getPath: () => '', getVersion: () => '0.0.0', getAppPath: () => process.cwd(), isPackaged: false },
+  app: { on: vi.fn(), once: vi.fn(), getPath: () => '', getVersion: () => '0.0.0', getAppPath: () => process.cwd(), isPackaged: false },
   safeStorage: {
     isAsyncEncryptionAvailable: async () => true, getSelectedStorageBackend: () => 'gnome_libsecret',
     encryptStringAsync: async (text: string) => Buffer.from(text),
@@ -471,6 +471,38 @@ it('hands a message for the running turn to the browser while one of its calls i
     expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input)
       .toMatchObject({ id: row.id, directTurn: { id: turnId } });
   });
+});
+
+// Like Codex's Steer: a message queued for after the turn can be sent into the running turn instead.
+it('sends a queued follow-up into the running turn when asked, as Send directly would', async () => {
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Queued follow-up sent now', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'user_message', messageId: randomUUID(), text: 'Inspect the current task', time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await attributedMcp(conversationId);
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' });
+  expect(row.directTurn).toBeUndefined();
+  expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+
+  expect(await input.sendQueuedInputNow(row.id)).toBe(true);
+  expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', mode: 'auto', transportIntent: 'browser', directTurn: { id: turnId } });
+  expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input)
+    .toMatchObject({ id: row.id, directTurn: { id: turnId } });
+  // Already on its way: a second press changes nothing.
+  expect(await input.sendQueuedInputNow(row.id)).toBe(false);
+});
+
+it('leaves a queued follow-up waiting when there is no running turn to send it into', async () => {
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Nothing running', conversationId });
+  await post('/events', { conversationId, events: [{ kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() }] });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' });
+  expect(await input.sendQueuedInputNow(row.id)).toBe(false);
+  expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', mode: 'after-turn' });
+  expect((await input.listInputs()).find(entry => entry.id === row.id)?.directTurn).toBeUndefined();
 });
 
 it('still holds an ordinary queued message for a chat while one of its calls is running', async () => {
@@ -1843,7 +1875,7 @@ describe('IPC input delivery and Goal control integration', () => {
     pushed.mockClear();
     expect((await post('/models', { nonce, models })).body.ok).toBe(true);
     expect((await handlers.get('chatModels:get')!(null, {})).data.models).toEqual(models);
-    expect(pushed).toHaveBeenCalledWith('state:changed', expect.anything());
+    await vi.waitFor(() => expect(pushed).toHaveBeenCalledWith('state:changed', expect.anything()));
     expect((await post('/models', { nonce, models })).status).toBe(409);
   });
   it('releases only the expected actual turn through IPC', async () => {
@@ -2885,7 +2917,15 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
         await bridge.sweepStaleSwarm(now);
         const status = (await post('/status', { openConversations: [conversationId] })).body;
         const repair = status.repairs.find((item: any) => item.conversationId === conversationId);
-        expect(repair?.reason).toBe('goal'); // Existing shared pickup wire reason.
+        // Failed once on Linux CI (2026-10-12) and not since in 192 local runs under load, so a
+        // failure names what the sweep saw instead of only "undefined".
+        const seen = async () => JSON.stringify({
+          minutes, repairs: status.repairs,
+          pickup: (await input.listInputs()).find(item => item.id === row.id)?.pickupRecovery ?? null,
+          state: (await input.listInputs()).find(item => item.id === row.id)?.state,
+          log: (await import('../src/main/logger.js')).getLog().slice(-12).map(entry => entry.message.slice(0, 160))
+        });
+        expect(repair?.reason, repair ? undefined : await seen()).toBe('goal'); // Existing shared pickup wire reason.
         await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
         expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued', text: row.text });
         expect(goal.goalPendingReplyFor(conversationId)).toBeNull();

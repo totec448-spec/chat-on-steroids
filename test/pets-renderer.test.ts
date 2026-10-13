@@ -103,3 +103,43 @@ it('renders the plugin-style library and wires import, multi-enable, favorite, d
   await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(1));
   expect(writeClipboard.mock.calls[0]![0]).toBe(w.document.getElementById('petsFormatInstructions')!.textContent);
 });
+
+// The bundled pets' descriptions come from their files and were shown as written, so every language
+// read "A calm capybara who lifts, chills and never panics." (2026-10-13). An imported pet's text is
+// the author's and stays as it is.
+it("shows a bundled pet's description in the app's language and leaves an imported pet's as written", async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
+    <span id="petsCount"></span>
+    <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
+    <div id="petsInstalled"></div>
+  </body>`, { url: 'https://pets.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const state: PetLibraryState = { pets: [
+    { id: 'capy', displayName: 'Capy', description: 'A calm capybara who lifts, chills and never panics.', kind: 'cos', builtin: true, enabled: false, favorite: false },
+    { id: 'willow', displayName: 'Willow', description: 'Forest friend', kind: 'cos', enabled: false, favorite: false }
+  ] };
+  const api: any = { petsList: () => Promise.resolve({ ok: true as const, data: state }), petsAsset: async () => ({ ok: false as const, error: 'none' }) };
+  const { initPets } = await import('../src/renderer/pets.js'); initPets(api, { applyLibraryState: vi.fn() } as any);
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.pet-library-card')).toHaveLength(2));
+  const text = (id: string) => w.document.querySelector(`[data-pet-id="${id}"] .plugin-card-title p`)!.textContent;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(text('capy')).toBe('Ein gelassenes Wasserschwein, das Gewichte stemmt, entspannt und nie die Nerven verliert.');
+  expect(text('willow')).toBe('Forest friend');
+  setLanguage('en');
+  expect(text('capy')).toBe('A calm capybara who lifts, chills and never panics.');
+});
+
+it('has a translation of every bundled pet description in every language', async () => {
+  const fs = await import('node:fs');
+  const descriptions = [...fs.readdirSync('pets').map(id => JSON.parse(fs.readFileSync(`pets/${id}/pet.json`, 'utf8')).description as string),
+    /description: '([^']+)'/.exec(fs.readFileSync('src/main/pet-library.ts', 'utf8'))![1]!];
+  expect(descriptions).toHaveLength(3);
+  for (const file of fs.readdirSync('src/renderer/locales')) {
+    const catalog = JSON.parse(fs.readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
+    for (const description of descriptions) expect(catalog[description], `${file}: ${description}`).toBeTruthy();
+  }
+});

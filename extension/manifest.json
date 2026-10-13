@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extension_name__",
-  "version": "2.1.34",
+  "version": "2.1.36",
   "description": "__MSG_extension_description__",
   "default_locale": "en",
   "minimum_chrome_version": "125",
@@ -10,7 +10,8 @@
     "scripting",
     "alarms",
     "debugger",
-    "tabs"
+    "tabs",
+    "tabGroups"
   ],
   "optional_permissions": ["cookies"],
   "host_permissions": [
@@ -22,7 +23,17 @@
     "http://127.0.0.1:8766/*",
     "http://127.0.0.1:8767/*",
     "http://127.0.0.1:8768/*",
-    "http://127.0.0.1:8769/*"
+    "http://127.0.0.1:8769/*",
+    "http://127.0.0.1:18765/*",
+    "http://127.0.0.1:18766/*",
+    "http://127.0.0.1:18767/*",
+    "http://127.0.0.1:18768/*",
+    "http://127.0.0.1:18769/*",
+    "http://127.0.0.1:38765/*",
+    "http://127.0.0.1:38766/*",
+    "http://127.0.0.1:38767/*",
+    "http://127.0.0.1:38768/*",
+    "http://127.0.0.1:38769/*"
   ],
   "background": {
     "service_worker": "background.js",

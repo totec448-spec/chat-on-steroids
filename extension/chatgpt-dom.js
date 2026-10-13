@@ -342,6 +342,9 @@ var CLF_DOM = (() => {
   // "Stream cache expired" (2026-10-05).
   function transportFailure(value) {
     const line = String(value || '').replace(/\s+/g, ' ').trim();
+    // The same failures on a pt-BR account, as measured 2026-10-12 (a send that never reached the
+    // model, and its dropped answer). Only observed wording; other languages stay unrecognised.
+    if (/^(?:a entrega da mensagem atingiu o tempo limite(?:\. tente novamente\.?)?|conexão interrompida\.? aguardando a resposta completa\.?)(?: tentar novamente)?$/i.test(line)) return true;
     return /^(?:message delivery timed out(?:\. please try again\.?)?|connection interrupted\.? waiting for the complete answer\.?|chatgpt stream recovery polling timed out\.?|stream cache expired\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|a network error occurred\.?(?: please check your connection and try again\.?)?|resume stream unavailable\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)(?: retry)?$/i.test(line);
   }
 
@@ -2687,6 +2690,33 @@ var CLF_DOM = (() => {
     ownConnectors = list;
     return true;
   }
+  /** This install's proven connector apps ({ surface, appId, linkId, name }), from the app's status. */
+  let ownApps = [];
+  function setConnectorApps(value) {
+    const list = [];
+    for (const surface of ['core', 'desktop', 'plugins']) {
+      for (const app of (value && Array.isArray(value[surface]) ? value[surface] : []).slice(0, 4)) {
+        if (!app || typeof app.appId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(app.appId)) continue;
+        list.push({ surface, appId: app.appId, linkId: typeof app.linkId === 'string' ? app.linkId : null,
+          name: typeof app.name === 'string' ? app.name : null });
+      }
+    }
+    const changed = JSON.stringify(list) !== JSON.stringify(ownApps);
+    ownApps = list;
+    return changed;
+  }
+  const connectorApps = () => ownApps.map(app => ({ ...app }));
+  /** Configured and learned names select one surface; renames never discard its proven IDs. */
+  function provenAppsFor(connectorName) {
+    const at = connectorNames().indexOf(connectorName);
+    const surfaces = new Set(ownApps.filter(app => app.name === connectorName).map(app => app.surface));
+    if (at >= 0) surfaces.add(['core', 'desktop', 'plugins'][at]);
+    // A learned name can collide with another surface's learned or configured name.
+    // That ambiguity is not permission to fall back to name-only enrollment.
+    if (surfaces.size > 1) return null;
+    const surface = [...surfaces][0];
+    return ownApps.filter(app => app.surface === surface);
+  }
   /** This install's three names, or the plain ones while the app has not said. */
   const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
   /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
@@ -2694,7 +2724,12 @@ var CLF_DOM = (() => {
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
-    const externalPlugins = pluginsConnectorName(connectorName);
+    // A durable exact-ID request already identifies its connector even when names collide.
+    // Use that ID's proven surface for limits too, rather than borrowing another surface's name.
+    const identified = expectedAppId ? ownApps.filter(app => app.appId === expectedAppId) : [];
+    const proven = identified.length ? identified : provenAppsFor(connectorName);
+    if (proven === null && !expectedAppId) return null;
+    const externalPlugins = proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2703,11 +2738,11 @@ var CLF_DOM = (() => {
         if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames() }, location.origin);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
-    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
+    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
@@ -2716,14 +2751,38 @@ var CLF_DOM = (() => {
       tools: snapshot.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), refresh: buttons[0] || null,
       tunnelId: typeof snapshot.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot.tunnelId) ? snapshot.tunnelId : null, settled: snapshot.settled === true } : null;
   }
+  /**
+   * Whether a plugin settings page shows this connector: by a proven app id when one exists (a
+   * same-named app with another id is somebody else's), otherwise by the configured name as before.
+   */
+  function ownSnapshot(snapshot, connectorName) {
+    const proven = provenAppsFor(connectorName);
+    return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
+  }
   function pluginInstalledButtons(connectorName) {
+    // Native links name their exact App Id, even when a fresh provider rename has not reached
+    // the learned name yet. Legacy buttons still need names; the destination proves identity.
+    const proven = provenAppsFor(connectorName);
+    if (proven === null) return null;
+    const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
+    const named = node => names.includes(text(node));
     return safe(() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
-        if (!main) return null;
-        const rows = [...main.querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
-          [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+        if (!main || (!proven.length && !connectorNames().includes(connectorName))) return null;
+        // Measured 2026-10-11: installed rows became links to exact management pages.
+        // Catalog and external links cannot identify an installed connector.
+        const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
+          if (!button.isConnected || button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
+          if (button.tagName === 'A') {
+            const url = new URL(button.href, location.href);
+            const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
+            if (url.origin !== location.origin || !route || url.hash) return false;
+            if (proven.length) return proven.some(app => app.appId === route[1]);
+          }
+          return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
+        });
         return rows.length ? rows : null;
       }
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
@@ -2734,7 +2793,7 @@ var CLF_DOM = (() => {
       const rows = [...panels[0].querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
         button.querySelector('[data-testid="plugin-icon-wrapper"]'));
       if (!rows.length) return null;
-      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && named(node)));
     }, null);
   }
   function pluginManagementIdle() {
@@ -2827,7 +2886,7 @@ var CLF_DOM = (() => {
       };
       const timer = setTimeout(() => finish(null), 1500);
       window.addEventListener('message', receive);
-      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames() }, location.origin);
+      window.postMessage({ source: 'clf-picker-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
     });
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
@@ -3257,6 +3316,65 @@ var CLF_DOM = (() => {
     });
   }
 
+  /**
+   * ChatGPT's own "new Project" control in its sidebar, or null.
+   *
+   * Located by the attribute ChatGPT's sidebar action carries, not by its label, which is in the
+   * account's language (measured 2026-10-10: `data-app-action-sidebar-project-create`, labelled
+   * "Adicionar novo projeto" on a pt-BR account). Exactly one shown control, or nothing.
+   */
+  function projectCreateControl() {
+    return safe(() => {
+      const shown = [...document.querySelectorAll('button[data-app-action-sidebar-project-create]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
+      return shown.length === 1 ? shown[0] : null;
+    }, null);
+  }
+
+  /**
+   * Opens ChatGPT's collapsed sidebar once so its New project control can show. A narrow window
+   * unmounts the sidebar, and the control lives only there.
+   */
+  function revealSidebar() {
+    return safe(() => {
+      const toggles = [...document.querySelectorAll('button[data-testid="open-sidebar-button"][aria-expanded="false"]')]
+        .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
+      if (toggles.length !== 1) return false;
+      toggles[0].click();
+      return true;
+    }, false);
+  }
+
+  /** Every Project the page links to right now, by id: the account's Projects ChatGPT lists. */
+  function projectIdsShown() {
+    return safe(() => [...new Set([...document.querySelectorAll('a[href]')]
+      .map(link => projectHomeId(new URL(link.href, location.href).pathname)).filter(Boolean))], []);
+  }
+
+  /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
+  function projectCreateForm() {
+    return safe(() => {
+      const dialogs = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+        .filter(node => node.querySelector('input#chatgpt-project-name') && node.getClientRects().length > 0);
+      if (dialogs.length !== 1) return null;
+      const input = dialogs[0].querySelector('input#chatgpt-project-name');
+      const submits = [...dialogs[0].querySelectorAll('button[type="submit"]')];
+      return input && submits.length === 1 ? { dialog: dialogs[0], input, submit: submits[0] } : null;
+    }, null);
+  }
+
+  /** Types a Project name the way React sees a person typing it. */
+  function fillProjectName(input, name) {
+    return safe(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) return false;
+      input.focus();
+      setter.call(input, name);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return input.value === name;
+    }, false);
+  }
+
   async function newChatControl(stillCurrent = () => true) {
     const shown = node => node && !node.closest(OWN_SURFACES) && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const link = (root = document) => [...root.querySelectorAll('a[data-testid="create-new-chat-button"][data-sidebar-item="true"][href="/"]')].find(shown) || null;
@@ -3295,6 +3413,11 @@ var CLF_DOM = (() => {
     prepareChatModelSurface,
     modelPickerReadable,
     newChatControl,
+    projectCreateControl,
+    projectCreateForm,
+    revealSidebar,
+    projectIdsShown,
+    fillProjectName,
     projectHomeId,
     enterProject,
     visibleModelSelection,
@@ -3305,6 +3428,8 @@ var CLF_DOM = (() => {
     composerAttachmentNames,
     pluginRefreshView,
     setConnectorNames,
+    setConnectorApps,
+    connectorApps,
     connectorNames,
     pluginInstalledButtons,
     pluginManagementIdle,

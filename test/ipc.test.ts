@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
-  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })) },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })), showMessageBox: vi.fn(async () => ({ response: 0 })) },
   shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   nativeTheme: { themeSource: 'system' },
   safeStorage: {
@@ -29,7 +29,7 @@ vi.mock('electron', () => ({
     encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
     decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
-  app: { on: vi.fn(), getPath: (_name: string) => '', getLocale: () => 'en-US', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
+  app: { on: vi.fn(), once: vi.fn(), getPath: (_name: string) => '', getLocale: () => 'en-US', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
@@ -596,6 +596,7 @@ afterAll(async () => {
 beforeEach(async () => {
   currentWindow = null;
   vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] });
+  vi.mocked(dialog.showMessageBox).mockReset().mockResolvedValue({ response: 0 } as never);
   nativeTheme.themeSource = 'system';
   vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(true);
   vi.mocked(shell.openPath).mockReset().mockResolvedValue('');
@@ -1298,6 +1299,34 @@ describe('every link the window offers', () => {
       expect(openInPreferredBrowser).not.toHaveBeenCalled();
     } finally {
       await saveConfig(original);
+    }
+  });
+
+  it("hands Setup's extensions address over by clipboard, because browsers ignore their own pages from outside", async () => {
+    const { clipboard } = await import('electron');
+    const write = vi.spyOn(clipboard, 'writeText');
+    try {
+      for (const browser of ['chrome', 'edge', 'brave'] as const) {
+        write.mockClear();
+        vi.mocked(openInPreferredBrowser).mockClear();
+        expect(await handlers.get('browser:setupOpen')!(null, { browser, page: 'extensions' })).toEqual({ ok: true, data: true });
+        expect(write).toHaveBeenCalledWith(`${browser}://extensions`);
+        // Only a blank tab to paste into: the browser would open its internal page as a new tab instead.
+        expect(openInPreferredBrowser).toHaveBeenCalledWith('about:blank', { browser, reveal: true });
+      }
+      // A copy that fails is reported, and no browser comes up for an address that is not there.
+      write.mockClear();
+      vi.mocked(openInPreferredBrowser).mockClear();
+      write.mockRejectedValueOnce(new Error('clipboard unavailable') as never);
+      expect(await handlers.get('browser:setupOpen')!(null, { browser: 'chrome', page: 'extensions' })).toMatchObject({ ok: false });
+      expect(openInPreferredBrowser).not.toHaveBeenCalled();
+      write.mockClear();
+      vi.mocked(openInPreferredBrowser).mockClear();
+      await handlers.get('browser:setupOpen')!(null, { browser: 'edge', page: 'chatgpt' });
+      expect(openInPreferredBrowser).toHaveBeenCalledWith('https://chatgpt.com/', { browser: 'edge', reveal: true });
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
     }
   });
 
@@ -2116,4 +2145,163 @@ it('saves a diagnostics report through the renderer channel without personal det
   expect(report).toMatch(/open '~[\\/]<p:[0-9a-f]{4}>[\\/]<p:[0-9a-f]{4}>\.xlsx'/);
   for (const personal of ['home-jane', 'Acme', 'invoice', 'jane@example.com', 'Quarterly tax return']) expect(report).not.toContain(personal);
   expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
+});
+
+describe('native worker checkout cleanup confirmation', () => {
+  const offer = {
+    runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    agentId: 'worker-1',
+    createdAt: 1723456789000,
+    reason: 'cleared' as const,
+    label: 'Review API'
+  };
+  const preview = {
+    ...offer,
+    workspace: '/approved/.chat-on-steroids-worktrees/owned/checkout',
+    branch: 'cos/worker-1',
+    headOid: 'a'.repeat(40),
+    dirty: true,
+    ignoredFiles: false,
+    uniqueCommits: false,
+    changes: ['M tracked.txt'],
+    blockers: ['tracked-changes'],
+    canOfferRemoval: false,
+    hasWorkerCommits: false,
+    branchIntegratedIntoSource: true,
+    trackedChangesCount: 1,
+    untrackedFilesCount: 0,
+    ignoredFilesCount: 0,
+    changesTruncated: false,
+    contentFingerprint: 'f'.repeat(64)
+  };
+  const invoke = (channel: string, payload?: unknown) => handlers.get(channel)!(null, payload) as Promise<any>;
+
+  async function withPreview(run: (spies: {
+    list: ReturnType<typeof vi.spyOn>;
+    dispose: ReturnType<typeof vi.spyOn>;
+  }) => Promise<void>): Promise<void> {
+    const agents = await import('../src/main/agents.js');
+    const worktrees = await import('../src/main/worktrees/index.js');
+    const offers = vi.spyOn(agents, 'managedWorktreeCleanupOffers').mockReturnValue([offer]);
+    const acknowledge = vi.spyOn(agents, 'acknowledgeManagedWorktreeCleanupOffer').mockReturnValue(true);
+    const list = vi.spyOn(worktrees, 'listOfferedWorkerWorktrees').mockResolvedValue([preview] as never);
+    const dispose = vi.spyOn(worktrees, 'disposeOfferedWorkerWorktree').mockResolvedValue({
+      removed: true, branchRemoved: false, branch: preview.branch, changes: []
+    });
+    try { await run({ list, dispose }); }
+    finally {
+      dispose.mockRestore();
+      list.mockRestore();
+      acknowledge.mockRestore();
+      offers.mockRestore();
+    }
+  }
+
+  it('sends only UI-safe summary data and defaults to keeping the checkout', async () => {
+    await withPreview(async ({ dispose }) => {
+      const listing = await invoke('swarm:worktreeCleanupList');
+      expect(listing).toMatchObject({ ok: true, data: [expect.objectContaining({ agentId: offer.agentId, dirty: true })] });
+      expect(JSON.stringify(listing)).not.toContain(preview.contentFingerprint);
+      expect(JSON.stringify(listing)).not.toContain(preview.headOid);
+      expect(JSON.stringify(listing)).not.toContain(preview.changes[0]);
+      expect(await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId }))
+        .toEqual({ ok: true, data: { removed: false, branchPreserved: true } });
+      expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+        defaultId: 0, cancelId: 0, buttons: ['Keep checkout', 'Remove checkout; preserve Git branch']
+      }));
+      expect(dispose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('rejects a same-path, same-status and same-size content edit made while the dialog is open', async () => {
+    await withPreview(async ({ list, dispose }) => {
+      // A fingerprint is the sole differing field; Git status/path/count and file sizes
+      // would all still look the same to the existing IPC comparison.
+      list.mockResolvedValueOnce([preview] as never)
+        .mockResolvedValueOnce([{ ...preview, contentFingerprint: 'e'.repeat(64) }] as never);
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      const result = await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+      expect(result).toEqual({ ok: false, error: 'The checkout changed while you were reviewing it. No files were removed.' });
+      expect(list).toHaveBeenCalledTimes(2);
+      expect(dispose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('refuses missing/truncated fingerprints and unreadable post-dialog inspections', async () => {
+    await withPreview(async ({ list, dispose }) => {
+      list.mockResolvedValueOnce([{ ...preview, contentFingerprint: null }] as never);
+      expect((await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId })).ok).toBe(false);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      list.mockResolvedValueOnce([{ ...preview, changesTruncated: true }] as never);
+      expect((await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId })).ok).toBe(false);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      list.mockResolvedValueOnce([preview] as never).mockResolvedValueOnce([] as never);
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      expect((await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId })).error)
+        .toBe('The checkout changed while you were reviewing it. No files were removed.');
+      expect(dispose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('passes the approved fingerprint to the manager, including its last-moment mismatch guard', async () => {
+    const { WorkerWorktreeError } = await import('../src/main/worktrees/index.js');
+    await withPreview(async ({ dispose }) => {
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      const accepted = await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+      expect(accepted).toEqual({ ok: true, data: { removed: true, branchPreserved: true } });
+      expect(dispose).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({
+        runId: offer.runId, agentId: offer.agentId
+      }), expect.any(Array), preview.contentFingerprint);
+
+      dispose.mockRejectedValueOnce(new WorkerWorktreeError('WORKTREE_CONTENT_CHANGED', 'file bytes changed after approval'));
+      vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1 } as never);
+      const refused = await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+      expect(refused).toEqual({ ok: false, error: 'The checkout changed while you were reviewing it. No files were removed.' });
+    });
+  });
+});
+
+it('projects reloaded unreadable ledger health through state:get and recovers only through explicit reset', async () => {
+  const file = path.join(dir, 'state', 'plugin-refresh.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, '{broken');
+  initDurableStore(dir);
+  const broken: any = await handlers.get('state:get')!(null, undefined);
+  expect(broken).toMatchObject({ ok: true, data: { pluginRefreshUnreadable: true } });
+  expect(await fs.readFile(file, 'utf8')).toBe('{broken');
+  const reset: any = await handlers.get('plugin-refresh:reset')!(null, undefined);
+  expect(reset).toMatchObject({ ok: true, data: { pluginRefreshUnreadable: false } });
+  expect(await readDurable('plugin-refresh')).toEqual([]);
+  const backups = (await fs.readdir(path.dirname(file))).filter(name => name.startsWith('plugin-refresh.recovery-'));
+  expect(await fs.readFile(path.join(path.dirname(file), backups.at(-1)!), 'utf8')).toBe('{broken');
+});
+
+// #1406: the recording store held a fixed 2 GB. Settings now offers larger sizes, applied at once.
+it('saves the recording storage size and applies it to the store', async () => {
+  const store = await import('../src/main/session/store.js');
+  await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 10 } });
+  expect(getConfig().sessions.storageLimitGiB).toBe(10);
+  expect(await store.getImageStorage()).toMatchObject({ limitBytes: 10 * 2 ** 30 });
+  // Only offered sizes are accepted.
+  expect(await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 3 } })).toMatchObject({ ok: false, error: 'Invalid input' });
+  expect(getConfig().sessions.storageLimitGiB).toBe(10);
+  await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 2 } });
+  expect(await store.getImageStorage()).toMatchObject({ limitBytes: 2 * 2 ** 30 });
+});
+
+// Most installs from before Automatic plugin refresh existed have it saved as off without ever
+// choosing that. The app asks once; the answer is kept either way, and a settings save keeps it.
+it('records the one-time answer to the automatic plugin refresh offer', async () => {
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } });
+  expect(getConfig().ui.autoRefreshPluginsAsked).toBe(false);
+  const declined: any = await handlers.get('pluginRefresh:offer')!(null, { turnOn: false });
+  expect(declined).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: false, autoRefreshPluginsAsked: true } } } });
+  // A later settings save from the window does not bring the question back.
+  await save({ ...getConfig(), ui: { ...getConfig().ui, theme: 'light' } });
+  expect(getConfig().ui.autoRefreshPluginsAsked).toBe(true);
+
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } });
+  const accepted: any = await handlers.get('pluginRefresh:offer')!(null, { turnOn: true });
+  expect(accepted).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: true, autoRefreshPluginsAsked: true } } } });
+  expect(await handlers.get('pluginRefresh:offer')!(null, { turnOn: 'yes' })).toMatchObject({ ok: false });
 });

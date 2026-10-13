@@ -509,6 +509,43 @@ c & d
     expect(rendered.querySelector('a, .evil, [style*="color:red"]')).toBeNull();
   });
 
+  it.each([
+    ['right after a line of text', "Using:\n\\[\n-\\frac{\\hbar^2}{2m}\\psi\n=\nE\\psi\n\\]\n\nAnd:\n$$\n-\\frac{\\hbar^2}{2m}\\psi\n=\nE\\psi\n$$\n"],
+    ['right after a list item\'s text', "1. Using `\\[ ... \\]` syntax\n   \\[\n   -\\frac{\\hbar^2}{2m}\\psi\n   =\n   E\\psi\n   \\]\n2. Using `$$ ... $$` syntax\n   $$\n   -\\frac{\\hbar^2}{2m}\\psi\n   =\n   E\\psi\n   $$\n"],
+    ['as recorded from GPT-6, beside the same source in code fences', "The 3D time-independent Schrödinger equation explicitly expands the Laplacian over \\(x,y,z\\).\n\nUsing `\\[ ... \\]`:\n\n```latex\n\\[\n-\\frac{\\hbar^2}{2m}\n\\left(\n\\frac{\\partial^2 \\psi}{\\partial x^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial y^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial z^2}\n\\right)\n+\nV(x,y,z)\\psi(x,y,z)\n=\nE\\psi(x,y,z)\n\\]\n```\n\nRendered:\n\n\\[\n-\\frac{\\hbar^2}{2m}\n\\left(\n\\frac{\\partial^2 \\psi}{\\partial x^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial y^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial z^2}\n\\right)\n+\nV(x,y,z)\\psi(x,y,z)\n=\nE\\psi(x,y,z)\n\\]\n\nUsing `$$ ... $$`:\n\n```latex\n$$\n-\\frac{\\hbar^2}{2m}\n\\left(\n\\frac{\\partial^2 \\psi}{\\partial x^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial y^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial z^2}\n\\right)\n+\nV(x,y,z)\\psi(x,y,z)\n=\nE\\psi(x,y,z)\n$$\n```\n\nRendered:\n\n$$\n-\\frac{\\hbar^2}{2m}\n\\left(\n\\frac{\\partial^2 \\psi}{\\partial x^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial y^2}\n+\n\\frac{\\partial^2 \\psi}{\\partial z^2}\n\\right)\n+\nV(x,y,z)\\psi(x,y,z)\n=\nE\\psi(x,y,z)\n$$"]
+  ])('draws a display formula spread over several lines with a lone = line, %s (#1342)', (_case, text) => {
+    // A formula opened on the line after prose was read as part of the paragraph, and its bare "="
+    // line turned the paragraph into a large heading: the backslash of \[ was lost and nothing drew.
+    const rendered = renderedMarkdown(text);
+    expect(rendered.querySelectorAll('.math-display .katex-display')).toHaveLength(2);
+    expect(rendered.querySelector('h1, h2')).toBeNull();
+    const shown = [...rendered.querySelectorAll('.math-display .katex-html')].map(node => node.textContent).join(' ');
+    expect(shown).toContain('ℏ');
+    expect(shown).not.toContain(String.raw`\frac`);
+    // Source in code fences stays source.
+    for (const code of rendered.querySelectorAll('pre code')) expect(code.querySelector('.katex')).toBeNull();
+  });
+
+  it('separates only an opening display line, never a closing one or one inside a code fence', async () => {
+    const { separateDisplayMath } = await import('../src/renderer/math.js');
+    expect(separateDisplayMath('A:\n$$\nx\n=\ny\n$$\nB')).toBe('A:\n\n$$\nx\n=\ny\n$$\nB');
+    expect(separateDisplayMath('```\ntext\n$$\n```\nC:\n\\[\nz\n\\]')).toBe('```\ntext\n$$\n```\nC:\n\n\\[\nz\n\\]');
+    expect(separateDisplayMath('Price $5 and $6.')).toBe('Price $5 and $6.');
+  });
+
+  it('draws a GPT-6 answer read from its fallback text: aligned blocks, \\\\[10pt] and inline formulas (#1342)', () => {
+    // The reply as the extension hands it over once formulas keep their LaTeX (recorded 2026-10-12).
+    const rendered = renderedMarkdown("The Lindhard dielectric function, as discussed in *Solid State Physics* by Ashcroft and Mermin, describes the electronic screening response of a noninteracting electron gas.\n\n\\[\n\\begin{aligned}\n\\varepsilon(\\mathbf{q},\\omega)\n\\\\\n=\n\\\\\n1-\\frac{4\\pi e^2}{q^2}\n\\frac{2}{V}\n\\sum_{\\mathbf{k}}\n\\frac{\nf\\!\\left(\\epsilon_{\\mathbf{k}+\\mathbf{q}}\\right)\n-\nf\\!\\left(\\epsilon_{\\mathbf{k}}\\right)\n}{\n\\epsilon_{\\mathbf{k}+\\mathbf{q}}\n-\n\\epsilon_{\\mathbf{k}}\n-\n\\hbar(\\omega+i0^+)\n}\n\\end{aligned}\n\\]\n\nHere, \\(\\mathbf{q}\\) is the wave vector of the perturbation, with magnitude \\(q=|\\mathbf{q}|\\).\n\n\\[\n\\begin{aligned}\n\\epsilon_{\\mathbf{k}} &= \\frac{\\hbar^2 k^2}{2m}\n\\\\[10pt]\nf(\\epsilon) &= \\frac{1}{e^{(\\epsilon-\\mu)/(k_B T)}+1}\n\\end{aligned}\n\\]\n\n[ok] 2^10 = 1024 a_b *star*");
+    expect(rendered.querySelectorAll('.math-display .katex-display')).toHaveLength(2);
+    expect(rendered.querySelectorAll('.math-inline .katex')).toHaveLength(2);
+    expect(rendered.querySelector('h1, h2, .is-source')).toBeNull();
+    // What is drawn, not the source KaTeX keeps for screen readers.
+    const shown = [...rendered.querySelectorAll('.katex-html')].map(node => node.textContent).join(' ');
+    expect(shown).toContain('ℏ');
+    expect(shown).not.toContain(String.raw`\frac`);
+    expect(rendered.querySelector('p:last-of-type')!.textContent).toContain('[ok] 2^10 = 1024 a_b');
+  });
+
   it('shows the name of a person or place ChatGPT links, instead of dropping it', () => {
     const rendered = renderedMarkdown('No \uE200entity\uE202["place","Antigo Egito"]\uE201, \uE200entity\uE202["people","René \\"Descartes\\"","filósofo"]\uE201 estudou.');
     expect(JSON.stringify(rendered.textContent!.trim())).toBe(JSON.stringify('No Antigo Egito, René "Descartes" estudou.'));

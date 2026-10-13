@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
+const askSection = source.slice(source.indexOf('  async function ask(message, current = null) {'), source.indexOf('  /**\n   * Whether a worker reply'));
 const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const tools = [{ name: 'read', description: 'Read current.', inputSchema: { type: 'object' } }];
-function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuringClaim?: boolean; refreshAvailable?: boolean; href?: string } = {}) {
+function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuringClaim?: boolean; navigateHrefDuringClaim?: boolean; refreshAvailable?: boolean; href?: string } = {}) {
   let refreshed = false;
   const click = vi.fn(() => { refreshed = true; });
   const href = options.href ?? `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`;
@@ -19,6 +21,7 @@ function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuring
   });
   const ask = vi.fn(async (message: { action: string }) => {
     if (message.action === 'claim' && options.navigateDuringClaim) context.epoch = 2;
+    if (message.action === 'claim' && options.navigateHrefDuringClaim) context.location.href = `https://chatgpt.com/plugins/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`;
     return { data: { ok: !(message.action === 'claim' && options.deny) } };
   });
   context.ask = ask;
@@ -32,6 +35,31 @@ it('claims before exactly one click and completes only a newly observed matching
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
   expect(h.ask.mock.invocationCallOrder[0]).toBeLessThan(h.click.mock.invocationCallOrder[0]!);
 });
+// Measured on Windows 2026-10-13 (2.1.36 release round). ChatGPT's plugin page does not show the
+// tool list, so the new tools arriving after the click change no element on the page. The only
+// change the wait could notice was the Refresh button turning active again, about 10 s later; when
+// that came after 12 s, a refresh that had worked was recorded as failed (2 of 3 runs).
+it('notices refreshed tools that arrive without any change on the page', async () => {
+  const dom = new JSDOM('<html><body></body></html>');
+  let clickedAt = 0;
+  const click = vi.fn(() => { clickedAt = Date.now(); });
+  const ask = vi.fn(async (_message: { action: string }) => ({ data: { ok: true } }));
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, setInterval, clearInterval, pageViewChecks: new Set(), MutationObserver: dom.window.MutationObserver,
+    document: dom.window.document, alive: true, generating: false, epoch: 1, ask, t: (_key: string, fallback: string) => fallback,
+    location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      // The page's data, not its elements: new tools 300 ms after the click.
+      pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh: { click },
+        tools: clickedAt && Date.now() - clickedAt >= 300 ? tools : [{ ...tools[0], description: 'Old description.' }] }) }
+  });
+  vm.runInContext(`${section}\nglobalThis.run = refreshManagedPlugin;`, context);
+  const started = Date.now();
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(Date.now() - started).toBeLessThan(4000);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
+  dom.window.close();
+}, 10_000);
 it.each([false, true])('waits for readable tool schemas before claim (navigation=%s)', async navigate => {
   const dom = new JSDOM('<html><body></body></html>');
   let ready = false, refreshed = false;
@@ -109,11 +137,11 @@ it('opens an enrolled exact App Id directly in marked settings without name disc
   await (context.run as Function)([{ surface: 'core' }], true);
   expect(create).toHaveBeenCalledExactlyOnceWith(`https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`, true);
 });
-it.each([{ deny: true }, { navigateDuringClaim: true }])('never clicks after denied claim or changed navigation: %j', async options => {
+it.each([{ deny: true }, { navigateDuringClaim: true }, { navigateHrefDuringClaim: true }])('never clicks or blames a moved page after denied claim or changed navigation: %j', async options => {
   const h = workflow(options);
   expect(await h.run()).toBe(false);
   expect(h.click).not.toHaveBeenCalled();
-  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'fail']);
+  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(options.deny ? ['claim', 'fail'] : ['claim']);
 });
 it.each(['unpinned', 'pinned', 'pinned-during-proof'])('reuses management tabs and respects pinning (%s)', async mode => {
   const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
@@ -172,6 +200,127 @@ it('reports why a page it owns produced no readable view, instead of returning i
 // The newer shell redirects `/#settings/Plugins/plugin_<app>` to a real path and keeps our query.
 // Measured 2026-09-26: unrecognised there, one request had accumulated five helper tabs.
 const pathRouted = `https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`;
+function registrationGatedWorkflow(action: 'current' | 'manual' | 'claim' | 'fail' | 'complete') {
+  let release!: (value: { ok: boolean }) => void, entered!: () => void, refreshed = false;
+  const gate = new Promise<{ ok: boolean }>(resolve => { release = resolve; });
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  let registration = action === 'complete' ? Promise.resolve({ ok: true }) : gate;
+  const click = vi.fn(() => { refreshed = true; });
+  const sendToWorker = vi.fn(async (message: { action: string }) => {
+    // Completion has its own registration await, after the legitimate owned claim/click.
+    if (message.action === 'claim' && action === 'complete') registration = gate;
+    return { data: { ok: true } };
+  });
+  const location = { pathname: '/settings/plugins-settings/plugin_asdk_app_synthetic', href: pathRouted };
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, location, sendToWorker, observed: {},
+    t: (_key: string, fallback: string) => fallback,
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginRefreshView: () => action === 'fail' ? null : { appId: 'asdk_app_synthetic',
+        tools: action === 'current' || refreshed ? tools : [{ ...tools[0], description: 'Old description.' }],
+        refresh: action === 'manual' ? null : { click } } } });
+  Object.defineProperty(context, 'documentReady', {
+    get() { if (registration === gate) entered(); return registration; },
+    set(value) { registration = value; }
+  });
+  vm.runInContext(`${askSection}\n${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  return { click, sendToWorker, location, waiting, release,
+    run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools }) as Promise<boolean> };
+}
+it.each(['current', 'manual', 'claim', 'fail', 'complete'] as const)(
+  'keeps %s publication owned across the real document-registration await', async action => {
+    for (const navigate of [false, true]) {
+      const h = registrationGatedWorkflow(action);
+      const pending = h.run();
+      await h.waiting;
+      if (navigate) {
+        h.location.href = pathRouted.replace('/settings/plugins-settings/', '/plugins/');
+        h.location.pathname = '/plugins/plugin_asdk_app_synthetic'; // Same epoch, App Id and request marker.
+      }
+      h.release({ ok: true });
+      expect(await pending).toBe(!navigate && action !== 'fail');
+      expect(h.sendToWorker.mock.calls.map(([message]) => message.action)).toEqual(navigate ? (action === 'complete' ? ['claim'] : []) :
+        action === 'claim' || action === 'complete' ? ['claim', 'complete'] : [action]);
+      expect(h.click).toHaveBeenCalledTimes(action === 'complete' || (!navigate && action === 'claim') ? 1 : 0);
+    }
+  }
+);
+const nativeFixtures: JSDOM[] = [];
+afterEach(() => { for (const dom of nativeFixtures.splice(0)) dom.window.close(); });
+function nativeInstalledWorkflow() {
+  const listed = `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`;
+  const dom = new JSDOM('<main><a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Chat On Steroids Core</span></a></main>', { runScripts: 'outside-only', url: listed });
+  nativeFixtures.push(dom);
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
+  dom.window.eval(domSource);
+  const link = dom.window.document.querySelector('a')!;
+  const click = vi.spyOn(link, 'click').mockImplementation(() => {});
+  const api = (dom.window as any).CLF_DOM;
+  const installed = vi.fn(api.pluginInstalledButtons), view = vi.fn(() => null);
+  const assign = vi.fn(), ask = vi.fn(), replace = vi.fn();
+  const location = { pathname: '/settings/plugins-settings', href: listed, assign };
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location, history: { replaceState: replace },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: installed, pluginRefreshView: view } });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  return { dom, link, click, installed, view, assign, ask, replace, location,
+    run: () => (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Core', tools }) as Promise<boolean> };
+}
+it('navigates the sole reverified native link with custody attached before inspecting its card', async () => {
+  const h = nativeInstalledWorkflow();
+  expect(await h.run()).toBe(true);
+  expect(h.installed).toHaveBeenCalledTimes(2);
+  expect(h.assign).toHaveBeenCalledExactlyOnceWith(pathRouted);
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.view).not.toHaveBeenCalled(); // An unreadable/unhydrated card cannot delay route custody.
+  expect(h.ask).not.toHaveBeenCalled();
+  expect(h.replace).not.toHaveBeenCalled();
+});
+it.each(['external', 'catalog', 'hash', 'changed-target', 'ambiguous', 'detached', 'hidden', 'replaced'])(
+  'refuses a native link whose ownership changes across discovery await (%s)', async mode => {
+    const h = nativeInstalledWorkflow();
+    const pending = h.run();
+    if (mode === 'external') h.link.href = 'https://example.com/settings/plugins-settings/plugin_asdk_app_synthetic';
+    if (mode === 'catalog') h.link.href = '/plugins/plugin_asdk_app_synthetic';
+    if (mode === 'hash') h.link.href += '#unowned';
+    if (mode === 'changed-target') h.link.href = '/settings/plugins-settings/plugin_asdk_app_other';
+    if (mode === 'ambiguous') h.link.after(h.link.cloneNode(true));
+    if (mode === 'detached') h.link.remove();
+    if (mode === 'hidden') h.link.hidden = true;
+    if (mode === 'replaced') h.link.replaceWith(h.link.cloneNode(true));
+    expect(await pending).toBe(false);
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.click).not.toHaveBeenCalled();
+    expect(h.ask).not.toHaveBeenCalled();
+    expect(h.view).not.toHaveBeenCalled();
+  }
+);
+it('does not use list discovery on another marked settings URL with the same epoch', async () => {
+  const h = nativeInstalledWorkflow();
+  const pending = h.run();
+  h.location.href = pathRouted;
+  h.location.pathname = '/settings/plugins-settings/plugin_asdk_app_synthetic';
+  expect(await pending).toBe(false);
+  expect(h.assign).not.toHaveBeenCalled();
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.ask).not.toHaveBeenCalled();
+  expect(h.view).not.toHaveBeenCalled();
+});
+it.each(['matching', 'unreadable'])('does not claim or fail after a management read moved to another URL (%s)', async outcome => {
+  let release!: (value: object | null) => void;
+  const reading = new Promise<object | null>(resolve => { release = resolve; });
+  const click = vi.fn(), ask = vi.fn();
+  const location = { pathname: '/settings/plugins-settings/plugin_asdk_app_synthetic', href: pathRouted };
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location,
+    t: (_key: string, fallback: string) => fallback,
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => reading } });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => { const value = await read(); return current() ? value : null; }; globalThis.run = refreshManagedPlugin;`, context);
+  const pending = (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+  location.href = pathRouted.replace('/settings/plugins-settings/', '/plugins/');
+  location.pathname = '/plugins/plugin_asdk_app_synthetic';
+  release(outcome === 'matching' ? { appId: 'asdk_app_synthetic', tools, refresh: { click } } : null);
+  expect(await pending).toBe(false);
+  expect(click).not.toHaveBeenCalled();
+  expect(ask).not.toHaveBeenCalled();
+});
 it('reuses and retires helper tabs on the path-routed settings page too', async () => {
   const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
   const code = background.slice(background.indexOf('let pluginRefreshFlight = null;'), background.indexOf('async function catalogProbe('));
@@ -273,7 +422,7 @@ it('refreshes a settled empty Plugins page and passes its tunnel id to the claim
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
   expect(ask.mock.calls[0]?.[0]).toMatchObject({ tunnelId: 'tunnel_synthetic01', tools: [] });
 });
-it('forwards the page tunnel id from the extension to the app, and only a well-formed one', async () => {
+it.each(['claim', 'current'])('forwards the page tunnel id for %s from the extension to the app, and only a well-formed one', async action => {
   // Measured 2026-09-27: the background relay rebuilt the body without it, so the app never saw
   // the proof and every stale Desktop/Plugins enrollment was refused.
   const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
@@ -282,9 +431,9 @@ it('forwards the page tunnel id from the extension to the app, and only a well-f
   const context = vm.createContext({ call, ownsDocument: () => true, maintain: () => {}, pluginRefreshMarker: () => id,
     chrome: { tabs: { get: async () => ({ url: pathRouted }) } } });
   vm.runInContext(`globalThis.handlers = {\n${handler}\n};`, context);
-  const send = (tunnelId: unknown) => (context.handlers as any).plugin_refresh({ action: 'claim', id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Desktop', tools, tunnelId }, null, { tab: 7 });
+  const send = (tunnelId: unknown) => (context.handlers as any).plugin_refresh({ action, id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Desktop', tools, tunnelId }, null, { tab: 7 });
   await send('tunnel_synthetic01');
-  expect(JSON.parse(call.mock.calls[0]![1].body)).toMatchObject({ action: 'claim', tunnelId: 'tunnel_synthetic01' });
+  expect(JSON.parse(call.mock.calls[0]![1].body)).toMatchObject({ action, tunnelId: 'tunnel_synthetic01' });
   await send('tunnel_x"; drop');
   expect(JSON.parse(call.mock.calls[1]![1].body)).not.toHaveProperty('tunnelId');
 });

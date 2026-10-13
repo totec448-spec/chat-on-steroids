@@ -322,7 +322,7 @@ export function projectEvent(event: SessionEvent): ControlApiEvent {
     case 'turn_end':
       return { ...base, outcome: event.outcome, detail: event.detail && line(event.detail, SUMMARY_CAP), reason: event.reason };
     case 'chat_error':
-      return { ...base, message: stored(event.message), recoverable: event.recoverable, blocking: event.blocking, reason: event.reason };
+      return { ...base, message: stored(event.message), recoverable: event.recoverable, blocking: event.blocking, retryAt: event.retryAt, reason: event.reason };
     case 'tool_call': {
       const call = event.call;
       const summary = toolCallSummary(call);
@@ -385,6 +385,35 @@ async function sessionEvents(id: string, params: URLSearchParams): Promise<Contr
   }
   return heavy(async () => {
     const page = await readSessionEvents(id, { ...query, limit: query.limit ?? 50 });
+    if (!page) throw new RequestError(404, 'session_not_found');
+    return { events: page.events.map(projectReadableEvent), total: page.total, nextFrom: page.nextFrom };
+  });
+}
+
+/** How many events one read of a stream fetches; a longer backlog takes several reads. */
+export const STREAM_PAGE = MAX_EVENTS;
+
+/**
+ * Where an event stream starts and what it carries. `Last-Event-ID` is the `seq` of the last
+ * event a client saw, so a reconnect continues after it; it wins over `from`, which is still in
+ * the address the client first opened.
+ */
+export function eventStreamQuery(params: URLSearchParams, lastEventId: string | string[] | undefined): { from: number; kinds?: SessionEventKind[] } {
+  const query = parseQuery(params, {
+    from: integer(0, 10_000_000).optional(),
+    kinds: csv(keysOf(EVENT_KINDS)).optional()
+  });
+  if (lastEventId === undefined) return { from: query.from ?? 0, kinds: query.kinds };
+  if (typeof lastEventId !== 'string' || !/^\d{1,8}$/.test(lastEventId)) {
+    throw new RequestError(400, 'invalid_query', 'Last-Event-ID is not valid');
+  }
+  return { from: Number(lastEventId) + 1, kinds: query.kinds };
+}
+
+/** One read for a stream: the same rows, projection and limits as `GET …/events?from=`. */
+export function streamEvents(id: string, from: number, kinds: SessionEventKind[] | undefined): Promise<ControlApiEvents> {
+  return heavy(async () => {
+    const page = await readSessionEvents(id, { from, limit: STREAM_PAGE, ...(kinds ? { kinds } : {}) });
     if (!page) throw new RequestError(404, 'session_not_found');
     return { events: page.events.map(projectReadableEvent), total: page.total, nextFrom: page.nextFrom };
   });

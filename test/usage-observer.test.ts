@@ -43,7 +43,7 @@ function harness() {
     clearTimeout: (id: number) => timers.delete(id) });
   evaluate();
   async function feed(data: unknown, url = 'https://chatgpt.com/backend-api/wham/usage', init: Record<string, unknown> = {},
-                      responseInit: { status?: number; headers?: Record<string, string> } = {}) {
+                      responseInit: { status?: number; headers?: Record<string, string> } = {}, requestUrl = '/endpoint') {
     let done: () => void = () => {};
     const inspected = new Promise<void>(resolve => { done = resolve; });
     let read = false;
@@ -57,7 +57,7 @@ function harness() {
       cancel: async () => { done(); }
     }) } }) };
     const expectedResponse = response;
-    const returned = await window.fetch('/endpoint', { headers: { Authorization: 'private-test-value' }, ...init });
+    const returned = await window.fetch(requestUrl, { headers: { Authorization: 'private-test-value' }, ...init });
     expect(returned).toBe(expectedResponse);
     if (new URL(url).origin === 'https://chatgpt.com' && status >= 200 && status < 300 &&
         /^\/backend-api\/(wham\/usage|conversation\/init|conversation\/prepare|models)$/.test(new URL(url).pathname)) await inspected;
@@ -256,6 +256,49 @@ describe('MAIN-world usage projection', () => {
     expect(h.posts, 'a contradictory response published an origin anyway').toHaveLength(0);
   });
 
+  /**
+   * #1305: the first turn of a new chat on some accounts never shows its tool rows to the page, so
+   * the app could not learn its connector's app id from it. The response stream carries the tool's
+   * result message as one complete event, with `invoked_resource` naming the app (measured
+   * 2026-10-11 on macOS, a Team account).
+   */
+  describe('app sightings from the response stream (#1305)', () => {
+    const conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const request_id = '11111111-2222-4333-8444-555555555555';
+    const result = (overrides: Record<string, unknown> = {}, author: Record<string, unknown> = { role: 'tool', name: 'api_tool.call_tool' }) => ({
+      message: { id: 'tool-result-1', author, recipient: 'all',
+        content: { content_type: 'text', text: 'ok /asdk_app_notfromtext/link_nope/exec_command' },
+        metadata: { request_id, invoked_resource: { resource_uri: '/asdk_app_6ac261da/link_6ac26253/exec_command',
+          app_name: 'Chat On Steroids Core', publish_status: 'draft' }, ...overrides } },
+      conversation_id
+    });
+    const frames = (value: unknown) => [
+      'event: delta_encoding\ndata: "v1"\n\n',
+      `event: delta\ndata: ${JSON.stringify({ p: '', o: 'add', v: value, c: 0 })}\n\n`
+    ];
+    const sightings = (posts: Array<Record<string, any>>) => posts.filter(row => row.type === 'cos-app-sighting');
+
+    it('reports the app named by a tool result message, with its request id', async () => {
+      const h = harness();
+      await h.feedSse(frames(result()), { method: 'POST' }, 'https://chatgpt.com/backend-api/f/conversation');
+      expect(sightings(h.posts)).toEqual([{ type: 'cos-app-sighting', conversationId: conversation_id, sightings: [
+        { requestId: request_id, appId: 'asdk_app_6ac261da', linkId: 'link_6ac26253', appName: 'Chat On Steroids Core' }
+      ] }]);
+    });
+
+    it.each([
+      ['a resource that is not an app path', result({ invoked_resource: { resource_uri: 'https://example.com/x', app_name: 'X' } })],
+      ['no request id', result({ request_id: undefined })],
+      ['a message that is not a connector result', result({}, { role: 'assistant', name: null })],
+      ['another conversation', { ...result(), conversation_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff' }]
+    ])('reports nothing for %s', async (_name, value) => {
+      const h = harness();
+      await h.feedSse(['data: ' + JSON.stringify({ conversation_id, turn_topic_id: 'topic-1' }) + '\n\n', ...frames(value)],
+        { method: 'POST' }, 'https://chatgpt.com/backend-api/f/conversation');
+      expect(sightings(h.posts)).toEqual([]);
+    });
+  });
+
   it('requires a fresh document for a legacy observer without a disposal handle', () => {
     const h = harness(); h.markLegacy(); const before = h.currentFetch();
     h.evaluate(); expect(h.needsReload()).toBe(true); expect(h.currentFetch()).toBe(before);
@@ -440,6 +483,46 @@ describe('MAIN-world usage projection', () => {
       expect.objectContaining({ model: 'deep-research', scope: 'feature', remaining: 5 }),
       expect.objectContaining({ model: 'gpt-example', scope: 'model', remaining: 2 })
     ]);
+  });
+
+  describe('a chat deleted in ChatGPT', () => {
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const deleted = (conversation?: string) => ({ detail: { message: 'A conversa foi excluída. Inicie um novo chat.', code: 'conversation_deleted',
+      can_retry: false, ...(conversation ? { conversation_id: conversation } : {}) } });
+    const at = Date.parse('2026-09-05T12:00:00Z');
+
+    it('reports the history answer with only the code and the exact id, and replays it', async () => {
+      const h = harness();
+      await h.feed(deleted(id), `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      expect(h.posts).toEqual([{ type: 'cos-conversation-deleted', conversationId: id, observedAt: at }]);
+      expect(JSON.stringify(h.posts)).not.toContain('excluída');
+      h.request();
+      expect(h.posts).toEqual([h.posts[0], h.posts[0]]);
+    });
+
+    it('reports a send into it by the conversation its own request names', async () => {
+      const h = harness();
+      await h.feed(deleted(), 'https://chatgpt.com/backend-api/f/conversation',
+        { method: 'POST', body: JSON.stringify({ conversation_id: id, messages: [] }) }, { status: 404 },
+        'https://chatgpt.com/backend-api/f/conversation');
+      expect(h.posts.filter(post => post.type === 'cos-conversation-deleted'))
+        .toEqual([{ type: 'cos-conversation-deleted', conversationId: id, observedAt: at }]);
+    });
+
+    it('stays silent for any other 404, code, route, origin or a history answer naming another chat', async () => {
+      const h = harness();
+      await h.feed({ detail: { code: 'conversation_not_found' } }, `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      await h.feed(deleted(id), `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 403 });
+      await h.feed(deleted(id), `https://chatgpt.com/backend-api/conversation/${id}`, { method: 'POST' }, { status: 404 });
+      await h.feed(deleted(id), `https://example.test/backend-api/conversation/${id}`, {}, { status: 404 });
+      await h.feed(deleted('bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'), `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      // A send whose request names no conversation (a new chat) has nothing to report.
+      await h.feed(deleted(), 'https://chatgpt.com/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ messages: [] }) },
+        { status: 404 }, 'https://chatgpt.com/backend-api/f/conversation');
+      await h.feed({ detail: { code: 'conversation_deleted', padding: 'x'.repeat(17 * 1024) } },
+        `https://chatgpt.com/backend-api/conversation/${id}`, {}, { status: 404 });
+      expect(h.posts.filter(post => post.type === 'cos-conversation-deleted')).toEqual([]);
+    });
   });
 
   it('projects a conversation-history 429 with Retry-After and replays only the bounded deadline', async () => {

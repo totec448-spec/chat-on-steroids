@@ -14,13 +14,33 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.36': {
+    lead: () => t('Steadier long runs, a tunnel that works behind a proxy, and ChatGPT\'s own words.'),
+    highlights: [
+      { icon: 'i-retry', title: () => t('Steadier long runs'), text: () => t('Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.') },
+      { icon: 'i-globe', title: () => t('Works behind a proxy'), text: () => t('The tunnel to ChatGPT uses your system\'s proxy by itself.') },
+      { icon: 'i-chat', title: () => t('Better dictation on Windows'), text: () => t('Dictation uses Windows\' own speech recognition, with punctuation and much better accuracy.') },
+      { icon: 'i-plug', title: () => t('Plugins, as ChatGPT calls them'), text: () => t('The app now says plugin, like ChatGPT, and plugins with many tools can be installed.') },
+      { icon: 'i-terminal', title: () => t('Start chats from your own tools'), text: () => t('The Local control API can start a new chat and send its events as they happen.') }
+    ]
+  },
+  '2.1.35': {
+    lead: () => t('ChatGPT Projects for your projects, workers in their own Git copy, and steadier long runs.'),
+    highlights: [
+      { icon: 'i-folder', title: () => t('Projects in ChatGPT'), text: () => t('New projects get their own ChatGPT Project, and their new chats open inside it.') },
+      { icon: 'i-browser', title: () => t('Background chats in a tab group'), text: () => t('Background chats can stay in one collapsed tab group in your browser window instead of their own window.') },
+      { icon: 'i-git-diff', title: () => t('Workers in their own Git copy'), text: () => t('When you turn it on, each new worker gets its own Git worktree and branch, away from your checkout.') },
+      { icon: 'i-chat', title: () => t('Dictation on Windows'), text: () => t('The microphone button turns your speech into text in the message box, and you send it when you\'re ready.') },
+      { icon: 'i-plug', title: () => t('Rename your plugins'), text: () => t('Chat On Steroids apps you rename in ChatGPT keep working.') }
+    ]
+  },
   '2.1.34': {
     lead: () => t('Goal on every plan, Compact & Resume in Projects, and a background window that stays.'),
     highlights: [
       { icon: 'i-target', title: () => t('Goal on every plan'), text: () => t('On plans without a model picker, such as Free, Goal and Loop follow-ups use the chat\'s current model instead of failing.') },
       { icon: 'i-steps', title: () => t('Compact & Resume in Projects'), text: () => t('Moving a chat inside a ChatGPT Project to a new chat now completes, and the new chat stays in that Project.') },
       { icon: 'i-browser', title: () => t('A background window that stays'), text: () => t('Background chats keep using the same window after the extension updates or reloads.') },
-      { icon: 'i-plug', title: () => t('Clearer connector hints'), text: () => t('When ChatGPT calls a tool its connector doesn\'t have, the result names the connector that has it.') },
+      { icon: 'i-plug', title: () => t('Clearer plugin hints'), text: () => t('When ChatGPT calls a tool its plugin doesn\'t have, the result names the plugin that has it.') },
       { icon: 'i-terminal', title: () => t('Fewer repeated commands'), text: () => t('When ChatGPT starts a command that is still running in that chat, the result points it to the running one.') }
     ]
   },

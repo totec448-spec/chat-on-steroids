@@ -221,6 +221,13 @@ it('outlines a running turn in ChatGPT\'s order: sentences, this app\'s calls, r
   expect(JSON.stringify(trace)).not.toContain('PRIVATE_HIDDEN_GROUP');
   expect(JSON.stringify(trace)).not.toContain('NEVER_COPY_TOOL_ARGS');
 });
+it('names the user message that opened each turn, so its outline is filed under the right one (#1301)', async () => {
+  const f = fixture();
+  expect((await f.ask()).turns[0].question).toBe(USER);
+  // A turn whose first item is not a user message names none.
+  f.entry.turn.items.shift();
+  expect((await f.ask()).turns[0].question).toBeUndefined();
+});
 it('says what a running turn is doing with the open thought ChatGPT shows, and nothing once it ends', async () => {
   const f = fixture();
   // Observed 2026-10-08: the group's activeReasoning is the status line until the round closes.
@@ -237,6 +244,24 @@ it('outlines commentary whose own message is readable too, while recording that 
   const turn = (await f.ask()).turns[0];
   expect(turn.trace).toContainEqual({ kind: 'say', text: 'I will inspect the project.', done: true });
   expect(turn.messages.map((m: any) => m.rawText)).toContain('I will inspect the project.');
+});
+it('records a sentence GPT-6 writes inside the working group while the turn runs, as commentary', async () => {
+  // Live 2026-10-12: GPT-6 nests each interim sentence in the reasoning group as an assistant message
+  // (phase final_answer, completed, text in its DIL fallback). Only the outline read it: the canonical
+  // message arrived when the turn ended or the page reloaded, 15 to 23 minutes late.
+  const f = fixture();
+  f.entry.turn.items[1].items.push({ type: 'assistant-message', messageId: OTHER, phase: 'final_answer', completed: true,
+    content: `::chatgpt-content-reference{index="0" source_message_id="${OTHER}"}`,
+    contentReferences: [{ type: 'dil', source_message_id: OTHER, model_dil_v2: { fallbackMarkdown: 'Now editing `a.txt`.' } }] });
+  const turn = (await f.ask()).turns[0];
+  expect(turn.messages.find((m: any) => m.rawMessageId === OTHER)?.rawText).toBe('Now editing `a.txt`.');
+  // An interim sentence never ends the turn, whatever phase it carries.
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect((await f.ask()).turns[0].endMessageId).toBe(ANSWER);
+  // The same message hoisted to the top level is read once, and the scan stays readable.
+  f.entry.turn.items.splice(2, 0, { ...f.entry.turn.items[1].items.at(-1) });
+  const hoisted = (await f.ask()).turns[0];
+  expect(hoisted.messages.filter((m: any) => m.rawMessageId === OTHER)).toHaveLength(1);
 });
 it('reads a DIL answer as the Markdown the page falls back to, not as its content reference', async () => {
   const f = fixture();
@@ -266,6 +291,28 @@ it('reads a DIL answer as the model wrote it, without the escapes its fallback a
   // Code keeps its own text: fences and spans are verbatim in the fallback already.
   expect(await read('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and \\_after\\_'))
     .toBe('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and _after_');
+});
+it('keeps the LaTeX of a DIL answer as written, while its plain text still loses the escapes (#1342)', async () => {
+  // Recorded from GPT-6 on 2026-10-12. The fallback escapes plain text only: a display formula is a
+  // block between a line "\\[" and a line "\\]", an inline one sits in \\( … \\), and both hold raw
+  // LaTeX. Literal brackets are escaped inside their text line, and literal parentheses never are.
+  // Unescaping the formulas too turned \\[ into [, \\( into (, f\\! into f! and \\\\[10pt] into \\[10pt].
+  const f = fixture();
+  const answer = f.entry.turn.items[2];
+  answer.content = `::chatgpt-content-reference{index="0" source_message_id="${ANSWER}"}`;
+  const read = async (fallbackMarkdown: string) => {
+    answer.contentReferences = [{ type: 'dil', source_message_id: ANSWER, model_dil_v2: { fallbackMarkdown } }];
+    return (await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === ANSWER).rawText;
+  };
+  expect(await read("The Lindhard dielectric function, as discussed in *Solid State Physics* by Ashcroft and Mermin, describes the electronic screening response of a noninteracting electron gas.\n\n\\[\n\\begin{aligned}\n\\varepsilon(\\mathbf{q},\\omega)\n\\\\\n=\n\\\\\n1-\\frac{4\\pi e^2}{q^2}\n\\frac{2}{V}\n\\sum_{\\mathbf{k}}\n\\frac{\nf\\!\\left(\\epsilon_{\\mathbf{k}+\\mathbf{q}}\\right)\n-\nf\\!\\left(\\epsilon_{\\mathbf{k}}\\right)\n}{\n\\epsilon_{\\mathbf{k}+\\mathbf{q}}\n-\n\\epsilon_{\\mathbf{k}}\n-\n\\hbar(\\omega+i0^+)\n}\n\\end{aligned}\n\\]\n\nHere, \\(\\mathbf{q}\\) is the wave vector of the perturbation, with magnitude \\(q=|\\mathbf{q}|\\)\\.\n\n\\[\n\\begin{aligned}\n\\epsilon_{\\mathbf{k}} &= \\frac{\\hbar^2 k^2}{2m}\n\\\\[10pt]\nf(\\epsilon) &= \\frac{1}{e^{(\\epsilon-\\mu)/(k_B T)}+1}\n\\end{aligned}\n\\]\n\n\\[ok\\] 2\\^10 = 1024 a\\_b \\*star\\*"))
+    .toBe("The Lindhard dielectric function, as discussed in *Solid State Physics* by Ashcroft and Mermin, describes the electronic screening response of a noninteracting electron gas.\n\n\\[\n\\begin{aligned}\n\\varepsilon(\\mathbf{q},\\omega)\n\\\\\n=\n\\\\\n1-\\frac{4\\pi e^2}{q^2}\n\\frac{2}{V}\n\\sum_{\\mathbf{k}}\n\\frac{\nf\\!\\left(\\epsilon_{\\mathbf{k}+\\mathbf{q}}\\right)\n-\nf\\!\\left(\\epsilon_{\\mathbf{k}}\\right)\n}{\n\\epsilon_{\\mathbf{k}+\\mathbf{q}}\n-\n\\epsilon_{\\mathbf{k}}\n-\n\\hbar(\\omega+i0^+)\n}\n\\end{aligned}\n\\]\n\nHere, \\(\\mathbf{q}\\) is the wave vector of the perturbation, with magnitude \\(q=|\\mathbf{q}|\\).\n\n\\[\n\\begin{aligned}\n\\epsilon_{\\mathbf{k}} &= \\frac{\\hbar^2 k^2}{2m}\n\\\\[10pt]\nf(\\epsilon) &= \\frac{1}{e^{(\\epsilon-\\mu)/(k_B T)}+1}\n\\end{aligned}\n\\]\n\n[ok] 2^10 = 1024 a_b *star*");
+  // Literal punctuation around formulas, a one-line formula ChatGPT made a block, and $$ … $$, which
+  // ChatGPT itself treats as plain text.
+  expect(await read("The RPA (random phase approximation) costs \\$5 or \\$10, see \\[note 1\\] and {braces} and 50% of a&#124;b, x = 1, a+b, \\#tag, \\~wave\\~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\)\\.\n\n\\[\nE = mc^2\n\\]\n\n\\$\\$\n\\\\int\\_0\\^\\\\infty e\\^,dx = \\\\frac}2\n\\$\\$"))
+    .toBe("The RPA (random phase approximation) costs $5 or $10, see [note 1] and {braces} and 50% of a&#124;b, x = 1, a+b, #tag, ~wave~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\).\n\n\\[\nE = mc^2\n\\]\n\n$$\n\\int_0^\\infty e^,dx = \\frac}2\n$$");
+  // An opening without its closing is not a formula: the text is unescaped as before.
+  expect(await read('Odd \\( left open and \\[ too')).toBe('Odd ( left open and [ too');
+  expect(await read('\\[\nnever closed \\_here\\_')).toBe('[\nnever closed _here_');
 });
 it('requires the final item and successful turn, while retaining exact messages on reload', async () => {
   const f = fixture(); f.entry.turn.items[2].completed = true;
@@ -1560,4 +1607,32 @@ it('reads a translated Extra High lane as xhigh, as the English label does', asy
   expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-thinking', reasoningEffort: 'xhigh' });
   lanes[2]!.labels.effort = 'Extra High';
   expect((await f.ask('clf-picker-ask')).picker.choices[2].effort).toBe('xhigh');
+});
+
+// Measured live 2026-10-11 (VM 141): ChatGPT's shell turns reach the app with stripped request
+// metadata, so app sightings must come from the shell's own mapping, or no connector is ever proven.
+it('reports app sightings for shell turns from the native mapping', async () => {
+  const f = fixture();
+  const { mapping, resultId } = pairedShellCall(f);
+  // ChatGPT stamps the result with its invocation's request id (live data); OTHER is the fixture's.
+  mapping[resultId].message.metadata.request_id = OTHER;
+  mapping[resultId].message.metadata.invoked_resource.resource_uri = '/asdk_app_x1/link_x/read';
+  const turn = (await f.ask()).turns[0];
+  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat On Steroids Core' }]);
+  expect(JSON.stringify(turn)).not.toContain('PRIVATE_TOOL_RESULT');
+});
+
+// Measured live 2026-10-11: in a new chat the result row is in ChatGPT's mapping but not among the
+// turn's message ids, so it is found by this turn's own request id instead.
+it('reports an app sighting for a shell result outside the turn\'s message ids, matched by this turn\'s request id', async () => {
+  const f = fixture();
+  const { mapping, resultId } = pairedShellCall(f);
+  mapping[resultId].message.metadata.request_id = OTHER;
+  mapping[resultId].message.metadata.invoked_resource.resource_uri = '/asdk_app_x1/link_x/read';
+  f.entry.turn.messageIds = f.entry.turn.messageIds.map((id: string) => id === resultId ? CALL : id);
+  mapping['99999999-0000-4000-8000-000000000000'] = { id: '99999999-0000-4000-8000-000000000000', message: { id: '99999999-0000-4000-8000-000000000000',
+    author: { role: 'tool', name: 'api_tool.call_tool' }, recipient: 'all',
+    metadata: { request_id: 'another-turns-request', invoked_resource: { app_name: 'Gmail', resource_uri: '/asdk_app_gmail/link_g/search' } } } };
+  const turn = (await f.ask()).turns[0];
+  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat On Steroids Core' }]);
 });

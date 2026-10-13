@@ -1,4 +1,5 @@
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
+import type { DictationEvent } from '../shared/dictation.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
@@ -34,6 +35,8 @@ import type {
   SessionEvent,
   SessionSummary,
   ClearAgentResult,
+  WorkerWorktreeCleanupOffer,
+  WorkerWorktreeCleanupResult,
   SwarmState,
   TokenPressure
 } from '../shared/session.js';
@@ -94,6 +97,16 @@ export interface SessionDetail {
 }
 
 const api = {
+  /** System.Speech is available only through Windows PowerShell. */
+  dictationSupported: process.platform === 'win32',
+  /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
+  startDictation: () => call<{ status: 'starting' }>('dictation:start'),
+  stopDictation: () => call<void>('dictation:stop'),
+  onDictationEvent: (listener: (event: DictationEvent) => void): (() => void) => {
+    const wrapped = (_event: unknown, value: DictationEvent): void => listener(value);
+    ipcRenderer.on('dictation:event', wrapped);
+    return () => ipcRenderer.removeListener('dictation:event', wrapped);
+  },
   terminalCreate: (id: string, projectId: string | null, cols: number, rows: number) => call<WorkspaceTerminalInfo>('workspaceTerminal:request', { action: 'create', id, projectId, cols, rows }),
   terminalWrite: (id: string, data: string) => call<void>('workspaceTerminal:request', { action: 'write', id, data }),
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
@@ -131,6 +144,8 @@ const api = {
   /** The interface language, kept by the app for the browser extension. */
   setUiLanguage: (language: string) => call<void>('ui:language', language),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
+  /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
+  answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),
   petsImport: () => call<PetLibraryState | null>('pets:import'),
   petsSetEnabled: (id: string, enabled: boolean) => call<PetLibraryState>('pets:enabled', { id, enabled }),
   petsSetFavorite: (id: string, favorite: boolean) => call<PetLibraryState>('pets:favorite', { id, favorite }),
@@ -199,6 +214,9 @@ const api = {
   attachText: (text: string) => call<InputAttachment>('sessions:attachText', { text }),
   getUsage: () => call<UsageOverview>('usage:get'),
   getState: () => call<AppState>('state:get'),
+  resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
+  /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
+  startFreshCredentials: () => call<{ state: AppState; setAside: boolean }>('credentials:start-fresh'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
   addRoot: () => call<AppState>('roots:add'),
   /** A folder dropped on the window; only the preload can learn a dropped File's path. */
@@ -242,10 +260,11 @@ const api = {
 
   // Sessions, compaction and the browser bridge. Everything here is read-only or a
   // named action; there is still no channel that takes a path or a command.
-  listSessions: (options?: { cursor?: SessionListCursor; limit?: number }) =>
+  listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
+  retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
@@ -321,6 +340,7 @@ const api = {
   },
   retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
   editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),
+  sendQueuedInputNow: (id: string) => call<boolean>('sessions:sendQueuedNow', { id }),
   reorderQueuedInputs: (sessionId: string, ids: string[]) => call<boolean>('sessions:reorderInputs', { sessionId, ids }),
   cancelInput: (id: string) => call<boolean>('sessions:cancelInput', { id }),
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),
@@ -355,6 +375,11 @@ const api = {
   // Clearing the prime ends the run; clearing a worker frees that slot. Which of the two
   // happened comes back in the result — the renderer does not decide it.
   clearAgent: (id: string, runId?: string) => call<ClearAgentResult>('swarm:clearAgent', { id, runId }),
+  /** Review only. Scans retained broker-owned checkouts on demand, never at app startup. */
+  listWorktreeCleanupOffers: () => call<WorkerWorktreeCleanupOffer[]>('swarm:worktreeCleanupList'),
+  /** Main process asks the user for explicit approval before discarding checkout files. */
+  removeWorktreeCleanupOffer: (runId: string, agentId: string) =>
+    call<WorkerWorktreeCleanupResult>('swarm:worktreeCleanupRemove', { runId, agentId }),
 
   onStateChanged: (listener: (state: AppState) => void): (() => void) => {
     const wrapped = (_event: unknown, state: AppState): void => listener(state);

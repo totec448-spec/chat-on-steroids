@@ -162,6 +162,14 @@ function action(label: string | (() => string), work: () => void | Promise<void>
   return button;
 }
 
+/**
+ * A pet's description: a bundled pet's follows the app's language (its text is ours, with a
+ * translation in every catalog); an imported pet's is its author's and is shown as written.
+ */
+function describe(pet: PetRecord): string | (() => string) {
+  return pet.builtin ? () => t(pet.description) : pet.description;
+}
+
 function closeDialog(): void { document.querySelector<HTMLDialogElement>('#petDialog')?.close(); }
 
 function confirmDelete(pet: PetRecord, api: AppApi, remove: () => Promise<boolean>): void {
@@ -171,7 +179,7 @@ function confirmDelete(pet: PetRecord, api: AppApi, remove: () => Promise<boolea
   dialog.setAttribute('aria-labelledby', title.id); head.append(title, action(() => t('Close'), closeDialog));
   const body = el('div', 'plugin-dialog-body');
   const identity = el('div', 'pet-delete-identity');
-  const copy = el('div', 'pet-delete-copy'); copy.append(el('h3', '', pet.displayName), el('p', '', pet.description));
+  const copy = el('div', 'pet-delete-copy'); copy.append(el('h3', '', pet.displayName), el('p', '', describe(pet)));
   identity.append(preview(pet, api), copy);
   body.append(identity, el('p', 'pet-delete-warning', () => t('This removes the pet from your local library. You can import it again later.')));
   const actions = el('div', 'pet-delete-actions');
@@ -216,7 +224,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
   const renderCard = (pet: PetRecord): HTMLElement => {
       const card = el('article', 'plugin-card pet-library-card'); card.dataset.petId = pet.id;
       const entry = el('div', 'plugin-entry pet-library-entry');
-      const title = el('div', 'plugin-card-title'); title.append(el('h2', '', pet.displayName), el('p', 'muted', pet.description));
+      const title = el('div', 'plugin-card-title'); title.append(el('h2', '', pet.displayName), el('p', 'muted', describe(pet)));
       const foot = el('div', 'plugin-card-foot');
       foot.append(el('span', `pill pet-library-status${pet.enabled ? ' is-live' : ''}`, () => t(pet.enabled ? 'Active' : 'Inactive')));
       if (pet.builtin) foot.append(el('span', 'pet-library-bundled', () => t('Bundled')));
@@ -241,7 +249,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
   const render = (): void => {
     const favoritesList = $('petsFavorites'), libraryList = $('petsInstalled'); favoritesList.replaceChildren(); libraryList.replaceChildren();
     const query = $<HTMLInputElement>('petsSearch').value.trim().toLowerCase();
-    const visible = state.pets.filter(pet => `${pet.displayName} ${pet.description}`.toLowerCase().includes(query));
+    const visible = state.pets.filter(pet => `${pet.displayName} ${pet.builtin ? t(pet.description) : pet.description}`.toLowerCase().includes(query));
     const favorites = visible.filter(pet => pet.favorite), library = visible.filter(pet => !pet.favorite);
     const libraryCount = state.pets.filter(pet => !pet.favorite).length;
     const favoriteCount = state.pets.length - libraryCount;

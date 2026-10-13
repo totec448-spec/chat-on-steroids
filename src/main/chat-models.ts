@@ -29,7 +29,7 @@ const waitingReasons: Record<z.infer<typeof progress>['waiting'], string> = {
   composer_missing: 'Waiting for the ChatGPT composer to finish loading.',
   composer_hidden: 'The ChatGPT composer is hidden. Close native settings or dialogs to use this tab.',
   inspection_busy: 'The native model picker is already being inspected.',
-  page_unreachable: 'The browser companion has not answered the page readiness check.',
+  page_unreachable: 'The browser extension has not answered the page readiness check.',
   page_changed: 'The discovery page changed or closed. Retry to start a new inspection.',
   opening: 'Opening one separate discovery page. Existing chats are left untouched.',
   inspecting: 'Reading the native model versions and restoring the original selection.',
@@ -63,7 +63,7 @@ function scheduleDeadline(at: number): void {
 function expire(): void {
   if (request && Date.now() >= request.expiresAt) {
     logInfo(`model discovery expired id=${request.nonce}`); request = null;
-    failed(`Model discovery timed out. ${lastProblem ?? catalog.waiting ?? 'Check the browser companion and the signed-in ChatGPT page, then retry.'}`);
+    failed(`Model discovery timed out. ${lastProblem ?? catalog.waiting ?? 'Check the browser extension and the signed-in ChatGPT page, then retry.'}`);
   }
 }
 export function getChatModels(): ChatModelCatalog {

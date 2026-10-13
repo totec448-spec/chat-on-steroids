@@ -1,7 +1,7 @@
 import type { SessionEvent } from '../shared/session.js';
 import { positionOf } from '../shared/chronology.js';
-import { chatErrorMessageKey } from '../shared/chat-error.js';
-import { t } from './i18n.js';
+import { chatErrorMessageKey, CONVERSATION_DELETED } from '../shared/chat-error.js';
+import { currentLanguage, t } from './i18n.js';
 
 type ChatError = Extract<SessionEvent, { kind: 'chat_error' }>;
 
@@ -20,9 +20,29 @@ export function duplicateChatErrors(history: readonly SessionEvent[]): Set<numbe
   return duplicates;
 }
 
+/** The retry time as a clock time, with the day when the wait ends on another day than the notice. */
+function retryTime(retryAt: number, noticedAt: number): string {
+  const at = new Date(retryAt), language = currentLanguage();
+  const clock = at.toLocaleTimeString(language, { hour: 'numeric', minute: '2-digit' });
+  return at.toDateString() === new Date(noticedAt).toDateString() ? clock
+    : `${at.toLocaleDateString(language, { month: 'short', day: 'numeric' })}, ${clock}`;
+}
+
+/**
+ * Notices already seen resolved. Resolution is final (the turn later completed), but the rows that
+ * prove it can lie outside the loaded page: scrolling up dropped them and drew the notice red again,
+ * green once they reloaded, red on the next page (2026-10-12).
+ */
+const resolvedNotices = new Set<string>();
+const RESOLVED_NOTICES_LIMIT = 1000;
+const noticeKey = (error: ChatError): string => `${error.seq}:${error.time}:${error.turnId ?? ''}:${error.message.text}`;
+
 /** Presentation only: never infer send/reload authority from error prose. */
 export function chatErrorPresentation(error: ChatError, history: readonly SessionEvent[] = []) {
   const text = error.message.text.trim();
+  if (text === CONVERSATION_DELETED) return { title: t('Chat deleted in ChatGPT'),
+    message: t('ChatGPT no longer has this chat, so nothing more can be sent to it.'),
+    next: t('Start a new chat to continue. This history stays in the app.'), resolved: false, reloaded: false };
   const thinking = text === 'Thinking failed';
   const stalled = text.startsWith('No visible progress for ten minutes.');
   const title = thinking ? t('Thinking failed') : stalled ? t('Response stalled') : t('ChatGPT reported a problem');
@@ -30,7 +50,9 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
   const message = thinking ? t('ChatGPT’s page reported a failure. This does not prove the work stopped.')
     : stalled ? t('No visible progress for ten minutes. The app could not confirm that this turn finished.') : error.message.text;
   let next = error.blocking === true
-    ? t('Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.')
+    ? error.retryAt
+      ? t('ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.', [retryTime(error.retryAt, error.time)])
+      : t('Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.')
     : thinking
       ? t('You can send a follow-up. Automatic recovery, when allowed, refreshes the page and waits five minutes before a queued continuation; new work postpones it.')
       : error.recoverable === true || stalled
@@ -67,7 +89,14 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
     if (event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:') &&
         (question || !event.turnId || (!!error.turnId && event.turnId === error.turnId))) repair = event;
   }
-  if (completed > continued) return { title: t('Recovered after interruption'), message, resolved: true, reloaded: false, next: t('This turn later completed. You can continue with a new message.') };
+  // The memory answers only when this page holds no completion of its own; a completion followed
+  // by more work on this page outranks it, as it always did.
+  if (completed && completed <= continued) resolvedNotices.delete(noticeKey(error));
+  if (completed > continued || (!completed && resolvedNotices.has(noticeKey(error)))) {
+    if (resolvedNotices.size >= RESOLVED_NOTICES_LIMIT) resolvedNotices.delete(resolvedNotices.values().next().value!);
+    resolvedNotices.add(noticeKey(error));
+    return { title: t('Recovered after interruption'), message, resolved: true, reloaded: false, next: t('This turn later completed. You can continue with a new message.') };
+  }
   const reloaded = error.blocking !== true && !!repair && /^(?:Reloaded|Reopened) chat\b/.test(repair.message.text);
   const errorReloaded = earlierReload || (reloaded && repair?.message.text.endsWith('an interrupted response.'));
   const reloadPolicy = errorReloaded && error.blocking !== true

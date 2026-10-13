@@ -6,7 +6,8 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
@@ -21,6 +22,8 @@ import {
   shutdownConnection,
   suspendConnectionLossNotices
 } from './connection.js';
+import { setSystemProxyResolver } from './tunnel/index.js';
+import { configureAppProxy, refreshAppProxy } from './app-proxy.js';
 import { openSessionChat, registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
@@ -31,9 +34,10 @@ import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTrans
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
-import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, initSessionStore } from './session/store.js';
+import { flushSessions, initSessionStore, listSessions, setRecordingStorageLimit } from './session/store.js';
+import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
 import { initPetLibrary } from './pet-library.js';
@@ -41,6 +45,7 @@ import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
+  onSessionChange,
   queueDeterministicAttributionRepair,
   setAgentBinder,
   setAgentConversationLookup
@@ -54,6 +59,7 @@ import {
   onSwarmPersist,
   onSwarmPersistNow,
   pauseSwarmForDisable,
+  managedWorkerRecoveryIdentities,
   primeFleetIn, repairPrimeConversationAfterRecovery,
   reconcileAgentRequestOwners,
   restoreRetiredWorkers,
@@ -64,6 +70,7 @@ import {
   type SwarmSnapshot
 } from './agents.js';
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
+import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
@@ -88,6 +95,7 @@ import {
 } from './session/continuation.js';
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
+import { restoreManagedWorktrees } from './worktrees/index.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
@@ -407,11 +415,14 @@ void app.whenReady().then(async () => {
     fingerprint: () => executableFingerprint(app.getVersion())
   });
   initSessionStore(userData);
+  // The tunnel program reads proxies only from its environment; the system's setting comes from here (#1255).
+  setSystemProxyResolver(url => session.defaultSession.resolveProxy(url));
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
+  await loadConnectorIdentity();
   if (windowActivation.isDisabled()) return;
   initControlApiPath(userData);
   initUvRuntime(userData);
@@ -421,11 +432,29 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
   for (const surface of await enrolledPluginSurfaces()) notePluginInstalled(surface);
   await pluginManager.initialize(userData);
+  // Codex's "Prevent sleep while running": a sleeping computer stops a long run (#1086).
+  const keepAwake = createKeepAwake({
+    sessions: async () => (await listSessions()).map(summary => ({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) })),
+    enabled: () => getConfig().ui.keepAwake !== false,
+    blocker: { start: () => powerSaveBlocker.start('prevent-app-suspension'), stop: id => { if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id); } }
+  });
+  installKeepAwake(keepAwake);
+  onSessionChange(() => void keepAwake.refresh());
+  setInterval(() => void keepAwake.refresh(), 60_000).unref();
+  void keepAwake.refresh();
+  // The app's own requests follow the system proxy too, not only the tunnel (#1255).
+  configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
+    ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),
+    ...pluginManager.remoteEndpoints()
+  ]);
+  await refreshAppProxy();
+  setInterval(() => void refreshAppProxy(), 2 * 60_000).unref();
   if (windowActivation.isDisabled()) return;
   try { applyLoginStartup(app, getConfig().ui.startAtLogin === true); }
   catch (error) { logWarn(`Windows login startup: ${error instanceof Error ? error.message : String(error)}`); }
@@ -498,6 +527,22 @@ void app.whenReady().then(async () => {
   // history; in the background, since startup does not wait on presentation.
   void archiveWorkerAssignments(savedSwarm);
   restoreSwarm(savedSwarm);
+  // Restore only marker-verified leases after broker identity is loaded and before any
+  // browser/MCP worker can execute. An existing isolated worker retains its assigned
+  // checkout even if autoWorktrees has subsequently been turned Off in Settings.
+  if (getConfig().roots.length > 0) {
+    try {
+      // Recovery is authorized only by the durable broker workers loaded above, not by
+      // self-asserting filesystem markers left from unaccepted or pruned allocations.
+      const recovered = await restoreManagedWorktrees(getConfig().roots, managedWorkerRecoveryIdentities());
+      logInfo(`worktrees: restored ${recovered.restored.length} worker workspace(s); refused ${recovered.rejected.length} invalid marker(s)`);
+    } catch (error) {
+      // No marker is accepted on failure; workspace resolution must still require an
+      // exact active lease rather than silently sending this worker into the prime cwd.
+      logWarn(`worktrees: restore failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (windowActivation.isDisabled()) return;
+  }
   if (!getConfig().multiAgent.enabled) {
     // A feature toggle is a pause, not Clear swarm. Canonicalize any active incarnation left by
     // a crash into stopped prime-owned history before the bridge exists, then make that safer

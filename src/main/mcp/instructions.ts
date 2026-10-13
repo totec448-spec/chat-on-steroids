@@ -121,7 +121,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
       'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',
       'Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
       'Set workdir to the project; virtual paths work there. Inside cmd use relative or native paths.',
-      'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay output without rerunning work. Inspect exit/output; benign_exit marks an expected non-zero result.',
+      "write_stdin takes session_id: a running command's id, or pass a finished command's completed_session_id as session_id. Completed reads replay output without rerunning work. Inspect exit/output; expected_exit marks an expected non-zero result.",
       'If output is truncated, narrow the command or read the relevant region.'
     );
     if (windows) lines.push(

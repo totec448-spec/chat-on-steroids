@@ -53,6 +53,7 @@ const {
   releaseVersion,
   resetUpdateForTests,
   stagedArtifact,
+  startUpdateChecks,
   updateStatus
 } = await import('../src/main/update.js');
 
@@ -564,5 +565,49 @@ describe('staged executable authority across later events', () => {
       repeat!(); await checkForUpdates();
       expect(next.asked).toEqual(['latest']);
     } finally { interval.mockRestore(); }
+  });
+});
+
+describe('a check or download that goes wrong on a bad connection', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  /**
+   * The app starts at login, often before the network is up. The check failed, Activity showed
+   * "update check failed" in red, and nothing asked again for six hours.
+   */
+  it('asks again a minute after a failed check, then leaves a successful one alone', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const offline = github({ fail: 'release' });
+    startUpdateChecks();
+    await vi.waitFor(() => expect(updateStatus().stage).toBe('failed'));
+    expect(offline.asked).toEqual(['latest']);
+    const online = github();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(online.asked).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(updateStatus().checkedAt).not.toBeNull());
+    expect(updateStatus().error).toBeNull();
+    const calls = online.asked.length;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(online.asked).toHaveLength(calls);
+  });
+
+  it('gives up on a download only when no data arrives for a minute, however long the whole file takes', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const body = 'installer bytes';
+    // One chunk, then silence: the connection is still open but nothing comes.
+    const stalled = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); } });
+    const { fetch } = github({ body });
+    const answer = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
+    let done = false;
+    const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
+    await vi.waitFor(() => expect(updateStatus().stage).toBe('downloading'));
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pass;
+    expect(updateStatus()).toMatchObject({ stage: 'failed', latest: NEXT });
+    expect(updateStatus().error).toContain('no data for 60 seconds');
   });
 });
