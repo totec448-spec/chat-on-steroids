@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from './session.js';
+import type { ReasoningEffort, RecordingStorageLimitGiB } from './session.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from './browser-control.js';
 import type { CommandAllowlistSettings } from './command-allowlist.js';
@@ -198,6 +198,8 @@ export interface SessionSettings {
   advisoryTokens: number;
   /** Estimated tokens at which that suggestion becomes urgent. */
   limitTokens: number;
+  /** Size of the store for recorded images and long texts, in GiB (#1406). Missing means 2. */
+  storageLimitGiB?: RecordingStorageLimitGiB;
 }
 
 /**

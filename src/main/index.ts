@@ -35,7 +35,8 @@ import { executableFingerprint, initKeychainNotice } from './keychain-notice.js'
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, initSessionStore } from './session/store.js';
+import { flushSessions, initSessionStore, setRecordingStorageLimit } from './session/store.js';
+import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
 import { initPetLibrary } from './pet-library.js';
@@ -429,6 +430,7 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
