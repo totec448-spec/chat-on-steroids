@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { acknowledgeLocalReports, offerMessagesForCaller, persistCriticalSwarmNow, requestWorkerBootstraps,
   requestWorkerRevivals, stageMessages, statusForCaller, type Caller } from './agents.js';
 import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from './agent-admission.js';
-import { getConfig } from './config.js';
+import { effectiveCapabilities, getConfig } from './config.js';
 import { RequestError } from './control-reads.js';
 import { projectWorkspace } from './projects.js';
 import { redactSecretText } from './redaction.js';
@@ -85,8 +85,13 @@ export async function serveWorkerAction(method: string, route: string, raw: unkn
   if (selected.action === 'spawn') {
     const body = parse(spawnBody, raw);
     const caller = { ...selected.caller, runId: body.runId };
+    const roots = JSON.stringify(getConfig().roots);
     const workspace = body.projectId ? await projectWorkspace(body.projectId) : null;
-    const result = await spawnAgentWorkers({ caller, context: body.context, workers: body.workers }, async () => workspace, authorizeCurrent);
+    const result = await spawnAgentWorkers({ caller, context: body.context, workers: body.workers }, async () => workspace,
+      () => { const caps = effectiveCapabilities(getConfig()); return caps.command && caps.create && caps.edit; },
+      { workspace, assertCurrent: () => { authorizeCurrent();
+        if (workspace && JSON.stringify(getConfig().roots) !== roots) throw new RequestError(409, 'project_roots_changed');
+      }, validate: async () => { if (body.projectId) await projectWorkspace(body.projectId); } });
     requestWorkerBootstraps(result.created.map(worker => worker.id), result.runId);
     return { status: 202, body: { runId: result.runId, workers: result.created.map(worker => ({ id: worker.id, label: worker.label, state: worker.state })),
       notes: [...result.defaultNotes ?? [], ...result.isolationNotes] } };
