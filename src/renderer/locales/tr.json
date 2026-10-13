@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Yüklü bir Windows konuşma tanıyıcısı yok. Bir Windows konuşma dil paketi yükleyin.",
   "Windows speech recognition could not start": "Windows konuşma tanıma başlatılamadı",
   "Windows speech recognition exited unexpectedly": "Windows konuşma tanıma beklenmedik şekilde kapandı",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Kayıt depolama alanı dolu. Yeni görseller ve uzun metinler artık sohbetlerinize kaydedilmiyor."
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Kayıt depolama alanı dolu. Yeni görseller ve uzun metinler artık sohbetlerinize kaydedilmiyor.",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "Bu bilgisayarda kayıtlı anahtarlar okunamadı, bu yüzden yeni anahtar kaydedilemiyor. Uygulamayı yeniden başlatmak işe yaramazsa sıfırdan başlayabilirsiniz.",
+  "Start fresh…": "Sıfırdan başla…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Okunamayan dosya kenara alınıp kayıtlı anahtar olmadan sıfırdan başlansın mı? API anahtarlarınızı ve eklenti gizli bilgilerini yeniden girmeniz gerekir; tarayıcı uzantısını da yeniden bağlamanız gerekebilir. Eski dosya yedek olarak saklanır.",
+  "Started fresh. Enter your keys again.": "Sıfırdan başlandı. Anahtarlarınızı yeniden girin.",
+  "The saved keys can be read again. Nothing was changed.": "Kayıtlı anahtarlar yeniden okunabiliyor. Hiçbir şey değiştirilmedi.",
+  "Could not start fresh.": "Sıfırdan başlanamadı."
 }

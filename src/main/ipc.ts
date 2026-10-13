@@ -85,7 +85,7 @@ import { addProject, expireArmedProjectCreates, getSessionProject, listProjects,
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
-import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
+import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -536,6 +536,8 @@ async function buildState(): Promise<AppState> {
     hasApiKey: await hasSecret(setupApiKeySlot(config.tunnel.profileId)),
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
+    // After the reads above: only a read can find the file unreadable.
+    credentialsUnreadable: storedSecretsUnreadable(),
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
     bridge: await bridgeStatus(),
@@ -620,6 +622,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('plugin-refresh:reset', async () => {
     await resetPluginRefreshLedger();
     return buildState();
+  });
+  // The renderer asks the person first. Nothing is set aside when the file can be read after all.
+  handle('credentials:start-fresh', async () => {
+    const setAside = (await setAsideUnreadableSecrets()) !== null;
+    return { state: await buildState(), setAside };
   });
   handle('state:get', async () => {
     const state = await buildState();

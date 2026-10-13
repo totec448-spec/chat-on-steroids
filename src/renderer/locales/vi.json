@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Chưa cài trình nhận dạng giọng nói của Windows. Hãy cài gói ngôn ngữ giọng nói của Windows.",
   "Windows speech recognition could not start": "Không thể khởi động nhận dạng giọng nói của Windows",
   "Windows speech recognition exited unexpectedly": "Nhận dạng giọng nói của Windows đã thoát đột ngột",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Bộ nhớ ghi lại đã đầy. Hình ảnh mới và văn bản dài không còn được lưu trong các cuộc trò chuyện của bạn."
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Bộ nhớ ghi lại đã đầy. Hình ảnh mới và văn bản dài không còn được lưu trong các cuộc trò chuyện của bạn.",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "Không thể đọc các khóa đã lưu trên máy tính này nên không thể lưu khóa mới. Nếu khởi động lại ứng dụng không giúp được, bạn có thể bắt đầu lại từ đầu.",
+  "Start fresh…": "Bắt đầu lại…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Để tệp không đọc được sang một bên và bắt đầu lại mà không có khóa đã lưu? Bạn sẽ phải nhập lại các khóa API và bí mật của plugin, và có thể phải kết nối lại tiện ích trình duyệt. Tệp cũ được giữ lại làm bản sao lưu.",
+  "Started fresh. Enter your keys again.": "Đã bắt đầu lại. Hãy nhập lại các khóa của bạn.",
+  "The saved keys can be read again. Nothing was changed.": "Các khóa đã lưu đã đọc được trở lại. Không có gì thay đổi.",
+  "Could not start fresh.": "Không thể bắt đầu lại."
 }
