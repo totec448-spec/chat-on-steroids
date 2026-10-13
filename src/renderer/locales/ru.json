@@ -2300,5 +2300,8 @@
   "Freeing space in the background. You can close this window.": "Место освобождается в фоне. Это окно можно закрыть.",
   "Free 1 GB from old chats": "Освободить 1 ГБ из старых чатов",
   "Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.": "Безвозвратно удалить около 1 ГБ изображений и полных длинных текстов из чатов, не использовавшихся неделю, начиная с самых старых? Чаты останутся, а длинные сообщения и результаты инструментов сохранят начало.",
-  "Freed {0} MB. {1} GB of recording storage is now available.": "Освобождено {0} МБ. Теперь доступно {1} ГБ хранилища записей."
+  "Freed {0} MB. {1} GB of recording storage is now available.": "Освобождено {0} МБ. Теперь доступно {1} ГБ хранилища записей.",
+  "Send now": "Отправить сейчас",
+  "Send into the running turn now": "Отправить сейчас в текущий ход",
+  "The turn ended before this message could join it. It stays queued.": "Ход завершился раньше, чем это сообщение успело в него попасть. Оно остаётся в очереди."
 }
