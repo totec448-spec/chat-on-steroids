@@ -2270,6 +2270,6 @@
   "Images and long texts recorded from your chats, up to 2 GB.": "チャットから記録した画像と長いテキスト（最大 2 GB）。",
   "Compact & Resume · waiting for this turn to end": "圧縮して再開 · このターンの終了を待っています",
   "Compact & Resume · asking ChatGPT for the handoff": "圧縮して再開 · ChatGPT に引き継ぎを依頼中",
-  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "このチャットはコンテキストの上限を超えました。このターンが終わり次第、引き継ぎの依頼を送信します。",
-  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "このチャットはコンテキストの上限を超えました。Chat On Steroids が新しいチャット用の要約を書くよう ChatGPT に依頼しています。"
+  "The handoff request is sent as soon as this turn ends.": "このターンが終わり次第、引き継ぎの依頼を送信します。",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids が新しいチャット用の要約を書くよう ChatGPT に依頼しています。"
 }

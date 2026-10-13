@@ -2269,7 +2269,7 @@
   "Recording storage": "Almacenamiento de grabaciones",
   "Images and long texts recorded from your chats, up to 2 GB.": "Imágenes y textos largos grabados de tus chats, hasta 2 GB.",
   "Compact & Resume · waiting for this turn to end": "Compactar y continuar · esperando a que termine este turno",
-  "Compact & Resume · asking ChatGPT for the handoff": "Compactar y reanudar · pidiendo el traspaso a ChatGPT",
-  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "Este chat superó su límite de contexto. La solicitud de traspaso se envía en cuanto termine este turno.",
-  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Este chat superó su límite de contexto. Chat On Steroids está enviando a ChatGPT la solicitud para escribir el resumen de un chat nuevo."
+  "Compact & Resume · asking ChatGPT for the handoff": "Compactar y continuar · pidiendo el traspaso a ChatGPT",
+  "The handoff request is sent as soon as this turn ends.": "La solicitud de traspaso se envía en cuanto termine este turno.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids está enviando a ChatGPT la solicitud para escribir el resumen de un chat nuevo."
 }

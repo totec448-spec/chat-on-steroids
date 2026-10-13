@@ -2269,7 +2269,7 @@
   "Recording storage": "기록 저장 공간",
   "Images and long texts recorded from your chats, up to 2 GB.": "채팅에서 기록한 이미지와 긴 텍스트입니다(최대 2GB).",
   "Compact & Resume · waiting for this turn to end": "압축 후 계속 · 이 턴이 끝나기를 기다리는 중",
-  "Compact & Resume · asking ChatGPT for the handoff": "압축 후 재개 · ChatGPT에 인계 요청 중",
-  "This chat is over its context limit. The handoff request is sent as soon as this turn ends.": "이 채팅은 컨텍스트 한도를 넘었습니다. 이 턴이 끝나는 즉시 인계 요청을 보냅니다.",
-  "This chat is over its context limit. Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "이 채팅은 컨텍스트 한도를 넘었습니다. Chat On Steroids가 새 채팅용 요약을 작성하도록 ChatGPT에 요청을 보내는 중입니다."
+  "Compact & Resume · asking ChatGPT for the handoff": "압축 후 계속 · ChatGPT에 인계 요청 중",
+  "The handoff request is sent as soon as this turn ends.": "이 턴이 끝나는 즉시 인계 요청을 보냅니다.",
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids가 새 채팅용 요약을 작성하도록 ChatGPT에 요청을 보내는 중입니다."
 }
