@@ -2311,5 +2311,10 @@
   "Join the running turn": "Tham gia lượt đang chạy",
   "Wait until the turn ends": "Chờ đến khi lượt kết thúc",
   "Notify when a chat finishes": "Thông báo khi một cuộc trò chuyện xong",
-  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Hiện thông báo khi câu trả lời của một cuộc trò chuyện hoàn tất trong lúc cửa sổ này ở chế độ nền. Worker và các cuộc trò chuyện bật Goal hoặc Loop sẽ không thông báo."
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Hiện thông báo khi câu trả lời của một cuộc trò chuyện hoàn tất trong lúc cửa sổ này ở chế độ nền. Worker và các cuộc trò chuyện bật Goal hoặc Loop sẽ không thông báo.",
+  "Find in chat": "Tìm trong cuộc trò chuyện",
+  "{0} of {1}": "{0}/{1}",
+  "No matches": "Không có kết quả",
+  "Previous match": "Kết quả trước",
+  "Next match": "Kết quả tiếp theo"
 }

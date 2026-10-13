@@ -1,5 +1,6 @@
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
+import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t } from './i18n.js';
@@ -57,6 +58,7 @@ import type {
   RunningToolActivity,
   SessionChange,
   SessionEvent,
+  SessionSearchLocation,
   SessionSummary,
   StoredText,
   SwarmState,
@@ -92,6 +94,7 @@ import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
+let chatFind: ReturnType<typeof initChatFind> | null = null;
 
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
 const KIND_ICON: Record<ActivitySummary['kind'], string> = {
@@ -262,7 +265,7 @@ async function removeProjectFromSidebar(id: string): Promise<void> {
       if (!selectedId) {
         const oldKey = draftKey();
         const authoredDraft = authoredComposerText();
-        selectedProjectId = null; selectionGeneration++; replaceComposerDraft();
+        selectedProjectId = null; selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
         // Keep the visible draft and its attachments while moving to unfiled.
         inputDrafts.set(draftKey(), authoredDraft); inputDrafts.delete(oldKey); newChatTasks.delete(oldKey);
         skillPicker?.restore();
@@ -2890,9 +2893,16 @@ function jumpToLatest(): void {
  */
 async function revealSearchMatch(id: string, query: string): Promise<void> {
   const selection = selectionGeneration;
-  const current = (): boolean => selection === selectionGeneration && selectedId === id;
   const location = await run(api.locateSearchMatch(id, query));
-  if (!location || !current()) return;
+  if (!location || selection !== selectionGeneration || selectedId !== id) return;
+  await revealChatLocation(id, location);
+}
+
+/** Scrolls the open chat to one recorded message, loading the history page around it when needed. */
+async function revealChatLocation(id: string, location: SessionSearchLocation): Promise<void> {
+  const selection = selectionGeneration;
+  const current = (): boolean => selection === selectionGeneration && selectedId === id;
+  if (!current()) return;
   // The chat's own first page, and the fill that follows it, settle first.
   for (const deadline = Date.now() + 5000; detailFor !== id || historyLoading || historyDemand !== null;) {
     if (Date.now() > deadline || !current()) return;
@@ -6452,7 +6462,7 @@ function showView(name: string): void {
 function selectSession(id: string): void {
   const ownerChanged = id !== selectedId;
   rememberDraft();
-  selectionGeneration++; replaceComposerDraft();
+  selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
@@ -6495,7 +6505,7 @@ function selectSession(id: string): void {
 }
 
 function selectNewChat(projectId: string | null = null): void {
-  rememberDraft(); selectionGeneration++; replaceComposerDraft(); pendingNewInput = null;
+  rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
@@ -7001,6 +7011,11 @@ export function initChat(next: Deps): void {
     } else void sendComposer(undefined, undefined, undefined, controlAction);
   });
 
+  chatFind = initChatFind({
+    selectedId: () => selectedId,
+    find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,
+    reveal: revealChatLocation
+  });
   chatSearch = initChatSearch({
     select: (id, match) => {
       if (id !== selectedId) { pendingNewInput = null; selectSession(id); }
