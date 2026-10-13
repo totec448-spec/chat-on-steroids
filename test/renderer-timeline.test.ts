@@ -2882,6 +2882,32 @@ it('shows Send directly alone for a running turn, keeps After this turn selected
   expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('after-turn');
 });
 
+it("retires the running turn's lines when the turn ends after its rows were drawn (2026-10-12)", async () => {
+  // The turn's end reached the header ("Worked for") after the last rows were drawn; the timeline kept
+  // "Working for" and "Thinking" frozen under the finished answer until another event arrived.
+  const asked = Date.now() - 60_000;
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'ending-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'ending-turn', messageId: 'q-end', message: text('Finish the step') }
+  ]);
+  const { w } = app;
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: 'ending-turn' } });
+  await app.append([{ seq: 3, time: asked + 50_000, source: 'extension', kind: 'assistant_message', turnId: 'ending-turn', messageId: 'a-end', final: true, message: text('Step finished.') },
+    { seq: 4, time: asked + 51_000, source: 'extension', kind: 'turn_end', turnId: 'ending-turn', outcome: 'completed' }]);
+  // The rows were drawn while the controls still said the turn runs.
+  expect(w.document.querySelector('#timeline .turn-status.is-working')).not.toBeNull();
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null } });
+  // An app state update re-reads only the controls, as the live app did when the turn ended.
+  const chat = await import('../src/renderer/chat.js');
+  chat.chatApply((await api.getState()).data);
+  await settle(); await settle();
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Worked for /);
+  expect(w.document.querySelector('#timeline .turn-status.is-working')).toBeNull();
+  expect(w.document.querySelector('#timeline .turn-now')).toBeNull();
+});
+
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
   const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
@@ -5198,6 +5224,51 @@ it('keeps the working line under your message while a failed delivery notice sta
   expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
   const moves = lineMoves(w);
   await app.append([]); await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
+it("keeps a long running turn's line at the top of its loaded rows, not under its newest action (2026-10-12)", async () => {
+  // A 45-minute turn pushed its question out of the loaded rows. "Working for" fell to the bottom,
+  // after the newest action, and jumped back under the question whenever that was loaded again.
+  const asked = Date.now() - 45 * 60_000;
+  const calls = Array.from({ length: 220 }, (_, i): SessionEvent => ({ ...toolCall(i + 3, `long-${i}`), time: asked + (i + 1) * 1000, turnId: 'long-turn' }));
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'long-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'long-turn', messageId: 'q-long', message: text('Build all thirty quests') },
+    ...calls
+  ]);
+  const { w } = app;
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('.ev-user_message')).toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  const rows = [...timeline.querySelectorAll('[data-timeline-key], .turn-status, .turn-now')];
+  expect(rows[0]).toBe(line);
+  expect(rows.at(-1)?.matches('.turn-now')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]);
+  expect(moves.stop()).toBe(0);
+});
+
+it('keeps a running turn’s line under its question while a message sent into it waits (2026-10-12)', async () => {
+  // A message sent mid-round pulled the running turn's line below it, as if the chat had moved on to
+  // the new message; the rows jumped back once it was delivered or cancelled.
+  const asked = Date.now() - 200_000;
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'running-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'running-turn', messageId: 'q-run', message: text('Port the reference client') },
+    { ...toolCall(3, 'mid-call'), turnId: 'running-turn' }
+  ]);
+  const { w } = app;
+  app.live.inputs.push({ id: 'mid-round', sessionId: '2026-09-02-test0001', text: 'Here is where the reference files are.',
+    mode: 'auto', dueAt: 0, model: null, reasoningEffort: null, state: 'browser', owner: 'page', createdAt: Date.now(), conversationId: 'chat-a' });
+  await app.append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message:not(.is-delivery-error)')).not.toBeNull();
+  const line = w.document.querySelector<HTMLElement>('.turn-status')!;
+  expect(line.closest('#timeline')).not.toBeNull();
+  expect(line.previousElementSibling?.matches('.ev-user_message')).toBe(true);
+  const moves = lineMoves(w);
+  await app.append([]); await app.append([]);
   expect(moves.stop()).toBe(0);
 });
 

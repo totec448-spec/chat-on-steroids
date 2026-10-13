@@ -764,7 +764,7 @@
                   <div class="step-side">
                     <div class="setup-guide" data-setup-guide="plugin" data-moves-into="pluginMoves"></div>
                   </div>
-                  <!-- Below both columns: the connectors side by side, then the note for older ChatGPT. -->
+                  <!-- Below both columns: the connectors side by side. -->
                   <!-- One card per connector. The name and description are what ChatGPT matches
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
@@ -790,12 +790,6 @@
                     </div>
                   </details>
                   <div class="connectors step-wide" id="connectorCards"></div>
-                  <!-- Only older ChatGPT versions have this switch, so it waits folded until someone needs it. -->
-                  <details class="setup-optional setup-legacy step-wide">
-                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Developer mode (older ChatGPT versions only)</summary>
-                    <p>If your ChatGPT settings still show Developer mode, turn it on under Settings → Security and login. Newer versions of ChatGPT no longer have this switch; then skip this step.</p>
-                    <div class="setup-guide" data-setup-guide="developer"></div>
-                  </details>
                 </div>
               </li>
               <!-- 7: not a task but the proof. It reads back every check above, says plainly when
@@ -1063,6 +1057,10 @@
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Background tabs open in</b><em>The group stays collapsed in the window you used last. Chrome saves open tab groups automatically; the app's group closes with its last chat, so it is not kept. If you close that window while app chats are open, Chrome may keep the group in its saved groups, where you can delete it. Browsers without tab groups use a window.</em></span><select id="backgroundPlacement"><option value="window">Their own minimized window</option><option value="group">A tab group in your browser window</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT, so a permission change reaches it without a manual refresh.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
+                  <div id="pluginRefreshRecovery" class="setting" hidden>
+                    <span class="setting-text"><b id="pluginRefreshRecoveryError" role="alert">Could not read plugin-refresh state</b><em>Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.</em></span>
+                    <button id="pluginRefreshReset" class="btn" type="button">Reset plugin refresh</button>
+                  </div>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
                   <p class="muted">Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>

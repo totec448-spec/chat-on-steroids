@@ -65,6 +65,30 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+let pluginRefreshResetBusy = false;
+let pluginRefreshResetFailed = false;
+function paintPluginRefreshRecovery(next: AppState): void {
+  if (next.pluginRefreshUnreadable !== true) pluginRefreshResetFailed = false;
+  $('pluginRefreshRecovery').hidden = next.pluginRefreshUnreadable !== true;
+  $<HTMLButtonElement>('pluginRefreshReset').disabled = pluginRefreshResetBusy;
+  ui($('pluginRefreshRecoveryError'), 'textContent', () => t(pluginRefreshResetFailed
+    ? 'Could not reset plugin-refresh state' : 'Could not read plugin-refresh state'));
+}
+$('pluginRefreshReset').addEventListener('click', async () => {
+  if (pluginRefreshResetBusy || state?.pluginRefreshUnreadable !== true) return;
+  pluginRefreshResetBusy = true;
+  paintPluginRefreshRecovery(state);
+  try {
+    const reply = await api.resetPluginRefresh();
+    if (!reply.ok) throw new Error('Could not reset plugin-refresh state');
+    pluginRefreshResetFailed = false;
+    apply(reply.data);
+  } catch { pluginRefreshResetFailed = true; }
+  finally {
+    pluginRefreshResetBusy = false;
+    if (state) paintPluginRefreshRecovery(state);
+  }
+});
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 // The tray menu and desktop notices come from the main process, which has no catalogs.
 publishMainTexts(texts => api.setMainTexts?.(texts));
@@ -825,6 +849,11 @@ function isRunning(value: AppState['status']['state']): boolean {
 interface SetupConnectionValues { tunnelId: string; hasApiKey: boolean }
 
 /** What still has to happen before connecting can work, in the order of the wizard. */
+/** A step's number as the rail shows it, so hints stay right when a step is added. */
+function setupStepNumber(step: string): number {
+  return [...document.querySelectorAll<HTMLElement>('.setup-rail [data-rail-step]')].findIndex(button => button.dataset.railStep === step) + 1;
+}
+
 function missingStep(
   next: AppState,
   values: SetupConnectionValues = { tunnelId: next.config.tunnel.tunnelId, hasApiKey: next.hasApiKey }
@@ -834,17 +863,17 @@ function missingStep(
   // clipboard may legitimately be rootless; enabling one must not hide a root still needed
   // by an effective file/patch/command capability on Core.
   if (config.roots.length === 0 && requiresApprovedFilesystemRoot(config)) {
-    return { step: 'folder', text: t("Choose a folder to share — step 2.") };
+    return { step: 'folder', text: t("Choose a folder to share — step {0}.", [setupStepNumber('folder')]) };
   }
   if (config.tunnel.kind === 'openai') {
     if (!TUNNEL_ID_PATTERN.test(values.tunnelId)) {
-      return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step 3.") };
+      return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step {0}.", [setupStepNumber('tunnel')]) };
     }
     if (!(next.secureStorage?.available ?? true) && !values.hasApiKey) {
       return { step: 'key', text: next.secureStorage?.detail ?? t("Secure credential storage is unavailable.") };
     }
     if (!values.hasApiKey) {
-      return { step: 'key', text: t("Add a restricted API key — step 4.") };
+      return { step: 'key', text: t("Add a restricted API key — step {0}.", [setupStepNumber('key')]) };
     }
   } else if (!next.resolvedBinary && config.tunnel.kind === 'cloudflared') {
     return { step: 'connect', text: t("cloudflared was not found on this computer.") };
@@ -1371,6 +1400,9 @@ function apply(next: AppState): void {
   const busy = disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
   const failed = status.state === 'auth-failed' || status.state === 'tunnel-unavailable';
   const running = isRunning(status.state);
+  // The tunnel field is filled before Setup is judged: what is missing reads the fields, so that
+  // drafts count, and on the first paint an unfilled field made a finished setup look unfinished.
+  applyValue($<HTMLInputElement>('tunnelId'), config.tunnel.tunnelId, previousState?.config.tunnel.tunnelId);
   const missing = currentSetupMissingStep(next);
 
   // ---- theme
@@ -1503,6 +1535,7 @@ function apply(next: AppState): void {
   // ---- out of date, app or extension
   paintUpdate(next);
   paintUpdateOperation();
+  paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
 
   // ---- health numbers and facts
@@ -1559,7 +1592,6 @@ function apply(next: AppState): void {
     previousState?.config.tunnel.kind
   );
   ui($('methodHint'), 'textContent', () => t(METHOD_HINT[config.tunnel.kind] ?? ''));
-  applyValue($<HTMLInputElement>('tunnelId'), config.tunnel.tunnelId, previousState?.config.tunnel.tunnelId);
   applyValue($<HTMLInputElement>('connectorSuffix'), config.connectorSuffix ?? '', previousState?.config.connectorSuffix ?? '');
   // A computer that has a name shows it, so the cards' suffixed names never come unexplained.
   if (config.connectorSuffix && !previousState?.config.connectorSuffix) $<HTMLDetailsElement>('connectorSuffixField').open = true;
@@ -1675,11 +1707,8 @@ function apply(next: AppState): void {
 
   // The pictures show the tunnel path; only a published URL needs saying in words.
   $('chatgptConn').hidden = openai;
-  $('chatgptConn').replaceChildren(
-    openai
-      ? frag("For the connection, choose ", "Tunnel", " and pick the tunnel you made in step 3.")
-      : frag("For the connection, paste the URL below into ", "MCP server URL", '.')
-  );
+  // The tunnel path needs no words: the pictures show it.
+  $('chatgptConn').replaceChildren(...(openai ? [] : [frag("For the connection, paste the URL below into ", "MCP server URL", '.')]));
 
   // Says plainly whether the connector has ever reached this app, because a
   // FORBIDDEN inside one ChatGPT conversation is not the same as a broken setup.
