@@ -151,6 +151,11 @@ let sessionPageCursor: { updatedAt: number; id: string } | null = null;
 let sessionPageLoading = false;
 /** True after the user has explicitly paged beyond the newest page. */
 let loadedOlderSessions = false;
+/**
+ * Where each project's own history continues (#1190): absent until the project was first
+ * expanded, a cursor while it has older chats that are not loaded, null once all of them are.
+ */
+const projectHistory = new Map<string, { cursor: { updatedAt: number; id: string } | null; asked: boolean; loading: boolean }>();
 let activeId: string | null = null;
 let selectedId: string | null = null;
 let newChatSelected = true;
@@ -249,7 +254,7 @@ async function removeProjectFromSidebar(id: string): Promise<void> {
     // Reject list snapshots captured before this newer catalog commit.
     ++sessionsLoadGeneration;
     projects = projects.map(row => row.id === id ? removed : row);
-    expandedProjects.delete(id); projectVisibleCounts.delete(id);
+    expandedProjects.delete(id); projectVisibleCounts.delete(id); projectHistory.delete(id);
     if (selectedProjectId === id) {
       if (!selectedId) {
         const oldKey = draftKey();
@@ -1191,6 +1196,42 @@ async function loadMoreSessions(): Promise<void> {
   }
 }
 
+/** A chat the project's section can show: workers alone leave it looking empty. */
+function projectShowsChat(id: string): boolean {
+  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' &&
+    (!!entry.conversationId || entry.origin?.kind === 'desktop'));
+}
+
+/**
+ * Reads the next page of one project's own chats (#1190). Project headings come from the whole
+ * project list, but chats from the newest page of all history: a project whose chats are all
+ * older looked empty, and expanding it did nothing. Only that project's pages are read, so the
+ * cost is what the project holds, and the rest of the sidebar does not fill up with old chats.
+ * It never selects a chat. A failed read leaves the place as it was, for the next expand.
+ */
+async function loadProjectHistory(id: string): Promise<void> {
+  const state = projectHistory.get(id) ?? { cursor: null, asked: false, loading: false };
+  projectHistory.set(id, state);
+  if (state.loading || (state.asked && !state.cursor)) return;
+  state.loading = true;
+  try {
+    do {
+      const page = await run(api.listSessions({ projectId: id, limit: SESSION_PAGE_SIZE, ...(state.cursor ? { cursor: state.cursor } : {}) }));
+      if (!page) return;
+      state.asked = true;
+      state.cursor = page.nextCursor ?? null;
+      mergeSessionRows(page.sessions);
+      // Rows older than the newest page are now held: refreshes must keep them, as after scrolling.
+      loadedOlderSessions = true;
+      for (const entry of page.pressure) pressure.set(entry.id, entry);
+      paintSessions();
+      // A page of workers shows nothing; read on while the project is open and still looks empty.
+    } while (state.cursor && expandedProjects.has(id) && !projectShowsChat(id));
+  } finally {
+    state.loading = false;
+  }
+}
+
 function maybePageSessions(): void {
   if (!visible || !sessionPageCursor || sessions.length >= sessionTotal) return;
   const pane = $('sessionList').closest<HTMLElement>('.scroll');
@@ -1305,6 +1346,7 @@ function paintSessions(): void {
       const open = !expandedProjects.has(id);
       if (open) expandedProjects.add(id); else expandedProjects.delete(id);
       section.open = open;
+      if (open) void loadProjectHistory(id);
     });
     if (project) {
       // One button for the project's actions, as in ChatGPT; a right click on the row opens the same menu.
@@ -1332,10 +1374,16 @@ function paintSessions(): void {
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
     section.append(...shown.flatMap(task => task.rows));
-    if (shown.length < tasks.length) {
+    // The project's own older chats count as "more" too, once it is known to have some (#1190).
+    const older = !!projectHistory.get(id)?.cursor;
+    if (shown.length < tasks.length || older) {
       const more = el('button', 'btn project-show-more', () => t("Show more")) as HTMLButtonElement;
       more.type = 'button'; ui(more, 'aria-label', () => t("Show more tasks in {0}", [project?.name ?? t("this project")]));
-      more.addEventListener('click', () => { projectVisibleCounts.set(id, count + PROJECT_TASK_PAGE_INCREMENT); paintSessions(); });
+      more.addEventListener('click', () => {
+        projectVisibleCounts.set(id, count + PROJECT_TASK_PAGE_INCREMENT);
+        if (older && count + PROJECT_TASK_PAGE_INCREMENT > tasks.length) void loadProjectHistory(id);
+        paintSessions();
+      });
       section.append(more);
     }
     projectSections.push(section);

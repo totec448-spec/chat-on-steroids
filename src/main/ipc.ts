@@ -1241,14 +1241,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
-    const { cursor, limit } = z
+    const { cursor, limit, projectId } = z
       .object({
         cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
-        limit: z.number().int().min(1).max(60).optional()
+        limit: z.number().int().min(1).max(60).optional(),
+        // One project's own pages: expanding a project must not page the whole history (#1190).
+        projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
       })
       .parse(payload ?? {});
-    return readSessionList({ cursor, limit: limit ?? 60 });
+    return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
   });
 
   handle('sessions:image', async (payload) => {
