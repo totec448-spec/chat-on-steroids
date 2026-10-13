@@ -2305,5 +2305,10 @@
   "Send into the running turn now": "Отправить сейчас в текущий ход",
   "The turn ended before this message could join it. It stays queued.": "Ход завершился раньше, чем это сообщение успело в него попасть. Оно остаётся в очереди.",
   "Keep the computer awake": "Не давать компьютеру уснуть",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Пока чат работает, компьютер не переходит в сон, и долгие задачи продолжаются. Экран при этом может выключаться."
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Пока чат работает, компьютер не переходит в сон, и долгие задачи продолжаются. Экран при этом может выключаться.",
+  "Find in chat": "Найти в чате",
+  "{0} of {1}": "{0} из {1}",
+  "No matches": "Нет совпадений",
+  "Previous match": "Предыдущее совпадение",
+  "Next match": "Следующее совпадение"
 }

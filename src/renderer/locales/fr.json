@@ -2305,5 +2305,10 @@
   "Send into the running turn now": "Envoyer maintenant dans le tour en cours",
   "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente.",
   "Keep the computer awake": "Garder l'ordinateur éveillé",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Pendant qu'un chat travaille, l'ordinateur ne se met pas en veille, pour que les longues tâches continuent. L'écran peut tout de même s'éteindre."
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Pendant qu'un chat travaille, l'ordinateur ne se met pas en veille, pour que les longues tâches continuent. L'écran peut tout de même s'éteindre.",
+  "Find in chat": "Rechercher dans le chat",
+  "{0} of {1}": "{0} sur {1}",
+  "No matches": "Aucun résultat",
+  "Previous match": "Résultat précédent",
+  "Next match": "Résultat suivant"
 }

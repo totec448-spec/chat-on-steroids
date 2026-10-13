@@ -2305,5 +2305,10 @@
   "Send into the running turn now": "立即傳送到進行中的這一回合",
   "The turn ended before this message could join it. It stays queued.": "這一回合在此訊息加入前已結束。它仍在佇列中。",
   "Keep the computer awake": "讓電腦保持喚醒",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "聊天工作時電腦不會進入睡眠，長時間任務得以繼續。螢幕仍可能關閉。"
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "聊天工作時電腦不會進入睡眠，長時間任務得以繼續。螢幕仍可能關閉。",
+  "Find in chat": "在聊天中尋找",
+  "{0} of {1}": "第 {0} 個，共 {1} 個",
+  "No matches": "沒有符合項目",
+  "Previous match": "上一個符合項目",
+  "Next match": "下一個符合項目"
 }
