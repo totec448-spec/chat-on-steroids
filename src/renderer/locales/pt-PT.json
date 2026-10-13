@@ -2316,5 +2316,9 @@
   "{0} of {1}": "{0} de {1}",
   "No matches": "Sem resultados",
   "Previous match": "Resultado anterior",
-  "Next match": "Resultado seguinte"
+  "Next match": "Resultado seguinte",
+  "Send messages with": "Enviar mensagens com",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "A tecla que envia o que escreve. Com ⌘Enter (Ctrl+Enter no Windows e Linux), Enter começa uma nova linha.",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }

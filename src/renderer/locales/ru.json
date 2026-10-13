@@ -2316,5 +2316,9 @@
   "{0} of {1}": "{0} из {1}",
   "No matches": "Нет совпадений",
   "Previous match": "Предыдущее совпадение",
-  "Next match": "Следующее совпадение"
+  "Next match": "Следующее совпадение",
+  "Send messages with": "Отправлять сообщения клавишей",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Какая клавиша отправляет набранный текст. С ⌘Enter (Ctrl+Enter в Windows и Linux) Enter начинает новую строку.",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }
