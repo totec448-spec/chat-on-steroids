@@ -273,25 +273,25 @@
     "message": "Los chats de subagentes permanecen en su conversación actual y nunca se compactan ni se reanudan manualmente."
   },
   "content_connector_identity_ambiguous": {
-    "message": "La identidad del conector instalado no está disponible o es ambigua"
+    "message": "La identidad del complemento instalado no está disponible o es ambigua"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "No se confirmó la solicitud de actualización del conector ni la propiedad de la página"
+    "message": "No se confirmó la solicitud de actualización del complemento ni la propiedad de la página"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Se solicitó la actualización, pero no se observó un esquema coincidente modificado"
   },
   "content_connector_refresh_unverified": {
-    "message": "No se pudo verificar la actualización del conector"
+    "message": "No se pudo verificar la actualización del complemento"
   },
   "content_connector_schema_no_refresh": {
-    "message": "El esquema del conector es distinto, pero ChatGPT no muestra el control Actualizar. Vuelve a crear o publicar esta aplicación personalizada para cargar el esquema de herramientas actual."
+    "message": "El esquema del complemento es distinto, pero ChatGPT no muestra el control Actualizar. Vuelve a crear o publicar este complemento para cargar el esquema de herramientas actual."
   },
   "content_connector_settings_unreadable": {
-    "message": "No se pudo leer la tarjeta de configuración del conector en la página de esta solicitud"
+    "message": "No se pudo leer la tarjeta de configuración del complemento en la página de esta solicitud"
   },
   "content_connector_settings_unverified": {
-    "message": "No se pudieron verificar los ajustes exactos del conector"
+    "message": "No se pudieron verificar los ajustes exactos del complemento"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Falló la transferencia del archivo adjunto. No se envió el mensaje."

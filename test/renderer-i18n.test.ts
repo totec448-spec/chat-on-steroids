@@ -355,6 +355,19 @@ it('calls each feature by the language\'s own name in every sentence', () => {
 // One word for it: the interface, the extension and its name in the browser say "browser
 // extension". "Companion" was a second name for the same thing in 20 texts (2026-10-13). The pets
 // are companions of another kind and keep the word.
+// What a person adds in ChatGPT is a plugin there (Plugins → Add custom MCP server → Create as a
+// plugin); "connector" no longer appears in ChatGPT, so the app does not use it either.
+it("calls what ChatGPT holds a plugin, not a connector, in every language's source text", () => {
+  const page = new JSDOM(readFileSync('src/renderer/index.html', 'utf8')).window.document;
+  const shown = [page.body.textContent ?? '', ...[...page.querySelectorAll('[title], [aria-label], [placeholder]')]
+    .flatMap(node => ['title', 'aria-label', 'placeholder'].map(name => node.getAttribute(name) ?? ''))].join('\n');
+  expect(shown.split('\n').map(line => line.trim()).filter(line => /connector/i.test(line))).toEqual([]);
+  const catalog = JSON.parse(readFileSync('src/renderer/locales/de.json', 'utf8')) as Record<string, string>;
+  expect(Object.keys(catalog).filter(key => /connector/i.test(key))).toEqual([]);
+  const extension = JSON.parse(readFileSync('extension/_locales/en/messages.json', 'utf8')) as Record<string, { message: string }>;
+  expect(Object.entries(extension).filter(([, entry]) => /connector/i.test(entry.message)).map(([key]) => key)).toEqual([]);
+});
+
 it('calls the browser extension an extension, not a companion', () => {
   // What a person can read: the page's text and its tooltips, labels and placeholders (comments are not).
   const page = new JSDOM(readFileSync('src/renderer/index.html', 'utf8')).window.document;

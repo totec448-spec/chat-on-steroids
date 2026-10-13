@@ -273,25 +273,25 @@
     "message": "Worker-Chats bleiben in ihrer bestehenden Unterhaltung und werden nie von Hand komprimiert oder fortgesetzt."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Die Identität des installierten Connectors ist nicht verfügbar oder nicht eindeutig"
+    "message": "Die Identität des installierten Plugins ist nicht verfügbar oder nicht eindeutig"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Die Übernahme der Connector-Aktualisierung oder die Zuständigkeit für die Seite wurde nicht bestätigt"
+    "message": "Die Übernahme der Plugin-Aktualisierung oder die Zuständigkeit für die Seite wurde nicht bestätigt"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Die Aktualisierung wurde angefordert, aber kein geändertes passendes Schema beobachtet"
   },
   "content_connector_refresh_unverified": {
-    "message": "Die Connector-Aktualisierung ließ sich nicht prüfen"
+    "message": "Die Plugin-Aktualisierung ließ sich nicht prüfen"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Das Connector-Schema weicht ab, aber ChatGPT bietet keine Schaltfläche zum Aktualisieren. Erstelle oder veröffentliche diese eigene App neu, um das aktuelle Tool-Schema zu laden."
+    "message": "Das Plugin-Schema weicht ab, aber ChatGPT bietet keine Schaltfläche zum Aktualisieren. Erstelle oder veröffentliche dieses Plugin neu, um das aktuelle Tool-Schema zu laden."
   },
   "content_connector_settings_unreadable": {
-    "message": "Die Connector-Einstellungen ließen sich auf der Seite dieser Anfrage nicht lesen"
+    "message": "Die Plugin-Einstellungen ließen sich auf der Seite dieser Anfrage nicht lesen"
   },
   "content_connector_settings_unverified": {
-    "message": "Die genauen Connector-Einstellungen ließen sich nicht prüfen"
+    "message": "Die genauen Plugin-Einstellungen ließen sich nicht prüfen"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Die Übertragung des Anhangs ist fehlgeschlagen. Die Nachricht wurde nicht gesendet."

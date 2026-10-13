@@ -273,25 +273,25 @@
     "message": "Cuộc trò chuyện worker luôn ở lại cuộc trò chuyện hiện có và không bao giờ được thu gọn hoặc tiếp tục thủ công."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Danh tính connector đã cài đặt không khả dụng hoặc không rõ ràng"
+    "message": "Danh tính plugin đã cài đặt không khả dụng hoặc không rõ ràng"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Không xác nhận được yêu cầu làm mới connector hoặc quyền sở hữu trang"
+    "message": "Không xác nhận được yêu cầu làm mới plugin hoặc quyền sở hữu trang"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Đã yêu cầu làm mới nhưng không quan sát thấy schema phù hợp đã thay đổi"
   },
   "content_connector_refresh_unverified": {
-    "message": "Không thể xác minh việc làm mới connector"
+    "message": "Không thể xác minh việc làm mới plugin"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Schema connector khác nhưng ChatGPT không hiển thị điều khiển Làm mới. Hãy tạo lại hoặc phát hành lại ứng dụng tùy chỉnh này để tải schema công cụ hiện tại."
+    "message": "Schema plugin khác nhưng ChatGPT không hiển thị điều khiển Làm mới. Hãy tạo lại hoặc phát hành lại plugin này để tải schema công cụ hiện tại."
   },
   "content_connector_settings_unreadable": {
-    "message": "Không thể đọc thẻ cài đặt connector trên trang thuộc về yêu cầu này"
+    "message": "Không thể đọc thẻ cài đặt plugin trên trang thuộc về yêu cầu này"
   },
   "content_connector_settings_unverified": {
-    "message": "Không thể xác minh chính xác cài đặt connector"
+    "message": "Không thể xác minh chính xác cài đặt plugin"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Chuyển tệp đính kèm thất bại. Tin nhắn chưa được gửi."
