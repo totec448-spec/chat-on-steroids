@@ -92,7 +92,8 @@ describe('the user’s own connector instructions', () => {
     // write_stdin has one id argument. completed_session_id is an exec_command result field that
     // goes into it; read as a second argument, the strict schema refuses the call.
     expect(text).toContain("pass a finished command's completed_session_id as session_id");
-    expect(text).toContain('benign_exit');
+    expect(text).toContain('expected_exit');
+    expect(text).not.toContain('benign');
     expect(text).toContain('without rerunning work');
     if (platform !== 'win32') {
       expect(text).toContain('normal POSIX shell');
