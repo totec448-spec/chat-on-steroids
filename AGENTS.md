@@ -3247,7 +3247,7 @@ sleep/reuse, inboxes and browser-command fences remain owned by the existing bro
 
 `agent-admission.ts` is the shared staged durability/worktree/measurement implementation for
 MCP and local entry points. Browser bootstraps/revivals follow committed admission only.
-The local API rechecks its action grant/profile beside commit; an unaccepted revision is
+The local API rechecks its action grant, worker switch and Setup profile before commit; an unaccepted revision is
 rolled back and superseded durably. Local report reads offer bounded redacted inbox messages;
 explicit acknowledgements retire only previously offered receipt ids the caller consumed.
 Explicit local acknowledgements mark a critical revision and await its durable write before success.
@@ -4535,18 +4535,37 @@ already cancelled), `not_sent` only for a terminal row whose Send was never auth
 out. Time, text, turn ids on the row and recorder sequence ranges are never evidence, and an
 unconfirmed row is never resent by this API.
 
-Direct local worker control is served by `control-workers.ts`: GET
-`/v1/workers/{ownerId}` (compact status and exact recorded worker session ids) and
-`.../reports` (unread broker offers), plus POST `.../spawn`, `.../message` and `.../ack`.
-These v1 routes are advertised in health and reuse this listener's authentication, action
-gate, JSON bounds, serialization and deadline behavior. The route's owner UUID is a local
-principal under the existing filesystem token grant, not a new secret or chat proof. Spawn
-may select an approved Local Project; MCP and local callers share `agent-admission.ts`.
-The adapter owns no second worker ledger. Reports repeat until their explicit receipt ids
-are acknowledged; reading status does not consume them. `scripts/t3-code-bridge.mjs` is a
-dependency-free caller that checks the advertised routes, uses compact status/report deltas,
-and refuses unsupported builds without silently opening a coordinator. For CLI commands
-and request fields, read `.agents/skills/cos-bridge/SKILL.md`.
+Direct worker control uses protocol 1 and the `/v1/workers/{ownerId}` routes
+advertised by health. `control-workers.ts` accepts a lowercase UUID as `ownerId`.
+It identifies a local caller under the existing filesystem token grant. It grants no
+access to another local owner's family or a ChatGPT prime family. All worker reads and
+mutations require `controlApi.allowActions` and `multiAgent.enabled`.
+The listener still enforces authentication, Origin and Host checks, JSON size limits,
+action serialization and deadlines. Disabling either switch returns 403 before any
+worker read or mutation. Ordinary read routes remain available.
+
+The worker contract is:
+
+| Request | Body or query | Response |
+| --- | --- | --- |
+| GET `/v1/workers/{ownerId}` | Optional `runId` query. | `runId`, `freeWorkerSlots`, `retainedHistory`, and compact `workers` with broker state and exact recorded `sessionId`. No task or result text. |
+| GET `/v1/workers/{ownerId}/reports` | Optional `runId` query. | Bounded redacted `messages` with `id`, `runId`, `from`, `time`, and `text`. Reading status does not consume reports. |
+| POST `/v1/workers/{ownerId}/spawn` | `workers` with `task` and optional `label`. Optional `runId`, `projectId`, and `context`. | 202 with `runId`, admitted `workers`, and `notes`. The saved worker model and effort defaults apply. |
+| POST `/v1/workers/{ownerId}/message` | `messages` with worker `to`, `text`, and optional `label`. Optional `runId`. | 202 with `runId`, `queued` receipt IDs and destinations, and `waking` worker IDs. A wake can return a new run incarnation. |
+| POST `/v1/workers/{ownerId}/ack` | `messageIds` and optional `runId`. | `acknowledged` receipt IDs. Only previously offered reports in an owned family can be acknowledged. Success follows the durable write. |
+
+Tasks, context and message text allow at most 4,000 characters. Labels allow 60.
+A spawn admits at most eight workers. A message call allows sixteen messages.
+An acknowledgement allows 128 IDs. Receipt IDs allow up to 100 ASCII letters,
+digits, underscores or hyphens. Unknown request fields and duplicate or unknown query
+keys are refused. Worker destinations use `worker-N`, with a positive integer of at
+most six digits. `runId` and `projectId` are lowercase UUIDs.
+
+Spawn may select an approved local project. MCP and local callers share
+`agent-admission.ts`. The adapter keeps no separate worker state.
+Callers follow a recorded worker session through the existing event page or stream.
+The stream emits events in ascending `seq` order so a reconnect after its last frame
+cannot skip a later revision that appears earlier in the displayed conversation.
 
 Cancel is narrower than the app's own cancel. It reads the row first and refuses, without asking
 the owner, a `sent` or `tool` row, a claim whose Send was authorized (it may already be in ChatGPT,

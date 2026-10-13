@@ -101,16 +101,17 @@ off whenever the API is off, and left off when you turn the API back on), it als
 a model that reads those messages can act under the permissions you have granted.**
 With the switch off, these routes all answer 403 and nothing changes.
 
-Local agents can also control workers through this API. Enable workers in CoS and save
-a lowercase UUID as `ownerId`. `GET /v1/workers/{ownerId}` lists that caller's workers.
-`GET /v1/workers/{ownerId}/reports` returns unread reports. With Allow actions enabled,
-the caller can send POST requests to `/v1/workers/{ownerId}/spawn` to start workers,
-`/v1/workers/{ownerId}/message` to send them messages, and `/v1/workers/{ownerId}/ack`
-to acknowledge report IDs. Reports repeat until the caller acknowledges them.
-
-T3 Code or another local agent can use `scripts/t3-code-bridge.mjs` with Node 22 or later.
-The [cos-bridge skill](../.agents/skills/cos-bridge/SKILL.md) lists every CLI command and
-its request fields.
+Local agents can control broker workers when Allow actions and workers are both on.
+Save a lowercase UUID as `ownerId` and reuse it across calls and app restarts.
+`GET /v1/workers/{ownerId}` lists that caller's workers.
+`GET /v1/workers/{ownerId}/reports` returns unread reports.
+Send POST requests to `/v1/workers/{ownerId}/spawn` to start workers,
+`/v1/workers/{ownerId}/message` to send them messages, and
+`/v1/workers/{ownerId}/ack` to acknowledge report IDs.
+Reports repeat until the caller acknowledges them. All five worker routes return 403
+when either switch is off. The other read routes remain available.
+The [worker API contract](../AGENTS.md#18-desktop-workspace-plugins-connection-and-native-control)
+lists the request fields and limits.
 
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
 A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.
