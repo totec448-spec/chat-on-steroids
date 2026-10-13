@@ -3236,6 +3236,7 @@ MCP and local entry points. Browser bootstraps/revivals follow committed admissi
 The local API rechecks its action grant/profile beside commit; an unaccepted revision is
 rolled back and superseded durably. Local report reads offer bounded redacted inbox messages;
 explicit acknowledgements retire only previously offered receipt ids the caller consumed.
+Explicit local acknowledgements mark a critical revision and await its durable write before success.
 Status is compact and never acknowledges reports. Report run ids accompany local offers even
 when a family has parked; reactivation still rotates the incarnation and retains bounded aliases.
 
@@ -4460,6 +4461,9 @@ display data for the timeline card and the control API's event projection; the l
 Server-Sent Events. It is the paged read repeated: every frame is a row `…/events?from=` would
 return, read through `streamEvents` under the same heavy-read limit, with `id` = `seq` so
 `Last-Event-ID` resumes after it (and wins over `from`). The recorder's `onSessionChange` says
+Each bounded stream page is emitted in ascending sequence order, so stopping between frames
+cannot skip a lower-sequence row that presentation chronology would place later. Paged reads
+keep their presentation order after selecting their bounded sequence window.
 when to read again and a 5 s tick covers a missed notice. Everything that can refuse a stream
 does so as JSON before the first byte; the first read runs under the listener's read deadline.
 At most `MAX_EVENT_STREAMS` (4) are open; each sends `: stream open` at once and a comment every

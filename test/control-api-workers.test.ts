@@ -18,7 +18,7 @@ const config = await import('../src/main/config.js');
 const api = await import('../src/main/control-api.js');
 const broker = await import('../src/main/agents.js');
 const durable = await import('../src/main/durable.js');
-const { initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { initSecretsPath } = await import('../src/main/secrets.js');
 const ownerId = '11111111-1111-4111-8111-111111111111';
 let directory: string;
@@ -54,9 +54,10 @@ afterAll(async () => {
 async function cli(command: string, request: unknown) {
   const file = path.join(directory, 'request.json');
   await fs.writeFile(file, JSON.stringify(request));
-  return new Promise<{ code: number; body: any }>(resolve => {
+  return new Promise<{ code: number; body: any; rows: any[] }>(resolve => {
     execFile(process.execPath, [path.resolve('scripts/t3-code-bridge.mjs'), command, '--data-dir', directory, '--request-file', file], { timeout: 10_000 }, (error, stdout) => {
-      resolve({ code: error ? Number(error.code) || 1 : 0, body: JSON.parse(stdout.trim()) });
+      const rows = stdout.trim().split('\n').map(line => JSON.parse(line));
+      resolve({ code: error ? Number(error.code) || 1 : 0, body: rows[0], rows });
     });
   });
 }
@@ -102,6 +103,21 @@ it('retains local ownership and unread reports through a broker restart', async 
   expect((await cli('reports', { ownerId, runId: spawn.runId })).body.messages).toMatchObject([{ from: 'worker-1', text: expect.stringContaining('retained report') }]);
 });
 
+it('does not reoffer successfully acknowledged reports after loading the durable broker snapshot', async () => {
+  const spawn = (await cli('delegate', { ownerId, workers: [{ task: 'Complete a task.' }] })).body;
+  broker.bindConversation('worker-1', 'acked-worker', spawn.runId);
+  broker.finishAgent({ conversationId: 'acked-worker' }, 'RESULT: consumed report');
+  broker.releaseQuiescentRun({ allowPendingReports: true }, spawn.runId);
+  await broker.persistCriticalSwarmNow();
+  const reports = (await cli('reports', { ownerId, runId: spawn.runId })).body;
+  expect((await cli('ack', { ownerId, runId: spawn.runId, messageIds: reports.messages.map((row: any) => row.id) })).code).toBe(0);
+  const snapshot = await durable.readDurable<NonNullable<ReturnType<typeof broker.snapshotSwarm>>>('swarm');
+  broker.resetAgentsForTests();
+  broker.restoreSwarm(snapshot);
+  broker.onSwarmPersistNow(state => durable.writeDurableNow('swarm', state));
+  expect((await cli('reports', { ownerId, runId: spawn.runId })).body.messages).toEqual([]);
+});
+
 it('cannot use another local owner or a ChatGPT prime family through its run id', async () => {
   const otherOwner = '22222222-2222-4222-8222-222222222222';
   const own = (await cli('delegate', { ownerId, workers: [{ task: 'Owner one.' }] })).body;
@@ -129,4 +145,18 @@ it('publishes no worker when local actions are revoked during its durability bar
   const result = await pending;
   expect(result.code).toBe(1);
   expect((await cli('agents', { ownerId })).body.workers).toEqual([]);
+});
+
+it('can resume a limited real event stream without skipping a row placed after a revised message', async () => {
+  const recorded = await createSession({ title: 'Cursor test' });
+  const turnId = 'cursor-turn';
+  const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
+  const start = await appendEvent(recorded.id, { kind: 'turn_start', source: 'extension', time: 10, turnId });
+  await upsertMessageEvent(recorded.id, { kind: 'assistant_message', source: 'extension', time: 20, turnId, messageId: 'cursor-message', message: text('Working'), final: false, state: 'streaming' });
+  const end = await appendEvent(recorded.id, { kind: 'turn_end', source: 'extension', time: 30, turnId, outcome: 'completed' });
+  const revision = (await upsertMessageEvent(recorded.id, { kind: 'assistant_message', source: 'extension', time: 40, turnId, messageId: 'cursor-message', message: text('Finished'), final: true, state: 'final' })).event;
+  const first = await cli('updates', { sessionId: recorded.id, from: start.seq, limit: 2, durationMs: 500 });
+  expect(first.rows.filter(row => row.event).map(row => row.event.seq)).toEqual([start.seq, end.seq]);
+  const resumed = await cli('updates', { sessionId: recorded.id, from: first.rows.at(-1).nextFrom, limit: 1, durationMs: 500 });
+  expect(resumed.rows.filter(row => row.event).map(row => row.event.seq)).toEqual([revision.seq]);
 });

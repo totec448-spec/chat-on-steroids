@@ -2899,8 +2899,10 @@ export function acknowledgeLocalReports(caller: Caller, messageIds: readonly str
   if (!caller.localOwnerId || !hasCallerIdentity(caller)) throw new IdentityLostError();
   requireFamilySelection(caller);
   const ids = new Set(messageIds);
-  return familiesForCaller(caller).filter(owner => ownsPrime(caller, owner) && (!caller.runId || answersTo(owner, caller.runId)))
+  const acknowledged = familiesForCaller(caller).filter(owner => ownsPrime(caller, owner) && (!caller.runId || answersTo(owner, caller.runId)))
     .flatMap(owner => acknowledgeAgentOffers(owner.agents.get(PRIME_ID)!, false, Number.POSITIVE_INFINITY, ids));
+  if (acknowledged.length) changed('critical');
+  return acknowledged;
 }
 
 export function pendingCount(id: string, runId?: string): number {
