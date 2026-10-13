@@ -2265,5 +2265,7 @@
   "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "將無法讀取的檔案移到一旁，並在沒有已儲存金鑰的情況下重新開始？你需要重新輸入 API 金鑰和外掛程式密鑰，瀏覽器擴充功能可能也需要重新連線。舊檔案會保留作為備份。",
   "Started fresh. Enter your keys again.": "已重新開始。請重新輸入你的金鑰。",
   "The saved keys can be read again. Nothing was changed.": "已儲存的金鑰又可以讀取了。未做任何變更。",
-  "Could not start fresh.": "無法重新開始。"
+  "Could not start fresh.": "無法重新開始。",
+  "Recording storage": "記錄儲存空間",
+  "Images and long texts recorded from your chats, up to 2 GB.": "從你的聊天中記錄的圖片和長文字，最多 2 GB。"
 }
