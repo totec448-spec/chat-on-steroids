@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "這與外掛程式的權限設定無關，此提醒也不會核准任何工具呼叫。",
   "Choose a folder to share — step {0}.": "選擇要共用的資料夾 — 第 {0} 步。",
   "Create a tunnel and paste its ID — step {0}.": "建立隧道並貼上 ID — 第 {0} 步。",
-  "Add a restricted API key — step {0}.": "新增受限 API 金鑰 — 第 {0} 步。"
+  "Add a restricted API key — step {0}.": "新增受限 API 金鑰 — 第 {0} 步。",
+  "Could not read plugin-refresh state": "無法讀取外掛程式重新整理狀態",
+  "Could not reset plugin-refresh state": "無法重設外掛程式重新整理狀態",
+  "Reset plugin refresh": "重設外掛程式重新整理",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "重設會備份無法讀取的狀態，並允許重新開始自動重新整理外掛程式。重新整理可能影響現有的 ChatGPT 對話。"
 }

@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "これはプラグインの権限設定とは別で、このリマインダーがツール呼び出しを承認することはありません。",
   "Choose a folder to share — step {0}.": "共有するフォルダーを選択してください（手順{0}）。",
   "Create a tunnel and paste its ID — step {0}.": "トンネルを作成し、ID を貼り付けてください（手順{0}）。",
-  "Add a restricted API key — step {0}.": "制限付き API キーを追加してください（手順{0}）。"
+  "Add a restricted API key — step {0}.": "制限付き API キーを追加してください（手順{0}）。",
+  "Could not read plugin-refresh state": "プラグイン更新の状態を読み取れませんでした",
+  "Could not reset plugin-refresh state": "プラグイン更新の状態をリセットできませんでした",
+  "Reset plugin refresh": "プラグイン更新をリセット",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "リセットすると、読み取れない状態をバックアップして自動プラグイン更新を再開できます。更新は既存のChatGPTチャットに影響する場合があります。"
 }

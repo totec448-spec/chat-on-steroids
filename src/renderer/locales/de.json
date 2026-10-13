@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Das ist unabhängig von den Berechtigungen des Plugins, und dieser Hinweis gibt keinen Tool-Aufruf frei.",
   "Choose a folder to share — step {0}.": "Wähle einen Ordner zum Freigeben – Schritt {0}.",
   "Create a tunnel and paste its ID — step {0}.": "Erstelle einen Tunnel und füge seine ID ein – Schritt {0}.",
-  "Add a restricted API key — step {0}.": "Füge einen eingeschränkten API-Schlüssel hinzu – Schritt {0}."
+  "Add a restricted API key — step {0}.": "Füge einen eingeschränkten API-Schlüssel hinzu – Schritt {0}.",
+  "Could not read plugin-refresh state": "Plugin-Refresh-Status konnte nicht gelesen werden",
+  "Could not reset plugin-refresh state": "Plugin-Refresh-Status konnte nicht zurückgesetzt werden",
+  "Reset plugin refresh": "Plugin-Refresh zurücksetzen",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Zurücksetzen sichert den unlesbaren Status und lässt die automatische Plugin-Aktualisierung neu beginnen. Das Aktualisieren kann bestehende ChatGPT-Chats beeinflussen."
 }

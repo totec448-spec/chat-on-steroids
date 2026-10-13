@@ -29,6 +29,31 @@ async function tempStore(): Promise<string> {
 }
 
 describe('durable state commit boundary', () => {
+  it('allows a missing strict ledger and reads a committed one', async () => {
+    await tempStore();
+    await expect(readDurable('probe', { strict: true })).resolves.toBeNull();
+    await writeDurableNow('probe', { generation: 1 });
+    await expect(readDurable('probe', { strict: true })).resolves.toEqual({ generation: 1 });
+  });
+
+  it.each(['malformed JSON', 'JSON null'])('rejects %s without exposing its contents, preserving tolerant reads', async kind => {
+    const dir = await tempStore();
+    await writeDurableNow('probe', {});
+    const file = path.join(dir, 'state', 'probe.json');
+    const broken = kind === 'JSON null' ? 'null' : '{"private-diagnostic":"fixture-only"';
+    await fs.writeFile(file, broken);
+    await expect(readDurable('probe', { strict: true })).rejects.toThrow(/^Could not read probe state$/);
+    await expect(readDurable('probe')).resolves.toBeNull();
+    expect(await fs.readFile(file, 'utf8')).toBe(broken);
+  });
+
+  it('rejects a strict I/O failure instead of treating it as a missing ledger', async () => {
+    await tempStore();
+    vi.spyOn(fs, 'readFile').mockRejectedValue(Object.assign(new Error('fixture-only diagnostic'), { code: 'EACCES' }));
+    await expect(readDurable('probe', { strict: true })).rejects.toThrow(/^Could not read probe state$/);
+    await expect(readDurable('probe')).resolves.toBeNull();
+  });
+
   it('starts independent pending files during flush without duplicating an active immediate write', async () => {
     await tempStore();
     let release!: () => void;

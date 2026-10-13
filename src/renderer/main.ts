@@ -65,6 +65,30 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+let pluginRefreshResetBusy = false;
+let pluginRefreshResetFailed = false;
+function paintPluginRefreshRecovery(next: AppState): void {
+  if (next.pluginRefreshUnreadable !== true) pluginRefreshResetFailed = false;
+  $('pluginRefreshRecovery').hidden = next.pluginRefreshUnreadable !== true;
+  $<HTMLButtonElement>('pluginRefreshReset').disabled = pluginRefreshResetBusy;
+  ui($('pluginRefreshRecoveryError'), 'textContent', () => t(pluginRefreshResetFailed
+    ? 'Could not reset plugin-refresh state' : 'Could not read plugin-refresh state'));
+}
+$('pluginRefreshReset').addEventListener('click', async () => {
+  if (pluginRefreshResetBusy || state?.pluginRefreshUnreadable !== true) return;
+  pluginRefreshResetBusy = true;
+  paintPluginRefreshRecovery(state);
+  try {
+    const reply = await api.resetPluginRefresh();
+    if (!reply.ok) throw new Error('Could not reset plugin-refresh state');
+    pluginRefreshResetFailed = false;
+    apply(reply.data);
+  } catch { pluginRefreshResetFailed = true; }
+  finally {
+    pluginRefreshResetBusy = false;
+    if (state) paintPluginRefreshRecovery(state);
+  }
+});
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 // The tray menu and desktop notices come from the main process, which has no catalogs.
 publishMainTexts(texts => api.setMainTexts?.(texts));
@@ -1504,6 +1528,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
+  paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
 
   // ---- health numbers and facts

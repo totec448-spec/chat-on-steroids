@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "이는 플러그인 권한과는 별개이며, 이 알림은 도구 호출을 승인하지 않습니다.",
   "Choose a folder to share — step {0}.": "공유할 폴더를 선택하세요 — {0}단계.",
   "Create a tunnel and paste its ID — step {0}.": "터널을 만들고 ID를 붙여넣으세요 — {0}단계.",
-  "Add a restricted API key — step {0}.": "제한된 API 키를 추가하세요 — {0}단계."
+  "Add a restricted API key — step {0}.": "제한된 API 키를 추가하세요 — {0}단계.",
+  "Could not read plugin-refresh state": "플러그인 새로고침 상태를 읽을 수 없습니다",
+  "Could not reset plugin-refresh state": "플러그인 새로고침 상태를 초기화할 수 없습니다",
+  "Reset plugin refresh": "플러그인 새로고침 초기화",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "초기화하면 읽을 수 없는 상태를 백업하고 자동 플러그인 새로고침을 다시 시작할 수 있습니다. 새로고침은 기존 ChatGPT 채팅에 영향을 줄 수 있습니다."
 }

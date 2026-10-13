@@ -2199,5 +2199,9 @@
   "This is separate from the plugin’s permissions, and this reminder does not approve a tool call.": "Bu, eklentinin izinlerinden ayrıdır ve bu hatırlatma bir araç çağrısını onaylamaz.",
   "Choose a folder to share — step {0}.": "Paylaşılacak klasörü seçin — {0}. adım.",
   "Create a tunnel and paste its ID — step {0}.": "Bir tünel oluşturup kimliğini yapıştırın — {0}. adım.",
-  "Add a restricted API key — step {0}.": "Kısıtlı bir API anahtarı ekleyin — {0}. adım."
+  "Add a restricted API key — step {0}.": "Kısıtlı bir API anahtarı ekleyin — {0}. adım.",
+  "Could not read plugin-refresh state": "Eklenti yenileme durumu okunamadı",
+  "Could not reset plugin-refresh state": "Eklenti yenileme durumu sıfırlanamadı",
+  "Reset plugin refresh": "Eklenti yenilemeyi sıfırla",
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Sıfırlama, okunamayan durumun yedeğini alır ve otomatik eklenti yenilemenin yeniden başlamasını sağlar. Yenileme mevcut ChatGPT sohbetlerini etkileyebilir."
 }
