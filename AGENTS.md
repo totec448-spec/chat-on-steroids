@@ -4727,6 +4727,14 @@ consumes that reservation durably and uses the settings-incarnation predicate. A
 explains the connection exception and possible restart, retains errors until explicit retry,
 and disables the action while its IPC receipt is outstanding.
 
+**Component status projection.** `renderer/update-readiness-state.ts` derives status and
+recovery copy from existing owners without rendering or starting work. Full completion needs
+a successful release check, no newer app, a paired live extension at the running version,
+and exact current schemas for required enabled connectors reached this run. Core is required;
+off/empty optional connectors skip. Successful tools may show operational readiness with a
+schema caveat, never erase failed or manual checks. Missing macOS grants block; unknown stays
+unverified and reads request no grant. State regressions belong in `update-readiness-state.test.ts`.
+
 ## 19. Debugging, tests and working here
 
 Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one
