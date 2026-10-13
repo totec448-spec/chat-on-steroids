@@ -2271,5 +2271,16 @@
   "Compact & Resume · waiting for this turn to end": "Compactar y continuar · esperando a que termine este turno",
   "Compact & Resume · asking ChatGPT for the handoff": "Compactar y continuar · pidiendo el traspaso a ChatGPT",
   "The handoff request is sent as soon as this turn ends.": "La solicitud de traspaso se envía en cuanto termine este turno.",
-  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids está enviando a ChatGPT la solicitud para escribir el resumen de un chat nuevo."
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids está enviando a ChatGPT la solicitud para escribir el resumen de un chat nuevo.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Ejecuciones largas más estables, un túnel que funciona detrás de un proxy y las propias palabras de ChatGPT.",
+  "Steadier long runs": "Ejecuciones largas más estables",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Los chats se recuperan de forma más fiable, también después de que el equipo entre en reposo, y la cronología mantiene en orden los turnos largos.",
+  "Works behind a proxy": "Funciona detrás de un proxy",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "El túnel a ChatGPT usa por sí solo el proxy de tu sistema.",
+  "Better dictation on Windows": "Mejor dictado en Windows",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "El dictado usa el reconocimiento de voz del propio Windows, con puntuación y mucha más precisión.",
+  "Plugins, as ChatGPT calls them": "Complementos, como los llama ChatGPT",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "La app ahora dice complemento, como ChatGPT, y se pueden instalar complementos con muchas herramientas.",
+  "Start chats from your own tools": "Inicia chats desde tus propias herramientas",
+  "The Local control API can start a new chat and send its events as they happen.": "La API de control local puede iniciar un chat nuevo y enviar sus eventos a medida que ocurren."
 }
