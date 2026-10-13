@@ -2300,5 +2300,8 @@
   "Freeing space in the background. You can close this window.": "Arka planda alan açılıyor. Bu pencereyi kapatabilirsiniz.",
   "Free 1 GB from old chats": "Eski sohbetlerden 1 GB aç",
   "Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.": "Bir haftadır kullanılmayan sohbetlerden yaklaşık 1 GB görsel ve tam uzun metin, en eskisinden başlayarak kalıcı olarak kaldırılsın mı? Sohbetler kalır; uzun mesajlar ve araç sonuçları başlangıçlarını korur.",
-  "Freed {0} MB. {1} GB of recording storage is now available.": "{0} MB alan açıldı. Artık {1} GB kayıt depolama alanı kullanılabilir."
+  "Freed {0} MB. {1} GB of recording storage is now available.": "{0} MB alan açıldı. Artık {1} GB kayıt depolama alanı kullanılabilir.",
+  "Send now": "Şimdi gönder",
+  "Send into the running turn now": "Devam eden tura şimdi gönder",
+  "The turn ended before this message could join it. It stays queued.": "Bu mesaj katılamadan tur sona erdi. Sırada kalmaya devam ediyor."
 }

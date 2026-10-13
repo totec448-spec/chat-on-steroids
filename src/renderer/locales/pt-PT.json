@@ -2300,5 +2300,8 @@
   "Freeing space in the background. You can close this window.": "A libertar espaço em segundo plano. Pode fechar esta janela.",
   "Free 1 GB from old chats": "Libertar 1 GB de chats antigos",
   "Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.": "Remover permanentemente cerca de 1 GB de imagens e textos longos completos de chats sem utilização há uma semana, começando pelos mais antigos? Os chats mantêm-se, e as mensagens longas e os resultados de ferramentas ficam com o início.",
-  "Freed {0} MB. {1} GB of recording storage is now available.": "Foram libertados {0} MB. Estão agora disponíveis {1} GB de armazenamento para gravações."
+  "Freed {0} MB. {1} GB of recording storage is now available.": "Foram libertados {0} MB. Estão agora disponíveis {1} GB de armazenamento para gravações.",
+  "Send now": "Enviar agora",
+  "Send into the running turn now": "Enviar agora para o turno em curso",
+  "The turn ended before this message could join it. It stays queued.": "O turno terminou antes de esta mensagem o poder integrar. Continua na fila."
 }
