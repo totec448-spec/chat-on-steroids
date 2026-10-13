@@ -1670,7 +1670,7 @@
   "These files no longer differ from the checkpoint": "Diese Dateien unterscheiden sich nicht mehr vom Checkpoint",
   "Too many changes to restore at once. Restore files one by one.": "Zu viele Änderungen, um sie auf einmal wiederherzustellen. Stelle die Dateien einzeln wieder her.",
   "Restore files from this checkpoint?": "Dateien aus diesem Checkpoint wiederherstellen?",
-  "Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.": "Jede Datei erhält wieder ihre Version aus dem Checkpoint, und eine Datei, die es damals noch nicht gab, wird entfernt. Die aktuellen Dateien werden vorher als Checkpoint gesichert, sodass du das in Review rückgängig machen kannst.",
+  "Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.": "Dateien kehren zu ihrer Checkpoint-Version zurück; seitdem hinzugefügte Dateien werden entfernt. Die aktuellen Dateien werden vorher gesichert, du kannst das in Review rückgängig machen.",
   "More files are not shown.": "Weitere Dateien werden nicht angezeigt.",
   "Keep current files": "Aktuelle Dateien behalten",
   "Restore files": "Dateien wiederherstellen",

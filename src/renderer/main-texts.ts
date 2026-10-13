@@ -33,8 +33,8 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
     'Restore files from this checkpoint?': t('Restore files from this checkpoint?'),
-    'Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.':
-      t('Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.'),
+    'Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.':
+      t('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
     'More files are not shown.': t('More files are not shown.'),
     'Keep current files': t('Keep current files'),
     'Restore files': t('Restore files')

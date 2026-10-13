@@ -1046,7 +1046,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         title: mainText('Restore files from this checkpoint?'),
         message: mainText('Restore files from this checkpoint?'),
         detail: [
-          mainText('Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.'),
+          mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
           '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
         ].join('\n'),
         buttons: [mainText('Keep current files'), mainText('Restore files')],

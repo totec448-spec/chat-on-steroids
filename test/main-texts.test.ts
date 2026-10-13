@@ -23,6 +23,18 @@ it('has every tray and notice text in every interface catalog', () => {
   }
 });
 
+it('keeps every translated tray and notice text within the bounds the main process accepts', () => {
+  // `ui:mainTexts` refuses the whole set when one text is longer, leaving every main text in English.
+  expect(MAIN_TEXTS.length).toBeLessThanOrEqual(32);
+  for (const file of readdirSync('src/renderer/locales').filter(name => name.endsWith('.json'))) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
+    for (const source of MAIN_TEXTS) {
+      expect(source.length, source).toBeLessThanOrEqual(200);
+      expect(catalog[source]?.length ?? 0, `${file}: ${source}`).toBeLessThanOrEqual(200);
+    }
+  }
+});
+
 it('publishes every tray and notice text in the selected language, and again after a language change', async () => {
   window.localStorage.setItem('cos.ui.language', 'de');
   const { initLanguage, setLanguage } = await import('../src/renderer/i18n.js');
