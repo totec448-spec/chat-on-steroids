@@ -2249,5 +2249,14 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "초기화하면 읽을 수 없는 상태를 백업하고 자동 플러그인 새로고침을 다시 시작할 수 있습니다. 새로고침은 기존 ChatGPT 채팅에 영향을 줄 수 있습니다.",
   "A calm capybara who lifts, chills and never panics.": "운동도 하고 느긋하게 쉬며 절대 당황하지 않는 차분한 카피바라.",
   "A tiny hamster with a big pre-workout attitude.": "운동 전 의욕이 넘치는 아주 작은 햄스터.",
-  "The built-in Chat On Steroids companion.": "Chat On Steroids에 기본으로 들어 있는 친구."
+  "The built-in Chat On Steroids companion.": "Chat On Steroids에 기본으로 들어 있는 친구.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "기본 정확도로 듣고 있습니다. 문장 부호와 더 나은 결과를 원하면 Windows 설정에서 온라인 음성 인식을 켜세요.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "사용할 수 있는 마이크가 없습니다. 마이크를 연결하거나 Windows 설정에서 마이크 액세스를 허용하세요.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows가 데스크톱 앱의 마이크 액세스를 차단하고 있습니다. Windows 설정에서 허용하세요.",
+  "Windows speech recognition lost its internet connection.": "Windows 음성 인식의 인터넷 연결이 끊어졌습니다.",
+  "The microphone signal was too poor to recognize speech.": "마이크 신호가 너무 약해 음성을 인식할 수 없었습니다.",
+  "Windows speech recognition stopped unexpectedly.": "Windows 음성 인식이 예기치 않게 중지되었습니다.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "설치된 Windows 음성 인식기가 없습니다. Windows 음성 언어 팩을 설치하세요.",
+  "Windows speech recognition could not start": "Windows 음성 인식을 시작할 수 없습니다",
+  "Windows speech recognition exited unexpectedly": "Windows 음성 인식이 예기치 않게 종료되었습니다"
 }

@@ -2249,5 +2249,14 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Сброс сохраняет копию нечитаемого состояния и позволяет возобновить автоматическое обновление плагинов. Обновление может повлиять на существующие чаты ChatGPT.",
   "A calm capybara who lifts, chills and never panics.": "Спокойная капибара, которая качается, отдыхает и никогда не паникует.",
   "A tiny hamster with a big pre-workout attitude.": "Крошечный хомяк с большим предтренировочным настроем.",
-  "The built-in Chat On Steroids companion.": "Встроенный компаньон Chat On Steroids."
+  "The built-in Chat On Steroids companion.": "Встроенный компаньон Chat On Steroids.",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Распознавание с базовой точностью. Чтобы получить знаки препинания и лучший результат, включите распознавание голоса в сети в параметрах Windows.",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Микрофон недоступен. Подключите микрофон или разрешите доступ к нему в параметрах Windows.",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows блокирует доступ к микрофону для классических приложений. Разрешите его в параметрах Windows.",
+  "Windows speech recognition lost its internet connection.": "Распознавание речи Windows потеряло подключение к интернету.",
+  "The microphone signal was too poor to recognize speech.": "Сигнал микрофона слишком слабый для распознавания речи.",
+  "Windows speech recognition stopped unexpectedly.": "Распознавание речи Windows неожиданно остановилось.",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Средство распознавания речи Windows не установлено. Установите языковой пакет Windows с распознаванием речи.",
+  "Windows speech recognition could not start": "Не удалось запустить распознавание речи Windows",
+  "Windows speech recognition exited unexpectedly": "Распознавание речи Windows неожиданно завершилось"
 }

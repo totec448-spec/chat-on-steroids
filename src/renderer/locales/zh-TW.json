@@ -2249,5 +2249,14 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "重設會備份無法讀取的狀態，並允許重新開始自動重新整理外掛程式。重新整理可能影響現有的 ChatGPT 對話。",
   "A calm capybara who lifts, chills and never panics.": "一隻沉著的水豚，舉鐵、放鬆，從不慌張。",
   "A tiny hamster with a big pre-workout attitude.": "一隻小小的倉鼠，訓練前幹勁十足。",
-  "The built-in Chat On Steroids companion.": "Chat On Steroids 內建的夥伴。"
+  "The built-in Chat On Steroids companion.": "Chat On Steroids 內建的夥伴。",
+  "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "正以基本精確度聆聽。若要加上標點並提升效果，請在 Windows 設定中開啟線上語音辨識。",
+  "No microphone is available. Connect one, or allow microphone access in Windows settings.": "沒有可用的麥克風。請連接麥克風，或在 Windows 設定中允許麥克風存取。",
+  "Windows blocks microphone access for desktop apps. Allow it in Windows settings.": "Windows 封鎖了桌面應用程式存取麥克風。請在 Windows 設定中允許存取。",
+  "Windows speech recognition lost its internet connection.": "Windows 語音辨識失去網路連線。",
+  "The microphone signal was too poor to recognize speech.": "麥克風訊號太差，無法辨識語音。",
+  "Windows speech recognition stopped unexpectedly.": "Windows 語音辨識意外停止。",
+  "No Windows speech recognizer is installed. Install a Windows speech language pack.": "未安裝 Windows 語音辨識器。請安裝 Windows 語音語言套件。",
+  "Windows speech recognition could not start": "無法啟動 Windows 語音辨識",
+  "Windows speech recognition exited unexpectedly": "Windows 語音辨識意外結束"
 }

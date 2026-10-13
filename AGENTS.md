@@ -3579,14 +3579,20 @@ of appearance controls.
 The Windows composer dictation control uses `preload/index.ts`'s fixed
 `dictationSupported`, `startDictation`, `stopDictation` and
 `onDictationEvent` methods. `main/dictation.ts` alone owns a Windows
-`System.Speech.Recognition` child process and sends validated
-`shared/dictation.ts` events (`status`, `partial`, `final`, `error`) to
-its originating `webContents`. Only an explicit microphone click starts it;
+PowerShell recognizer child and sends validated `shared/dictation.ts` events
+(`status`, `partial`, `final`, `error`) to its originating `webContents`. The child
+dictates with Windows' own `Windows.Media.SpeechRecognition` engine (online, with
+punctuation) and falls back to offline `System.Speech` when that cannot run;
+`status: 'listening'` carries `engine: 'modern' | 'legacy'`, and the renderer tells
+the person when only the basic engine listens. Its fixed error sentences are catalog
+keys. Only an explicit microphone click starts it;
 the renderer owns the current composer draft, stops on manual edits/navigation,
-and never sends recognized text automatically. A normal Stop grants 650ms for
-final recognition; app `before-quit` kills the child synchronously, and the
+and never sends recognized text automatically. Stop creates a per-session stop file
+that the child polls; it then finishes the phrase in progress and exits, with 4 s
+before it is killed. App `before-quit` kills the child synchronously, and the
 PowerShell event loop checks the owning app's PID each second so a crashed/killed
-app cannot leave an orphan recording. No audio enters IPC or storage;
+app cannot leave an orphan recording. `scripts/fixtures/smoke-dictation-parent-windows.cjs`
+parses the whole script with PowerShell and runs its loop without a microphone. No audio enters IPC or storage;
 macOS/Linux hide this Windows-only control.
 
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
