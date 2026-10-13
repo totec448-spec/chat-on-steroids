@@ -8,11 +8,12 @@ Read the [responsible-use notice and provider rules](../README.md#responsible-us
 
 ## Quick start
 
-1. **Install and open CoS.** Choose the download for your operating system and CPU.
-2. **Choose what ChatGPT may access.** In **Settings → Workspace**, approve a project folder and review the tool permissions.
-3. **Connect the local tools.** Configure a tunnel in **Settings → Setup**, press **Connect**, then add the **Core** app in ChatGPT under **Plugins → Add → Add custom MCP server**.
-4. **Load the companion extension.** Open your browser's extensions page (`chrome://extensions`, `edge://extensions` or `brave://extensions`; Setup copies the address for you, because browsers only open these pages from their own address bar). Turn on **Developer mode** (in Edge, at the bottom of the left sidebar), click **Load unpacked** and select the folder that **Open extension folder** shows. Pairing is automatic.
-5. **Start a task.** Choose a project and model in CoS, write your request and send it.
+1. **Install and open CoS.** Choose the download for your operating system and CPU, then open **Settings → Setup**. The steps below are Setup's own, in its order.
+2. **Browser (step 1).** Load the companion extension: open your browser's extensions page (`chrome://extensions`, `edge://extensions` or `brave://extensions`; Setup copies the address for you, because browsers only open these pages from their own address bar). Turn on **Developer mode** (in Edge, at the bottom of the left sidebar), click **Load unpacked** and select the folder that **Open extension folder** shows. Pairing is automatic. Then choose where ChatGPT runs and sign in.
+3. **Folder and Access (steps 2–3).** Share a project folder and choose what ChatGPT may do in it. You can fine-tune both later in **Settings → Workspace**.
+4. **Tunnel, API key, Connect (steps 4–6).** Create a tunnel and a restricted API key at OpenAI, paste both, and press **Connect**. Details are under [Tunnel setup](#tunnel-setup).
+5. **ChatGPT (step 7).** Add the **Core** app in ChatGPT under **Plugins → Add → Add custom MCP server**, with the name and description Setup shows.
+6. **Start a task.** Choose a project and model in CoS, write your request and send it.
 
 Want screen and keyboard control? Enable **Desktop** permissions and connect its separate app. On macOS, also grant Screen Recording and Accessibility in System Settings.
 
@@ -25,10 +26,10 @@ Want screen and keyboard control? Enable **Desktop** permissions and connect its
 1. Create a tunnel in [Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels), in the same workspace you use in ChatGPT.
 2. Create a **Restricted** [API key](https://platform.openai.com/settings/organization/api-keys) with **Tunnels: Read** and **Tunnels: Use**.
 3. Enter the tunnel ID and key in CoS and press **Connect**.
-4. In ChatGPT, open [Plugins](https://chatgpt.com/plugins), click **Add** at the top right and choose **Add custom MCP server**. Under **Connection** pick **Tunnel** and select your tunnel (or paste its ID), set **Authentication** to **No authentication**, tick **I understand and want to continue** and click **Create as a plugin**. Older ChatGPT versions instead need Developer mode turned on first (**Settings → Security and login**) and show a **+** button. Review and enable the app's actions.
+4. In ChatGPT, open [Plugins](https://chatgpt.com/plugins), click **Add** at the top right and choose **Add custom MCP server**. Under **Connection** pick **Tunnel** and select your tunnel (or paste its ID), set **Authentication** to **No authentication**, tick **I understand and want to continue** and click **Create as a plugin**. Where the plugin's page in ChatGPT offers **Permissions** (not on every account type), choose **Allow all tools**; otherwise answer the first tool call's prompt with **Allow → Always allow**. ChatGPT shows these labels in your language.
 5. Name each app exactly as CoS shows it (for example `Chat On Steroids Core`). You can rename it later in ChatGPT: after its first call, CoS recognizes the app by ChatGPT's app ID, and Setup shows the new name next to the original.
 
-> **No Developer mode switch?** That's expected. Current ChatGPT accounts, including new Plus accounts, create the app from **Plugins → Add → Add custom MCP server** without it, and file edits and desktop control work as before ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)).
+> **Looking for ChatGPT's Developer mode switch?** It no longer exists. Apps are created from **Plugins → Add → Add custom MCP server**, and file edits and desktop control work without it ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)).
 
 Core, Desktop and Plugins are separate connectors. Configure each surface you enable. Release packages include the pinned, checksum-verified `tunnel-client`.
 
