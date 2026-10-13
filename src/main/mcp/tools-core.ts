@@ -33,9 +33,9 @@ import {
 } from '../codex/view-image.js';
 import { logInfo, logWarn } from '../logger.js';
 import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, strayVirtualPath } from '../sandbox.js';
-import { currentWorkspace, primeWorkspace, setWorkspaceFor } from '../workspace.js';
+import { currentWorkspace, primeWorkspace } from '../workspace.js';
 import { getSessionProject } from '../projects.js';
-import { allocWorkerWorkspace, validateWorkerWorkspaceLease, WorkerWorktreeError, type WorkerWorktreeLease } from '../worktrees/index.js';
+import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from '../agent-admission.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -110,13 +110,11 @@ import {
 } from '../exec-hints.js';
 import { childEnv } from '../exec.js';
 import { locateRipgrep } from '../ripgrep.js';
-import { ensureDevToolchain, isGitRepository } from '../toolchain.js';
+import { ensureDevToolchain } from '../toolchain.js';
 import {
   agentForCaller,
   agentFamiliesForCaller,
   reconcileAgentRequestOwners,
-  noteAgentContextTokens,
-  persistCriticalSwarmNow,
   PRIME_ID,
   requestWorkerBootstraps,
   requestWorkerRevivals,
@@ -124,12 +122,9 @@ import {
   stageFinishAgent,
   stageMessages,
   stagePrimeMessage,
-  stageSpawn,
-  markStagedWorkerWorktree,
   managedWorkerIsolationRequired,
   managedWorkerAllocationIdentity,
   swarmRunning,
-  swarmStateForCaller,
   type Caller
 } from '../agents.js';
 import { repairPrimeFromResumeShadow } from '../session/continuation.js';
@@ -1185,80 +1180,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
  * act on and is kept to a sentence or two; ids, states and counts are machine state and belong
  * in a shape the caller can read without parsing English.
  */
-/**
- * Re-measures how full each sleeping worker's chat is, before the prime may wake one.
- *
- * The context ceiling is what makes a stop final, and it is measured from the app's own
- * durable session for that conversation rather than from anything a model reported. The
- * broker keeps the figure in memory and in its snapshot, but a chat that grew while this app
- * was not running — or one whose snapshot predates the measurement entirely — would otherwise
- * be woken into a conversation with no room left in it. Reading it here, on the one call that
- * can wake a worker, is what makes the ceiling survive a crash rather than a restart quietly
- * handing back a worker the prime was already told was finished.
- */
-async function measureSleepingWorkers(caller: Caller): Promise<void> {
-  const state = swarmStateForCaller(caller);
-  if (state.agents.length === 0) return;
-  for (const info of state.agents) {
-    if (info.role !== 'worker' || info.state !== 'sleeping' || !info.conversationId) continue;
-    const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
-    if (summary) noteAgentContextTokens(info.conversationId, summary.contextTokens);
-  }
-  // Measurement is usually telemetry, but crossing the worker ceiling revokes durable revival
-  // authority and can terminalize a parked worker. `status` also calls this helper, so there is
-  // no later message/spawn acceptance barrier we can rely on: make every critical revision seen
-  // through the end of measurement durable before publishing the resulting state to the model.
-  try {
-    if (!(await persistCriticalSwarmNow())) {
-      throw new Error('the broker has no immediate durable persistence sink');
-    }
-  } catch (error) {
-    throw new Error(
-      `Worker context/revival state could not cross its durable barrier. Retry the agents call. (${error instanceof Error ? error.message : String(error)})`
-    );
-  }
-}
-
-/** Publish a staged broker mutation only after its exact revision is durable. */
-async function acceptAgentMutation(
-  staged: { commit(): void | boolean; rollback(): void },
-  failure: string,
-  commitFailure: string = failure,
-  admission?: { validate(): Promise<void>; assertCurrent(): void }
-): Promise<void> {
-  try {
-    let durable: boolean;
-    try {
-      durable = await persistCriticalSwarmNow();
-    } catch (error) {
-      throw new Error(`${failure} (${error instanceof Error ? error.message : String(error)})`);
-    }
-    if (!durable) throw new Error(failure);
-    // The durable write itself awaits filesystem IO. Recheck live ownership after it,
-    // then check the current policy synchronously beside the broker's commit.
-    if (admission) {
-      await admission.validate();
-      admission.assertCurrent();
-    }
-    if (staged.commit() === false) throw new Error(commitFailure);
-  } catch (error) {
-    staged.rollback();
-    if (admission) {
-      // A rejected admission can happen after the persistence sink successfully wrote
-      // the staged topology. Publish the compensating rollback before returning the
-      // rejection, otherwise an immediate restart could restore unaccepted workers.
-      try {
-        if (!(await persistCriticalSwarmNow())) {
-          throw new Error('the broker has no immediate durable persistence sink');
-        }
-      } catch (rollbackError) {
-        throw new Error(`Worker admission rollback could not be made durable (${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)})`);
-      }
-    }
-    throw error;
-  }
-}
-
 function registerAgentsTool(reg: SurfaceRegistrar): void {
   reg.register(
     'agents',
@@ -1387,115 +1308,15 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           if (await managedWorkerIsolationRequired(spawnCaller) && !managedWorkerAllocationIdentity(spawnCaller)) {
             return fail('WORKTREE_OWNER_UNAVAILABLE: a retired worker cannot create a prime run after its isolated checkout owner was lost.');
           }
-          const staged = stageSpawn({
+          const { created, becamePrime, runId, defaultNotes, isolationNotes } = await spawnAgentWorkers({
             workers: input.workers,
             context: input.context ?? null,
             caller: spawnCaller
-          });
-          // Newly staged admissions alone may own Git branches. A repeated spawn may show
-          // existing workers in `created`, but must never reallocate their checkouts.
-          const allocated: WorkerWorktreeLease[] = [];
-          const admittedLeases: WorkerWorktreeLease[] = [];
-          const isolationNotes: string[] = [];
-          let sourceDirty = false;
-          let allocationAttempted = false;
-          try {
-            if (staged.newlyStaged && getConfig().multiAgent.autoWorktrees === true) {
-              // A selected Local Project is durable even before this prime has made its first
-              // file call. Fetch that binding explicitly instead of relying on the cwd cache.
-              const sessionId = currentCall()?.caller.sessionId;
-              const source = (sessionId ? await getSessionProject(sessionId) : null) ??
-                primeWorkspace(currentCaller().conversationId) ?? currentWorkspace();
-              // Unfiled chats without any selected/learned folder can still delegate ordinary
-              // work. Once a source exists, a Git checkout must pass strict isolation checks.
-              if (!source) {
-                isolationNotes.push('No workspace is selected; workers were spawned without isolated Git worktrees.');
-              } else if (isGitRepository(source.real)) {
-                if (reg.ctx.readOnly || !reg.caps.command || !reg.caps.create || !reg.caps.edit) {
-                  throw new Error('WORKTREE_PERMISSION_REQUIRED: worker isolation requires Command, Create and Edit, with Read-only disabled.');
-                }
-                for (const agentId of staged.newlyStagedWorkerIds) {
-                  allocationAttempted = true;
-                  const lease = await allocWorkerWorkspace({
-                    runId: staged.runId,
-                    agentId,
-                    primeWorkspace: source,
-                    approvedRoots: getConfig().roots
-                  });
-                  if (lease.newlyCreated) allocated.push(lease);
-                  // Allocation awaited Git with the then-current approved roots. Revocation,
-                  // rename or replacement during that wait must prevent worker admission.
-                  await validateWorkerWorkspaceLease(lease, getConfig().roots);
-                  admittedLeases.push(lease);
-                  sourceDirty ||= lease.sourceDirty;
-                  markStagedWorkerWorktree(staged.runId, agentId);
-                }
-                if (getConfig().multiAgent.autoWorktrees !== true) {
-                  throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
-                }
-                isolationNotes.push(`${staged.newlyStagedWorkerIds.length} newly staged worker(s) received isolated Git worktrees.`);
-                if (sourceDirty) {
-                  isolationNotes.push('Warning: the source checkout has uncommitted changes. Workers start from the committed Git base revision, so those uncommitted changes were not copied into their worktrees.');
-                }
-              } else {
-                isolationNotes.push('The selected workspace is not a Git repository; no worktrees were allocated.');
-              }
-            }
-            staged.prepareDurability();
-            await acceptAgentMutation(staged,
-              'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.',
-              undefined,
-              admittedLeases.length ? {
-                validate: async () => {
-                  for (const lease of admittedLeases) {
-                    await validateWorkerWorkspaceLease(lease, getConfig().roots);
-                  }
-                },
-                assertCurrent: () => {
-                  const liveConfig = getConfig();
-                  if (liveConfig.multiAgent.autoWorktrees !== true) {
-                    throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
-                  }
-                  for (const lease of admittedLeases) {
-                    if (!liveConfig.roots.some(root => root.name === lease.approvedRoot.name &&
-                      nodePath.resolve(root.path) === nodePath.resolve(lease.approvedRoot.path))) {
-                      throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'the owning approved root was revoked during worker admission');
-                    }
-                  }
-                }
-              } : undefined);
-          } catch (error) {
-            staged.rollback();
-            // An unaccepted spawn never opened a worker chat, but user files can appear in a
-            // checkout between a Git status check and `git worktree remove`. Even non-force
-            // removal may erase ignored files. Retain these newly created leases on failure;
-            // they are not broker-admitted and can be inspected/disposed of explicitly later.
-            // In particular, a retry must not take another user's branch or remove its files.
-            if (allocated.length) {
-              const retained = allocated.map(lease => lease.worktreePath).join(', ');
-              logWarn(`multi-agent: spawn failed (${error instanceof Error ? error.message : String(error)}); ${allocated.length} unaccepted managed worktree(s) retained for safe inspection: ${retained}`);
-              throw new Error(`WORKTREE_ROLLBACK_RETAINED: ${allocated.length} unaccepted Git checkout(s) were kept to protect user files. Inspect the local app logs for their locations and the allocation error.`);
-            }
-            if (allocationAttempted) {
-              // Even the first failed allocation can include a native path in a Git or
-              // filesystem error (for example an unsafe managed parent directory).
-              // Only a trusted worktree error code crosses the model-facing boundary.
-              logWarn(`multi-agent: worker allocation failed: ${error instanceof Error ? error.message : String(error)}`);
-              const code = error instanceof WorkerWorktreeError ? error.code : 'WORKTREE_ALLOCATION_FAILED';
-              // A fixed, path-free reason the user can act on may cross; any other stays in the log.
-              const hint = code === 'WORKTREE_STORAGE_UNAVAILABLE'
-                ? 'Worker checkouts are kept next to the repository, inside an approved folder, so the approved folder must contain the repository rather than be it. Ask the user to approve the folder that contains this repository, or to turn off "Isolate new workers in Git worktrees" in Settings.'
-                : 'See local app logs for details.';
-              throw new Error(`${code}: isolated Git checkout allocation failed. ${hint} The worker spawn was rolled back.`);
-            }
-            throw error;
-          }
-          const { created, becamePrime, runId, defaultNotes } = staged;
-          // Keep provisional workspaces out of the cwd cache until the broker has accepted
-          // their owners. A failed stage retains its checkout but exposes no orphan cwd.
-          for (const lease of admittedLeases) {
-            setWorkspaceFor(`agent:${lease.runId}:${lease.agentId}`, lease.workspace);
-          }
+          }, async () => {
+            const sessionId = currentCall()?.caller.sessionId;
+            return (sessionId ? await getSessionProject(sessionId) : null) ??
+              primeWorkspace(currentCaller().conversationId) ?? currentWorkspace();
+          }, () => !reg.ctx.readOnly && reg.caps.command && reg.caps.create && reg.caps.edit);
           if (currentCall()) currentCall()!.caller.runId = runId;
           // Browser tabs are a publication side effect, never part of planning. They become
           // visible only after the exact broker revision above is durable.
