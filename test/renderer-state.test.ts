@@ -2692,6 +2692,19 @@ it('offers the handoff length, starting at the thorough default, and saves a sho
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
 });
 
+// #1406: the recording store's size used to be fixed at 2 GB.
+it('offers the recording storage sizes, starting at 2 GB, and saves a larger choice', async () => {
+  const mounted = await mountChat({ hasGoalKey: true });
+  const size = mounted.window.document.getElementById('recordingStorageLimit') as HTMLSelectElement;
+  expect(size.value).toBe('2');
+  expect([...size.options].map(option => option.value)).toEqual(['2', '5', '10', '20', '50']);
+  size.value = '10';
+  size.dispatchEvent(new mounted.window.Event('change'));
+  await settle();
+  await settle();
+  expect(mounted.calls.at(-1)?.sessions.storageLimitGiB).toBe(10);
+});
+
 /**
  * The catalogue is a network request to somebody else's service, so it happens when a person
  * asks for it and not when the settings tab is opened.

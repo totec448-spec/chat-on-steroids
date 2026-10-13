@@ -388,6 +388,20 @@ describe('settings migration', () => {
     expect((await loadConfig()).compaction.handoffPrompt).toBe(custom);
   });
 
+  it('keeps 2 GB of recording storage for older and broken configs, and saves a larger size', async () => {
+    const config = defaultConfig();
+    expect(config.sessions.storageLimitGiB).toBe(2);
+    const older = structuredClone(config) as Record<string, any>;
+    delete older.sessions.storageLimitGiB;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(older), 'utf8');
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(2);
+    await fs.writeFile(path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, sessions: { ...config.sessions, storageLimitGiB: 7 } }), 'utf8');
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(2);
+    await saveConfig({ ...config, sessions: { ...config.sessions, storageLimitGiB: 20 } });
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(20);
+  });
+
   it('keeps the thorough handoff length for older and broken configs, and saves a choice', async () => {
     const config = defaultConfig();
     expect(config.compaction.handoffLength).toBe('thorough');

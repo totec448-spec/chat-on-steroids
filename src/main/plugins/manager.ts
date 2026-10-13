@@ -140,6 +140,10 @@ export class PluginManager {
       tools: row.catalog, disabledTools: row.disabledTools,
     })));
   }
+  /** Remote plugin addresses, so the app's proxy can leave the ones the system reaches directly alone. */
+  remoteEndpoints(): string[] {
+    return this.records.flatMap(row => row.source.kind === 'remote' && row.source.url ? [row.source.url] : []);
+  }
   snapshot(): PluginSnapshot {
     const exposure = this.exposure();
     return structuredClone({
