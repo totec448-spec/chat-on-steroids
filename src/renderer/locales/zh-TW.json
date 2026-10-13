@@ -2282,5 +2282,10 @@
   "Plugins, as ChatGPT calls them": "外掛，與 ChatGPT 的叫法一致",
   "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "應用程式現在和 ChatGPT 一樣稱之為外掛，工具很多的外掛也可以安裝了。",
   "Start chats from your own tools": "從你自己的工具開始聊天",
-  "The Local control API can start a new chat and send its events as they happen.": "本機控制 API 可以開始新聊天，並在事件發生時立即傳送。"
+  "The Local control API can start a new chat and send its events as they happen.": "本機控制 API 可以開始新聊天，並在事件發生時立即傳送。",
+  "Keep plugins up to date in ChatGPT": "讓 ChatGPT 中的外掛保持最新",
+  "When an update changes a plugin's tools, Chat On Steroids refreshes it in ChatGPT for you. You can change this later in Settings.": "當更新變更了外掛的工具時，Chat On Steroids 會替你在 ChatGPT 中重新整理它。之後可以在設定中變更。",
+  "Not now": "以後再說",
+  "Automatic plugin refresh is on.": "自動重新整理外掛已開啟。",
+  "Could not save settings.": "無法儲存設定。"
 }
