@@ -112,6 +112,7 @@ Reports repeat until the caller acknowledges them. All five worker routes return
 when either switch is off. The other read routes remain available.
 The [worker API contract](../AGENTS.md#18-desktop-workspace-plugins-connection-and-native-control)
 lists the request fields and limits.
+For a CLI and agent skill, see [cos-bridge](https://github.com/abdulsalamgs/cos-bridge).
 
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
 A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.

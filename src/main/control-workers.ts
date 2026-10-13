@@ -8,7 +8,6 @@ import { projectWorkspace } from './projects.js';
 import { redactSecretText } from './redaction.js';
 import { findSessionByConversation } from './session/store.js';
 
-/** The authenticated local API supplies this principal; it never claims a ChatGPT chat. */
 const uuid = z.string().uuid().refine(value => value === value.toLowerCase());
 const routePattern = /^\/v1\/workers\/([0-9a-f-]{36})(?:\/(spawn|message|reports|ack))?$/;
 const run = { runId: uuid.optional() };
@@ -71,7 +70,6 @@ export async function serveWorkerRead(route: string, params: URLSearchParams): P
     from: message.from, time: message.time, text: redactSecretText(message.text) })) };
 }
 
-/** Uses the same staged admission, worktree policy and browser handout as the MCP agents tool. */
 export async function serveWorkerAction(method: string, route: string, raw: unknown, authorize: () => void) {
   const selected = callerFor(route);
   if (method !== 'POST' || !selected || !['spawn', 'message', 'ack'].includes(selected.action ?? '')) return undefined;
@@ -87,11 +85,19 @@ export async function serveWorkerAction(method: string, route: string, raw: unkn
     const caller = { ...selected.caller, runId: body.runId };
     const roots = JSON.stringify(getConfig().roots);
     const workspace = body.projectId ? await projectWorkspace(body.projectId) : null;
-    const result = await spawnAgentWorkers({ caller, context: body.context, workers: body.workers }, async () => workspace,
-      () => { const caps = effectiveCapabilities(getConfig()); return caps.command && caps.create && caps.edit; },
-      { workspace, assertCurrent: () => { authorizeCurrent();
-        if (workspace && JSON.stringify(getConfig().roots) !== roots) throw new RequestError(409, 'project_roots_changed');
-      }, validate: async () => { if (body.projectId) await projectWorkspace(body.projectId); } });
+    const result = await spawnAgentWorkers(
+      { caller, context: body.context, workers: body.workers }, async () => workspace,
+      () => {
+        const caps = effectiveCapabilities(getConfig());
+        return caps.command && caps.create && caps.edit;
+      }, {
+        workspace,
+        assertCurrent: () => {
+          authorizeCurrent();
+          if (workspace && JSON.stringify(getConfig().roots) !== roots) throw new RequestError(409, 'project_roots_changed');
+        },
+        validate: async () => { if (body.projectId) await projectWorkspace(body.projectId); }
+      });
     requestWorkerBootstraps(result.created.map(worker => worker.id), result.runId);
     return { status: 202, body: { runId: result.runId, workers: result.created.map(worker => ({ id: worker.id, label: worker.label, state: worker.state })),
       notes: [...result.defaultNotes ?? [], ...result.isolationNotes] } };

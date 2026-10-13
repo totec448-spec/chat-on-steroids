@@ -184,8 +184,10 @@ export async function spawnAgentWorkers(
   for (const lease of admittedLeases) {
     setWorkspaceFor(`agent:${lease.runId}:${lease.agentId}`, lease.workspace);
   }
-  if (admission?.workspace) for (const agentId of staged.newlyStagedWorkerIds) {
-    if (!admittedLeases.some(lease => lease.agentId === agentId)) setWorkspaceFor(`agent:${staged.runId}:${agentId}`, admission.workspace);
+  if (admission?.workspace) {
+    for (const agentId of staged.newlyStagedWorkerIds) {
+      if (!admittedLeases.some(lease => lease.agentId === agentId)) setWorkspaceFor(`agent:${staged.runId}:${agentId}`, admission.workspace);
+    }
   }
   const { created, becamePrime, runId, defaultNotes } = staged;
   return { created, becamePrime, runId, defaultNotes, isolationNotes };
