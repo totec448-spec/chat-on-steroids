@@ -4727,7 +4727,7 @@ function bindWorkerConversation(agent: Agent, conversationId: string): boolean {
   }
   const taken = boundAgent(conversationId);
   if (taken && taken !== agent) {
-    logWarn(`multi-agent: refused to bind ${agent.info.id} to conversation ${conversationId}, already held by ${taken}`);
+    logWarn(`multi-agent: refused to bind ${agent.info.id} to conversation ${conversationId}, already held by ${taken.info.id}`);
     return false;
   }
   const dormantTaken = dormantAgentForConversation(conversationId);
