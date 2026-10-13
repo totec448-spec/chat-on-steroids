@@ -1044,13 +1044,13 @@
     "message": "sí"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "No se registró ninguna llamada a una herramienta MCP en la última respuesta. Puede que ChatGPT te esté haciendo una pregunta o que se haya perdido la conexión con las herramientas. Respóndele o comprueba el túnel si las herramientas han dejado de funcionar. La continuación automática está en pausa; Loop sigue activado."
+    "message": "No se registró ninguna llamada a una herramienta MCP en la última respuesta. Puede que ChatGPT te esté haciendo una pregunta o que se haya perdido la conexión con las herramientas. Respóndele o comprueba el túnel si las herramientas han dejado de funcionar. La continuación automática está en pausa; Bucle sigue activado."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "No hay una continuación pendiente para esta respuesta. Puede que ya se haya procesado o que un trabajo más reciente la haya sustituido. Revisa la actividad más reciente del chat antes de volver a intentarlo."
   },
   "content_goal_error_goal_context_too_large": {
-    "message": "La tarea y las instrucciones de Goal/Loop son demasiado largas para enviarlas al asistente. Acorta la tarea o las instrucciones de continuación personalizadas en Ajustes."
+    "message": "La tarea y las instrucciones de Objetivo/Bucle son demasiado largas para enviarlas al asistente. Acorta la tarea o las instrucciones de continuación personalizadas en Ajustes."
   },
   "content_goal_error_reply_too_long": {
     "message": "El asistente escribió una continuación demasiado larga para enviarla. Pide instrucciones de continuación más breves o elige otro modelo asistente en Ajustes."
@@ -1110,13 +1110,13 @@
     "message": "Este chat continúa mediante la herramienta finish. Con la configuración actual, una respuesta final del navegador no activa otro mensaje."
   },
   "content_goal_error_goal_disabled": {
-    "message": "Goal/Loop está desactivado en este chat. Actívalo para permitir la continuación."
+    "message": "Objetivo/Bucle está desactivado en este chat. Actívalo para permitir la continuación."
   },
   "content_goal_error_goal_worker_chat": {
-    "message": "Los subagentes no pueden ejecutar su propio Goal/Loop. Activa la continuación en el chat principal."
+    "message": "Los subagentes no pueden ejecutar su propio Objetivo/Bucle. Activa la continuación en el chat principal."
   },
   "content_goal_error_conversation_superseded": {
-    "message": "Este chat fue sustituido por Compact & Resume. Continúa en su chat sucesor."
+    "message": "Este chat fue sustituido por Compactar y continuar. Continúa en su chat sucesor."
   },
   "content_goal_error_chat_blocked": {
     "message": "Este chat está bloqueado en la aplicación. Desbloquéalo allí antes de activar la continuación."
@@ -1128,16 +1128,16 @@
     "message": "No hay ninguna conversación registrada disponible para continuar. Envía primero una tarea."
   },
   "content_goal_error_no_objective": {
-    "message": "No se proporcionó ninguna tarea. Introduce una tarea antes de iniciar Goal/Loop."
+    "message": "No se proporcionó ninguna tarea. Introduce una tarea antes de iniciar Objetivo/Bucle."
   },
   "content_goal_error_nothing_to_open_with": {
     "message": "El asistente no generó un mensaje inicial. Haz la tarea más específica e inténtalo de nuevo."
   },
   "content_goal_error_loop_stop_refused": {
-    "message": "El asistente siguió eligiendo detenerse en lugar de escribir una continuación de Loop. Revisa las instrucciones de Loop o elige otro modelo asistente."
+    "message": "El asistente siguió eligiendo detenerse en lugar de escribir una continuación de Bucle. Revisa las instrucciones de Bucle o elige otro modelo asistente."
   },
   "content_goal_error_goal_marker_missing": {
-    "message": "La respuesta no contiene el marcador de finalización requerido por las plantillas de Goal sin conexión. Revisa las instrucciones de la plantilla o elige otra fuente de continuación."
+    "message": "La respuesta no contiene el marcador de finalización requerido por las plantillas de Objetivo sin conexión. Revisa las instrucciones de la plantilla o elige otra fuente de continuación."
   },
   "content_goal_error_goal_reply_not_durable": {
     "message": "La aplicación no pudo guardar la continuación pendiente. Comprueba el espacio libre en disco y los diagnósticos de la aplicación."
@@ -1146,7 +1146,7 @@
     "message": "La aplicación no pudo guardar la confirmación de entrega. Comprueba el espacio libre en disco; revisa el chat antes de reenviar manualmente."
   },
   "content_goal_error_goal_switch_not_durable": {
-    "message": "La aplicación no pudo guardar la configuración de Goal/Loop. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
+    "message": "La aplicación no pudo guardar la configuración de Objetivo/Bucle. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
   },
   "content_goal_error_goal_objective_not_durable": {
     "message": "La aplicación no pudo guardar la tarea. Comprueba el espacio libre en disco e intenta guardarla de nuevo."
