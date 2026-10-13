@@ -2303,5 +2303,7 @@
   "Freed {0} MB. {1} GB of recording storage is now available.": "{0} Mo libérés. {1} Go de stockage des enregistrements sont maintenant disponibles.",
   "Send now": "Envoyer maintenant",
   "Send into the running turn now": "Envoyer maintenant dans le tour en cours",
-  "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente."
+  "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente.",
+  "Keep the computer awake": "Garder l'ordinateur éveillé",
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Pendant qu'un chat travaille, l'ordinateur ne se met pas en veille, pour que les longues tâches continuent. L'écran peut tout de même s'éteindre."
 }
