@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { readDurable, writeDurableNow, durableRevision } from './durable.js';
+import { readDurable, recoverDurable, writeDurableNow, durableRevision } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { logInfo, logWarn } from './logger.js';
 import { getConfig } from './config.js';
@@ -75,13 +75,22 @@ let tunnelGraceMs = PLUGIN_REFRESH_TUNNEL_GRACE_MS;
 export const PLUGIN_REFRESH_FAILURE_LIMIT = 3;
 let chain: Promise<unknown> = Promise.resolve();
 function serial<T>(work: () => Promise<T>): Promise<T> { const result = chain.then(work, work); chain = result.catch(() => undefined); return result; }
+async function readRows(): Promise<Row[]> {
+  try {
+    const result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh', { strict: true }) ?? []);
+    if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+    return result;
+  } catch {
+    // Neither corrupt records nor parser diagnostics may grant new Refresh authority.
+    throw new Error('Could not read plugin-refresh state');
+  }
+}
 async function savedRows(retryFailed = false): Promise<Row[]> {
   const revision = durableRevision('plugin-refresh');
   if (savedCache?.revision !== revision || (retryFailed && savedCache.failed)) {
     const entry: SavedRows = { revision, value: Promise.resolve([]) };
     entry.value = (async () => {
-      const result = z.array(rowSchema).max(3).parse(await readDurable('plugin-refresh', { strict: true }) ?? []);
-      if (new Set(result.map(row => row.surface)).size !== result.length) throw new Error('Duplicate plugin surface mapping');
+      const result = await readRows();
       entry.rows = result;
       return result;
     })().catch(() => {
@@ -94,10 +103,26 @@ async function savedRows(retryFailed = false): Promise<Row[]> {
   }
   return structuredClone(await savedCache.value);
 }
-async function save(current: Row[]): Promise<void> {
-  await writeDurableNow('plugin-refresh', current);
+function remember(current: Row[]): void {
   const snapshot = structuredClone(current);
   savedCache = { revision: durableRevision('plugin-refresh'), value: Promise.resolve(snapshot), rows: snapshot };
+}
+async function save(current: Row[]): Promise<void> { await writeDurableNow('plugin-refresh', current); remember(current); }
+/** A state projection must never repair, unpark or grant refresh authority. */
+export function pluginRefreshUnreadable(): Promise<boolean> {
+  return serial(async () => { try { await savedRows(); return false; } catch { return true; } });
+}
+/** Only an explicit Settings action may replace an unreadable ledger. */
+export function resetPluginRefreshLedger(): Promise<void> {
+  return serial(async () => {
+    savedCache = null; // Explicit Reset rechecks the file under this owner's lock.
+    try { await savedRows(); return; } catch { /* Recover only an unreadable ledger. */ }
+    try { await recoverDurable('plugin-refresh', []); }
+    catch { throw new Error('Could not reset plugin-refresh state'); }
+    remember([]);
+    changed();
+    wakeBrowserWork();
+  });
 }
 async function rows(retryFailed = false): Promise<Row[]> {
   const result = await savedRows(retryFailed);

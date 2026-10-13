@@ -1942,7 +1942,14 @@ export async function readHandoffResponse(sessionId: string, conversationId: str
   if (entry.nextSeq !== revision || events.length >= MAX_EVENT_TAIL) return pending;
   const turns = entry.summary.timelineTurns;
   const next = events.findIndex(event => event.kind === 'user_message' && !injectedUserMessage(event, turns));
-  const interval = next < 0 ? events : events.slice(0, next);
+  // The source turn can end after the handoff was sent: an interrupted or stopped turn whose end
+  // the page reports only on its next load. That end belongs to the turn before the request, so a
+  // bare `turn_end` of a turn with no start and no answer in this interval is not a second answer.
+  // On 2026-10-12 such an end, recorded with the handoff, kept a finished brief from being captured.
+  const bounded = next < 0 ? events : events.slice(0, next);
+  const answering = new Set(bounded.filter(event => event.kind === 'turn_start' || event.kind === 'assistant_message')
+    .flatMap(event => event.turnId ? [responseTurnId(turns, event.turnId)] : []));
+  const interval = bounded.filter(event => event.kind !== 'turn_end' || !event.turnId || answering.has(responseTurnId(turns, event.turnId)));
   const generations = new Set<string>();
   for (const event of interval) {
     if (event.kind === 'user_message') continue;
