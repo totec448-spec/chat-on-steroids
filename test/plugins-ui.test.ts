@@ -51,12 +51,12 @@ it('routes exact plugin and tool identity for disabling a discovered tool', asyn
   const toggle = document.querySelector<HTMLInputElement>('.plugin-tool input')!;
   toggle.checked = false; toggle.dispatchEvent(new dom.window.Event('change')); await tick();
   expect(api.pluginsSetToolEnabled).toHaveBeenCalledWith('one', 'remember', false);
-  expect(document.querySelector('.toast')!.textContent).toContain('Refresh the Chat On Steroids Plugins connector in ChatGPT');
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
 });
 
 it('distinguishes a serving connector from evidence of ChatGPT contact', () => {
   applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', connectorName: 'Chat On Steroids Plugins', description: 'Plugins', localUrl: 'http://localhost/mcp', lastRequestAt: null }] } } as unknown as AppState);
-  expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Connector online · waiting for ChatGPT');
+  expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Plugin online · waiting for ChatGPT');
   expect(document.getElementById('pluginsSetup')).toBeNull();
   expect(document.querySelector('[data-panel="setup"] #pluginsTunnelId')).toBeNull();
   expect(document.querySelector('.plugin-connection')!.classList.contains('is-configured')).toBe(true);
@@ -66,7 +66,7 @@ it('distinguishes a serving connector from evidence of ChatGPT contact', () => {
 it('keeps saved plugin setup compact after restart even while its connector is offline', () => {
   applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: 'saved-plugins' } }, status: { surfaces: [] } } as unknown as AppState);
   expect(document.querySelector('.plugin-connection')!.classList.contains('is-configured')).toBe(true);
-  expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Plugins connector offline');
+  expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Chat On Steroids Plugins offline');
   expect(document.getElementById('pluginsSetupLink')!.textContent).toBe('Plugin setup');
   applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } }, status: { surfaces: [] } } as unknown as AppState);
   expect(document.querySelector('.plugin-connection')!.classList.contains('is-configured')).toBe(false);
@@ -77,7 +77,7 @@ it('keeps first-use setup and the connector-refresh instruction visible, includi
   expect(document.querySelector('.plugin-connection')!.textContent).toContain('before your first use');
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('After installing, updating or changing enabled plugins');
   applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', lastRequestAt: 1, tools: [] }] } } as unknown as AppState);
-  expect(document.getElementById('pluginsSetupTitle')!.textContent).toBe('Your Plugins connector');
+  expect(document.getElementById('pluginsSetupTitle')!.textContent).toBe('Chat On Steroids Plugins in ChatGPT');
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('refresh Chat On Steroids Plugins in ChatGPT');
   document.getElementById('pluginsOpenChatGPT')!.click(); await tick();
   expect(api.openLink).toHaveBeenCalledExactlyOnceWith('https://chatgpt.com/plugins');
@@ -248,13 +248,13 @@ it('names this computer\'s own Plugins connector everywhere the page tells the u
     status: { surfaces: [{ id: 'plugins', state: 'off', connectorName: named, lastRequestAt, tools: [] }] } }) as unknown as AppState;
   initPlugins(); await tick();
   applyPluginsState(withName(null));
-  expect(document.getElementById('pluginsSetupHint')!.textContent).toBe(`Add the ${named} connector in ChatGPT once so it can use your installed plugins.`);
+  expect(document.getElementById('pluginsSetupHint')!.textContent).toBe(`Add ${named} to ChatGPT once, so ChatGPT can use your installed plugins.`);
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain(`refresh ${named} in ChatGPT`);
   state.plugins[0]!.tools = [{ name: 'remember', exposedName: 'plugin_one_remember', enabled: true }];
   await refreshPlugins(); document.querySelector<HTMLButtonElement>('.plugin-entry')!.click();
   const toggle = document.querySelector<HTMLInputElement>('.plugin-tool input')!;
   toggle.checked = false; toggle.dispatchEvent(new dom.window.Event('change')); await tick();
-  expect(document.querySelector('.toast')!.textContent).toContain(`Refresh the ${named} connector in ChatGPT`);
+  expect(document.querySelector('.toast')!.textContent).toContain(`Refresh ${named} in ChatGPT`);
   // The name survives a language change, and a later state without a name falls back to the plain one.
   setLanguage('de');
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain(named);
