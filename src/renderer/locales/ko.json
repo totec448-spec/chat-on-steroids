@@ -2304,6 +2304,8 @@
   "Send now": "지금 보내기",
   "Send into the running turn now": "진행 중인 턴에 지금 보내기",
   "The turn ended before this message could join it. It stays queued.": "이 메시지가 합류하기 전에 턴이 끝났습니다. 대기열에 남아 있습니다.",
+  "Keep the computer awake": "컴퓨터 깨어 있게 유지",
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "채팅이 작업하는 동안 컴퓨터가 잠자기 상태로 전환되지 않아 긴 작업이 계속됩니다. 화면은 꺼질 수 있습니다.",
   "Notify when a chat finishes": "채팅이 끝나면 알림",
   "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "이 창이 백그라운드에 있는 동안 채팅의 답변이 완료되면 알림을 보냅니다. 워커와 Goal 또는 Loop가 켜진 채팅은 알리지 않습니다."
 }

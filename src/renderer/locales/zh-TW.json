@@ -2304,6 +2304,8 @@
   "Send now": "立即傳送",
   "Send into the running turn now": "立即傳送到進行中的這一回合",
   "The turn ended before this message could join it. It stays queued.": "這一回合在此訊息加入前已結束。它仍在佇列中。",
+  "Keep the computer awake": "讓電腦保持喚醒",
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "聊天工作時電腦不會進入睡眠，長時間任務得以繼續。螢幕仍可能關閉。",
   "Notify when a chat finishes": "聊天完成時通知",
   "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "當此視窗在背景時，聊天的回答完成後傳送通知。工作者以及開啟了目標或循環的聊天不會通知。"
 }

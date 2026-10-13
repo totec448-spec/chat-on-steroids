@@ -2304,6 +2304,8 @@
   "Send now": "Jetzt senden",
   "Send into the running turn now": "Jetzt in den laufenden Durchlauf senden",
   "The turn ended before this message could join it. It stays queued.": "Der Durchlauf endete, bevor diese Nachricht hinzukommen konnte. Sie bleibt eingereiht.",
+  "Keep the computer awake": "Computer wach halten",
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Solange ein Chat arbeitet, geht der Computer nicht in den Ruhezustand, damit lange Läufe weiterlaufen. Der Bildschirm kann sich trotzdem ausschalten.",
   "Notify when a chat finishes": "Benachrichtigen, wenn ein Chat fertig ist",
   "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Eine Benachrichtigung, wenn die Antwort eines Chats fertig ist, während dieses Fenster im Hintergrund ist. Worker und Chats mit Goal oder Loop benachrichtigen nicht."
 }
