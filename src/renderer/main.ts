@@ -6,6 +6,7 @@ import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initRecordingStorageSetting, paintRecordingStorageNotice, paintRecordingStorageUsage } from './image-storage.js';
 import { paintCredentialsNotice } from './credentials-notice.js';
+import { paintPluginRefreshOffer } from './plugin-refresh-offer.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -1536,6 +1537,7 @@ function apply(next: AppState): void {
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
   paintRecordingStorageNotice(next.recordingStorageFull === true);
   paintCredentialsNotice(next, api, apply);
+  paintPluginRefreshOffer(next, api, apply);
 
   // ---- health numbers and facts
   paintClock();

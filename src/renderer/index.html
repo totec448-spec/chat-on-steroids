@@ -147,6 +147,15 @@
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
+      <div class="notice offer-card" id="pluginRefreshOffer" role="region" aria-labelledby="pluginRefreshOfferTitle" hidden>
+        <div class="offer-icon"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i></div>
+        <div class="offer-text">
+          <b id="pluginRefreshOfferTitle">Keep plugins up to date in ChatGPT</b>
+          <em>When an update changes a plugin's tools, Chat On Steroids refreshes it in ChatGPT for you. You can change this later in Settings.</em>
+        </div>
+        <button class="offer-later" id="pluginRefreshOfferLater" type="button">Not now</button>
+        <button class="offer-accept" id="pluginRefreshOfferAccept" type="button">Turn on</button>
+      </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
         <i class="ico ph ph-activity" aria-hidden="true"></i>
         <span>The tools of a Chat On Steroids plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>

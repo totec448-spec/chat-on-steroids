@@ -2282,5 +2282,10 @@
   "Plugins, as ChatGPT calls them": "ChatGPT と同じ「プラグイン」",
   "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "アプリは ChatGPT と同じく「プラグイン」と呼ぶようになり、ツールの多いプラグインもインストールできます。",
   "Start chats from your own tools": "自分のツールからチャットを開始",
-  "The Local control API can start a new chat and send its events as they happen.": "ローカル制御 API で新しいチャットを開始し、そのイベントを発生と同時に受け取れます。"
+  "The Local control API can start a new chat and send its events as they happen.": "ローカル制御 API で新しいチャットを開始し、そのイベントを発生と同時に受け取れます。",
+  "Keep plugins up to date in ChatGPT": "ChatGPT のプラグインを最新に保つ",
+  "When an update changes a plugin's tools, Chat On Steroids refreshes it in ChatGPT for you. You can change this later in Settings.": "アップデートでプラグインのツールが変わったとき、Chat On Steroids が ChatGPT で自動的に更新します。この設定はあとから設定で変更できます。",
+  "Not now": "今はしない",
+  "Automatic plugin refresh is on.": "プラグインの自動更新をオンにしました。",
+  "Could not save settings.": "設定を保存できませんでした。"
 }
