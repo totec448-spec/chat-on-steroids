@@ -41,7 +41,7 @@ import type {
   ToolEditReview
 } from '../../shared/session.js';
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
-import { continuationMarkerOf, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
+import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
@@ -243,7 +243,12 @@ const MAX_RECENT_READ_BYTES = 8 * 1024 * 1024;
 const MAX_CANONICAL_MESSAGE_BYTES = 1024 * 1024;
 export const MAX_ASSET_BYTES = 8 * 1024 * 1024;
 export const MAX_SESSION_ASSET_BYTES = 192 * 1024 * 1024;
-export const MAX_GLOBAL_ASSET_BYTES = 2 * 1024 * 1024 * 1024;
+/** The default recording storage size; Settings can choose a larger one (#1406). */
+export const MAX_GLOBAL_ASSET_BYTES = DEFAULT_RECORDING_STORAGE_GIB * 1024 * 1024 * 1024;
+let globalAssetLimitBytes = MAX_GLOBAL_ASSET_BYTES;
+/** A chat used within this long keeps everything when old chats are cleaned up. */
+const OLD_CHAT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const CLEANUP_TARGET_BYTES = 1024 * 1024 * 1024;
 
 const sessionAssetUsage = new Map<string, number>();
 let globalAssetUsage: number | null = null;
@@ -270,6 +275,15 @@ export function recordingStorageFull(): boolean {
 export function onRecordingStorageFullChange(listener: () => void): () => void {
   recordingStoreFullListeners.add(listener);
   return () => { recordingStoreFullListeners.delete(listener); };
+}
+
+/** Applies the size chosen in Settings. A known usage decides at once whether the store is full. */
+export function setRecordingStorageLimit(gib: number): void {
+  if (!(RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(gib)) throw new Error(`Unsupported recording storage size: ${gib} GiB`);
+  globalAssetLimitBytes = gib * 1024 * 1024 * 1024;
+  // Unknown usage: let the next write decide rather than claim a state nobody measured.
+  if (globalAssetUsage !== null) setRecordingStoreFull(globalAssetUsage >= globalAssetLimitBytes);
+  else if (recordingStoreFull) setRecordingStoreFull(false);
 }
 let assetWriteQueue = Promise.resolve();
 let assetMutationEpoch = 0;
@@ -3613,7 +3627,7 @@ export async function writeAsset(
     const used = await sessionAssetBytesOnDisk(sessionId);
     const globalUsed = await globalAssetBytesOnDisk();
     if (used + data.length > MAX_SESSION_ASSET_BYTES) throw new Error('Session asset quota exceeded');
-    if (globalUsed + data.length > MAX_GLOBAL_ASSET_BYTES) {
+    if (globalUsed + data.length > globalAssetLimitBytes) {
       setRecordingStoreFull(true);
       throw new Error(GLOBAL_ASSET_QUOTA_EXCEEDED);
     }
@@ -3685,6 +3699,8 @@ interface StoredImageFile {
   mtimeMs: number;
   dev: number;
   ino: number;
+  /** A long text spilled by writeOverflowText rather than an image. */
+  text?: true;
 }
 
 interface VerifiedAssetsDirectory {
@@ -3764,10 +3780,11 @@ async function inspectVerifiedAssetFile(directory: VerifiedAssetsDirectory, name
 }
 
 /** Exact physical quota inventory. Directory entries, not caller paths, define the scope. */
-async function imageStorageInventory(collectImages = true): Promise<{ usedBytes: number; images: StoredImageFile[] }> {
+async function imageStorageInventory(collectImages = true): Promise<{ usedBytes: number; images: StoredImageFile[]; texts: StoredImageFile[] }> {
   assertReady();
   let usedBytes = 0;
   const images: StoredImageFile[] = [];
+  const texts: StoredImageFile[] = [];
   const usage = new Map<string, number>();
   let sessions: Awaited<ReturnType<typeof fs.opendir>> | null = null;
   try {
@@ -3775,7 +3792,7 @@ async function imageStorageInventory(collectImages = true): Promise<{ usedBytes:
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
       sessionAssetUsage.clear();
       globalAssetUsage = 0;
-      return { usedBytes: 0, images: [] };
+      return { usedBytes: 0, images: [], texts: [] };
     }
     sessions = await fs.opendir(root);
     for await (const session of sessions) {
@@ -3803,10 +3820,9 @@ async function imageStorageInventory(collectImages = true): Promise<{ usedBytes:
           const file = await inspectVerifiedAssetFile(assetsDir, entry.name);
           if (!file) continue;
           sessionBytes += file.bytes;
-          if (file.image) {
-            const { image: _image, ...stored } = file;
-            images.push({ sessionId: session.name, assetId: entry.name, ...stored });
-          }
+          const { image: _image, ...stored } = file;
+          if (file.image) images.push({ sessionId: session.name, assetId: entry.name, ...stored });
+          else if (entry.name.endsWith('.txt')) texts.push({ sessionId: session.name, assetId: entry.name, ...stored, text: true });
         }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -3824,11 +3840,11 @@ async function imageStorageInventory(collectImages = true): Promise<{ usedBytes:
   sessionAssetUsage.clear();
   for (const [sessionId, bytes] of usage) sessionAssetUsage.set(sessionId, bytes);
   globalAssetUsage = usedBytes;
-  return { usedBytes, images };
+  return { usedBytes, images, texts };
 }
 
 function sameStoredImage(file: StoredImageFile, observed: VerifiedAssetFile): boolean {
-  return observed.image && observed.dev === file.dev && observed.ino === file.ino && observed.bytes === file.bytes;
+  return observed.image === !file.text && observed.dev === file.dev && observed.ino === file.ino && observed.bytes === file.bytes;
 }
 
 /**
@@ -3900,39 +3916,112 @@ function retireImageReferences(event: CanonicalEvent, selected: ReadonlySet<stri
   return { ...event, call: { ...event.call, assets: retainedAssets(event.call.assets, retiredImageAssetIds), retiredImageAssetIds } };
 }
 
+/** Every long-text file name an event mentions anywhere, including in its prose. */
+function mentionedTextAssetIds(event: SessionEvent): string[] {
+  return JSON.stringify(event).match(/[0-9a-f]{8,64}\.txt/g) ?? [];
+}
+
+/** The head stays; the note says the rest was removed instead of naming a file that is gone. */
+function retireStoredText(stored: StoredText, selected: ReadonlySet<string>): StoredText {
+  if (!stored.assetId || !selected.has(stored.assetId)) return stored;
+  const { assetId, ...rest } = stored;
+  return { ...rest, text: stored.text.replace(`more characters stored in full as ${assetId}]`, 'more characters removed to free storage]') };
+}
+
+function retireTextReferences(event: CanonicalEvent, selected: ReadonlySet<string>): CanonicalEvent | null {
+  if (event.kind === 'tool_call') {
+    const args = retireStoredText(event.call.args, selected);
+    const result = retireStoredText(event.call.result, selected);
+    let changesTouched = false;
+    const changes = event.call.changes?.map(change => {
+      if (!change.reviewAssetId || !selected.has(change.reviewAssetId)) return change;
+      changesTouched = true;
+      const { reviewAssetId: _review, ...rest } = change;
+      return rest;
+    });
+    if (args === event.call.args && result === event.call.result && !changesTouched) return null;
+    return { ...event, call: { ...event.call, args, result, ...(changes ? { changes } : {}) } };
+  }
+  if (event.kind !== 'user_message' && event.kind !== 'assistant_message') return null;
+  const message = retireStoredText(event.message, selected);
+  const renderedHtml = event.kind === 'assistant_message' && event.renderedHtml ? retireStoredText(event.renderedHtml, selected) : undefined;
+  if (message === event.message && (event.kind !== 'assistant_message' || renderedHtml === event.renderedHtml)) return null;
+  return event.kind === 'assistant_message' ? { ...event, message, ...(renderedHtml ? { renderedHtml } : {}) } : { ...event, message };
+}
+
 /**
  * Retires every durable reference before physical deletion. Canonical shards overlay ordinary
  * journal tool rows, so history remains immutable while future reads cannot claim a removed file
- * is available. Unsupported unkeyed references veto deletion for their exact asset.
+ * is available. Unsupported unkeyed references veto deletion for their exact asset; a long text
+ * also stays while any record, rewritten or not, still mentions its file.
  */
-async function retireSessionImages(sessionId: string, selected: ReadonlySet<string>): Promise<Set<string>> {
+async function retireSessionAssets(sessionId: string, images: ReadonlySet<string>, texts: ReadonlySet<string> = new Set()): Promise<Set<string>> {
   const events = await readEvents(sessionId);
-  const safe = new Set(selected);
+  const safe = new Set([...images, ...texts]);
   const keyed = new Map<string, CanonicalEvent>();
   for (const event of events) {
-    if (!referencedAssetIds(event).some((asset) => selected.has(asset.id))) continue;
+    const imageIds = referencedAssetIds(event).filter((asset) => images.has(asset.id)).map((asset) => asset.id);
+    const textIds = texts.size ? mentionedTextAssetIds(event).filter((id) => texts.has(id)) : [];
+    if (!imageIds.length && !textIds.length) continue;
     const key = messageKey(event);
-    if (!key || !['user_message', 'native_image', 'tool_call'].includes(event.kind)) {
-      for (const asset of referencedAssetIds(event)) safe.delete(asset.id);
+    if (!key || !['user_message', 'native_image', 'tool_call'].includes(event.kind) && !(textIds.length && event.kind === 'assistant_message')) {
+      for (const id of [...imageIds, ...textIds]) safe.delete(id);
       continue;
     }
     keyed.set(key, event as CanonicalEvent);
   }
   const entry = await ensureOpen(sessionId);
   await enqueueSessionOperation(entry, 'image storage cleanup', async () => {
-    for (const [key, observed] of keyed) {
-      const current = entry.messages.get(key) ?? observed;
-      const retired = retireImageReferences(current, safe);
-      if (!retired) continue;
+    // Only files that will really go are retired. A text some rewritten record still names stays,
+    // and then no record may lose its reference to it, so settle the kept set before writing.
+    let rewritten: Array<[string, CanonicalEvent]> = [];
+    for (let settled = false; !settled;) {
+      settled = true;
+      rewritten = [];
+      const imageIds = new Set([...images].filter((id) => safe.has(id)));
+      const textIds = new Set([...texts].filter((id) => safe.has(id)));
+      for (const [key, observed] of keyed) {
+        const current = entry.messages.get(key) ?? observed;
+        const withoutImages = retireImageReferences(current, imageIds) ?? current;
+        const retired = retireTextReferences(withoutImages, textIds) ?? withoutImages;
+        for (const id of mentionedTextAssetIds(retired)) if (safe.delete(id)) settled = false;
+        if (retired !== current) rewritten.push([key, retired]);
+      }
+    }
+    for (const [key, retired] of rewritten) {
       const full = { ...retired, origin: retired.origin ?? retired.seq, seq: entry.nextSeq } as CanonicalEvent;
       await writeCanonicalMessage(sessionId, key, full);
       entry.messages.set(key, full);
       entry.nextSeq += 1;
       entry.historySeq = full.seq;
     }
-    if (keyed.size) scheduleMeta(entry);
+    if (rewritten.length) scheduleMeta(entry);
   });
   return safe;
+}
+
+/** Whole chats unused for a week, oldest first, until about 1 GiB is chosen. */
+async function chooseFromOldChats(inventory: { images: StoredImageFile[]; texts: StoredImageFile[] }): Promise<StoredImageFile[]> {
+  const cutoff = Date.now() - OLD_CHAT_AGE_MS;
+  const bySession = new Map<string, StoredImageFile[]>();
+  for (const file of [...inventory.images, ...inventory.texts]) {
+    const files = bySession.get(file.sessionId) ?? [];
+    files.push(file);
+    bySession.set(file.sessionId, files);
+  }
+  const old = (await readEverySummary())
+    .filter((summary) => bySession.has(summary.id) && summary.updatedAt < cutoff)
+    .sort((left, right) => left.updatedAt - right.updatedAt || left.id.localeCompare(right.id));
+  const chosen: StoredImageFile[] = [];
+  let chosenBytes = 0;
+  for (const summary of old) {
+    if (chosenBytes >= CLEANUP_TARGET_BYTES) break;
+    for (const file of bySession.get(summary.id)!) {
+      chosen.push(file);
+      chosenBytes += file.bytes;
+    }
+  }
+  return chosen;
 }
 
 export function getImageStorage(): Promise<ImageStorageInfo> {
@@ -3940,11 +4029,11 @@ export function getImageStorage(): Promise<ImageStorageInfo> {
     assertReady();
     // Asset writes and cleanup already maintain this quota authority under the same queue.
     const usedBytes = globalAssetUsage ?? (await imageStorageInventory(false)).usedBytes;
-    return { usedBytes, limitBytes: MAX_GLOBAL_ASSET_BYTES };
+    return { usedBytes, limitBytes: globalAssetLimitBytes };
   });
 }
 
-/** Explicit user cleanup. No automatic eviction and no alternate cache can bypass the 2 GiB cap. */
+/** Explicit user cleanup. No automatic eviction and no alternate cache can bypass the chosen cap. */
 export async function clearImageStorage(mode: ImageStorageClearMode): Promise<ImageStorageClearResult> {
   assertReady();
   // This synchronous edge separates already-admitted writers from writes initiated after the
@@ -3966,14 +4055,17 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
   const cleanup = enqueueAssetOperation(async () => {
     try {
       const inventory = await imageStorageInventory();
-      const ordered = [...inventory.images].sort((left, right) =>
-        left.mtimeMs - right.mtimeMs || left.sessionId.localeCompare(right.sessionId) || left.assetId.localeCompare(right.assetId));
       const chosen: StoredImageFile[] = [];
-      let chosenBytes = 0;
-      for (const file of ordered) {
-        if (mode === 'oldest-gib' && chosenBytes >= 1024 * 1024 * 1024) break;
-        chosen.push(file);
-        chosenBytes += file.bytes;
+      if (mode === 'old-chats-gib') chosen.push(...await chooseFromOldChats(inventory));
+      else {
+        const ordered = [...inventory.images].sort((left, right) =>
+          left.mtimeMs - right.mtimeMs || left.sessionId.localeCompare(right.sessionId) || left.assetId.localeCompare(right.assetId));
+        let chosenBytes = 0;
+        for (const file of ordered) {
+          if (mode === 'oldest-gib' && chosenBytes >= CLEANUP_TARGET_BYTES) break;
+          chosen.push(file);
+          chosenBytes += file.bytes;
+        }
       }
       for (const file of chosen) removedAssetEpoch.set(localAssetKey(file.sessionId, file.assetId), cleanupEpoch);
       announceSelection(chosen);
@@ -3991,8 +4083,8 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
       sessionAssetUsage.clear();
       globalAssetUsage = null;
       const after = await imageStorageInventory(false);
-      if (after.usedBytes < MAX_GLOBAL_ASSET_BYTES) setRecordingStoreFull(false);
-      return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: MAX_GLOBAL_ASSET_BYTES };
+      if (after.usedBytes < globalAssetLimitBytes) setRecordingStoreFull(false);
+      return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: globalAssetLimitBytes };
     } catch (error) {
       rejectSelection(error);
       throw error;
@@ -4001,15 +4093,15 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
 
   try {
     const chosen = await selection;
-    const bySession = new Map<string, Set<string>>();
+    const bySession = new Map<string, { images: Set<string>; texts: Set<string> }>();
     for (const file of chosen) {
-      const ids = bySession.get(file.sessionId) ?? new Set<string>();
-      ids.add(file.assetId);
+      const ids = bySession.get(file.sessionId) ?? { images: new Set<string>(), texts: new Set<string>() };
+      (file.text ? ids.texts : ids.images).add(file.assetId);
       bySession.set(file.sessionId, ids);
     }
     const deletable = new Set<string>();
     for (const [sessionId, ids] of bySession) {
-      for (const assetId of await retireSessionImages(sessionId, ids)) deletable.add(`${sessionId}\u0000${assetId}`);
+      for (const assetId of await retireSessionAssets(sessionId, ids.images, ids.texts)) deletable.add(`${sessionId}\u0000${assetId}`);
     }
     finishRetirement(deletable);
   } catch (error) {
@@ -4176,6 +4268,7 @@ export function resetSessionStoreForTests(): void {
   globalAssetUsage = null;
   recordingStoreFull = false;
   recordingStoreFullListeners.clear();
+  globalAssetLimitBytes = MAX_GLOBAL_ASSET_BYTES;
   assetMutationEpoch = 0;
   assetWrittenEpoch.clear();
   removedAssetEpoch.clear();

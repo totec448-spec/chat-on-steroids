@@ -92,7 +92,7 @@ export interface AssetRef {
   height?: number;
 }
 
-/** Recording-asset storage is global; cleanup never changes the configured 2 GiB ceiling. */
+/** Recording-asset storage is global; cleanup never changes the configured ceiling. */
 export interface ImageStorageInfo {
   /** All bytes charged to the global session-asset quota, including preserved non-image assets. */
   usedBytes: number;
@@ -100,12 +100,21 @@ export interface ImageStorageInfo {
 }
 
 export interface ImageStorageClearResult extends ImageStorageInfo {
-  /** Physical image bytes removed by this explicit user operation. */
+  /** Physical bytes removed by this explicit user operation. */
   freedBytes: number;
   removedFiles: number;
 }
 
-export type ImageStorageClearMode = 'oldest-gib' | 'all';
+/**
+ * `oldest-gib` and `all` remove images only. `old-chats-gib` empties whole chats unused for a
+ * week, oldest first, of images and long texts until about 1 GiB is free (#1406).
+ */
+export type ImageStorageClearMode = 'oldest-gib' | 'all' | 'old-chats-gib';
+
+/** The recording storage sizes Settings offers, in GiB. The first is the default. */
+export const RECORDING_STORAGE_LIMITS_GIB = [2, 5, 10, 20, 50] as const;
+export type RecordingStorageLimitGiB = (typeof RECORDING_STORAGE_LIMITS_GIB)[number];
+export const DEFAULT_RECORDING_STORAGE_GIB: RecordingStorageLimitGiB = 2;
 
 /** Compact human-readable presentation of one tool call. */
 export interface ActivitySummary {

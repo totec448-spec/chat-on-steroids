@@ -2275,3 +2275,16 @@ it('projects reloaded unreadable ledger health through state:get and recovers on
   const backups = (await fs.readdir(path.dirname(file))).filter(name => name.startsWith('plugin-refresh.recovery-'));
   expect(await fs.readFile(path.join(path.dirname(file), backups.at(-1)!), 'utf8')).toBe('{broken');
 });
+
+// #1406: the recording store held a fixed 2 GB. Settings now offers larger sizes, applied at once.
+it('saves the recording storage size and applies it to the store', async () => {
+  const store = await import('../src/main/session/store.js');
+  await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 10 } });
+  expect(getConfig().sessions.storageLimitGiB).toBe(10);
+  expect(await store.getImageStorage()).toMatchObject({ limitBytes: 10 * 2 ** 30 });
+  // Only offered sizes are accepted.
+  expect(await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 3 } })).toMatchObject({ ok: false, error: 'Invalid input' });
+  expect(getConfig().sessions.storageLimitGiB).toBe(10);
+  await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 2 } });
+  expect(await store.getImageStorage()).toMatchObject({ limitBytes: 2 * 2 ** 30 });
+});

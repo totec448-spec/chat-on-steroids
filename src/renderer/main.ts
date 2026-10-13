@@ -1535,6 +1535,8 @@ function apply(next: AppState): void {
   paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
   paintRecordingStorageNotice(next.recordingStorageFull === true);
+  // A new size changes the "used of" line at once, not only when Settings opens again.
+  if (previousState && previousState.config.sessions.storageLimitGiB !== next.config.sessions.storageLimitGiB) void paintRecordingStorageUsage();
   paintCredentialsNotice(next, api, apply);
 
   // ---- health numbers and facts
