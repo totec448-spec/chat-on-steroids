@@ -25,7 +25,8 @@ import {
   type PollHealth
 } from './tunnel/health.js';
 
-import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus } from '../shared/types.js';
+import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus, SurfaceId } from '../shared/types.js';
+import { connectorsSharingTunnel, type ConnectorTunnelIds } from '../shared/tunnel-ids.js';
 import { surfaceIsUseful } from './mcp/surfaces.js';
 import { refreshMacOSDesktopAccess } from './computer/index.js';
 
@@ -292,6 +293,28 @@ function developerMode(seen: number | null, called: number | null): Check {
   };
 }
 
+/**
+ * Two connectors on one Secure Tunnel ID (#1401). OpenAI hands requests to every client on an ID in
+ * turn, so ChatGPT can read one connector's tool list for the other and then offers none of the
+ * expected tools, or calls land on the wrong connector. Every other check passes in that state,
+ * which is why it has a row of its own. Null when fewer than two connectors have an ID.
+ */
+export function describeSeparateTunnels(tunnel: ConnectorTunnelIds): Check | null {
+  const labels: Record<SurfaceId, string> = { core: 'Core', desktop: 'Desktop', plugins: 'Plugins' };
+  const surfaces = Object.keys(labels) as SurfaceId[];
+  const configured = surfaces.filter(surface => (surface === 'core' ? tunnel.tunnelId : surface === 'desktop' ? tunnel.desktopTunnelId : tunnel.pluginsTunnelId)?.trim());
+  if (configured.length < 2) return null;
+  const first = configured.find(surface => connectorsSharingTunnel(tunnel, surface).length > 0);
+  if (!first) return { name: 'One tunnel per connector', status: 'pass', ok: true, detail: 'Each connector has its own tunnel ID.' };
+  const names = [first, ...connectorsSharingTunnel(tunnel, first)].map(surface => labels[surface]);
+  const list = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ');
+  return {
+    name: 'One tunnel per connector', status: 'fail', ok: false,
+    detail: `${list} use the same tunnel ID. OpenAI hands requests to each of them in turn, so ChatGPT can lose a connector's tools or call the wrong one. ` +
+      'Create a separate tunnel for each connector, enter its ID in Setup, reconnect, then refresh the plugins in ChatGPT.'
+  };
+}
+
 export async function runDiagnostics(): Promise<Diagnosis> {
   const checks: Check[] = [];
   const config = getConfig();
@@ -332,7 +355,9 @@ export async function runDiagnostics(): Promise<Diagnosis> {
     checks.push(await checkLocalServer(status.localUrl));
   }
 
-  // 3. The tunnel process itself.
+  // 3. The tunnel process itself, after the one mistake in its settings that nothing else shows.
+  const separate = config.tunnel.kind === 'openai' ? describeSeparateTunnels(config.tunnel) : null;
+  if (separate) checks.push(separate);
   const base = tunnelHealthBase();
   if (config.tunnel.kind !== 'openai') {
     checks.push({
