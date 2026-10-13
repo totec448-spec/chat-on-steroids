@@ -2300,5 +2300,8 @@
   "Freeing space in the background. You can close this window.": "正在后台释放空间。您可以关闭此窗口。",
   "Free 1 GB from old chats": "从旧聊天中释放 1 GB",
   "Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.": "要从一周未使用的聊天中永久移除约 1 GB 的图片和完整长文本（从最旧的开始）吗？聊天会保留，长消息和工具结果会保留开头部分。",
-  "Freed {0} MB. {1} GB of recording storage is now available.": "已释放 {0} MB。现在有 {1} GB 的记录存储空间可用。"
+  "Freed {0} MB. {1} GB of recording storage is now available.": "已释放 {0} MB。现在有 {1} GB 的记录存储空间可用。",
+  "Send now": "立即发送",
+  "Send into the running turn now": "立即发送到正在进行的这一轮",
+  "The turn ended before this message could join it. It stays queued.": "这一轮在此消息加入前已结束。它仍在队列中。"
 }
