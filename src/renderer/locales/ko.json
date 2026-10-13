@@ -2271,5 +2271,16 @@
   "Compact & Resume · waiting for this turn to end": "압축 후 계속 · 이 턴이 끝나기를 기다리는 중",
   "Compact & Resume · asking ChatGPT for the handoff": "압축 후 계속 · ChatGPT에 인계 요청 중",
   "The handoff request is sent as soon as this turn ends.": "이 턴이 끝나는 즉시 인계 요청을 보냅니다.",
-  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids가 새 채팅용 요약을 작성하도록 ChatGPT에 요청을 보내는 중입니다."
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids가 새 채팅용 요약을 작성하도록 ChatGPT에 요청을 보내는 중입니다.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "더 안정적인 장시간 실행, 프록시 뒤에서도 작동하는 터널, 그리고 ChatGPT와 같은 용어.",
+  "Steadier long runs": "더 안정적인 장시간 실행",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "컴퓨터가 절전 모드에서 깨어난 뒤에도 채팅이 더 확실하게 복구되고, 타임라인은 긴 턴의 순서를 지킵니다.",
+  "Works behind a proxy": "프록시 뒤에서도 작동",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "ChatGPT로 가는 터널이 시스템 프록시를 자동으로 사용합니다.",
+  "Better dictation on Windows": "Windows 받아쓰기 개선",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "받아쓰기가 Windows 자체 음성 인식을 사용해 문장 부호를 넣고 정확도가 크게 높아졌습니다.",
+  "Plugins, as ChatGPT calls them": "ChatGPT가 부르는 대로, 플러그인",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "앱이 이제 ChatGPT처럼 플러그인이라고 부르며, 도구가 많은 플러그인도 설치할 수 있습니다.",
+  "Start chats from your own tools": "내 도구에서 채팅 시작",
+  "The Local control API can start a new chat and send its events as they happen.": "로컬 제어 API로 새 채팅을 시작하고 이벤트를 발생하는 즉시 받을 수 있습니다."
 }

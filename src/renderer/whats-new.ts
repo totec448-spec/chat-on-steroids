@@ -14,6 +14,16 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.36': {
+    lead: () => t('Steadier long runs, a tunnel that works behind a proxy, and ChatGPT\'s own words.'),
+    highlights: [
+      { icon: 'i-retry', title: () => t('Steadier long runs'), text: () => t('Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.') },
+      { icon: 'i-globe', title: () => t('Works behind a proxy'), text: () => t('The tunnel to ChatGPT uses your system\'s proxy by itself.') },
+      { icon: 'i-chat', title: () => t('Better dictation on Windows'), text: () => t('Dictation uses Windows\' own speech recognition, with punctuation and much better accuracy.') },
+      { icon: 'i-plug', title: () => t('Plugins, as ChatGPT calls them'), text: () => t('The app now says plugin, like ChatGPT, and plugins with many tools can be installed.') },
+      { icon: 'i-terminal', title: () => t('Start chats from your own tools'), text: () => t('The Local control API can start a new chat and send its events as they happen.') }
+    ]
+  },
   '2.1.35': {
     lead: () => t('ChatGPT Projects for your projects, workers in their own Git copy, and steadier long runs.'),
     highlights: [

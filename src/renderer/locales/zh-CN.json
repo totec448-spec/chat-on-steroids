@@ -2271,5 +2271,16 @@
   "Compact & Resume · waiting for this turn to end": "压缩并继续 · 正在等待本轮结束",
   "Compact & Resume · asking ChatGPT for the handoff": "压缩并继续 · 正在向 ChatGPT 请求交接",
   "The handoff request is sent as soon as this turn ends.": "本轮结束后会立即发送交接请求。",
-  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids 正在请求 ChatGPT 为新聊天撰写摘要。"
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids 正在请求 ChatGPT 为新聊天撰写摘要。",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "长时间运行更稳定，隧道可在代理后工作，并使用 ChatGPT 自己的说法。",
+  "Steadier long runs": "长时间运行更稳定",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "聊天恢复更可靠，电脑睡眠后也一样，时间线也会让长回合保持正确顺序。",
+  "Works behind a proxy": "可在代理后工作",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "通往 ChatGPT 的隧道会自动使用系统代理。",
+  "Better dictation on Windows": "Windows 上更好的听写",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "听写使用 Windows 自带的语音识别，带标点，准确度大大提高。",
+  "Plugins, as ChatGPT calls them": "插件，与 ChatGPT 的叫法一致",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "应用现在和 ChatGPT 一样称之为插件，工具很多的插件也可以安装了。",
+  "Start chats from your own tools": "从你自己的工具开始聊天",
+  "The Local control API can start a new chat and send its events as they happen.": "本地控制 API 可以开始新聊天，并在事件发生时立即发送。"
 }

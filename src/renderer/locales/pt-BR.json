@@ -2271,5 +2271,16 @@
   "Compact & Resume · waiting for this turn to end": "Compactar e retomar · aguardando o fim deste turno",
   "Compact & Resume · asking ChatGPT for the handoff": "Compactar e retomar · pedindo a passagem ao ChatGPT",
   "The handoff request is sent as soon as this turn ends.": "O pedido de passagem é enviado assim que este turno terminar.",
-  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "O Chat On Steroids está enviando ao ChatGPT o pedido para escrever o resumo de um novo chat."
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "O Chat On Steroids está enviando ao ChatGPT o pedido para escrever o resumo de um novo chat.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Execuções longas mais estáveis, um túnel que funciona atrás de um proxy e as palavras do próprio ChatGPT.",
+  "Steadier long runs": "Execuções longas mais estáveis",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Os chats se recuperam com mais confiabilidade, inclusive depois que o computador hiberna, e a linha do tempo mantém os turnos longos em ordem.",
+  "Works behind a proxy": "Funciona atrás de um proxy",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "O túnel para o ChatGPT usa sozinho o proxy do seu sistema.",
+  "Better dictation on Windows": "Ditado melhor no Windows",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "O ditado usa o reconhecimento de voz do próprio Windows, com pontuação e precisão muito maior.",
+  "Plugins, as ChatGPT calls them": "Plugins, como o ChatGPT os chama",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "O app agora diz plugin, como o ChatGPT, e plugins com muitas ferramentas podem ser instalados.",
+  "Start chats from your own tools": "Inicie chats pelas suas próprias ferramentas",
+  "The Local control API can start a new chat and send its events as they happen.": "A API de controle local pode iniciar um chat novo e enviar os eventos dele à medida que acontecem."
 }

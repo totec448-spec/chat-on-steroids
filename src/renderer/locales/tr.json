@@ -2271,5 +2271,16 @@
   "Compact & Resume · waiting for this turn to end": "Sıkıştır ve sürdür · bu turun bitmesi bekleniyor",
   "Compact & Resume · asking ChatGPT for the handoff": "Sıkıştır ve sürdür · ChatGPT'den devir isteniyor",
   "The handoff request is sent as soon as this turn ends.": "Devir isteği bu tur biter bitmez gönderilir.",
-  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids, yeni bir sohbet için özeti yazma isteğini ChatGPT'ye gönderiyor."
+  "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids, yeni bir sohbet için özeti yazma isteğini ChatGPT'ye gönderiyor.",
+  "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Daha kararlı uzun çalışmalar, proxy arkasında çalışan bir tünel ve ChatGPT'nin kendi terimleri.",
+  "Steadier long runs": "Daha kararlı uzun çalışmalar",
+  "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Sohbetler, bilgisayarınız uykudan uyandıktan sonra da daha güvenilir şekilde toparlanır ve zaman çizelgesi uzun turları düzenli tutar.",
+  "Works behind a proxy": "Proxy arkasında çalışır",
+  "The tunnel to ChatGPT uses your system's proxy by itself.": "ChatGPT'ye giden tünel, sisteminizin proxy'sini kendiliğinden kullanır.",
+  "Better dictation on Windows": "Windows'ta daha iyi dikte",
+  "Dictation uses Windows' own speech recognition, with punctuation and much better accuracy.": "Dikte, Windows'un kendi konuşma tanımasını kullanır; noktalama işaretleriyle ve çok daha doğru.",
+  "Plugins, as ChatGPT calls them": "ChatGPT'nin dediği gibi: eklentiler",
+  "The app now says plugin, like ChatGPT, and plugins with many tools can be installed.": "Uygulama artık ChatGPT gibi eklenti diyor ve çok sayıda aracı olan eklentiler yüklenebiliyor.",
+  "Start chats from your own tools": "Kendi araçlarınızdan sohbet başlatın",
+  "The Local control API can start a new chat and send its events as they happen.": "Yerel denetim API'si yeni bir sohbet başlatıp olaylarını gerçekleştikçe gönderebilir."
 }
