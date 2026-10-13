@@ -23,7 +23,7 @@ export interface InboundTiming {
   calls: number;
   phases: Record<InboundPhase, number>;
 }
-const store = new AsyncLocalStorage<{ requestId: string | null; timing?: InboundTiming; publication?: OutputPublication }>();
+const store = new AsyncLocalStorage<{ requestId: string | null; timing?: InboundTiming; publication?: OutputPublication; providerRequest: boolean }>();
 
 /** Fixed-size, process-local numbers only: no payload, credential, path or chat identity. */
 export function createInboundTiming(): InboundTiming {
@@ -57,9 +57,10 @@ export function formatInboundTiming(timing: InboundTiming): string {
 }
 
 /** Runs `body` with the request id of the HTTP request currently being served. */
-export function withInboundRequestId<T>(requestId: string | null, body: () => T, timing?: InboundTiming, publication?: OutputPublication): T {
-  return store.run({ requestId, timing, publication }, body);
+export function withInboundRequestId<T>(requestId: string | null, body: () => T, timing?: InboundTiming, publication?: OutputPublication, providerRequest = false): T {
+  return store.run({ requestId, timing, publication, providerRequest }, body);
 }
+export function inboundProviderRequest(): boolean { return store.getStore()?.providerRequest === true; }
 
 /** Shared by calls in one HTTP response; socket completion alone is not a remote receipt. */
 export function inboundPublication(): OutputPublication | undefined {

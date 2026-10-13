@@ -46,7 +46,7 @@ async function buildAndRun() {
         kind: 'builtin', builtin: true, enabled: true, favorite: true
       }] } }),
       petAsset: async () => ({ ok: false, error: 'No imported pet in this fixture.' }),
-      setInteractive() {}, focusOwner() {}, openLibrary() {}, openActivity() {},
+      setInteractive() {}, focusOwner() {}, releaseFocus() {}, openLibrary() {}, openActivity() {},
       onSnapshot(listener: typeof publishSnapshot) { publishSnapshot = listener; listener(snapshot); return () => {}; },
       onLibraryChanged() { return () => {}; },
       onPointer(listener: (value: {x:number;y:number}) => void) { return hostPointer?.onPointer(listener) ?? (() => {}); },

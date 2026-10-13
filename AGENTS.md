@@ -175,7 +175,8 @@ service-worker lifetime, and local session vs frontend id are recurring sources 
 guarantee. `writeDurableNow()` is the required barrier before an acknowledged control transition
 or browser side effect. Per-file queues allow independent writes; cross-file semantic ordering
 must be explicit in the caller. Missing/corrupt auxiliary state logs and reads as null so the app
-can start; restore may only reconstruct facts from independent durable proof.
+can start; authority ledgers can opt into strict reads, where only a missing file is empty
+and unreadable data throws a generic error. Restore may only reconstruct facts from independent durable proof.
 
 ## 3. Intent, current source and evidence
 
@@ -3994,6 +3995,17 @@ and reload backing follow the persisted palette. `scripts/verify-appearance.cjs`
 production renderer in isolated Electron with color, queue/push, theme, reset, reload and narrow
 layout checks. It does not operate the installed app or a provider conversation.
 
+Unreadable plugin-refresh ledgers fail closed. `pluginRefreshUnreadable()` uses the same
+revision-scoped read cache without repairing or rearming; `AppState.pluginRefreshUnreadable`
+exposes only that boolean. Settings
+shows the read error beside Automatic plugin refresh even when it is off. The explicit
+`plugin-refresh:reset` / `resetPluginRefresh()` action rechecks the file under the ledger owner's lock;
+a healthy or missing ledger is a no-op. `recoverDurable()` copies the bad file to a unique
+`state/plugin-refresh.recovery-<uuid>.json` before atomically installing an empty ledger.
+Successful recovery invalidates that ledger's durable revision and replaces its read cache.
+Failed backup/replacement retains the original and never queues a recovery retry. Only a
+successful reset clears cached confirmation and wakes browser work; old request IDs stay fenced.
+
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
 in ChatGPT. It compares `AppState.connectorSchemas` (the declaration fingerprints the local
 MCP server publishes per surface) with the ones acknowledged in
@@ -4195,6 +4207,41 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+
+Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid rows,
+duplicate surfaces and I/O failures leave the ledger intact and reject new work with
+`Could not read plugin-refresh state`; parser contents stay private. A missing file still
+allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
+
+
+**Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
+New ledger rows carry `tunnelKey`; old rows with a concrete App ID retain all consumed/manual
+custody until that same App ID proves the configured OpenAI tunnel and exact declarations.
+Their requests are `observeOnly`; stale definitions cannot authorize another Refresh click.
+Successful migration binds the receipt without creating a provider version. Manual/cloudflared
+runs retain schema proof only within the current process; another publication or scope cannot
+borrow it. A read-only legacy check binds its requested tunnel/schema, and an ended failure
+projects `failed/migration` without rewriting its installation or click identity.
+
+`pluginRefreshStatuses()` and `confirmedPluginSchemas()` project committed rows cached by
+`durableRevision('plugin-refresh')`. Reads create no debt, repair no rows, emit no browser wake
+and expose no App IDs, declarations or private errors. Writes/store replacement invalidate the
+cache; explicit requests/Restart may retry a failed read. `beginPluginToolCall` reserves successful
+use for one publication; the caller may confirm it only after a successful provider tool result.
+Explicit request primitives bind `requestedVersion`, `requestedFromVersion`, requested tunnel
+and optional first schema, retain claimed/manual custody, and reserve at most one durable startup
+attempt per accepted round. These primitives do not change automatic preferences or install apps.
+
+| Receipt | Readiness evidence | Refresh authority |
+| --- | --- | --- |
+| Missing or foreign scope | Unknown | No borrowed grant |
+| Current unclaimed debt | Pending | One durable claim before a click |
+| Claimed, not confirmed | Refreshing or failed | No second click |
+| Manual or ended observation | Manual or failed | Read-only recheck only |
+| Unscoped legacy identity | Unknown or scoped migration failure | Same App ID, tunnel and full declarations to migrate |
+| Scoped full confirmation | Current; unstable transports require this process | No additional click |
+| Future-version intent | Wait for the exact build; reserve startup once durably | No grant to the old build |
+
 Setup counts a connector as created in ChatGPT from this run's requests or from
 `connector-proof.ts`: requests and tool calls through the same tunnel in earlier runs, an
 enrolled refresh row, or the extension's `core_plugin` message (ChatGPT's own app list names
@@ -4569,6 +4616,33 @@ browser-chord policy prevents tab/window management through forbidden input chor
 focus chords support authorized navigation, like clicking or setting that same native control;
 it is not a general browser automation fallback. Capture/privacy settings and platform permission
 failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
+
+**Connector state publication.** IPC publishes `AppState.connectorRefresh` from the refresh
+owner's read-only committed projection and subscribes to its owner notifications. Schema,
+safe failure phase and optional operational response evidence stay separate; App IDs and
+private diagnostics never enter this state. The MCP HTTP boundary marks real provider
+requests, excluding self-tests/tunnel probes. Only successful outer tool results may complete
+the publication captured before dispatch; in-process calls, failed tools and late results
+cannot establish operational readiness or full-schema verification.
+
+**Connection startup authority.** `connect(current?)` rechecks a caller's reservation before
+queued startup and after each asynchronous endpoint/secret/tunnel boundary. Revoked startup
+stops resources instead of publishing them, including a settings A → B → A incarnation.
+After successful startup, established health reports retain their connection-generation
+lifetime; unrelated later settings saves do not silence them. Ordinary callers omit the
+predicate and retain the existing lifecycle behavior.
+
+**Explicit update command.** `update:all` / preload `updateAll()` groups concurrent presses
+and stages supported releases. Ready installers ask for native approval in the selected
+interface language; Keep working is the default. Cancellation grants neither shutdown nor
+connector intent. Approval commits exact-target intent before ordinary shutdown; the staged
+version is rechecked before quitting. Manual platform steps remain manual. A failed release
+check still requests the running connectors and preserves the app failure. Receipts
+`restarting/manual/checking-connectors/cancelled` prove no component completion. The explicit
+target build may connect once with auto-connect off without changing preferences. Startup
+consumes that reservation durably and uses the settings-incarnation predicate. Activity
+explains the connection exception and possible restart, retains errors until explicit retry,
+and disables the action while its IPC receipt is outstanding.
 
 ## 19. Debugging, tests and working here
 

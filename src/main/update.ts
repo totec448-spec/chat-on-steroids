@@ -403,8 +403,8 @@ async function download(version: string, name: string, expected: string): Promis
  *
  * The caller quits. This module still never does.
  */
-export function markInstallOnQuit(): boolean {
-  if (!staged) return false;
+export function markInstallOnQuit(expectedVersion?: string): boolean {
+  if (!staged || (expectedVersion !== undefined && staged.version !== expectedVersion)) return false;
   runAfterInstall = true;
   return true;
 }

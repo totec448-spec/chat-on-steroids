@@ -65,6 +65,30 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+let pluginRefreshResetBusy = false;
+let pluginRefreshResetFailed = false;
+function paintPluginRefreshRecovery(next: AppState): void {
+  if (next.pluginRefreshUnreadable !== true) pluginRefreshResetFailed = false;
+  $('pluginRefreshRecovery').hidden = next.pluginRefreshUnreadable !== true;
+  $<HTMLButtonElement>('pluginRefreshReset').disabled = pluginRefreshResetBusy;
+  ui($('pluginRefreshRecoveryError'), 'textContent', () => t(pluginRefreshResetFailed
+    ? 'Could not reset plugin-refresh state' : 'Could not read plugin-refresh state'));
+}
+$('pluginRefreshReset').addEventListener('click', async () => {
+  if (pluginRefreshResetBusy || state?.pluginRefreshUnreadable !== true) return;
+  pluginRefreshResetBusy = true;
+  paintPluginRefreshRecovery(state);
+  try {
+    const reply = await api.resetPluginRefresh();
+    if (!reply.ok) throw new Error('Could not reset plugin-refresh state');
+    pluginRefreshResetFailed = false;
+    apply(reply.data);
+  } catch { pluginRefreshResetFailed = true; }
+  finally {
+    pluginRefreshResetBusy = false;
+    if (state) paintPluginRefreshRecovery(state);
+  }
+});
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 // The tray menu and desktop notices come from the main process, which has no catalogs.
 publishMainTexts(texts => api.setMainTexts?.(texts));
@@ -131,6 +155,12 @@ const GROUPS: Group[] = [
 ];
 
 let state: AppState | null = null;
+let updateAllError: string | null = null;
+function paintUpdateOperation(): void {
+  const error = $('updateAllError');
+  error.hidden = !updateAllError;
+  ui(error, 'textContent', () => updateAllError ? t('Update all could not finish: {0}', [t(updateAllError)]) + '\n' + t('Choose Update all to retry.') : '');
+}
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1504,6 +1534,8 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
+  paintUpdateOperation();
+  paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
 
   // ---- health numbers and facts
@@ -2452,6 +2484,32 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
+const updateAllButton = $<HTMLButtonElement>('updateAll');
+updateAllButton.addEventListener('click', async () => {
+  if (updateAllButton.disabled) return;
+  updateAllButton.disabled = true;
+  updateAllButton.setAttribute('aria-busy', 'true');
+  ui(updateAllButton, 'textContent', () => t('Updating…'));
+  updateAllError = null;
+  paintUpdateOperation();
+  try {
+    const reply = await api.updateAll();
+    if (!reply.ok) { updateAllError = reply.error; toast(t(reply.error)); return; }
+    const result = reply.data;
+    if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
+    else if (result === 'checking-connectors') toast(t('Connector checks requested. Any remaining steps are shown in Update status.'));
+    else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
+  } catch (error) {
+    updateAllError = error instanceof Error ? error.message : String(error);
+  } finally {
+    updateAllButton.disabled = false;
+    updateAllButton.removeAttribute('aria-busy');
+    ui(updateAllButton, 'textContent', () => t('Update all'));
+    paintUpdateOperation();
+  }
+});
+
 
 /**
  * Install the update that is already downloaded.

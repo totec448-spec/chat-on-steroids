@@ -1057,6 +1057,10 @@
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Background tabs open in</b><em>The group stays collapsed in the window you used last. Chrome saves open tab groups automatically; the app's group closes with its last chat, so it is not kept. If you close that window while app chats are open, Chrome may keep the group in its saved groups, where you can delete it. Browsers without tab groups use a window.</em></span><select id="backgroundPlacement"><option value="window">Their own minimized window</option><option value="group">A tab group in your browser window</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT, so a permission change reaches it without a manual refresh.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
+                  <div id="pluginRefreshRecovery" class="setting" hidden>
+                    <span class="setting-text"><b id="pluginRefreshRecoveryError" role="alert">Could not read plugin-refresh state</b><em>Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.</em></span>
+                    <button id="pluginRefreshReset" class="btn" type="button">Reset plugin refresh</button>
+                  </div>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
                   <p class="muted">Idle app-created tabs close after five minutes, finished ones after two. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
@@ -1332,6 +1336,13 @@
             <h1>Activity</h1>
             <p>Recent local events and failures.</p>
           </header>
+          <section class="card update-actions" id="updateActions">
+            <h2>Update all</h2>
+            <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="You will be asked before the app restarts. Finish active work before installing.">Update all</button>
+            <p class="muted" id="updateAllNotice">You will be asked before the app restarts. Finish active work before installing.</p>
+            <p class="muted">After updating, the app connects once to finish connector checks, even if automatic connection is off.</p>
+            <p class="is-warn" id="updateAllError" role="alert" hidden></p>
+          </section>
           <section class="card">
             <h2>
               <span class="sr-only">Activity</span>
