@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Средство распознавания речи Windows не установлено. Установите языковой пакет Windows с распознаванием речи.",
   "Windows speech recognition could not start": "Не удалось запустить распознавание речи Windows",
   "Windows speech recognition exited unexpectedly": "Распознавание речи Windows неожиданно завершилось",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Хранилище записей заполнено. Новые изображения и длинные тексты больше не сохраняются в ваших чатах."
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Хранилище записей заполнено. Новые изображения и длинные тексты больше не сохраняются в ваших чатах.",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "Не удалось прочитать ключи, сохранённые на этом компьютере, поэтому новые ключи сохранить нельзя. Если перезапуск приложения не помогает, можно начать заново.",
+  "Start fresh…": "Начать заново…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Отложить нечитаемый файл и начать без сохранённых ключей? Ключи API и секреты плагинов придётся ввести снова, а расширение браузера, возможно, подключить заново. Старый файл сохранится как резервная копия.",
+  "Started fresh. Enter your keys again.": "Начато заново. Введите ключи ещё раз.",
+  "The saved keys can be read again. Nothing was changed.": "Сохранённые ключи снова читаются. Ничего не изменено.",
+  "Could not start fresh.": "Не удалось начать заново."
 }

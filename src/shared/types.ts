@@ -751,6 +751,8 @@ export interface AppState {
   pluginRefreshUnreadable?: boolean;
   /** True while the 2 GiB recording store refuses new images and long texts. */
   recordingStorageFull?: boolean;
+  /** True when the saved keys exist but working secure storage could not read them; saves fail until the person starts fresh. */
+  credentialsUnreadable?: boolean;
   platform: PlatformInfo;
   /** Only packaged Windows builds may change the login item. */
   loginStartupAvailable?: boolean;

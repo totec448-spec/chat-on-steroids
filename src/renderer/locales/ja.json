@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Windows の音声認識エンジンがインストールされていません。Windows の音声言語パックをインストールしてください。",
   "Windows speech recognition could not start": "Windows の音声認識を開始できませんでした",
   "Windows speech recognition exited unexpectedly": "Windows の音声認識が予期せず終了しました",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "記録用ストレージがいっぱいです。新しい画像と長いテキストはチャットに保存されなくなりました。"
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "記録用ストレージがいっぱいです。新しい画像と長いテキストはチャットに保存されなくなりました。",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "このコンピューターに保存されているキーを読み取れなかったため、新しいキーを保存できません。アプリを再起動しても直らない場合は、最初からやり直せます。",
+  "Start fresh…": "最初からやり直す…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "読み取れないファイルを退避して、保存済みのキーなしでやり直しますか？ API キーとプラグインのシークレットは再入力が必要になり、ブラウザー拡張機能の再接続が必要になる場合があります。古いファイルはバックアップとして残ります。",
+  "Started fresh. Enter your keys again.": "最初からやり直しました。キーをもう一度入力してください。",
+  "The saved keys can be read again. Nothing was changed.": "保存されているキーを再び読み取れるようになりました。何も変更していません。",
+  "Could not start fresh.": "やり直せませんでした。"
 }
