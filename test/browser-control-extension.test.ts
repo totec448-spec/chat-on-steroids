@@ -54,6 +54,13 @@ describe('browser extension release custody',()=>{
     await expect(control.execute({...command('list'),tool:'browser_snapshot',args})).rejects.toThrow(/FRAME_UNAVAILABLE/);
   });
 
+  // Firefox has no chrome.debugger: Browser control says so instead of failing on an undefined API.
+  it('refuses attachment plainly in a browser without the DevTools debugger API (Firefox)',async()=>{
+    const {chrome,control,command}=await fixture('A',false);
+    delete (chrome as {debugger?:unknown}).debugger;
+    await expect(control.execute({...command('attach'),args:{action:'attach',tabId:18}})).rejects.toThrow(/BROWSER_CONTROL_UNAVAILABLE/);
+  });
+
   it('does not detach a foreign debugger when Chrome rejects attachment',async()=>{
     const {chrome,control,command}=await fixture('A',false);
     chrome.debugger.attach.mockRejectedValueOnce(new Error('Another debugger is already attached'));

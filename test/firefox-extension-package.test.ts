@@ -38,8 +38,10 @@ describe('Firefox companion packaging groundwork', () => {
       }
     });
 
-    // Runtime code and permissions stay shared; this is package compatibility only.
-    expect(manifest.permissions).toEqual(source.permissions);
+    // Runtime code and permissions stay shared; this is package compatibility only. Firefox has no
+    // `debugger` permission (no DevTools API for extensions), so the Gecko manifest leaves it out.
+    expect(source.permissions).toContain('debugger');
+    expect(manifest.permissions).toEqual(source.permissions.filter((permission: string) => permission !== 'debugger'));
     expect(manifest.host_permissions).toEqual(source.host_permissions);
     expect(manifest.content_scripts).toEqual(source.content_scripts);
     expect(source.background).toEqual({ service_worker: 'background.js', type: 'module' });
