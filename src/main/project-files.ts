@@ -222,6 +222,16 @@ export async function projectFileTarget(
   return { ...target, kind };
 }
 
+/** Like projectFileTarget, but a missing leaf (or missing parents) is allowed and reads as null. */
+export async function projectRestoreTarget(projectId: string, relativePath: string): Promise<Omit<ProjectFileTarget, 'kind'> & { kind: ProjectFileKind | null }> {
+  const target = await resolveTarget(projectId, relativePath, { allowRoot: false, allowMissing: true });
+  try { return { ...target, kind: await kindOf(target.real) }; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ...target, kind: null };
+    throw error;
+  }
+}
+
 /** Repository internals and Finder metadata, hidden in the Files tree as editors do. Core tools still see them. */
 const HIDDEN_ENTRIES = new Set(['.git', '.DS_Store']);
 

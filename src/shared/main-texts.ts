@@ -1,7 +1,7 @@
 /**
  * English source of the texts the main process shows outside the window: the tray menu and its
  * tooltip, the Session finish desktop notice with its buttons, tunnel-loss notices, and the
- * one-time notice that the CoS browser hid to the tray.
+ * one-time notice that the CoS browser hid to the tray, and the checkpoint Restore confirmation.
  *
  * Same contract as STOP_NOTICE_TEXTS (#855): the main process has no interface catalogs, so the
  * renderer translates exactly these strings and publishes them; anything else is refused, and a
@@ -27,7 +27,12 @@ export const MAIN_TEXTS = [
   'Write Directly',
   'The Chat On Steroids browser is still running',
   'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.',
-  'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'
+  'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
+  'Restore files from this checkpoint?',
+  'Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.',
+  'More files are not shown.',
+  'Keep current files',
+  'Restore files'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

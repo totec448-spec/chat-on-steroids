@@ -2,7 +2,8 @@ import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { setMainTextTranslations } from './main-texts.js';
+import { mainText, setMainTextTranslations } from './main-texts.js';
+import { restoreCheckpoint } from './checkpoints/index.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -1032,6 +1033,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
       baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
     return readProjectGitDiff(projectId, path, baseRef, expectedRevision);
+  });
+  handle('checkpoints:restore', async payload => {
+    const { projectId, checkpointId, paths, expectedRevision } = z.object({ projectId: projectFileId,
+      checkpointId: z.string().regex(/^[0-9a-f]{32}$/), paths: z.array(projectRelativePath.min(1)).min(1).max(256).nullable(),
+      expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
+    // Approval comes from this trusted dialog, never from a renderer boolean; the default keeps the files.
+    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, async selected => {
+      const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        title: mainText('Restore files from this checkpoint?'),
+        message: mainText('Restore files from this checkpoint?'),
+        detail: [
+          mainText('Each file goes back to its checkpoint version, and a file that did not exist then is removed. The current files are saved as a checkpoint first, so you can undo this in Review.'),
+          '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
+        ].join('\n'),
+        buttons: [mainText('Keep current files'), mainText('Restore files')],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      });
+      return response === 1;
+    });
   });
   handle('sessions:toolEditReview', async payload => {
     const { sessionId, callId, changeIndex } = z.object({

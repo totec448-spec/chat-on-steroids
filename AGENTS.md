@@ -4184,9 +4184,11 @@ The same picker lists the project's code checkpoints (§10), newest first, as `c
 choices. A checkpoint comparison reads the checkpoint tree into a temporary index and reports
 working-tree changes against it, untracked files included, without writing objects; it has the
 same identity rules as a branch comparison. Restore (one file from its diff, or all listed
-files) sends the checkpoint id, the paths and that comparison revision. Main recomputes the
-comparison and refuses a changed revision, asks for confirmation (default Keep), then first
-takes a "Before restore" checkpoint of the current state, so a restore can itself be undone.
+files) sends the checkpoint id, the paths and that comparison revision, which also covers each
+listed file's identity (inode, size, mtime). Main recomputes the comparison and refuses a changed
+revision, asks for confirmation in its own dialog (`MAIN_TEXTS`, default Keep), checks the
+revision again after the dialog, then first takes a "Before restore" checkpoint of the current
+state, so a restore can itself be undone.
 Each file is rewritten (through `cat-file --filters`, temp file and rename) or removed only if
 its content still hashes to what that new checkpoint captured; a file edited in between is
 skipped and reported. Symlinks, submodules and paths outside the project are never written.
