@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "未安装 Windows 语音识别器。请安装 Windows 语音语言包。",
   "Windows speech recognition could not start": "无法启动 Windows 语音识别",
   "Windows speech recognition exited unexpectedly": "Windows 语音识别意外退出",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "记录存储空间已满。新的图片和长文本不再保存到你的聊天中。"
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "记录存储空间已满。新的图片和长文本不再保存到你的聊天中。",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "无法读取这台电脑上保存的密钥，因此不能保存新的密钥。如果重启应用后仍然如此，你可以重新开始。",
+  "Start fresh…": "重新开始…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "将无法读取的文件移到一边，并在没有已保存密钥的情况下重新开始？你需要重新输入 API 密钥和插件机密，浏览器扩展可能也需要重新连接。旧文件会作为备份保留。",
+  "Started fresh. Enter your keys again.": "已重新开始。请重新输入你的密钥。",
+  "The saved keys can be read again. Nothing was changed.": "已保存的密钥又可以读取了。未做任何更改。",
+  "Could not start fresh.": "无法重新开始。"
 }

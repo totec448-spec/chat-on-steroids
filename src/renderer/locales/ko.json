@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "설치된 Windows 음성 인식기가 없습니다. Windows 음성 언어 팩을 설치하세요.",
   "Windows speech recognition could not start": "Windows 음성 인식을 시작할 수 없습니다",
   "Windows speech recognition exited unexpectedly": "Windows 음성 인식이 예기치 않게 종료되었습니다",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "기록 저장 공간이 가득 찼습니다. 새 이미지와 긴 텍스트가 더 이상 채팅에 저장되지 않습니다."
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "기록 저장 공간이 가득 찼습니다. 새 이미지와 긴 텍스트가 더 이상 채팅에 저장되지 않습니다.",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "이 컴퓨터에 저장된 키를 읽을 수 없어 새 키를 저장할 수 없습니다. 앱을 다시 시작해도 해결되지 않으면 새로 시작할 수 있습니다.",
+  "Start fresh…": "새로 시작…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "읽을 수 없는 파일을 따로 보관하고 저장된 키 없이 새로 시작할까요? API 키와 플러그인 시크릿을 다시 입력해야 하며, 브라우저 확장 프로그램을 다시 연결해야 할 수도 있습니다. 기존 파일은 백업으로 보관됩니다.",
+  "Started fresh. Enter your keys again.": "새로 시작했습니다. 키를 다시 입력하세요.",
+  "The saved keys can be read again. Nothing was changed.": "저장된 키를 다시 읽을 수 있습니다. 변경된 내용은 없습니다.",
+  "Could not start fresh.": "새로 시작할 수 없습니다."
 }

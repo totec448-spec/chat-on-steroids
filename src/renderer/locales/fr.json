@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Aucun module de reconnaissance vocale Windows n’est installé. Installez un module linguistique vocal Windows.",
   "Windows speech recognition could not start": "La reconnaissance vocale de Windows n’a pas pu démarrer",
   "Windows speech recognition exited unexpectedly": "La reconnaissance vocale de Windows s’est fermée de manière inattendue",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Le stockage des enregistrements est plein. Les nouvelles images et les longs textes ne sont plus enregistrés dans vos chats."
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Le stockage des enregistrements est plein. Les nouvelles images et les longs textes ne sont plus enregistrés dans vos chats.",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "Les clés enregistrées sur cet ordinateur n'ont pas pu être lues ; aucune nouvelle clé ne peut donc être enregistrée. Si redémarrer l'application ne suffit pas, vous pouvez repartir de zéro.",
+  "Start fresh…": "Repartir de zéro…",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Mettre de côté le fichier illisible et repartir sans clé enregistrée ? Vos clés API et les secrets des plugins devront être saisis à nouveau, et l'extension de navigateur devra peut-être être reconnectée. L'ancien fichier est conservé comme sauvegarde.",
+  "Started fresh. Enter your keys again.": "Reparti de zéro. Saisissez à nouveau vos clés.",
+  "The saved keys can be read again. Nothing was changed.": "Les clés enregistrées sont de nouveau lisibles. Rien n'a été modifié.",
+  "Could not start fresh.": "Impossible de repartir de zéro."
 }

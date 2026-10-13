@@ -2259,5 +2259,11 @@
   "No Windows speech recognizer is installed. Install a Windows speech language pack.": "Keine Windows-Spracherkennung installiert. Installiere ein Windows-Sprachpaket mit Spracherkennung.",
   "Windows speech recognition could not start": "Die Windows-Spracherkennung konnte nicht starten",
   "Windows speech recognition exited unexpectedly": "Die Windows-Spracherkennung wurde unerwartet beendet",
-  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Der Aufzeichnungsspeicher ist voll. Neue Bilder und lange Texte werden nicht mehr in deinen Chats gespeichert."
+  "Recording storage is full. New images and long texts are no longer saved in your chats.": "Der Aufzeichnungsspeicher ist voll. Neue Bilder und lange Texte werden nicht mehr in deinen Chats gespeichert.",
+  "The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.": "Die auf diesem Computer gespeicherten Schlüssel konnten nicht gelesen werden, deshalb lassen sich keine neuen speichern. Wenn ein Neustart der App nicht hilft, kannst du neu beginnen.",
+  "Start fresh…": "Neu beginnen …",
+  "Set the unreadable file aside and start with no saved keys? Your API keys and plugin secrets have to be entered again, and the browser extension may have to be connected again. The old file is kept as a backup.": "Die unlesbare Datei beiseitelegen und ohne gespeicherte Schlüssel neu beginnen? Deine API-Schlüssel und Plugin-Geheimnisse musst du erneut eingeben, und die Browser-Erweiterung muss eventuell neu verbunden werden. Die alte Datei bleibt als Sicherung erhalten.",
+  "Started fresh. Enter your keys again.": "Neu begonnen. Gib deine Schlüssel erneut ein.",
+  "The saved keys can be read again. Nothing was changed.": "Die gespeicherten Schlüssel sind wieder lesbar. Es wurde nichts geändert.",
+  "Could not start fresh.": "Neubeginn nicht möglich."
 }
