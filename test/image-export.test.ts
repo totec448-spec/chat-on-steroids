@@ -88,3 +88,4 @@ it.each(['ENOTSUP', 'EPERM', 'EXDEV'])('saves on a volume without hard links (%s
     await expect(again).rejects.toThrow('/workspace/usb.png already exists');
   } finally { link.mockRestore(); }
 });
+
