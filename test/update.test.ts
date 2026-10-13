@@ -611,3 +611,4 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(updateStatus().error).toContain('no data for 60 seconds');
   });
 });
+

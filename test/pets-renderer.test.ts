@@ -143,3 +143,4 @@ it('has a translation of every bundled pet description in every language', async
     for (const description of descriptions) expect(catalog[description], `${file}: ${description}`).toBeTruthy();
   }
 });
+

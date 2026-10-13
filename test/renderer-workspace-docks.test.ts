@@ -217,3 +217,4 @@ it('keeps a greyed-out tab\'s reason in the app\'s language when the language ch
   setLanguage('en');
   expect(quick.title).toBe('Open a project to use Files and Review');
 });
+

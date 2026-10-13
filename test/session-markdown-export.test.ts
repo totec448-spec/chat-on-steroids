@@ -54,3 +54,4 @@ it('says a copy failed when the clipboard refuses it, instead of "copied"', asyn
   electron.clipboard.writeText.mockRejectedValueOnce(new Error('clipboard unavailable'));
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null)).rejects.toThrow('clipboard unavailable');
 });
+
