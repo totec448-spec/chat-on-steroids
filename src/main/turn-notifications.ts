@@ -1,4 +1,5 @@
 import type { SessionSummary } from '../shared/session.js';
+import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
 
 /**
  * A notification when a chat finishes a turn while the window is in the background, like Codex's
@@ -15,7 +16,7 @@ const MAX_BODY = 140;
 
 /** The start of the answer as plain text, short enough for a notification. */
 export function noticeText(answer: string | null): string {
-  const plain = (answer ?? '')
+  const plain = providerEntitiesAsMarkdown(answer ?? '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[`*_~>#]/g, '')
