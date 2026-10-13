@@ -75,7 +75,7 @@ import {
   foldProgress,
   toolCallSummary
 } from '../shared/session.js';
-import { chronological, positionOf } from '../shared/chronology.js';
+import { chronological, positionOf, residenceOf } from '../shared/chronology.js';
 import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
 import {
   DEFAULT_GOAL_MODEL,
@@ -1478,7 +1478,7 @@ function canonicalMessageKey(event: SessionEvent): string | null {
 function mergeDetailDelta(delta: SessionEvent[]): void {
   if (delta.length === 0) return;
   const merged = [...events];
-  const floor = events.length ? Math.min(...events.map(positionOf)) : 0;
+  const floor = events.length ? Math.min(...events.map(residenceOf)) : 0;
   const messageRows = new Map<string, number>();
   for (let index = 0; index < merged.length; index++) {
     const key = canonicalMessageKey(merged[index]!);
@@ -1491,7 +1491,7 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
     else {
       // An old canonical revision is not newly authored history. Its original
       // page still owns it; admitting it here would evict an unrelated live row.
-      if (positionOf(event) < floor) continue;
+      if (residenceOf(event) < floor) continue;
       if (key) messageRows.set(key, merged.length);
       merged.push(event);
     }
@@ -2045,9 +2045,9 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     } else if (prepend) {
       const boundary = olderBefore!;
       historyBefore = boundary;
-      const retained = events.filter(event => positionOf(event) >= boundary);
+      const retained = events.filter(event => residenceOf(event) >= boundary);
       events = retainTimelinePage(chronological(foldProgress([...folded, ...retained])), 'older');
-    } else events = chronological([...folded].sort((a, b) => positionOf(a) - positionOf(b)).slice(-MAX_TIMELINE_ROWS));
+    } else events = chronological([...folded].sort((a, b) => residenceOf(a) - residenceOf(b)).slice(-MAX_TIMELINE_ROWS));
     detailFor = wanted;
   }
   detailCursor = Math.max(opening ? 0 : detailCursor ?? 0,
@@ -3074,8 +3074,8 @@ async function fillTimelineHistory(): Promise<void> {
         break;
       }
       const cursor = demand.direction < 0
-        ? events.reduce((oldest, event) => Math.min(oldest, positionOf(event)), Infinity)
-        : events.reduce((newest, event) => Math.max(newest, positionOf(event)), 0);
+        ? events.reduce((oldest, event) => Math.min(oldest, residenceOf(event)), Infinity)
+        : events.reduce((newest, event) => Math.max(newest, residenceOf(event)), 0);
       if (!Number.isFinite(cursor) || (demand.direction < 0 && (cursor <= 1 || cursor === historyStart))) {
         historyDemand = null;
         break;
@@ -3084,8 +3084,8 @@ async function fillTimelineHistory(): Promise<void> {
       if (demand.sessionId !== selectedId || demand.selection !== selectionGeneration || detailFor !== selectedId) continue;
       if (!loaded) { if (demand === historyDemand) historyDemand = null; continue; }
       const next = demand.direction < 0
-        ? events.reduce((oldest, event) => Math.min(oldest, positionOf(event)), Infinity)
-        : events.reduce((newest, event) => Math.max(newest, positionOf(event)), 0);
+        ? events.reduce((oldest, event) => Math.min(oldest, residenceOf(event)), Infinity)
+        : events.reduce((newest, event) => Math.max(newest, residenceOf(event)), 0);
       if (demand === historyDemand && demand.opening) {
         // Filling a newly selected tail has not navigated away from live work.
         // User input replaces the demand and owns its position from then on.
@@ -3593,9 +3593,9 @@ function visibleEvents(): SessionEvent[] {
  * Keep the current visible rows plus the incoming stage; ordinary tall histories
  * still settle at 160 records. Dense collapsed activity has bounded extra room. */
 function retainTimelinePage(source: SessionEvent[], direction: 'older' | 'newer'): SessionEvent[] {
-  // Residency and navigation share the immutable origin domain. Display order
-  // can move a final across its turn's tools, but must not cut a hole in a page.
-  source = [...source].sort((a, b) => positionOf(a) - positionOf(b));
+  // Residency and navigation share one domain, the one the store pages by (`residenceOf`):
+  // immutable origins, except that a turn's final answer lives beside its turn's end.
+  source = [...source].sort((a, b) => residenceOf(a) - residenceOf(b));
   const pane = $('chatBody');
   const edge = pane.getBoundingClientRect().top;
   const protectedKeys = new Set<string>();
