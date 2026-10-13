@@ -2309,5 +2309,9 @@
   "Messages during a running turn": "実行中のターン中のメッセージ",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT の作業中に送ったメッセージの既定の動作です。⌘⇧Enter（Windows と Linux では Ctrl+Shift+Enter）でもう一方の方法で送信します。",
   "Join the running turn": "実行中のターンに加える",
-  "Wait until the turn ends": "ターンの終了を待つ"
+  "Wait until the turn ends": "ターンの終了を待つ",
+  "Send messages with": "メッセージの送信キー",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "入力した内容を送信するキーです。⌘Enter（Windows と Linux では Ctrl+Enter）にすると、Enter で改行します。",
+  "Enter": "Enter",
+  "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter"
 }

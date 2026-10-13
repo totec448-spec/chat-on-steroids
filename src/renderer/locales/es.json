@@ -2309,5 +2309,9 @@
   "Messages during a running turn": "Mensajes durante un turno en curso",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Lo que hace por defecto un mensaje que envías mientras ChatGPT trabaja. ⌘⇧Intro (Ctrl+Mayús+Intro en Windows y Linux) lo envía de la otra forma.",
   "Join the running turn": "Unirse al turno en curso",
-  "Wait until the turn ends": "Esperar a que termine el turno"
+  "Wait until the turn ends": "Esperar a que termine el turno",
+  "Send messages with": "Enviar mensajes con",
+  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Qué tecla envía lo que escribes. Con ⌘Intro (Ctrl+Intro en Windows y Linux), Intro empieza una línea nueva.",
+  "Enter": "Intro",
+  "⌘Enter / Ctrl+Enter": "⌘Intro / Ctrl+Intro"
 }

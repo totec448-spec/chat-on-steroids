@@ -411,6 +411,13 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui.followUp).toBe('queue');
   });
 
+  it('sends with Enter by default and saves Cmd/Ctrl+Enter', async () => {
+    const config = defaultConfig();
+    expect(config.ui.enterSends).toBe(true);
+    await saveConfig({ ...config, ui: { ...config.ui, enterSends: false } });
+    expect((await loadConfig()).ui.enterSends).toBe(false);
+  });
+
   it('keeps the thorough handoff length for older and broken configs, and saves a choice', async () => {
     const config = defaultConfig();
     expect(config.compaction.handoffLength).toBe('thorough');
