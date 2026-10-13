@@ -22,6 +22,7 @@ import {
   suspendConnectionLossNotices
 } from './connection.js';
 import { setSystemProxyResolver } from './tunnel/index.js';
+import { configureAppProxy, refreshAppProxy } from './app-proxy.js';
 import { openSessionChat, registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
@@ -435,6 +436,13 @@ void app.whenReady().then(async () => {
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
   for (const surface of await enrolledPluginSurfaces()) notePluginInstalled(surface);
   await pluginManager.initialize(userData);
+  // The app's own requests follow the system proxy too, not only the tunnel (#1255).
+  configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
+    ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),
+    ...pluginManager.remoteEndpoints()
+  ]);
+  await refreshAppProxy();
+  setInterval(() => void refreshAppProxy(), 2 * 60_000).unref();
   if (windowActivation.isDisabled()) return;
   try { applyLoginStartup(app, getConfig().ui.startAtLogin === true); }
   catch (error) { logWarn(`Windows login startup: ${error instanceof Error ? error.message : String(error)}`); }

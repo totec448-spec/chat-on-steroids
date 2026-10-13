@@ -1020,3 +1020,10 @@ describe('enabled plugin process ownership', () => {
     expect(alive((await h.pids())[1]!.pid)).toBe(true);
   });
 });
+
+// #1255 follow-up: the app's proxy leaves remote plugins the system reaches directly alone.
+it('lists the addresses of remote plugins, and only those', async () => {
+  await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } });
+  await manager.install({ source: { kind: 'remote', url: 'https://mcp.lan.example/mcp', auth: 'oauth' } });
+  expect(manager.remoteEndpoints()).toEqual(['https://mcp.lan.example/mcp']);
+});

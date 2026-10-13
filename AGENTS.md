@@ -4379,6 +4379,15 @@ launch `tunnel/proxy.ts` derives them (#1255): an existing `HTTPS_PROXY` is left
 skipped. A failed or slow lookup means no proxy, never a tunnel that does not start. The quick
 tunnel (cloudflared) is unchanged.
 
+The app's own requests (update check, Skills from GitHub, Goal providers, remote plugins) use the
+same proxy through Node's built-in support (`app-proxy.ts`, `http.setGlobalProxyFromEnv`, Node
+24.14+; a no-op where it is missing). `HTTPS_PROXY`/`HTTP_PROXY` win; otherwise the system's HTTP(S)
+proxy for `https://github.com/` applies (no SOCKS in Node: stays direct). `NO_PROXY` keeps the
+person's entries plus loopback and `.localhost`, and adds the exact host of the custom Goal provider
+and each remote plugin whose own `resolveProxy` answer is direct (Node's `NO_PROXY` has no address
+ranges). `refreshAppProxy()` runs at startup, every 2 minutes and after each settings save, and resets
+Node's agents only when the result changed.
+
 For a few seconds after a new OpenAI tunnel-client process connects (app start, update, or a
 client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
 process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
