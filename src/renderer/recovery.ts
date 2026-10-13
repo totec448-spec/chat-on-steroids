@@ -19,6 +19,8 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
           const next = countdown.next === 'continue' ? t('Automatic Continue') : countdown.next === 'queue' ? t('Queued message') : countdown.next === 'goal' ? t('Goal') : t('Loop');
           return t('{0} · next: {1}', [reason, next]);
         }
+        if (countdown.kind === 'compaction') return countdown.phase === 'waiting'
+          ? t('Compact & Resume · waiting for this turn to end') : t('Compact & Resume · asking ChatGPT for the handoff');
         return countdown.kind === 'provider-limit' ? t('ChatGPT history temporarily rate-limited') :
         countdown.kind === 'unattributed' ? t('Unattributed call') :
         countdown.kind === 'unattributed-wait' ? t('Unattributed activity · awaiting attribution') :
@@ -28,7 +30,10 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
         countdown.kind === 'post-reload' ? t('Reloaded · waiting for activity') :
         countdown.kind === 'thinking-failed' ? t('Thinking failed · waiting for activity') : t('Turn still marked generating · extra wait');
       });
-      ui(row, 'title', () => countdown.kind === 'provider-limit'
+      ui(row, 'title', () => countdown.kind === 'compaction'
+        ? countdown.phase === 'waiting' ? t('The handoff request is sent as soon as this turn ends.')
+          : t('Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.')
+        : countdown.kind === 'provider-limit'
         ? t('Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.')
         : countdown.kind === 'pickup-stopped'
         ? t('The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.', [String(countdown.attempts ?? 3)])
@@ -60,7 +65,9 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
     timer.closest<HTMLElement>('.recovery-notice')!.hidden = (countdown.visibleAt ?? 0) > now;
     const seconds = Math.max(0, Math.ceil((countdown.deadline - now) / 1000));
     const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-    const text = countdown.kind === 'provider-limit'
+    // Compact & Resume's checks are internal pacing, not something to wait for: no clock.
+    const text = countdown.kind === 'compaction' ? ''
+      : countdown.kind === 'provider-limit'
       ? seconds ? t('Retry check in {0}', [time]) : t('Retry window ended')
       : countdown.kind === 'pickup-stopped'
       ? t('Stopped after {0} attempts', [String(countdown.attempts ?? 3)])
