@@ -21,6 +21,7 @@ import {
   shutdownConnection,
   suspendConnectionLossNotices
 } from './connection.js';
+import { setSystemProxyResolver } from './tunnel/index.js';
 import { openSessionChat, registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
@@ -410,6 +411,8 @@ void app.whenReady().then(async () => {
     fingerprint: () => executableFingerprint(app.getVersion())
   });
   initSessionStore(userData);
+  // The tunnel program reads proxies only from its environment; the system's setting comes from here (#1255).
+  setSystemProxyResolver(url => session.defaultSession.resolveProxy(url));
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);

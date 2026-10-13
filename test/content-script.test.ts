@@ -2986,8 +2986,10 @@ async function replyFiber(
   // deliver the request, so this one case runs on real timers.
   const instant = window.setTimeout;
   window.setTimeout = (fn: () => void, ms: number) => globalThis.setTimeout(fn, ms);
+  let answered = false;
   const onAsk = (event: any) => {
     if (!event.data || event.data.source !== 'clf-fiber-ask') return;
+    answered = true;
     const scanToken = event.data.nonce;
     // Tests manually mark the exact DOM↔descriptor joins they intend. Upgrade those legacy
     // numeric fixtures to the shipped scan-token stamp at reply time, matching what fiber.js
@@ -3032,6 +3034,10 @@ async function replyFiber(
   try {
     if (observeOnly) {
       active.hook.observe();
+      // The scan's question travels as a posted message, so it arrives on a later task. A fixed
+      // 100 ms used to stand for "asked and answered", and on a loaded CI runner the question
+      // sometimes had not even arrived yet (canary 2026-10-13, macOS). Wait for the answer itself.
+      await vi.waitFor(() => { if (!answered) throw new Error('the scan has not asked yet'); }, { timeout: 10_000, interval: 5 });
       await new Promise(resolve => globalThis.setTimeout(resolve, 100));
     } else await active.hook.refreshFiber(settled);
   } finally {

@@ -957,7 +957,7 @@ it('saves strict chat allowlisting and disables the unattributed switch while st
 
 it('keeps project keyboard focus across activity repaint without taking composer focus or reloading on disclosure', async () => {
   const { project, session } = projectSidebarFixture();
-  const listSessions = vi.fn(async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } }));
+  const listSessions = vi.fn(async (_options?: { projectId?: string }) => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } }));
   const mounted = await mountChat({}, [], {
     listProjects: async () => ({ ok: true, data: [project] }), listSessions
   });
@@ -965,10 +965,14 @@ it('keeps project keyboard focus across activity repaint without taking composer
   const heading = () => doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] > summary`)!;
   await vi.waitFor(() => expect(heading()).not.toBeNull());
   await settle();
-  const reads = listSessions.mock.calls.length;
+  // Reads of the whole list. Opening a project reads one page of that project itself (#1190),
+  // which is not a reload of the sidebar.
+  const wholeListReads = () => listSessions.mock.calls.filter(([options]) => !options?.projectId).length;
+  const reads = wholeListReads();
   heading().focus(); heading().click();
   await settle();
-  expect(listSessions).toHaveBeenCalledTimes(reads);
+  expect(wholeListReads()).toBe(reads);
+  expect(listSessions.mock.calls.filter(([options]) => options?.projectId === project.id)).toHaveLength(1);
   expect(doc.activeElement).toBe(heading());
   mounted.push(structuredClone(mounted.state));
   expect(doc.activeElement).toBe(heading());
@@ -980,7 +984,7 @@ it('keeps project keyboard focus across activity repaint without taking composer
   const { chatVisible } = await import('../src/renderer/chat.js');
   chatVisible(false); chatVisible(true);
   await settle();
-  expect(listSessions).toHaveBeenCalledTimes(reads + 1);
+  expect(wholeListReads()).toBe(reads + 1);
 });
 
 // Adapted from @Haz4rdovisk's #345: typed Setup values used to reach the app only on blur, so a
@@ -2024,6 +2028,35 @@ it('judges Setup from the saved settings on the first paint, and numbers its ste
   noKey.hasApiKey = false;
   mounted.push(noKey);
   expect((doc.getElementById('wizConnect') as HTMLButtonElement).title).toBe('Add a restricted API key — step 5.');
+});
+
+it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's language", async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const moves = (group: string) => [...doc.querySelectorAll(`[data-setup-guide="${group}"] .guide-move-text`)].map(move => move.textContent);
+  expect(moves('signin')).toContain('Click “Log in”');
+  expect(moves('external-browser')).toContain('Click “Log in”');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // ChatGPT's German page says "Anmelden"; the step used to send people looking for "Log in".
+  expect(moves('signin')).toContain('Auf „Anmelden“ klicken');
+  expect(moves('external-browser')).toContain('Auf „Anmelden“ klicken');
+  setLanguage('ja');
+  expect(moves('signin').some(text => text!.includes('「ログイン」'))).toBe(true);
+  setLanguage('en');
+});
+
+it("keeps a worker's delivery line in the app's language when the language changes", async () => {
+  const worker = { id: 'worker-1', role: 'worker', label: 'Docs', task: 'Update the docs', jobTitle: 'Docs', runId: 'run-1', reasoningEffort: null, model: null, state: 'active',
+    createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
+  const mounted = await mountChat({}, [], { getSwarm: async () => ({ ok: true, data: { enabled: true, running: true, runId: 'run-1', agents: [worker], maxWorkers: 2, pendingReports: 0 } }) });
+  const line = () => mounted.window.document.querySelector('#swarmList .model-sub')?.textContent;
+  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered · chat bound'));
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // The line was joined once when the list was painted, so it stayed English.
+  expect(line()).toBe('0 ausstehend · 1 zugestellt · Chat verknüpft');
+  setLanguage('en');
 });
 
 it('highlights missing required setup fields while respecting drafts and a stored API key', async () => {
@@ -3081,4 +3114,32 @@ it('shows a computer name set elsewhere and opens its section, so the suffixed c
   await settle();
   expect((doc.getElementById('connectorSuffix') as HTMLInputElement).value).toBe('Windows');
   expect((doc.getElementById('connectorSuffixField') as HTMLDetailsElement).open).toBe(true);
+});
+
+it('shows unreadable refresh state and allows one explicit reset, including failure and retry', async () => {
+  let finish!: (value: any) => void;
+  const reset = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const mounted = await mountChat({ pluginRefreshUnreadable: true }, [], { resetPluginRefresh: reset });
+  const doc = mounted.window.document;
+  const recovery = doc.getElementById('pluginRefreshRecovery')!;
+  const button = doc.getElementById('pluginRefreshReset') as HTMLButtonElement;
+  expect(recovery.hidden).toBe(false);
+  expect(recovery.textContent).toContain('Could not read plugin-refresh state');
+  expect(reset).not.toHaveBeenCalled();
+  button.click(); button.click();
+  expect(button.disabled).toBe(true); expect(reset).toHaveBeenCalledTimes(1);
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: true });
+  expect(button.disabled).toBe(true);
+  finish({ ok: false, error: 'private filesystem diagnostics' }); await settle();
+  expect(recovery.hidden).toBe(false); expect(button.disabled).toBe(false);
+  expect(recovery.textContent).toContain('Could not reset plugin-refresh state');
+  expect(recovery.textContent).not.toContain('private filesystem');
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: false });
+  expect(recovery.hidden).toBe(true);
+  mounted.push({ ...mounted.state, pluginRefreshUnreadable: true });
+  expect(recovery.textContent).toContain('Could not read plugin-refresh state');
+  button.click(); expect(reset).toHaveBeenCalledTimes(2);
+  finish({ ok: true, data: { ...mounted.state, pluginRefreshUnreadable: false } }); await settle();
+  expect(recovery.hidden).toBe(true);
+  button.click(); expect(reset).toHaveBeenCalledTimes(2);
 });

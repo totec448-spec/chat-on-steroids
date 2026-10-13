@@ -11,7 +11,7 @@ type Box = [number, number, number, number];
 type Capture = { file: string; size: [number, number]; labels: Record<string, string>; spots: Record<string, Box> };
 /** A page captured by scripts/capture-setup-pages.mjs: its own words fill the move texts. */
 type Page = { scene: string; spots: Array<{ key: string; text: (labels: Record<string, string>) => string; pin?: Spot['pin'] }> };
-type Still = { src: string; spots: Array<{ text: string; box: Box; pin?: Spot['pin'] }> };
+type Still = { src: string; spots: Array<{ text: string | (() => string); box: Box; pin?: Spot['pin'] }> };
 
 const pageFiles = import.meta.glob('./setup-images/pages/*.webp', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 
@@ -21,20 +21,26 @@ function capture(scene: string, language: Language = currentLanguage()): Capture
   return scenes[scene]?.[language] ?? scenes[scene]?.en ?? null;
 }
 
+/** A label ChatGPT shows in the app's language, else its English one: for steps without a capture of their own. */
+function label(scene: string, key: string): string {
+  const scenes = pages as unknown as Record<string, Partial<Record<Language, { labels: Record<string, string> }>>>;
+  return scenes[scene]?.[currentLanguage()]?.labels[key] ?? scenes[scene]!.en!.labels[key]!;
+}
+
 // Only reviewed, redacted captures belong here: placeholders stand in for every name, address and id.
 // The ChatGPT and OpenAI Platform pages are re-captured with scripts/capture-setup-pages.mjs.
 const guides: Record<string, Array<Page | Still>> = {
   signin: [
     { src: new URL('./setup-images/cos-browser-sign-in.png', import.meta.url).href, spots: [
       // Two places side by side: the pins take opposite corners so neither covers the other.
-      { text: 'Click Log in', box: [72, 11.7, 8.7, 10.6], pin: 'bottom-left' },
+      { text: () => t('Click {0}', [quoted(label('signin', 'login'))]), box: [72, 11.7, 8.7, 10.6], pin: 'bottom-left' },
       { text: 'Green dot: the app is connected', box: [77.2, 2.6, 2.9, 5.1] }
     ] }
   ],
   'external-browser': [
     { src: new URL('./setup-images/external-browser-chatgpt.png', import.meta.url).href, spots: [
       { text: 'Review extension', box: [96.1, 2.8, 2.6, 5.1], pin: 'outside-left' },
-      { text: 'Click Log in', box: [91.2, 12.1, 7.5, 11.1], pin: 'bottom-left' }
+      { text: () => t('Click {0}', [quoted(label('signin', 'login'))]), box: [91.2, 12.1, 7.5, 11.1], pin: 'bottom-left' }
     ] }
   ],
   tunnel: [
@@ -76,7 +82,7 @@ const guides: Record<string, Array<Page | Still>> = {
 /** The pictures and move texts of a guide in the app's current language. */
 function shots(group: string): Shot[] {
   return (guides[group] ?? []).flatMap(entry => {
-    if ('src' in entry) return [{ src: entry.src, spots: entry.spots.map(spot => ({ ...spot, text: () => t(spot.text) })) }];
+    if ('src' in entry) return [{ src: entry.src, spots: entry.spots.map(spot => ({ ...spot, text: typeof spot.text === 'string' ? () => t(spot.text as string) : spot.text })) }];
     const page = capture(entry.scene);
     const src = page ? pageFiles[`./setup-images/pages/${page.file}`] : undefined;
     if (!page || !src) return [];

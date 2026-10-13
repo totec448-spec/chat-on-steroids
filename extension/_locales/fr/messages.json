@@ -273,25 +273,25 @@
     "message": "Les chats d’agents restent dans leur conversation actuelle et ne sont jamais compactés ni repris manuellement."
   },
   "content_connector_identity_ambiguous": {
-    "message": "L’identité du connecteur installé est indisponible ou ambiguë"
+    "message": "L’identité du plugin installé est indisponible ou ambiguë"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "La demande d’actualisation du connecteur ou la propriété de la page n’a pas été confirmée"
+    "message": "La demande d’actualisation du plugin ou la propriété de la page n’a pas été confirmée"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Une actualisation a été demandée, mais aucun changement du schéma correspondant n’a été observé"
   },
   "content_connector_refresh_unverified": {
-    "message": "Impossible de vérifier l’actualisation du connecteur"
+    "message": "Impossible de vérifier l’actualisation du plugin"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Le schéma du connecteur a changé, mais ChatGPT n'affiche pas de commande Actualiser. Recréez ou republiez cette application personnalisée pour charger le schéma d'outils actuel."
+    "message": "Le schéma du plugin a changé, mais ChatGPT n'affiche pas de commande Actualiser. Recréez ou republiez ce plugin pour charger le schéma d'outils actuel."
   },
   "content_connector_settings_unreadable": {
-    "message": "La fiche de configuration du connecteur n'a pas pu être lue sur la page associée à cette demande"
+    "message": "La fiche de configuration du plugin n'a pas pu être lue sur la page associée à cette demande"
   },
   "content_connector_settings_unverified": {
-    "message": "Impossible de vérifier les réglages exacts du connecteur"
+    "message": "Impossible de vérifier les réglages exacts du plugin"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Le transfert de la pièce jointe a échoué. Le message n’a pas été envoyé."
@@ -741,7 +741,7 @@
     "message": "Connecte ChatGPT à Chat On Steroids et contrôle les onglets du navigateur en arrière-plan via le DOM, les captures d’écran et les outils de développement."
   },
   "extension_name": {
-    "message": "Extension compagnon Chat On Steroids"
+    "message": "Extension de navigateur Chat On Steroids"
   },
   "popup_advanced": {
     "message": "Avancé"
@@ -1038,7 +1038,7 @@
     "message": "Réessayer"
   },
   "popup_version_mismatch_help": {
-    "message": "Application v$1 (protocole $2) ; extension compagnon v$3 (protocole $4). Ouvrez la page Extensions de votre navigateur, activez le mode développeur, puis mettez à jour ou rechargez cette extension compagnon. Si l’incompatibilité persiste, utilisez « Ouvrir le dossier de l’extension » dans Chat On Steroids et chargez ce dossier. Rechargez les onglets ChatGPT une fois leur travail actif terminé."
+    "message": "Application v$1 (protocole $2) ; extension v$3 (protocole $4). Ouvrez la page Extensions de votre navigateur, activez le mode développeur, puis mettez à jour ou rechargez cette extension. Si l’incompatibilité persiste, utilisez « Ouvrir le dossier de l’extension » dans Chat On Steroids et chargez ce dossier. Rechargez les onglets ChatGPT une fois leur travail actif terminé."
   },
   "popup_yes": {
     "message": "oui"
