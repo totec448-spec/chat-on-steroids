@@ -7,6 +7,8 @@ import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initRecordingStorageSetting, paintRecordingStorageNotice, paintRecordingStorageUsage } from './image-storage.js';
 import { paintCredentialsNotice } from './credentials-notice.js';
 import { paintPluginRefreshOffer } from './plugin-refresh-offer.js';
+import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js';
+import { updateErrorText } from './update-error.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
@@ -56,7 +58,6 @@ import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
-import { updateErrorNextStep, updateErrorText } from './update-error.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
 
 declare global {
@@ -161,11 +162,6 @@ const GROUPS: Group[] = [
 
 let state: AppState | null = null;
 let updateAllError: string | null = null;
-function paintUpdateOperation(): void {
-  const error = $('updateAllError');
-  error.hidden = !updateAllError;
-  ui(error, 'textContent', () => updateAllError ? t('Update all could not finish: {0}', [updateErrorText(updateAllError)]) + '\n' + updateErrorNextStep(updateAllError) : '');
-}
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1544,7 +1540,7 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
-  paintUpdateOperation();
+  paintUpdateReadiness(next, updateAllError);
   paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
   paintRecordingStorageNotice(next.recordingStorageFull === true);
@@ -2503,6 +2499,8 @@ window.addEventListener('drop', (event) => event.preventDefault());
 }
 
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
+initUpdateReadiness();
+$('updateReviewSetup').addEventListener('click', () => showTab('setup'));
 const updateAllButton = $<HTMLButtonElement>('updateAll');
 updateAllButton.addEventListener('click', async () => {
   if (updateAllButton.disabled) return;
@@ -2510,7 +2508,7 @@ updateAllButton.addEventListener('click', async () => {
   updateAllButton.setAttribute('aria-busy', 'true');
   ui(updateAllButton, 'textContent', () => t('Updating…'));
   updateAllError = null;
-  paintUpdateOperation();
+  if (state) paintUpdateReadiness(state, updateAllError);
   try {
     const reply = await api.updateAll();
     if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
@@ -2525,10 +2523,9 @@ updateAllButton.addEventListener('click', async () => {
     updateAllButton.disabled = false;
     updateAllButton.removeAttribute('aria-busy');
     ui(updateAllButton, 'textContent', () => t('Update all'));
-    paintUpdateOperation();
+    if (state) paintUpdateReadiness(state, updateAllError);
   }
 });
-
 
 /**
  * Install the update that is already downloaded.
@@ -2572,16 +2569,20 @@ for (const id of ['copyLog', 'copyLogText']) {
 }
 
 // One file for a bug report; the main process removes personal details and shows the saved file.
-$('saveDiagnosticsReport').addEventListener('click', async () => {
-  const button = $<HTMLButtonElement>('saveDiagnosticsReport');
-  button.disabled = true;
+const diagnosticsButtons = [$<HTMLButtonElement>('saveDiagnosticsReport'), $<HTMLButtonElement>('updateDiagnosticsReport')];
+async function saveDiagnosticsReport(): Promise<void> {
+  if (diagnosticsButtons.some(button => button.disabled)) return;
+  for (const button of diagnosticsButtons) button.disabled = true;
   try {
     const result = await run(api.saveDiagnosticsReport());
     if (result?.saved) toast(t('Diagnostics report saved as {0}. Read it before you share it.', [result.name]));
+  } catch (error) {
+    toast(t(error instanceof Error ? error.message : String(error)));
   } finally {
-    button.disabled = false;
+    for (const button of diagnosticsButtons) button.disabled = false;
   }
-});
+}
+for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());
