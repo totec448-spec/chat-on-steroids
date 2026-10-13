@@ -1373,7 +1373,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
           ? 'recording storage limit reached'
           : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
         imageRecordingReasons.add(reason);
-        logWarn(`session image not stored: ${reason}`);
+        // The store reports being full once, as a state (#1406); other reasons keep their line.
+        if (message !== 'Global session asset quota exceeded') logWarn(`session image not stored: ${reason}`);
       }
     }
 

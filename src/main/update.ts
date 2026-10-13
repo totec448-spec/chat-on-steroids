@@ -53,7 +53,18 @@ const REPO = 'totec448-spec/chat-on-steroids';
 const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 const CHECK_TIMEOUT_MS = 15_000;
-const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+/**
+ * A download is given up when nothing has arrived for this long, never for taking long overall.
+ * A fixed ten-minute limit meant a connection slower than about 1.5 Mbit/s could not finish the
+ * installer at all: each pass deleted the partial file and began the same download again.
+ */
+const DOWNLOAD_STALL_MS = 60_000;
+/**
+ * A failed check is asked again after these waits, then left to the regular recheck. The app
+ * starts at login, often before the network is up, and one failed request used to leave "update
+ * check failed" standing for six hours.
+ */
+const RETRY_AFTER_FAILURE_MS = [60_000, 5 * 60_000, 30 * 60_000];
 /**
  * How often the check repeats while the app is open.
  *
@@ -139,6 +150,10 @@ let pass: Promise<void> | null = null;
 /** Set by `markInstallOnQuit`: the user pressed Install, so bring the app back afterwards. */
 let runAfterInstall = false;
 const listeners = new Set<() => void>();
+/** Set by `startUpdateChecks`: only a scheduled app retries on its own. */
+let recheck: ReturnType<typeof setInterval> | null = null;
+let retry: ReturnType<typeof setTimeout> | null = null;
+let failures = 0;
 
 export function onUpdateChange(listener: () => void): () => void {
   listeners.add(listener);
@@ -161,8 +176,22 @@ function set(next: Partial<UpdateStatus>): void {
  * alive, and the shutdown sequence does not have to know it exists.
  */
 export function startUpdateChecks(): void {
+  if (recheck) clearInterval(recheck);
+  recheck = setInterval(() => void checkForUpdates(), RECHECK_MS);
+  recheck.unref();
   void checkForUpdates();
-  setInterval(() => void checkForUpdates(), RECHECK_MS).unref();
+}
+
+/** After a pass: a failure is asked again soon, a success ends the waiting. */
+function scheduleRetry(): void {
+  if (retry) { clearTimeout(retry); retry = null; }
+  if (!recheck) return;
+  if (status.stage !== 'failed') { failures = 0; return; }
+  const wait = RETRY_AFTER_FAILURE_MS[failures];
+  if (wait === undefined) return;
+  failures += 1;
+  retry = setTimeout(() => { retry = null; void checkForUpdates(); }, wait);
+  retry.unref();
 }
 
 /**
@@ -190,6 +219,7 @@ export function checkForUpdates(): Promise<void> {
     })
     .finally(() => {
       if (pass === run) pass = null;
+      scheduleRetry();
     });
   pass = run;
   return run;
@@ -342,9 +372,9 @@ function assetUrl(version: string, name: string): string {
   return `https://github.com/${REPO}/releases/download/v${encodeURIComponent(version)}/${name}`;
 }
 
-async function get(url: string, timeout: number, headers: Record<string, string> = {}): Promise<Response> {
+async function get(url: string, timeout: number | AbortSignal, headers: Record<string, string> = {}): Promise<Response> {
   const response = await fetch(url, {
-    signal: AbortSignal.timeout(timeout),
+    signal: typeof timeout === 'number' ? AbortSignal.timeout(timeout) : timeout,
     redirect: 'follow',
     headers: { 'user-agent': `chat-on-steroids/${APP_VERSION}`, ...headers }
   });
@@ -375,12 +405,22 @@ async function download(version: string, name: string, expected: string): Promis
   await rm(path.join(app.getPath('userData'), 'updates'), { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, name);
-  const response = await get(assetUrl(version, name), DOWNLOAD_TIMEOUT_MS);
-  if (!response.body) throw new Error(`downloading ${name} returned no content`);
+  // Stopped when the connection goes quiet, not when the file is simply large for the line.
+  const quiet = new AbortController();
+  const stalled = new Error(`downloading ${name} stopped: no data for ${DOWNLOAD_STALL_MS / 1000} seconds`);
+  const watch = setTimeout(() => quiet.abort(stalled), DOWNLOAD_STALL_MS);
   const hash = createHash('sha256');
-  const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
-  body.on('data', (chunk: Buffer) => hash.update(chunk));
-  await pipeline(body, createWriteStream(`${file}.part`));
+  try {
+    const response = await get(assetUrl(version, name), quiet.signal);
+    if (!response.body) throw new Error(`downloading ${name} returned no content`);
+    const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+    body.on('data', (chunk: Buffer) => { hash.update(chunk); watch.refresh(); });
+    await pipeline(body, createWriteStream(`${file}.part`), { signal: quiet.signal });
+  } catch (err) {
+    throw quiet.signal.aborted ? stalled : err;
+  } finally {
+    clearTimeout(watch);
+  }
   const digest = hash.digest('hex');
   if (digest !== expected) {
     await rm(`${file}.part`, { force: true });
@@ -471,4 +511,7 @@ export function resetUpdateForTests(): void {
   pass = null;
   runAfterInstall = false;
   listeners.clear();
+  if (recheck) clearInterval(recheck);
+  if (retry) clearTimeout(retry);
+  recheck = null; retry = null; failures = 0;
 }

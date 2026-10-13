@@ -16,9 +16,15 @@ const embedded = source.match(/const SCRIPT = (\[[\s\S]*?\])\.join\('\\r\\n'\)/)
 if (!embedded) throw new Error('Recognizer script missing');
 const lines = vm.runInNewContext(embedded[1], Object.create(null));
 const original = lines.join('\r\n');
-const script = original.replace('$recognizer.SetInputToDefaultAudioDevice()',
-  "$recognizer.SetInputToWaveFile('" + wave.replace(/'/g, "''") + "')");
-if (script === original) throw new Error('Synthetic WAV was not substituted');
+// A WAV file can only feed the offline System.Speech fallback, so the modern engine is skipped.
+const script = original
+  .replace('\r\n    CompileRecognizer\r\n', "\r\n    throw 'A synthetic WAV uses the offline engine'\r\n")
+  .replace('$legacy.SetInputToDefaultAudioDevice()', () => "$legacy.SetInputToWaveFile('" + wave.replace(/'/g, "''") + "')")
+  .replace('__COS_PARENT_PID__', String(process.pid))
+  .replace('__COS_STOP_FILE__', () => path.join(require('node:os').tmpdir(), `cos-dictation-wav-${process.pid}.stop`));
+if (!script.includes('SetInputToWaveFile') || !script.includes("throw 'A synthetic WAV") || script.includes('__COS_')) {
+  throw new Error('Synthetic WAV was not substituted');
+}
 const child = spawn('powershell.exe', [
   '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
   Buffer.from(script, 'utf16le').toString('base64')

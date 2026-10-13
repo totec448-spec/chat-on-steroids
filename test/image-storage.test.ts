@@ -10,13 +10,16 @@ import {
   getImageStorage,
   initSessionStore,
   MAX_GLOBAL_ASSET_BYTES,
+  onRecordingStorageFullChange,
   readAsset,
   readEvents,
+  recordingStorageFull,
   resetSessionStoreForTests,
   upsertMessageEvent,
   upsertNativeImageEvent,
   writeAsset
 } from '../src/main/session/store.js';
+import * as logger from '../src/main/logger.js';
 
 let directory: string;
 
@@ -186,3 +189,39 @@ it('does not traverse or delete an assets directory symlink', async () => {
   });
   expect(await fs.readFile(outsideFile)).toEqual(pixels);
 });
+
+// #1406: a full store used to be visible only as one log warning per refused write (thousands in a
+// long run), while recordings silently became incomplete.
+it('reports a full recording store once, and clears the report when space is free again', async () => {
+  const filler = await createSession({ title: 'Old recordings' });
+  const current = await createSession({ title: 'Current chat' });
+  await writeAsset(filler.id, Buffer.from('an old long text'), 'text/plain');
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+  const changes: boolean[] = [];
+  const stop = onRecordingStorageFullChange(() => changes.push(recordingStorageFull()));
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  // The old chat's files fill the store. Real sizes would need 2 GiB on disk.
+  const realStat = fs.stat.bind(fs);
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file).includes(path.join(filler.id, 'assets') + path.sep)) Object.defineProperty(found, 'size', { value: MAX_GLOBAL_ASSET_BYTES });
+    return found;
+  });
+  expect(recordingStorageFull()).toBe(false);
+  await expect(writeAsset(current.id, Buffer.from('first refused'), 'text/plain')).rejects.toThrow('Global session asset quota exceeded');
+  await expect(writeAsset(current.id, Buffer.from('second refused'), 'text/plain')).rejects.toThrow('Global session asset quota exceeded');
+  expect(recordingStorageFull()).toBe(true);
+  expect(changes).toEqual([true]);
+  expect(warned.mock.calls.filter(([line]) => /recording storage is full/i.test(String(line)))).toHaveLength(1);
+
+  // Space is free again (here: the sizes are real again, as after a clean-up).
+  stat.mockRestore();
+  await clearImageStorage('all');
+  expect(recordingStorageFull()).toBe(false);
+  expect(changes).toEqual([true, false]);
+  await writeAsset(current.id, Buffer.from('stored again'), 'text/plain');
+  expect(changes).toEqual([true, false]);
+  stop();
+});
+

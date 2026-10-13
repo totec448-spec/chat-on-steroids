@@ -273,25 +273,25 @@
     "message": "Yardımcı ajan sohbetleri mevcut konuşmalarında kalır; hiçbir zaman elle sıkıştırılmaz veya sürdürülmez."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Yüklü bağlayıcının kimliği kullanılamıyor veya belirsiz"
+    "message": "Yüklü eklentinin kimliği kullanılamıyor veya belirsiz"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Bağlayıcı yenileme beyanı veya sayfa sahipliği doğrulanmadı"
+    "message": "Eklenti yenileme beyanı veya sayfa sahipliği doğrulanmadı"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Yenileme istendi ancak eşleşen şemada bir değişiklik gözlenmedi"
   },
   "content_connector_refresh_unverified": {
-    "message": "Bağlayıcının yenilendiği doğrulanamadı"
+    "message": "Eklentinin yenilendiği doğrulanamadı"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Bağlayıcı şeması farklı, ancak ChatGPT Yenile denetimini göstermiyor. Güncel araç şemasını yüklemek için bu özel uygulamayı yeniden oluşturun veya yayımlayın."
+    "message": "Eklenti şeması farklı, ancak ChatGPT Yenile denetimini göstermiyor. Güncel araç şemasını yüklemek için bu eklentiyi yeniden oluşturun veya yayımlayın."
   },
   "content_connector_settings_unreadable": {
-    "message": "Bu isteğe ait sayfadaki bağlayıcı ayar kartı okunamadı"
+    "message": "Bu isteğe ait sayfadaki eklenti ayar kartı okunamadı"
   },
   "content_connector_settings_unverified": {
-    "message": "Bağlayıcının kesin ayarları doğrulanamadı"
+    "message": "Eklentinin kesin ayarları doğrulanamadı"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Ek aktarımı başarısız oldu. Mesaj gönderilmedi."
@@ -741,7 +741,7 @@
     "message": "ChatGPT'yi Chat On Steroids'a bağlar ve tarayıcı sekmelerini DOM, ekran görüntüleri ve geliştirici araçlarıyla arka planda denetler."
   },
   "extension_name": {
-    "message": "Chat On Steroids yardımcı eklentisi"
+    "message": "Chat On Steroids tarayıcı uzantısı"
   },
   "popup_advanced": {
     "message": "Gelişmiş"
@@ -1038,13 +1038,13 @@
     "message": "Yeniden dene"
   },
   "popup_version_mismatch_help": {
-    "message": "Uygulama v$1 (protokol $2); yardımcı eklenti v$3 (protokol $4). Tarayıcınızın Uzantılar sayfasını açın, Geliştirici modunu etkinleştirin ve bu yardımcı eklentiyi Güncelle / Yeniden yükle ile yenileyin. Uyumsuzluk sürerse Chat On Steroids'ta Uzantı klasörünü aç seçeneğini kullanın ve o klasörü yükleyin. Etkin çalışmaları bittiğinde ChatGPT sekmelerini yeniden yükleyin."
+    "message": "Uygulama v$1 (protokol $2); uzantı v$3 (protokol $4). Tarayıcınızın Uzantılar sayfasını açın, Geliştirici modunu etkinleştirin ve bu uzantıyı Güncelle / Yeniden yükle ile yenileyin. Uyumsuzluk sürerse Chat On Steroids'ta Uzantı klasörünü aç seçeneğini kullanın ve o klasörü yükleyin. Etkin çalışmaları bittiğinde ChatGPT sekmelerini yeniden yükleyin."
   },
   "popup_yes": {
     "message": "evet"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi. ChatGPT size bir soru soruyor olabilir veya araç bağlantısı kesilmiş olabilir. Soruyu yanıtlayın ya da araçlar çalışmayı durdurduysa tüneli kontrol edin. Otomatik devam duraklatıldı; Loop etkin kalır."
+    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi. ChatGPT size bir soru soruyor olabilir veya araç bağlantısı kesilmiş olabilir. Soruyu yanıtlayın ya da araçlar çalışmayı durdurduysa tüneli kontrol edin. Otomatik devam duraklatıldı; Döngü etkin kalır."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "Bu yanıt için bekleyen bir devam yok. Zaten işlenmiş veya daha yeni bir çalışma tarafından değiştirilmiş olabilir. Yeniden denemeden önce en son sohbet etkinliğini kontrol edin."

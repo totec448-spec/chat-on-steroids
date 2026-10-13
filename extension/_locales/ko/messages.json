@@ -273,25 +273,25 @@
     "message": "워커 대화는 기존 대화에 머무르며 수동으로 압축하거나 재개하지 않습니다."
   },
   "content_connector_identity_ambiguous": {
-    "message": "설치된 커넥터의 식별 정보를 사용할 수 없거나 불분명합니다"
+    "message": "설치된 플러그인의 식별 정보를 사용할 수 없거나 불분명합니다"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "커넥터 새로고침 요청이나 페이지 소유권이 확인되지 않았습니다"
+    "message": "플러그인 새로고침 요청이나 페이지 소유권이 확인되지 않았습니다"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "새로고침을 요청했지만 변경된 일치 스키마가 관찰되지 않았습니다"
   },
   "content_connector_refresh_unverified": {
-    "message": "커넥터 새로고침을 확인할 수 없습니다"
+    "message": "플러그인 새로고침을 확인할 수 없습니다"
   },
   "content_connector_schema_no_refresh": {
-    "message": "커넥터 스키마가 다르지만 ChatGPT에 새로고침 버튼이 없습니다. 현재 도구 스키마를 불러오려면 이 사용자 지정 앱을 다시 만들거나 다시 게시하세요."
+    "message": "플러그인 스키마가 다르지만 ChatGPT에 새로고침 버튼이 없습니다. 현재 도구 스키마를 불러오려면 이 플러그인을 다시 만들거나 다시 게시하세요."
   },
   "content_connector_settings_unreadable": {
-    "message": "이 요청이 소유한 페이지에서 커넥터 설정 카드를 읽을 수 없습니다"
+    "message": "이 요청이 소유한 페이지에서 플러그인 설정 카드를 읽을 수 없습니다"
   },
   "content_connector_settings_unverified": {
-    "message": "정확한 커넥터 설정을 확인할 수 없습니다"
+    "message": "정확한 플러그인 설정을 확인할 수 없습니다"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "첨부 파일 전송에 실패했습니다. 메시지를 보내지 않았습니다."
@@ -741,7 +741,7 @@
     "message": "ChatGPT를 Chat On Steroids에 연결하고 DOM, 스크린샷, 개발자 도구로 백그라운드에서 브라우저 탭을 제어합니다."
   },
   "extension_name": {
-    "message": "Chat On Steroids 컴패니언"
+    "message": "Chat On Steroids 브라우저 확장 프로그램"
   },
   "popup_advanced": {
     "message": "고급"
@@ -1038,7 +1038,7 @@
     "message": "다시 시도"
   },
   "popup_version_mismatch_help": {
-    "message": "앱 v$1(프로토콜 $2), 컴패니언 v$3(프로토콜 $4). 브라우저의 확장 프로그램 페이지를 열고 개발자 모드를 켠 뒤 이 컴패니언을 업데이트/새로고침하세요. 불일치가 계속되면 Chat On Steroids에서 확장 프로그램 폴더 열기를 사용해 그 폴더를 불러오세요. 진행 중인 작업이 끝나면 ChatGPT 탭을 새로고침하세요."
+    "message": "앱 v$1(프로토콜 $2), 확장 프로그램 v$3(프로토콜 $4). 브라우저의 확장 프로그램 페이지를 열고 개발자 모드를 켠 뒤 이 확장 프로그램을 업데이트/새로고침하세요. 불일치가 계속되면 Chat On Steroids에서 확장 프로그램 폴더 열기를 사용해 그 폴더를 불러오세요. 진행 중인 작업이 끝나면 ChatGPT 탭을 새로고침하세요."
   },
   "popup_yes": {
     "message": "예"

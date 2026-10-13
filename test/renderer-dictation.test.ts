@@ -127,6 +127,16 @@ describe('renderer microphone draft ownership', () => {
     expect(button.getAttribute('aria-label')).toBe('Retry dictation');
   });
 
+  it('says when only the basic Windows engine is listening, and how to get the better one', async () => {
+    input.value = ''; input.setSelectionRange(0, 0);
+    button.click(); await flush();
+    emit({ type: 'status', status: 'listening', engine: 'legacy' });
+    expect(status.textContent).toBe('Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.');
+    emit({ type: 'status', status: 'listening', engine: 'modern' });
+    expect(status.textContent).toBe('Listening…');
+    emit({ type: 'status', status: 'stopped' });
+  });
+
   it('unsubscribes on page unload without sending a message', () => {
     dom.window.dispatchEvent(new dom.window.Event('beforeunload'));
     expect(unsubscribe).toHaveBeenCalledTimes(1);

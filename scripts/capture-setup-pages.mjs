@@ -11,6 +11,8 @@
 // tunnel or workspace names) or an id pattern is still visible inside it. Writes
 // <scene>-<language>.webp and manifest.json (labels and outlined places measured from the page);
 // copy both into src/renderer/setup-images/pages/.
+// The scene "signin" has no picture: it reads the "Log in" label from ChatGPT's signed-out page in a
+// private context of the same browser, which is closed again afterwards.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -259,6 +261,49 @@ async function capture(sceneName, scene, language) {
   }
 }
 
+/**
+ * ChatGPT's signed-out page, in a private context of the same browser: only its "Log in" label,
+ * which Setup's sign-in steps quote. No picture: those steps show the app's and the browser's
+ * own windows around the page.
+ */
+async function signedOutLabels(language) {
+  const locale = LANGS[language];
+  const version = await (await fetch(`${cdp}/json/version`)).json();
+  const browser = new WebSocket(version.webSocketDebuggerUrl);
+  await new Promise(resolve => browser.addEventListener('open', resolve));
+  let n = 0;
+  const call = (method, params = {}, sessionId) => new Promise((resolve, reject) => { const id = ++n; const handle = message => { const data = JSON.parse(message.data); if (data.id !== id) return; browser.removeEventListener('message', handle); data.error ? reject(new Error(data.error.message)) : resolve(data.result); }; browser.addEventListener('message', handle); browser.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+  const { browserContextId } = await call('Target.createBrowserContext');
+  try {
+    const { targetId } = await call('Target.createTarget', { url: 'about:blank', browserContextId });
+    const { sessionId } = await call('Target.attachToTarget', { targetId, flatten: true });
+    await call('Emulation.setLocaleOverride', { locale }, sessionId);
+    await call('Network.enable', {}, sessionId);
+    await call('Network.setUserAgentOverride', { userAgent: version['User-Agent'], acceptLanguage: locale }, sessionId);
+    await call('Page.navigate', { url: 'https://chatgpt.com/' }, sessionId);
+    await sleep(9000);
+    // The page's top-right pair is Log in, then Sign up.
+    const result = await call('Runtime.evaluate', { returnByValue: true, expression: `(() => {
+      const top = [...document.querySelectorAll('button, a')].filter(node => node.getClientRects().length && node.getBoundingClientRect().y < 80 && node.innerText.trim())
+        .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+      return top.length >= 2 ? top.at(-2).innerText.trim() : null; })()` }, sessionId);
+    const login = result.result?.value;
+    if (!login) throw new Error('Log in button not found on the signed-out page');
+    (manifest.signin ??= {})[language] = { labels: { login } };
+    console.log('signin', language, JSON.stringify({ login }));
+  } finally {
+    await call('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
+    browser.close();
+  }
+}
+
+if (!onlyScene || onlyScene === 'signin') {
+  for (const language of Object.keys(LANGS)) {
+    if (onlyLanguage && language !== onlyLanguage) continue;
+    try { await signedOutLabels(language); } catch (error) { console.log('FAIL', 'signin', language, error.message); }
+    await sleep(4000);
+  }
+}
 for (const [sceneName, scene] of Object.entries(SCENES)) {
   if (onlyScene && sceneName !== onlyScene) continue;
   for (const language of scene.languages) {
