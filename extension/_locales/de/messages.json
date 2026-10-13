@@ -741,7 +741,7 @@
     "message": "Verbindet ChatGPT mit Chat On Steroids und steuert Browser-Tabs im Hintergrund über DOM, Screenshots und Entwicklertools."
   },
   "extension_name": {
-    "message": "Chat On Steroids Begleiter"
+    "message": "Chat On Steroids Browser-Erweiterung"
   },
   "popup_advanced": {
     "message": "Erweitert"
@@ -1038,7 +1038,7 @@
     "message": "Erneut versuchen"
   },
   "popup_version_mismatch_help": {
-    "message": "App v$1 (Protokoll $2); Begleiter v$3 (Protokoll $4). Öffne die Erweiterungsseite deines Browsers, aktiviere den Entwicklermodus und klicke bei diesem Begleiter auf „Aktualisieren“ bzw. „Neu laden“. Bleibt der Unterschied bestehen, nutze in Chat On Steroids „Erweiterungsordner öffnen“ und lade diesen Ordner. Lade ChatGPT-Tabs neu, sobald ihre laufende Arbeit fertig ist."
+    "message": "App v$1 (Protokoll $2); Erweiterung v$3 (Protokoll $4). Öffne die Erweiterungsseite deines Browsers, aktiviere den Entwicklermodus und klicke bei dieser Erweiterung auf „Aktualisieren“ bzw. „Neu laden“. Bleibt der Unterschied bestehen, nutze in Chat On Steroids „Erweiterungsordner öffnen“ und lade diesen Ordner. Lade ChatGPT-Tabs neu, sobald ihre laufende Arbeit fertig ist."
   },
   "popup_yes": {
     "message": "ja"
@@ -1167,6 +1167,6 @@
     "message": "Fehlgeschlagen. Anmeldung in CoS neu starten."
   },
   "popup_app_not_running_help": {
-    "message": "Stelle sicher, dass Chat On Steroids auf diesem Computer geöffnet ist. Die Begleit-Erweiterung verbindet sich dann von selbst."
+    "message": "Stelle sicher, dass Chat On Steroids auf diesem Computer geöffnet ist. Die Browser-Erweiterung verbindet sich dann von selbst."
   }
 }

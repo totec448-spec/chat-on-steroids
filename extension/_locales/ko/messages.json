@@ -741,7 +741,7 @@
     "message": "ChatGPT를 Chat On Steroids에 연결하고 DOM, 스크린샷, 개발자 도구로 백그라운드에서 브라우저 탭을 제어합니다."
   },
   "extension_name": {
-    "message": "Chat On Steroids 컴패니언"
+    "message": "Chat On Steroids 브라우저 확장 프로그램"
   },
   "popup_advanced": {
     "message": "고급"
@@ -1038,7 +1038,7 @@
     "message": "다시 시도"
   },
   "popup_version_mismatch_help": {
-    "message": "앱 v$1(프로토콜 $2), 컴패니언 v$3(프로토콜 $4). 브라우저의 확장 프로그램 페이지를 열고 개발자 모드를 켠 뒤 이 컴패니언을 업데이트/새로고침하세요. 불일치가 계속되면 Chat On Steroids에서 확장 프로그램 폴더 열기를 사용해 그 폴더를 불러오세요. 진행 중인 작업이 끝나면 ChatGPT 탭을 새로고침하세요."
+    "message": "앱 v$1(프로토콜 $2), 확장 프로그램 v$3(프로토콜 $4). 브라우저의 확장 프로그램 페이지를 열고 개발자 모드를 켠 뒤 이 확장 프로그램을 업데이트/새로고침하세요. 불일치가 계속되면 Chat On Steroids에서 확장 프로그램 폴더 열기를 사용해 그 폴더를 불러오세요. 진행 중인 작업이 끝나면 ChatGPT 탭을 새로고침하세요."
   },
   "popup_yes": {
     "message": "예"

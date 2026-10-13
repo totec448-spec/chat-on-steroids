@@ -741,7 +741,7 @@
     "message": "Connecte ChatGPT à Chat On Steroids et contrôle les onglets du navigateur en arrière-plan via le DOM, les captures d’écran et les outils de développement."
   },
   "extension_name": {
-    "message": "Extension compagnon Chat On Steroids"
+    "message": "Extension de navigateur Chat On Steroids"
   },
   "popup_advanced": {
     "message": "Avancé"
@@ -1038,7 +1038,7 @@
     "message": "Réessayer"
   },
   "popup_version_mismatch_help": {
-    "message": "Application v$1 (protocole $2) ; extension compagnon v$3 (protocole $4). Ouvrez la page Extensions de votre navigateur, activez le mode développeur, puis mettez à jour ou rechargez cette extension compagnon. Si l’incompatibilité persiste, utilisez « Ouvrir le dossier de l’extension » dans Chat On Steroids et chargez ce dossier. Rechargez les onglets ChatGPT une fois leur travail actif terminé."
+    "message": "Application v$1 (protocole $2) ; extension v$3 (protocole $4). Ouvrez la page Extensions de votre navigateur, activez le mode développeur, puis mettez à jour ou rechargez cette extension. Si l’incompatibilité persiste, utilisez « Ouvrir le dossier de l’extension » dans Chat On Steroids et chargez ce dossier. Rechargez les onglets ChatGPT une fois leur travail actif terminé."
   },
   "popup_yes": {
     "message": "oui"
