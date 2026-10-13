@@ -101,6 +101,12 @@ off whenever the API is off, and left off when you turn the API back on), it als
 a model that reads those messages can act under the permissions you have granted.**
 With the switch off, these routes all answer 403 and nothing changes.
 
+The same action grant also permits direct broker control: GET `/v1/workers/{ownerId}`
+and `.../reports`, and POST `.../spawn`, `.../message` and `.../ack`. A trusted local
+orchestrator owns a durable local UUID rather than a ChatGPT prime conversation. See the
+[direct bridge contract](t3-code-bridge.md#api-contract) for request bodies and report receipts.
+
+
 Requests need `Authorization: Bearer <token>`. Any request with a browser `Origin` is refused.
 A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave
@@ -109,7 +115,7 @@ them behind, so a caller should treat a refused connection as "not running".
 ## Permissions and plugins
 
 For T3 Code or another local coding agent, see the [CoS command-line bridge](t3-code-bridge.md)
-to delegate through a ChatGPT coordinator and read delivery, worker status and updates.
+to control broker workers directly and read delivery, worker status and updates.
 
 | Plugin in ChatGPT | What it adds |
 | --- | --- |

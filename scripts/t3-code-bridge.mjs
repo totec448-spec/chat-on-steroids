@@ -95,8 +95,8 @@ function request(connection, route, body) {
   });
 }
 
-function sendBody(value, delegate) {
-  object(value, ['id', 'sessionId', 'projectId', 'interrupt', ...(delegate ? ['context', 'workers'] : ['text'])]);
+function sendBody(value) {
+  object(value, ['id', 'sessionId', 'projectId', 'interrupt', 'text']);
   const body = { id: address(value.id, uuid) };
   if (value.sessionId !== undefined) body.sessionId = address(value.sessionId, session);
   if (value.projectId !== undefined) body.projectId = address(value.projectId, uuid);
@@ -105,25 +105,43 @@ function sendBody(value, delegate) {
     if (typeof value.interrupt !== 'boolean') fail('invalid_interrupt');
     body.interrupt = value.interrupt;
   }
-  if (!delegate) body.text = text(value.text, 64_000);
-  else {
-    if (!Array.isArray(value.workers) || value.workers.length < 1 || value.workers.length > 8) fail('invalid_workers');
-    for (const worker of value.workers) {
+  body.text = text(value.text, 64_000);
+  return body;
+}
+
+function workerRequest(value, command) {
+  const fields = { delegate: ['context', 'workers', 'projectId'], message: ['messages'], ack: ['messageIds'], agents: [], reports: [] };
+  object(value, ['ownerId', 'runId', ...fields[command]]);
+  const ownerId = address(value.ownerId, uuid);
+  const { ownerId: _owner, ...body } = value;
+  if (body.runId !== undefined) address(body.runId, uuid);
+  if (command === 'delegate') {
+    if (body.context !== undefined) text(body.context, 4000);
+    if (body.projectId !== undefined) address(body.projectId, uuid);
+    if (!Array.isArray(body.workers) || body.workers.length < 1 || body.workers.length > 8) fail('invalid_workers');
+    for (const worker of body.workers) {
       object(worker, ['label', 'task']);
       text(worker.task, 4000);
       if (worker.label !== undefined) text(worker.label, 60);
     }
-    if (value.context !== undefined) text(value.context, 4000);
-    body.text = [
-      'T3 Code delegates the following work to this ChatGPT coordinator through Chat On Steroids.',
-      'Use the CoS agents tool to perform these assignments. Check status once, reuse suitable sleeping workers with message, and spawn only when needed. Omit model and reasoning_effort overrides; use saved defaults. Respect worker capacity and dispatch remaining assignments as slots become available.',
-      'Give each worker the shared context and its exact assignment. Workers must not delegate further. Keep work within the authorized scope and permissions; if agents is unavailable, report the blocker instead of claiming delegation.',
-      'Report progress in this conversation, including returned run_id and worker ids. Collect worker reports before finalizing. Return RESULT / CHANGES / VALIDATION / BLOCKERS with factual evidence. Do not repeatedly poll agents status.',
-      'Assignments (JSON):', JSON.stringify({ context: value.context ?? '', workers: value.workers })
-    ].join('\n\n');
   }
-  text(body.text, 64_000);
-  return body;
+  if (command === 'message') {
+    if (!Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 16) fail('invalid_messages');
+    for (const message of body.messages) {
+      object(message, ['to', 'text', 'label']);
+      address(message.to, /^worker-[1-9][0-9]{0,5}$/);
+      text(message.text, 4000);
+      if (message.label !== undefined) text(message.label, 60);
+    }
+  }
+  if (command === 'ack') {
+    if (!Array.isArray(body.messageIds) || body.messageIds.length < 1 || body.messageIds.length > 128) fail('invalid_messages');
+    body.messageIds.forEach(id => address(id, /^[A-Za-z0-9_-]{1,100}$/));
+  }
+  const suffix = { delegate: '/spawn', message: '/message', ack: '/ack', agents: '', reports: '/reports' }[command];
+  const route = '/v1/workers/' + ownerId + suffix;
+  return { ownerId, route: ['agents', 'reports'].includes(command) ? route + (body.runId ? '?runId=' + body.runId : '') : route,
+    body: ['agents', 'reports'].includes(command) ? undefined : body };
 }
 
 function updates(connection, route, from, durationMs, limit) {
@@ -185,17 +203,17 @@ function updates(connection, route, from, durationMs, limit) {
 }
 
 let operationId;
+let workerOwnerId;
 try {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { 'data-dir': { type: 'string' }, 'request-file': { type: 'string' } } });
-  if (positionals.length !== 1 || !['delegate', 'send', 'inputs', 'health', 'status', 'sessions', 'session', 'agents', 'updates'].includes(positionals[0])) fail('unknown_command');
+  if (positionals.length !== 1 || !['delegate', 'message', 'reports', 'ack', 'send', 'inputs', 'health', 'status', 'sessions', 'session', 'agents', 'updates'].includes(positionals[0])) fail('unknown_command');
   const command = positionals[0];
   const input = values['request-file'] ? await readJson(values['request-file']) : {};
   let body;
   let route;
   switch (command) {
     case 'send':
-    case 'delegate':
-      body = sendBody(input, command === 'delegate');
+      body = sendBody(input);
       operationId = body.id;
       route = '/v1/inputs';
       break;
@@ -214,10 +232,17 @@ try {
       object(input, ['sessionId']);
       route = '/v1/sessions/' + address(input.sessionId, session) + '?live=1';
       break;
-    case 'agents':
-      object(input, ['runId']); if (input.runId !== undefined) address(input.runId, uuid);
-      route = '/v1/agents';
+    case 'delegate':
+    case 'message':
+    case 'reports':
+    case 'ack':
+    case 'agents': {
+      const worker = workerRequest(input, command);
+      workerOwnerId = worker.ownerId;
+      route = worker.route;
+      body = worker.body;
       break;
+    }
     case 'updates': {
       object(input, ['sessionId', 'from', 'durationMs', 'limit']);
       integer(input.durationMs, 30_000, 1, 45_000);
@@ -231,6 +256,10 @@ try {
       route = '/v1/' + command;
   }
   const connection = await credentials(values['data-dir'] ?? userData());
+  if (workerOwnerId) {
+    const health = await request(connection, '/v1/health');
+    if (health.protocol !== 1 || !health.routes?.includes('/v1/workers/{ownerId}')) fail('worker_broker_unavailable');
+  }
   if (command === 'updates') {
     const health = await request(connection, '/v1/health');
     if (health.protocol !== 1 || !Array.isArray(health.routes)) fail('unsupported_endpoint');
@@ -251,11 +280,12 @@ try {
   else {
     const result = await request(connection, route, body);
     if (command === 'inputs' && input.id) emit({ input: result.inputs.find(row => row.id === input.id) ?? null, missing: 'A missing row does not prove it was never sent; the outbox retains limited history.' });
-    else if (command === 'agents' && input.runId) emit({ ...result, agents: result.agents.filter(row => row.runId === input.runId) });
-    else emit({ ...result, ...(command === 'delegate' ? { delegation: 'requested' } : {}) });
+    else emit(result);
   }
 } catch (error) {
   const allowed = /^[a-z_0-9]+(?:: enable Local control API in CoS Settings > General > For developers)?$/;
-  emit({ error: allowed.test(error.message) ? error.message : 'bridge_error', ...(operationId ? { inputId: operationId, recovery: 'Inspect inputs before retrying. Never resend an unconfirmed delivery.' } : {}) });
+  emit({ error: allowed.test(error.message) ? error.message : 'bridge_error',
+    ...(operationId ? { inputId: operationId, recovery: 'Inspect inputs before retrying. Never resend an unconfirmed delivery.' } : {}),
+    ...(workerOwnerId ? { ownerId: workerOwnerId, recovery: 'Inspect agents and reports before retrying a worker mutation.' } : {}) });
   process.exitCode = 1;
 }

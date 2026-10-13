@@ -17,7 +17,7 @@ beforeEach(async () => {
   directory = await makeTempDir('cos-t3-');
   await fs.mkdir(path.join(directory, 'control-api'));
   answer = (_req, res) => { res.writeHead(404); res.end('{}'); };
-  routes = ['/v1/sessions/{id}/events/stream'];
+  routes = ['/v1/workers/{ownerId}', '/v1/sessions/{id}/events/stream'];
   server = http.createServer(async (req, res) => {
     if (req.headers.authorization !== 'Bearer fixture-token') {
       res.writeHead(401); res.end('{}'); return;
@@ -61,21 +61,18 @@ async function run(command: string, request?: unknown) {
   });
 }
 
-it('admits a delegation through the coordinator outbox without claiming workers have started', async () => {
+it('delegates exact assignments directly to the worker broker without a coordinator prompt', async () => {
   let received: any;
   answer = (req, res, body) => {
-    if (req.url === '/v1/inputs' && req.method === 'POST') {
+    if (req.url === `/v1/workers/${messageId}/spawn` && req.method === 'POST') {
       received = body;
-      json(res, { input: { id: body.id, sessionId: body.id, delivery: 'pending' }, replayed: false }, 202);
+      json(res, { runId: sessionId, workers: [{ id: 'worker-1', state: 'invited' }] }, 202);
     } else json(res, {} , 404);
   };
-  const result = await run('delegate', { id: messageId, context: 'Read-only audit.', workers: [{ label: 'Audit', task: 'Inspect architecture; do not edit files.' }] });
+  const result = await run('delegate', { ownerId: messageId, context: 'Read-only audit.', workers: [{ label: 'Audit', task: 'Inspect architecture; do not edit files.' }] });
   expect(result.code, result.stderr).toBe(0);
-  expect(received).toMatchObject({ id: messageId });
-  expect(received.sessionId).toBeUndefined();
-  expect(received.text).toContain('agents');
-  expect(received.text).toContain('Inspect architecture; do not edit files.');
-  expect(result.rows[0]).toMatchObject({ delegation: 'requested', input: { delivery: 'pending' } });
+  expect(received).toEqual({ context: 'Read-only audit.', workers: [{ label: 'Audit', task: 'Inspect architecture; do not edit files.' }] });
+  expect(result.rows[0]).toMatchObject({ workers: [{ state: 'invited' }] });
 });
 
 it('sends an update to the exact coordinator and reads delivery separately from admission', async () => {
@@ -100,7 +97,7 @@ it('reads health, paged sessions, live session state and workers from existing A
       '/v1/status': { bridge: { paired: true } },
       '/v1/sessions?limit=20&cursor=10.abcdefgh': { sessions: [{ id: sessionId }], nextCursor: '9.abcdefgh' },
       [`/v1/sessions/${sessionId}?live=1`]: { session: { id: sessionId }, live: { activeTurnId: 'turn-1' } },
-      '/v1/agents': { agents: [{ runId: messageId, id: 'worker-1', state: 'sleeping', revivable: true }] }
+      [`/v1/workers/${messageId}?runId=${sessionId}`]: { workers: [{ id: 'worker-1', state: 'sleeping', revivable: true }] }
     };
     json(res, replies[req.url ?? ''] ?? {}, replies[req.url ?? ''] ? 200 : 404);
   };
@@ -108,7 +105,7 @@ it('reads health, paged sessions, live session state and workers from existing A
   expect((await run('status')).rows[0]).toMatchObject({ bridge: { paired: true } });
   expect((await run('sessions', { cursor: '10.abcdefgh' })).rows[0].nextCursor).toBe('9.abcdefgh');
   expect((await run('session', { sessionId })).rows[0].live.activeTurnId).toBe('turn-1');
-  expect((await run('agents', { runId: messageId })).rows[0].agents).toEqual([{ runId: messageId, id: 'worker-1', state: 'sleeping', revivable: true }]);
+  expect((await run('agents', { ownerId: messageId, runId: sessionId })).rows[0].workers).toEqual([{ id: 'worker-1', state: 'sleeping', revivable: true }]);
 });
 
 it('streams revised assistant updates and returns a sequence cursor for resuming', async () => {
@@ -200,10 +197,10 @@ it('returns failure and the consumed cursor when CoS ends a stream with an error
   expect(result.rows).toEqual([{ event: { seq: 4, kind: 'progress' }, nextFrom: 5 }, { end: 'error', nextFrom: 5 }, { error: 'stream_error' }]);
 });
 
-it('refuses a delegation whose serialized assignments exceed the CoS message ceiling', async () => {
+it('refuses an oversized worker assignment before contacting CoS', async () => {
   let contacted = false;
   answer = (_req, res) => { contacted = true; json(res, {}); };
-  const result = await run('delegate', { id: messageId, workers: Array.from({ length: 8 }, () => ({ task: '"'.repeat(4000) })) });
+  const result = await run('delegate', { ownerId: messageId, workers: [{ task: 'x'.repeat(4001) }] });
   expect(result.rows[0].error).toBe('invalid_text');
   expect(contacted).toBe(false);
 });
@@ -220,4 +217,13 @@ it.each(['stream', 'page'])('keeps revisions and later timeline rows when sequen
   };
   const result = await run('updates', { sessionId, from: 7 });
   expect(result.rows).toEqual([{ event: events[0], nextFrom: 10 }, { event: events[1], nextFrom: 10 }, { end: mode === 'page' ? 'page' : 'stopped', nextFrom: 10 }]);
+});
+
+it('refuses a build without direct worker routes before any delegation and uses no coordinator fallback', async () => {
+  routes = ['/v1/inputs'];
+  let posted = false;
+  answer = (_req, res) => { posted = true; json(res, {}); };
+  const result = await run('delegate', { ownerId: messageId, workers: [{ task: 'A task.' }] });
+  expect(result.rows[0]).toMatchObject({ error: 'worker_broker_unavailable', ownerId: messageId });
+  expect(posted).toBe(false);
 });

@@ -3222,6 +3222,23 @@ attached to that worker's real root prime; the worker cannot control descendants
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
 family prevents a duplicate but remains hidden from status until accepted.
 
+A trusted local orchestrator can own broker workers through `localOwnerId`, a lowercase UUID
+supplied only by the authenticated local control API. It is a separate Caller/Run/DormantRun
+identity, never a claimed ChatGPT conversation or an unattributed MCP request. The broker's
+existing v7 active/dormant snapshots preserve it; restore refuses mixed local/chat/request
+ownership. MCP arguments cannot set this principal. The active Setup profile is frozen at
+admission, and local control cannot adopt an unrelated ChatGPT prime or another local owner's
+run. No ChatGPT prime conversation is opened. Worker topology, capacity, workspace isolation,
+sleep/reuse, inboxes and browser-command fences remain owned by the existing broker.
+
+`agent-admission.ts` is the shared staged durability/worktree/measurement implementation for
+MCP and local entry points. Browser bootstraps/revivals follow committed admission only.
+The local API rechecks its action grant/profile beside commit; an unaccepted revision is
+rolled back and superseded durably. Local report reads offer bounded redacted inbox messages;
+explicit acknowledgements retire only previously offered receipt ids the caller consumed.
+Status is compact and never acknowledges reports. Report run ids accompany local offers even
+when a family has parked; reactivation still rotates the incarnation and retains bounded aliases.
+
 A fresh family also freezes the Setup profile carried by the exact Core endpoint generation that
 accepted its spawn. That local profile ID survives active/dormant snapshots, restart and family
 reactivation; legacy histories without it remain unclaimed rather than being assigned from a later
@@ -4490,6 +4507,19 @@ already cancelled), `not_sent` only for a terminal row whose Send was never auth
 `unconfirmed` for every other row that may have reached ChatGPT, and `pending` before it is handed
 out. Time, text, turn ids on the row and recorder sequence ranges are never evidence, and an
 unconfirmed row is never resent by this API.
+
+Direct local worker control is served by `control-workers.ts`: GET
+`/v1/workers/{ownerId}` (compact status and exact recorded worker session ids) and
+`.../reports` (unread broker offers), plus POST `.../spawn`, `.../message` and `.../ack`.
+These v1 routes are advertised in health and reuse this listener's authentication, action
+gate, JSON bounds, serialization and deadline behavior. The route's owner UUID is a local
+principal under the existing filesystem token grant, not a new secret or chat proof. Spawn
+may select an approved Local Project; MCP and local callers share `agent-admission.ts`.
+The adapter owns no second worker ledger. Reports repeat until their explicit receipt ids
+are acknowledged; reading status does not consume them. `scripts/t3-code-bridge.mjs` is a
+dependency-free caller that checks the advertised surface, uses compact status/report deltas,
+and refuses unsupported builds without silently opening a coordinator. See
+`docs/t3-code-bridge.md` and `.agents/skills/cos-bridge/SKILL.md` for the CLI contract.
 
 Cancel is narrower than the app's own cancel. It reads the row first and refuses, without asking
 the owner, a `sent` or `tool` row, a claim whose Send was authorized (it may already be in ChatGPT,
