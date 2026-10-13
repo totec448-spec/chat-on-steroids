@@ -1152,7 +1152,7 @@
     "message": "Die App konnte die Aufgabe nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
   },
   "popup_sign_in_transfer": {
-    "message": "Sitzung in den CoS browser übertragen"
+    "message": "Sitzung in den CoS-Browser übertragen"
   },
   "popup_sign_in_permission": {
     "message": "Cookie-Zugriff abgelehnt. Erneut klicken."
@@ -1161,7 +1161,7 @@
     "message": "Sitzung übertragen"
   },
   "popup_sign_in_imported_detail": {
-    "message": "Sie sind im CoS browser angemeldet."
+    "message": "Du bist im CoS-Browser angemeldet."
   },
   "popup_sign_in_failed": {
     "message": "Fehlgeschlagen. Anmeldung in CoS neu starten."
