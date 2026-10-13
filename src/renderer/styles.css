@@ -1773,7 +1773,7 @@ main {
 .setup-instructions li + li { margin-top: 6px; }
 .setup-instructions strong { color: var(--ink); }
 .setup-optional { margin-top: 20px; padding: 16px 0 0; border-top: 1px solid var(--line); }
-.setup-optional > summary { display: flex; align-items: center; gap: 7px; list-style: none; cursor: pointer; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; }
+.setup-optional > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; list-style: none; cursor: pointer; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; }
 .tag.is-optional { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); border-radius: var(--pill); padding: 2px 8px; white-space: nowrap; }
 .setup-optional .tag { margin-left: 8px; }
 details.connector > summary { cursor: pointer; }
@@ -1905,7 +1905,7 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .browser-setup .btn-quiet { border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 6px 10px; gap: 8px; width: fit-content; max-width: 100%; white-space: normal; }
 .browser-setup .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
 .browser-setup .btn-solid { min-height: 40px; padding: 9px 18px; }
-#bridgeFolder, .setup-tunnel-open { min-width: 220px; min-height: 40px; padding: 9px 18px; justify-content: center; }
+#bridgeFolder, .setup-tunnel-open { min-width: min(220px, 100%); max-width: 100%; min-height: 40px; padding: 9px 18px; justify-content: center; }
 .step:is([data-step="tunnel"], [data-step="key"], [data-step="chatgpt"]) .step-lead { margin-top: 10px; line-height: 1.6; }
 .step:is([data-step="tunnel"], [data-step="key"]) > .step-body > .step-actions { margin-top: 22px; }
 .step:is([data-step="tunnel"], [data-step="key"], [data-step="chatgpt"]) .guide-moves { margin: 18px 0 0; gap: 10px; }
@@ -2052,8 +2052,6 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .wizard > .step.is-open > .step-body > .extension-guide:not([hidden]) { grid-column: 2; grid-row: 1 / span 40; align-self: start; }
 .wizard > .step.is-open > .step-body > .step-nav { grid-column: 1 / -1; }
 .wizard > .step.is-open .field { max-width: 460px; }
-.setup-legacy .setup-guide { display: block; }
-.setup-legacy .guide-stage { max-width: 360px; margin-top: 4px; }
 .step-nav, .browser-stage-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
 .step-nav .btn, .browser-stage-footer .btn, .browser-back { display: inline-flex; align-items: center; gap: 7px; }
 .step-nav .step-next, .browser-stage-footer .step-next { margin-left: auto; }
@@ -4654,7 +4652,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .btn.step-link { white-space: nowrap; }
 .step-main > .connectors { margin-top: 20px; }
 .step-side > .step-note { margin: 4px 0 0; }
-.step-side > .setup-legacy { margin-top: 0; }
 /* A connector's status line sits apart from the copy fields above it, not against their edge. */
 .connectors .connector > p.hint { margin-top: 12px; }
 .connectors .connector > .connector-head + p.hint { margin-top: 4px; }
@@ -4679,7 +4676,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 28px; align-items: start; margin: 26px 0 0;
   padding-top: 22px; border-top: 1px solid var(--line);
 }
-.wizard > .step.is-open > .step-body > .setup-legacy.step-wide { margin-top: 18px; }
 @container (max-width: 700px) {
   .wizard > .step.is-open > .step-body > #connectorCards { grid-template-columns: minmax(0, 1fr); }
 }
@@ -4688,7 +4684,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* Add it in ChatGPT: a taller stage, and spacing instead of rules between its blocks. */
 .step-side .guide-picture img { max-height: 380px; }
 .wizard > .step.is-open > .step-body > #connectorCards { padding-top: 0; border-top: 0; margin-top: 30px; }
-.wizard > .step.is-open > .step-body > .setup-legacy.step-wide { padding-top: 0; border-top: 0; margin-top: 22px; }
 /* The stage runs exactly as tall as the left column beside it; a rule sets off the cards below. */
 .wizard > .step.is-open > .step-body > .step-side { align-self: stretch; display: flex; flex-direction: column; }
 .step-side > .setup-guide { flex: 1; display: flex; }
