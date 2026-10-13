@@ -2266,6 +2266,8 @@
   "Started fresh. Enter your keys again.": "最初からやり直しました。キーをもう一度入力してください。",
   "The saved keys can be read again. Nothing was changed.": "保存されているキーを再び読み取れるようになりました。何も変更していません。",
   "Could not start fresh.": "やり直せませんでした。",
+  "Recording storage": "記録用ストレージ",
+  "Images and long texts recorded from your chats, up to 2 GB.": "チャットから記録した画像と長いテキスト（最大 2 GB）。",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "長時間の実行がより安定し、プロキシ環境でもトンネルが動作し、ChatGPT と同じ言葉を使います。",
   "Steadier long runs": "長時間の実行がより安定",
   "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "スリープ後も含めてチャットがより確実に復旧し、タイムラインは長いターンを正しい順序に保ちます。",

@@ -2266,6 +2266,8 @@
   "Started fresh. Enter your keys again.": "Começou do zero. Introduza novamente as suas chaves.",
   "The saved keys can be read again. Nothing was changed.": "As chaves guardadas voltaram a poder ser lidas. Nada foi alterado.",
   "Could not start fresh.": "Não foi possível começar do zero.",
+  "Recording storage": "Armazenamento de gravações",
+  "Images and long texts recorded from your chats, up to 2 GB.": "Imagens e textos longos gravados dos seus chats, até 2 GB.",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Execuções longas mais estáveis, um túnel que funciona atrás de um proxy e as palavras do próprio ChatGPT.",
   "Steadier long runs": "Execuções longas mais estáveis",
   "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "Os chats recuperam com mais fiabilidade, também depois de o computador entrar em suspensão, e a cronologia mantém os turnos longos em ordem.",

@@ -4,7 +4,7 @@ import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
-import { paintRecordingStorageNotice } from './image-storage.js';
+import { initRecordingStorageSetting, paintRecordingStorageNotice, paintRecordingStorageUsage } from './image-storage.js';
 import { paintCredentialsNotice } from './credentials-notice.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
@@ -91,6 +91,7 @@ $('pluginRefreshReset').addEventListener('click', async () => {
     if (state) paintPluginRefreshRecovery(state);
   }
 });
+initRecordingStorageSetting();
 publishStopNoticeTexts(texts => api.setStopNoticeTexts(texts));
 // The tray menu and desktop notices come from the main process, which has no catalogs.
 publishMainTexts(texts => api.setMainTexts?.(texts));
@@ -231,6 +232,7 @@ function showTab(name: string): void {
   $('workspaceSettings').hidden = false;
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
+  if (name === 'settings') void paintRecordingStorageUsage();
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.

@@ -2266,6 +2266,8 @@
   "Started fresh. Enter your keys again.": "새로 시작했습니다. 키를 다시 입력하세요.",
   "The saved keys can be read again. Nothing was changed.": "저장된 키를 다시 읽을 수 있습니다. 변경된 내용은 없습니다.",
   "Could not start fresh.": "새로 시작할 수 없습니다.",
+  "Recording storage": "기록 저장 공간",
+  "Images and long texts recorded from your chats, up to 2 GB.": "채팅에서 기록한 이미지와 긴 텍스트입니다(최대 2GB).",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "더 안정적인 장시간 실행, 프록시 뒤에서도 작동하는 터널, 그리고 ChatGPT와 같은 용어.",
   "Steadier long runs": "더 안정적인 장시간 실행",
   "Chats recover more reliably, also after your computer sleeps, and the timeline keeps a long turn in order.": "컴퓨터가 절전 모드에서 깨어난 뒤에도 채팅이 더 확실하게 복구되고, 타임라인은 긴 턴의 순서를 지킵니다.",

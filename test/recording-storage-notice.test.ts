@@ -44,3 +44,24 @@ it('stays dismissed while the store is still full, and returns when it fills up 
   paint(true);
   expect(notice.hidden).toBe(false);
 });
+
+// #1406: the clean-up was reachable only from a timeline row whose image preview was missing,
+// or once the store was already full.
+it('offers the clean-up in Settings, with the storage used', async () => {
+  const { initRecordingStorageSetting, paintRecordingStorageUsage } = await import('../src/renderer/image-storage.js');
+  getImageStorage.mockResolvedValueOnce({ ok: true as const, data: { usedBytes: 0.5 * 2 ** 30, limitBytes: 2 ** 31 } });
+  initRecordingStorageSetting();
+  await paintRecordingStorageUsage();
+  expect(document.getElementById('recordingStorageUsage')!.textContent).toBe('0.50 GB used of 2 GB');
+  document.getElementById('settingsFreeImageStorage')!.click();
+  expect(document.querySelector('.image-storage-dialog')).not.toBeNull();
+});
+
+it('keeps the description when the usage cannot be read', async () => {
+  const { paintRecordingStorageUsage } = await import('../src/renderer/image-storage.js');
+  const usage = document.getElementById('recordingStorageUsage')!;
+  const before = usage.textContent;
+  getImageStorage.mockResolvedValueOnce({ ok: false, error: 'unavailable' } as never);
+  await paintRecordingStorageUsage();
+  expect(usage.textContent).toBe(before);
+});
