@@ -4887,10 +4887,13 @@ function paintStateLine(): void {
   if (!developer && working === true) paintTurnStatus({ text: note.textContent ?? '', tone, working, ticking });
   // The turn's end can reach this line after the rows were last drawn: the header already said
   // "Worked for", while the timeline kept "Working for" and "Thinking" frozen until the next event
-  // (2026-10-12). Only a redraw of the rows retires them; one, after this repaint.
-  if (!developer && working !== true && turnWorking && !staleTurnRedraw) {
+  // (2026-10-12). Only a redraw of the rows retires them; one, after this repaint. The guard holds
+  // until the stale state itself ends: a redraw that cannot retire the lines (no rows to redraw)
+  // would otherwise schedule the next one from its own repaint, forever.
+  if (developer || working === true || !turnWorking) staleTurnRedraw = false;
+  else if (!staleTurnRedraw) {
     staleTurnRedraw = true;
-    queueMicrotask(() => { staleTurnRedraw = false; if (turnWorking && stateLine().working !== true) paintDetail(); });
+    queueMicrotask(() => { if (turnWorking && stateLine().working !== true) paintDetail(); });
   }
   // The turn lines carry the caption outside developer mode; the header keeps developer detail.
   note.classList.toggle('is-mirrored', !developer);
