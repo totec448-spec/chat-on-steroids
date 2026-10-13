@@ -273,25 +273,25 @@
     "message": "子代理聊天會留在既有對話中，無法手動壓縮或續接。"
   },
   "content_connector_identity_ambiguous": {
-    "message": "已安裝連接器的身分無法取得或不明確"
+    "message": "已安裝外掛的身分無法取得或不明確"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "未確認連接器重新整理的宣告或頁面擁有權"
+    "message": "未確認外掛重新整理的宣告或頁面擁有權"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "已要求重新整理，但未觀察到相符的結構描述變更"
   },
   "content_connector_refresh_unverified": {
-    "message": "無法驗證連接器重新整理結果"
+    "message": "無法驗證外掛重新整理結果"
   },
   "content_connector_schema_no_refresh": {
-    "message": "連接器結構描述不同，但 ChatGPT 未顯示重新整理控制項。請重新建立或發佈此自訂應用程式，以載入目前的工具結構描述。"
+    "message": "外掛結構描述不同，但 ChatGPT 未顯示重新整理控制項。請重新建立或發佈這個外掛，以載入目前的工具結構描述。"
   },
   "content_connector_settings_unreadable": {
-    "message": "無法讀取此要求所屬頁面上的連接器設定卡片"
+    "message": "無法讀取此要求所屬頁面上的外掛設定卡片"
   },
   "content_connector_settings_unverified": {
-    "message": "無法驗證精確的連接器設定"
+    "message": "無法驗證精確的外掛設定"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "附件傳輸失敗。訊息未傳送。"

@@ -273,25 +273,25 @@
     "message": "Yardımcı ajan sohbetleri mevcut konuşmalarında kalır; hiçbir zaman elle sıkıştırılmaz veya sürdürülmez."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Yüklü bağlayıcının kimliği kullanılamıyor veya belirsiz"
+    "message": "Yüklü eklentinin kimliği kullanılamıyor veya belirsiz"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Bağlayıcı yenileme beyanı veya sayfa sahipliği doğrulanmadı"
+    "message": "Eklenti yenileme beyanı veya sayfa sahipliği doğrulanmadı"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Yenileme istendi ancak eşleşen şemada bir değişiklik gözlenmedi"
   },
   "content_connector_refresh_unverified": {
-    "message": "Bağlayıcının yenilendiği doğrulanamadı"
+    "message": "Eklentinin yenilendiği doğrulanamadı"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Bağlayıcı şeması farklı, ancak ChatGPT Yenile denetimini göstermiyor. Güncel araç şemasını yüklemek için bu özel uygulamayı yeniden oluşturun veya yayımlayın."
+    "message": "Eklenti şeması farklı, ancak ChatGPT Yenile denetimini göstermiyor. Güncel araç şemasını yüklemek için bu eklentiyi yeniden oluşturun veya yayımlayın."
   },
   "content_connector_settings_unreadable": {
-    "message": "Bu isteğe ait sayfadaki bağlayıcı ayar kartı okunamadı"
+    "message": "Bu isteğe ait sayfadaki eklenti ayar kartı okunamadı"
   },
   "content_connector_settings_unverified": {
-    "message": "Bağlayıcının kesin ayarları doğrulanamadı"
+    "message": "Eklentinin kesin ayarları doğrulanamadı"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Ek aktarımı başarısız oldu. Mesaj gönderilmedi."

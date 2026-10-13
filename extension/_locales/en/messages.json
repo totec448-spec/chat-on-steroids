@@ -273,25 +273,25 @@
     "message": "Worker chats stay in their existing conversation and are never manually compacted or resumed."
   },
   "content_connector_identity_ambiguous": {
-    "message": "Installed connector identity is unavailable or ambiguous"
+    "message": "Installed plugin identity is unavailable or ambiguous"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "Connector refresh claim or page ownership was not confirmed"
+    "message": "Plugin refresh claim or page ownership was not confirmed"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "Refresh was requested, but a changed matching schema was not observed"
   },
   "content_connector_refresh_unverified": {
-    "message": "Connector refresh could not be verified"
+    "message": "Plugin refresh could not be verified"
   },
   "content_connector_schema_no_refresh": {
-    "message": "Connector schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this custom app to load the current tool schema."
+    "message": "Plugin schema differs, but ChatGPT exposes no Refresh control. Recreate or republish this plugin to load the current tool schema."
   },
   "content_connector_settings_unreadable": {
-    "message": "The connector settings card could not be read on the page this request owns"
+    "message": "The plugin settings card could not be read on the page this request owns"
   },
   "content_connector_settings_unverified": {
-    "message": "Exact connector settings could not be verified"
+    "message": "Exact plugin settings could not be verified"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "Attachment transfer failed. The message was not sent."

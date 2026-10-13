@@ -31,7 +31,7 @@ Want screen and keyboard control? Enable **Desktop** permissions and connect its
 
 > **Looking for ChatGPT's Developer mode switch?** It no longer exists. Apps are created from **Plugins → Add → Add custom MCP server**, and file edits and desktop control work without it ([#522](https://github.com/totec448-spec/chat-on-steroids/issues/522)).
 
-Core, Desktop and Plugins are separate connectors. Configure each surface you enable. Release packages include the pinned, checksum-verified `tunnel-client`.
+Core, Desktop and Plugins are separate plugins in ChatGPT. Configure each surface you enable. Release packages include the pinned, checksum-verified `tunnel-client`.
 
 ### Other tunnels
 
@@ -106,9 +106,9 @@ A read that waits on something the app cannot answer within 15 seconds gets `504
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave
 them behind, so a caller should treat a refused connection as "not running".
 
-## Permissions and connectors
+## Permissions and plugins
 
-| Connector | What it adds |
+| Plugin in ChatGPT | What it adds |
 | --- | --- |
 | **Core** | Local files, patches, terminals, saving ChatGPT-generated images, plans and workers. Available on all supported platforms. |
 | **Desktop** | Background browser tabs through the browser extension on every platform; screen inspection, mouse, keyboard and clipboard on Windows and macOS. macOS requires explicit enablement and OS permissions. |
@@ -137,11 +137,11 @@ These continuity features do not grant additional quota or access. Do not use ne
 ## Troubleshooting
 
 - **Missing or stale tools:** refresh the relevant CoS app in ChatGPT. Reloading the Chrome extension is a separate action.
-- **Provider usage limit or policy warning:** stop the affected workflow and disable its Goal/Loop automation. Follow the provider's stated reset or support/appeal process. Do not switch accounts, chats, models, connectors or tunnels to evade the restriction. A local retry or reconnection is not evidence that a policy restriction has been lifted. Keep account notices and appeal details private; a GitHub issue cannot resolve an account enforcement decision.
-- **`UNKNOWN_TOOL` for a tool that exists, about every second call:** two connectors share one Secure Tunnel ID. OpenAI hands calls round-robin to every client on one ID, so each connector receives the other's calls. Give Core, Desktop and Plugins each their own tunnel. Setup and the Plugins dialog show a warning under the field while two IDs match.
+- **Provider usage limit or policy warning:** stop the affected workflow and disable its Goal/Loop automation. Follow the provider's stated reset or support/appeal process. Do not switch accounts, chats, models, plugins or tunnels to evade the restriction. A local retry or reconnection is not evidence that a policy restriction has been lifted. Keep account notices and appeal details private; a GitHub issue cannot resolve an account enforcement decision.
+- **`UNKNOWN_TOOL` for a tool that exists, about every second call:** two plugins share one Secure Tunnel ID. OpenAI hands calls round-robin to every client on one ID, so each plugin receives the other's calls. Give Core, Desktop and Plugins each their own tunnel. Setup and the Plugins dialog show a warning under the field while two IDs match.
 - **Behind a proxy ("Tunnel-client has not been seen"):** the tunnel uses your system's proxy setting by itself (HTTP, HTTPS or SOCKS5 proxies without a login), and `ALL_PROXY` if you set it. To use a different proxy, or one that needs a login, set `HTTPS_PROXY` (for example `http://user:password@host:port`) before starting CoS; that always wins. In Setup, the connection details then show the route as "via …" instead of "direct". A proxy switched on or off applies from the next reconnect.
 - **Tunnel rejects the API key or tunnel ID:** check the saved tunnel ID, the selected setup profile, and that its key has Tunnels Read + Use for that tunnel. Extension pairing does not authenticate the tunnel. If Platform offers no matching ChatGPT workspace, retain the exact error for an access investigation; a different tunnel does not establish account eligibility.
-- **ChatGPT blocks a tool for safety:** local permission alone does not prove that ChatGPT accepted or dispatched the call. Inspect the local tool history for the exact request. If no result exists, execution is unconfirmed; do not replay a potentially executed operation or route it through another connector. Keep the task's progress and report the provider's error, selected Chat/Work surface, and app/extension versions without credentials or private content. A plan label alone does not diagnose a provider refusal.
+- **ChatGPT blocks a tool for safety:** local permission alone does not prove that ChatGPT accepted or dispatched the call. Inspect the local tool history for the exact request. If no result exists, execution is unconfirmed; do not replay a potentially executed operation or route it through another plugin. Keep the task's progress and report the provider's error, selected Chat/Work surface, and app/extension versions without credentials or private content. A plan label alone does not diagnose a provider refusal.
 - **CoS returns `TOOL_DISABLED`:** check Read-only and the named local capability. `CALLER_IDENTITY_REQUIRED` or `WORKER_IDENTITY_LOST` instead concerns exact caller ownership; neither proves that command execution is globally disabled.
 - **Extension version mismatch:** the browser extension updates itself once no chat is busy. If it stays on the old build, reload it in `chrome://extensions` (Chrome may have loaded it from another folder), then reload the ChatGPT page.
 - **Models missing:** use **Reload ChatGPT models**. The picker reflects availability in your signed-in account.

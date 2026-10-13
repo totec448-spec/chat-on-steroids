@@ -273,25 +273,25 @@
     "message": "子代理聊天会保留在现有对话中，且不会手动压缩或恢复。"
   },
   "content_connector_identity_ambiguous": {
-    "message": "已安装连接器的身份不可用或存在歧义"
+    "message": "已安装插件的身份不可用或存在歧义"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "未确认连接器刷新声明或页面归属"
+    "message": "未确认插件刷新声明或页面归属"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "已请求刷新，但未观察到匹配架构发生变化"
   },
   "content_connector_refresh_unverified": {
-    "message": "无法验证连接器刷新"
+    "message": "无法验证插件刷新"
   },
   "content_connector_schema_no_refresh": {
-    "message": "连接器架构不同，但 ChatGPT 未显示刷新控件。请重新创建或发布此自定义应用，以加载当前工具架构。"
+    "message": "插件架构不同，但 ChatGPT 未显示刷新控件。请重新创建或发布此插件，以加载当前工具架构。"
   },
   "content_connector_settings_unreadable": {
-    "message": "无法读取属于此请求的页面上的连接器设置卡片"
+    "message": "无法读取属于此请求的页面上的插件设置卡片"
   },
   "content_connector_settings_unverified": {
-    "message": "无法验证准确的连接器设置"
+    "message": "无法验证准确的插件设置"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "附件传输失败。消息未发送。"
