@@ -2303,5 +2303,7 @@
   "Freed {0} MB. {1} GB of recording storage is now available.": "{0} MB freigegeben. Jetzt sind {1} GB Aufzeichnungsspeicher verfügbar.",
   "Send now": "Jetzt senden",
   "Send into the running turn now": "Jetzt in den laufenden Durchlauf senden",
-  "The turn ended before this message could join it. It stays queued.": "Der Durchlauf endete, bevor diese Nachricht hinzukommen konnte. Sie bleibt eingereiht."
+  "The turn ended before this message could join it. It stays queued.": "Der Durchlauf endete, bevor diese Nachricht hinzukommen konnte. Sie bleibt eingereiht.",
+  "Notify when a chat finishes": "Benachrichtigen, wenn ein Chat fertig ist",
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Eine Benachrichtigung, wenn die Antwort eines Chats fertig ist, während dieses Fenster im Hintergrund ist. Worker und Chats mit Goal oder Loop benachrichtigen nicht."
 }

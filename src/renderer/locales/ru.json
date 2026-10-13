@@ -2303,5 +2303,7 @@
   "Freed {0} MB. {1} GB of recording storage is now available.": "Освобождено {0} МБ. Теперь доступно {1} ГБ хранилища записей.",
   "Send now": "Отправить сейчас",
   "Send into the running turn now": "Отправить сейчас в текущий ход",
-  "The turn ended before this message could join it. It stays queued.": "Ход завершился раньше, чем это сообщение успело в него попасть. Оно остаётся в очереди."
+  "The turn ended before this message could join it. It stays queued.": "Ход завершился раньше, чем это сообщение успело в него попасть. Оно остаётся в очереди.",
+  "Notify when a chat finishes": "Уведомлять, когда чат закончил",
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Уведомление, когда ответ чата готов, пока это окно в фоне. Воркеры и чаты с включённой Целью или Циклом не уведомляют."
 }

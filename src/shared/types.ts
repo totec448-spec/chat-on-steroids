@@ -176,6 +176,8 @@ export interface UiPrefs {
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
+  /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
+  turnNotifications?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
