@@ -5105,9 +5105,8 @@ function paintSwarm(state: SwarmState): void {
           top.append(clear);
         }
         const sub = el('div', 'model-sub');
-        const bits = [t("{0} pending", [agent.pending]), t("{0} delivered", [agent.delivered])];
-        if (agent.conversationId) bits.push(t("chat bound"));
-        sub.textContent = bits.join(' · ');
+        ui(sub, 'textContent', () => [t("{0} pending", [agent.pending]), t("{0} delivered", [agent.delivered]),
+          ...(agent.conversationId ? [t("chat bound")] : [])].join(' · '));
         row.append(top, sub);
         if (agent.task) row.append(el('p', 'hint', agent.task));
         // Why it failed, not just that it did. A worker only reaches this state when its
