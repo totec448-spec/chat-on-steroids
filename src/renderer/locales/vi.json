@@ -2246,5 +2246,8 @@
   "Could not read plugin-refresh state": "Không thể đọc trạng thái làm mới plugin",
   "Could not reset plugin-refresh state": "Không thể đặt lại trạng thái làm mới plugin",
   "Reset plugin refresh": "Đặt lại làm mới plugin",
-  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Đặt lại sẽ sao lưu trạng thái không đọc được và cho phép khởi động lại việc tự động làm mới plugin. Làm mới có thể ảnh hưởng đến các cuộc trò chuyện ChatGPT hiện có."
+  "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Đặt lại sẽ sao lưu trạng thái không đọc được và cho phép khởi động lại việc tự động làm mới plugin. Làm mới có thể ảnh hưởng đến các cuộc trò chuyện ChatGPT hiện có.",
+  "A calm capybara who lifts, chills and never panics.": "Một chú capybara điềm tĩnh, tập tạ, thư giãn và không bao giờ hoảng hốt.",
+  "A tiny hamster with a big pre-workout attitude.": "Một chú chuột hamster tí hon với tinh thần trước buổi tập đầy khí thế.",
+  "The built-in Chat On Steroids companion.": "Người bạn đồng hành có sẵn của Chat On Steroids."
 }
