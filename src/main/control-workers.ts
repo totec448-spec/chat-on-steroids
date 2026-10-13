@@ -31,15 +31,19 @@ function callerFor(route: string): { caller: Caller; action: string | undefined 
 }
 
 function enabled(): void {
-  if (!getConfig().multiAgent.enabled) throw new RequestError(403, 'workers_disabled');
+  const config = getConfig();
+  if (!config.controlApi.enabled || !config.controlApi.allowActions) throw new RequestError(403, 'actions_disabled');
+  if (!config.multiAgent.enabled) throw new RequestError(403, 'workers_disabled');
 }
 
 async function status(caller: Caller) {
   await measureSleepingWorkers(caller);
+  enabled();
   const current = statusForCaller(caller);
   const workers = [];
   for (const worker of current.state.agents.filter(agent => agent.role === 'worker')) {
     const session = worker.conversationId ? await findSessionByConversation(worker.conversationId, { requireUnique: true }) : null;
+    enabled();
     workers.push({ id: worker.id, runId: worker.runId ?? null, label: worker.label, state: worker.state,
       conversationId: worker.conversationId, sessionId: session?.id ?? null, revivable: worker.revivable,
       pending: worker.pending, awaitingAck: worker.awaitingAck, contextTokens: worker.contextTokens });
@@ -51,6 +55,7 @@ async function status(caller: Caller) {
 export async function serveWorkerRead(route: string, params: URLSearchParams): Promise<unknown | undefined> {
   const selected = callerFor(route);
   if (!selected || (selected.action !== undefined && selected.action !== 'reports')) return undefined;
+  enabled();
   const query: Record<string, string> = Object.create(null);
   for (const [key, value] of params) {
     if (Object.hasOwn(query, key)) throw new RequestError(400, 'invalid_query');
@@ -59,7 +64,6 @@ export async function serveWorkerRead(route: string, params: URLSearchParams): P
   const result = z.object(run).strict().safeParse(query);
   if (!result.success) throw new RequestError(400, 'invalid_query');
   const caller = { ...selected.caller, ...result.data };
-  enabled();
   if (!selected.action) return status(caller);
   statusForCaller(caller); // Reject foreign/unknown run selection before any inbox offer.
   const offered = offerMessagesForCaller(caller)?.messages ?? [];

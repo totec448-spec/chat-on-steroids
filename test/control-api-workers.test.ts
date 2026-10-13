@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -51,46 +51,82 @@ afterAll(async () => {
   await removeTempDir(directory);
 });
 
-async function cli(command: string, request: unknown) {
-  const file = path.join(directory, 'request.json');
-  await fs.writeFile(file, JSON.stringify(request));
-  return new Promise<{ code: number; body: any; rows: any[] }>(resolve => {
-    execFile(process.execPath, [path.resolve('scripts/t3-code-bridge.mjs'), command, '--data-dir', directory, '--request-file', file], { timeout: 10_000 }, (error, stdout) => {
-      const rows = stdout.trim().split('\n').map(line => JSON.parse(line));
-      resolve({ code: error ? Number(error.code) || 1 : 0, body: rows[0], rows });
+async function request(route: string, body?: unknown) {
+  const endpoint = JSON.parse(await fs.readFile(path.join(directory, 'control-api', 'endpoint.json'), 'utf8'));
+  const token = (await fs.readFile(path.join(directory, 'control-api', 'token'), 'utf8')).trim();
+  const response = await fetch('http://127.0.0.1:' + endpoint.port + route, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  return { status: response.status, body: await response.json() as any };
+}
+
+function worker(action: 'spawn' | 'status' | 'reports' | 'message' | 'ack', data: any) {
+  const { ownerId, ...body } = data;
+  const route = '/v1/workers/' + ownerId + (action === 'status' ? '' : '/' + action);
+  return action === 'status' || action === 'reports'
+    ? request(route + (body.runId ? '?runId=' + body.runId : ''))
+    : request(route, body);
+}
+
+async function streamEvents(sessionId: string, from: number, count: number) {
+  const endpoint = JSON.parse(await fs.readFile(path.join(directory, 'control-api', 'endpoint.json'), 'utf8'));
+  const token = (await fs.readFile(path.join(directory, 'control-api', 'token'), 'utf8')).trim();
+  return new Promise<any[]>((resolve, reject) => {
+    const events: any[] = [];
+    let buffer = '';
+    const req = http.get({ hostname: '127.0.0.1', port: endpoint.port,
+      path: '/v1/sessions/' + sessionId + '/events/stream?from=' + from,
+      headers: { authorization: 'Bearer ' + token } }, res => {
+      if (res.statusCode !== 200) { req.destroy(); reject(new Error('Unexpected HTTP ' + res.statusCode)); return; }
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        buffer += chunk;
+        for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
+          const frame = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+          const data = frame.split('\n').find(line => line.startsWith('data: '));
+          if (!data || frame.includes('event: end')) continue;
+          events.push(JSON.parse(data.slice(6)));
+          if (events.length === count) { req.destroy(); resolve(events); return; }
+        }
+      });
     });
+    req.setTimeout(5000, () => { req.destroy(); reject(new Error('Event stream did not advance')); });
+    req.on('error', reject);
   });
 }
 
 it('lets a local orchestrator spawn real broker workers without a ChatGPT prime or unattributed opt-in', async () => {
-  const result = await cli('delegate', { ownerId, context: 'Read-only assignment.', workers: [{ label: 'Audit', task: 'Inspect and report.' }] });
-  expect(result.code, JSON.stringify(result.body)).toBe(0);
+  const result = await worker('spawn', { ownerId, context: 'Read-only assignment.', workers: [{ label: 'Audit', task: 'Inspect and report.' }] });
+  expect(result.status, JSON.stringify(result.body)).toBe(202);
   expect(result.body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
-  const status = await cli('agents', { ownerId, runId: result.body.runId });
+  const status = await worker('status', { ownerId, runId: result.body.runId });
   expect(status.body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
   expect(status.body.freeWorkerSlots).toBe(config.getConfig().multiAgent.maxWorkers - 1);
   expect(broker.primeConversation(result.body.runId)).toBeNull();
 });
 
 it('collects exact worker reports across parking, explicitly acknowledges them, and reuses the sleeper', async () => {
-  const spawn = (await cli('delegate', { ownerId, workers: [{ task: 'First assignment.' }] })).body;
+  const spawn = (await worker('spawn', { ownerId, workers: [{ task: 'First assignment.' }] })).body;
   broker.bindConversation('worker-1', 'local-worker-chat', spawn.runId);
   broker.finishAgent({ conversationId: 'local-worker-chat' }, 'RESULT: first assignment complete');
   broker.releaseQuiescentRun({ allowPendingReports: true }, spawn.runId);
-  const reports = (await cli('reports', { ownerId, runId: spawn.runId })).body;
+  const reports = (await worker('reports', { ownerId, runId: spawn.runId })).body;
   expect(reports.messages).toMatchObject([{ from: 'worker-1', text: expect.stringContaining('first assignment complete') }]);
-  expect((await cli('reports', { ownerId, runId: spawn.runId })).body.messages.map((row: any) => row.id)).toEqual(reports.messages.map((row: any) => row.id));
-  expect((await cli('ack', { ownerId, runId: spawn.runId, messageIds: reports.messages.map((row: any) => row.id) })).body.acknowledged).toEqual(reports.messages.map((row: any) => row.id));
-  expect((await cli('reports', { ownerId, runId: spawn.runId })).body.messages).toEqual([]);
-  const wake = await cli('message', { ownerId, runId: spawn.runId, messages: [{ to: 'worker-1', text: 'Second assignment.', label: 'Follow-up' }] });
-  expect(wake.code, JSON.stringify(wake.body)).toBe(0);
+  expect((await worker('reports', { ownerId, runId: spawn.runId })).body.messages.map((row: any) => row.id)).toEqual(reports.messages.map((row: any) => row.id));
+  expect((await worker('ack', { ownerId, runId: spawn.runId, messageIds: reports.messages.map((row: any) => row.id) })).body.acknowledged).toEqual(reports.messages.map((row: any) => row.id));
+  expect((await worker('reports', { ownerId, runId: spawn.runId })).body.messages).toEqual([]);
+  const wake = await worker('message', { ownerId, runId: spawn.runId, messages: [{ to: 'worker-1', text: 'Second assignment.', label: 'Follow-up' }] });
+  expect(wake.status, JSON.stringify(wake.body)).toBe(202);
   expect(wake.body.waking).toEqual(['worker-1']);
   expect(wake.body.runId).not.toBe(spawn.runId);
-  expect((await cli('agents', { ownerId, runId: wake.body.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'waking', label: 'Follow-up' }]);
+  expect((await worker('status', { ownerId, runId: wake.body.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'waking', label: 'Follow-up' }]);
 });
 
 it('retains local ownership and unread reports through a broker restart', async () => {
-  const spawn = (await cli('delegate', { ownerId, workers: [{ task: 'Complete a task.' }] })).body;
+  const spawn = (await worker('spawn', { ownerId, workers: [{ task: 'Complete a task.' }] })).body;
   broker.bindConversation('worker-1', 'restart-worker', spawn.runId);
   broker.finishAgent({ conversationId: 'restart-worker' }, 'RESULT: retained report');
   broker.releaseQuiescentRun({ allowPendingReports: true }, spawn.runId);
@@ -98,65 +134,93 @@ it('retains local ownership and unread reports through a broker restart', async 
   broker.resetAgentsForTests();
   broker.restoreSwarm(snapshot);
   broker.onSwarmPersistNow(state => durable.writeDurableNow('swarm', state));
-  const status = await cli('agents', { ownerId, runId: spawn.runId });
+  const status = await worker('status', { ownerId, runId: spawn.runId });
   expect(status.body.workers).toMatchObject([{ id: 'worker-1', state: 'sleeping', revivable: true }]);
-  expect((await cli('reports', { ownerId, runId: spawn.runId })).body.messages).toMatchObject([{ from: 'worker-1', text: expect.stringContaining('retained report') }]);
+  expect((await worker('reports', { ownerId, runId: spawn.runId })).body.messages).toMatchObject([{ from: 'worker-1', text: expect.stringContaining('retained report') }]);
 });
 
 it('does not reoffer successfully acknowledged reports after loading the durable broker snapshot', async () => {
-  const spawn = (await cli('delegate', { ownerId, workers: [{ task: 'Complete a task.' }] })).body;
+  const spawn = (await worker('spawn', { ownerId, workers: [{ task: 'Complete a task.' }] })).body;
   broker.bindConversation('worker-1', 'acked-worker', spawn.runId);
   broker.finishAgent({ conversationId: 'acked-worker' }, 'RESULT: consumed report');
   broker.releaseQuiescentRun({ allowPendingReports: true }, spawn.runId);
   await broker.persistCriticalSwarmNow();
-  const reports = (await cli('reports', { ownerId, runId: spawn.runId })).body;
-  expect((await cli('ack', { ownerId, runId: spawn.runId, messageIds: reports.messages.map((row: any) => row.id) })).code).toBe(0);
+  const reports = (await worker('reports', { ownerId, runId: spawn.runId })).body;
+  expect((await worker('ack', { ownerId, runId: spawn.runId, messageIds: reports.messages.map((row: any) => row.id) })).status).toBe(200);
   const snapshot = await durable.readDurable<NonNullable<ReturnType<typeof broker.snapshotSwarm>>>('swarm');
   broker.resetAgentsForTests();
   broker.restoreSwarm(snapshot);
   broker.onSwarmPersistNow(state => durable.writeDurableNow('swarm', state));
-  expect((await cli('reports', { ownerId, runId: spawn.runId })).body.messages).toEqual([]);
+  expect((await worker('reports', { ownerId, runId: spawn.runId })).body.messages).toEqual([]);
 });
 
 it('cannot use another local owner or a ChatGPT prime family through its run id', async () => {
   const otherOwner = '22222222-2222-4222-8222-222222222222';
-  const own = (await cli('delegate', { ownerId, workers: [{ task: 'Owner one.' }] })).body;
-  const foreign = (await cli('delegate', { ownerId: otherOwner, workers: [{ task: 'Owner two.' }] })).body;
-  expect((await cli('agents', { ownerId, runId: foreign.runId })).code).toBe(1);
-  expect((await cli('message', { ownerId, runId: foreign.runId, messages: [{ to: 'worker-1', text: 'Wrong owner.' }] })).code).toBe(1);
+  const own = (await worker('spawn', { ownerId, workers: [{ task: 'Owner one.' }] })).body;
+  const foreign = (await worker('spawn', { ownerId: otherOwner, workers: [{ task: 'Owner two.' }] })).body;
+  expect((await worker('status', { ownerId, runId: foreign.runId })).status).toBe(500);
+  expect((await worker('message', { ownerId, runId: foreign.runId, messages: [{ to: 'worker-1', text: 'Wrong owner.' }] })).status).toBe(500);
   const chat = broker.spawn({ caller: { conversationId: 'chatgpt-prime' }, workers: [{ task: 'Existing ChatGPT family.' }] });
-  expect((await cli('agents', { ownerId, runId: chat.runId })).code).toBe(1);
-  expect((await cli('agents', { ownerId, runId: own.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
-  expect((await cli('agents', { ownerId: otherOwner, runId: foreign.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
+  expect((await worker('status', { ownerId, runId: chat.runId })).status).toBe(500);
+  expect((await worker('status', { ownerId, runId: own.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
+  expect((await worker('status', { ownerId: otherOwner, runId: foreign.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
 });
 
-it('publishes no worker when local actions are revoked during its durability barrier', async () => {
+it.each(['actions', 'workers'])('publishes no worker when %s are revoked during its durability barrier', async setting => {
   const barrier = faultGate();
   let first = true;
   broker.onSwarmPersistNow(async snapshot => {
     if (first) { first = false; await barrier.hold(); }
     await durable.writeDurableNow('swarm', snapshot);
   });
-  const pending = cli('delegate', { ownerId, workers: [{ task: 'Should be withdrawn.' }] });
+  const pending = worker('spawn', { ownerId, workers: [{ task: 'Should be withdrawn.' }] });
   await barrier.entered;
   const current = config.getConfig();
-  await config.saveConfig({ ...current, controlApi: { enabled: true, allowActions: false } });
+  await config.saveConfig({ ...current,
+    controlApi: { enabled: true, allowActions: setting !== 'actions' },
+    multiAgent: { ...current.multiAgent, enabled: setting !== 'workers' }
+  });
   barrier.release();
   const result = await pending;
-  expect(result.code).toBe(1);
-  expect((await cli('agents', { ownerId })).body.workers).toEqual([]);
+  expect(result.status).toBe(403);
+  await config.saveConfig({ ...config.getConfig(), controlApi: { enabled: true, allowActions: true },
+    multiAgent: { ...current.multiAgent, enabled: true }
+  });
+  expect((await worker('status', { ownerId })).body.workers).toEqual([]);
 });
 
 it('can resume a limited real event stream without skipping a row placed after a revised message', async () => {
-  const recorded = await createSession({ title: 'Cursor test' });
+  const spawn = (await worker('spawn', { ownerId, workers: [{ task: 'Report progress.' }] })).body;
+  broker.bindConversation('worker-1', 'progress-worker', spawn.runId);
+  const recorded = await createSession({ title: 'Worker progress', conversationId: 'progress-worker',
+    origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Report progress.' }
+  });
+  const status = (await worker('status', { ownerId, runId: spawn.runId })).body;
+  expect(status.workers[0].sessionId).toBe(recorded.id);
   const turnId = 'cursor-turn';
   const text = (value: string) => ({ text: value, chars: value.length, truncated: false });
   const start = await appendEvent(recorded.id, { kind: 'turn_start', source: 'extension', time: 10, turnId });
   await upsertMessageEvent(recorded.id, { kind: 'assistant_message', source: 'extension', time: 20, turnId, messageId: 'cursor-message', message: text('Working'), final: false, state: 'streaming' });
   const end = await appendEvent(recorded.id, { kind: 'turn_end', source: 'extension', time: 30, turnId, outcome: 'completed' });
   const revision = (await upsertMessageEvent(recorded.id, { kind: 'assistant_message', source: 'extension', time: 40, turnId, messageId: 'cursor-message', message: text('Finished'), final: true, state: 'final' })).event;
-  const first = await cli('updates', { sessionId: recorded.id, from: start.seq, limit: 2, durationMs: 500 });
-  expect(first.rows.filter(row => row.event).map(row => row.event.seq)).toEqual([start.seq, end.seq]);
-  const resumed = await cli('updates', { sessionId: recorded.id, from: first.rows.at(-1).nextFrom, limit: 1, durationMs: 500 });
-  expect(resumed.rows.filter(row => row.event).map(row => row.event.seq)).toEqual([revision.seq]);
+  const first = await streamEvents(status.workers[0].sessionId, start.seq, 2);
+  expect(first.map(event => event.seq)).toEqual([start.seq, end.seq]);
+  const resumed = await streamEvents(recorded.id, first.at(-1).seq + 1, 1);
+  expect(resumed.map(event => event.seq)).toEqual([revision.seq]);
+});
+
+it.each(['actions', 'workers'])('refuses every worker route when %s are disabled while ordinary reads remain available', async setting => {
+  const spawn = (await worker('spawn', { ownerId, workers: [{ task: 'Keep ownership.' }] })).body;
+  const current = config.getConfig();
+  await config.saveConfig({ ...current,
+    controlApi: { enabled: true, allowActions: setting !== 'actions' },
+    multiAgent: { ...current.multiAgent, enabled: setting !== 'workers' }
+  });
+  for (const action of ['status', 'reports', 'spawn', 'message', 'ack'] as const) {
+    const response = await worker(action, { ownerId, runId: spawn.runId });
+    expect(response.status, action).toBe(403);
+    expect(response.body).toEqual({ error: setting === 'actions' ? 'actions_disabled' : 'workers_disabled' });
+  }
+  expect((await request('/v1/health')).status).toBe(200);
+  expect((await request('/v1/sessions')).status).toBe(200);
 });
