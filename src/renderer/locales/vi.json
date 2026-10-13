@@ -2300,5 +2300,8 @@
   "Freeing space in the background. You can close this window.": "Đang giải phóng bộ nhớ ở chế độ nền. Bạn có thể đóng cửa sổ này.",
   "Free 1 GB from old chats": "Giải phóng 1 GB từ cuộc trò chuyện cũ",
   "Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.": "Xóa vĩnh viễn khoảng 1 GB ảnh và văn bản dài đầy đủ khỏi các cuộc trò chuyện không dùng trong một tuần, cũ nhất trước? Các cuộc trò chuyện vẫn còn, tin nhắn dài và kết quả công cụ giữ lại phần đầu.",
-  "Freed {0} MB. {1} GB of recording storage is now available.": "Đã giải phóng {0} MB. Hiện có {1} GB bộ nhớ ghi lại trống."
+  "Freed {0} MB. {1} GB of recording storage is now available.": "Đã giải phóng {0} MB. Hiện có {1} GB bộ nhớ ghi lại trống.",
+  "Send now": "Gửi ngay",
+  "Send into the running turn now": "Gửi ngay vào lượt đang chạy",
+  "The turn ended before this message could join it. It stays queued.": "Lượt đã kết thúc trước khi tin nhắn này kịp tham gia. Tin nhắn vẫn nằm trong hàng đợi."
 }

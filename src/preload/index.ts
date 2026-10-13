@@ -340,6 +340,7 @@ const api = {
   },
   retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
   editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),
+  sendQueuedInputNow: (id: string) => call<boolean>('sessions:sendQueuedNow', { id }),
   reorderQueuedInputs: (sessionId: string, ids: string[]) => call<boolean>('sessions:reorderInputs', { sessionId, ids }),
   cancelInput: (id: string) => call<boolean>('sessions:cancelInput', { id }),
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),

@@ -2300,5 +2300,8 @@
   "Freeing space in the background. You can close this window.": "Libération de l'espace en arrière-plan. Vous pouvez fermer cette fenêtre.",
   "Free 1 GB from old chats": "Libérer 1 Go des anciens chats",
   "Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.": "Supprimer définitivement environ 1 Go d'images et de longs textes complets des chats inutilisés depuis une semaine, les plus anciens d'abord ? Les chats restent, et les longs messages et résultats d'outils gardent leur début.",
-  "Freed {0} MB. {1} GB of recording storage is now available.": "{0} Mo libérés. {1} Go de stockage des enregistrements sont maintenant disponibles."
+  "Freed {0} MB. {1} GB of recording storage is now available.": "{0} Mo libérés. {1} Go de stockage des enregistrements sont maintenant disponibles.",
+  "Send now": "Envoyer maintenant",
+  "Send into the running turn now": "Envoyer maintenant dans le tour en cours",
+  "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente."
 }
