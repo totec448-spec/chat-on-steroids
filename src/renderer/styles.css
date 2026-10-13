@@ -1199,6 +1199,26 @@ main {
 
 #dismissPluginRefreshReminder { flex: none; }
 
+/* A one-time offer, not a warning: the What's New dialog's icon tile and buttons, in a notice row. */
+.notice.offer-card { gap: 14px; padding: 12px 18px; animation: offer-card-arrive .42s cubic-bezier(.16, 1, .3, 1) both; }
+.offer-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 10px;
+  background: var(--hover); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 6px 16px -10px #0008; }
+.offer-icon .ico { --ico: 16px; --glyph: 16px; color: var(--ink); }
+.offer-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.offer-text b { font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 600; }
+.offer-text em { font-style: normal; color: var(--soft); line-height: 1.4; }
+.offer-later, .offer-accept { flex: none; border: 0; font: inherit; font-size: calc(12px * var(--text-scale, 1)); cursor: pointer;
+  border-radius: 10px; transition: background-color .14s, color .14s, transform .16s cubic-bezier(.16, 1, .3, 1); }
+.offer-later { padding: 7px 10px; background: none; color: var(--faint); font-weight: 500; }
+.offer-later:hover { color: var(--ink); background: var(--hover); }
+.offer-accept { min-width: 84px; padding: 7px 14px; background: var(--ink); color: var(--page); font-weight: 600; box-shadow: 0 6px 16px -10px #000a; }
+.offer-accept:hover { transform: translateY(-1px); }
+.offer-accept:active { transform: translateY(0) scale(.98); }
+.offer-later:focus-visible, .offer-accept:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.offer-later:disabled, .offer-accept:disabled { opacity: .55; cursor: default; transform: none; }
+@keyframes offer-card-arrive { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .notice.offer-card { animation: none; } }
+
 /* A state that blocks sending, not a tip: stated in weight, as `.hint.is-warn` does. */
 .notice.is-warn span { font-weight: 600; }
 .notice.is-warn .ico { color: var(--ink); }
