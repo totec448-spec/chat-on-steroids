@@ -4715,6 +4715,18 @@ After successful startup, established health reports retain their connection-gen
 lifetime; unrelated later settings saves do not silence them. Ordinary callers omit the
 predicate and retain the existing lifecycle behavior.
 
+**Explicit update command.** `update:all` / preload `updateAll()` groups concurrent presses
+and stages supported releases. Ready installers ask for native approval in the selected
+interface language; Keep working is the default. Cancellation grants neither shutdown nor
+connector intent. Approval commits exact-target intent before ordinary shutdown; the staged
+version is rechecked before quitting. Manual platform steps remain manual. A failed release
+check still requests the running connectors and preserves the app failure. Receipts
+`restarting/manual/checking-connectors/cancelled` prove no component completion. The explicit
+target build may connect once with auto-connect off without changing preferences. Startup
+consumes that reservation durably and uses the settings-incarnation predicate. Activity
+explains the connection exception and possible restart, retains errors until explicit retry,
+and disables the action while its IPC receipt is outstanding.
+
 ## 19. Debugging, tests and working here
 
 Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one

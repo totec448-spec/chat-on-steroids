@@ -2428,6 +2428,37 @@ it('says nothing about being current until the check has actually answered', asy
 /**
  * A staged update is not "up to date", and it is not a failure either.
  */
+it('runs Update all once on explicit click and keeps it busy across state pushes, then allows retry', async () => {
+  let resolve!: (reply: any) => void;
+  const updateAll = vi.fn(() => new Promise<any>(done => { resolve = done; }));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  expect(button).not.toBeNull();
+  expect(w.document.querySelector('.update-actions')!.textContent).toContain('asked before the app restarts');
+  expect(button.getAttribute('aria-describedby')).toBe('updateAllNotice');
+  button.click(); button.click(); push(structuredClone(state));
+  expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
+  resolve({ ok: false, error: 'Network unavailable' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(button.textContent).toBe('Update all');
+  button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
+  resolve({ ok: true, data: 'manual' });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(w.document.body.textContent).toContain('Download link opened. Install the app to continue');
+});
+
+it.each(['reply', 'transport'])('retains the update command %s error across state pushes', async kind => {
+  const updateAll = vi.fn(() => kind === 'reply' ? Promise.resolve({ ok: false, error: 'Network unavailable' }) : Promise.reject(new Error('Network unavailable')));
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+  push(structuredClone(state));
+  expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
+  expect(w.document.getElementById('updateAllError')!.textContent).toContain('Network unavailable');
+  expect(updateAll).toHaveBeenCalledTimes(1);
+});
+
 it('reports a staged update in the Activity line and the header bar', async () => {
   const mounted = await mountChat();
   const staged = structuredClone(mounted.state) as any;
