@@ -2304,6 +2304,8 @@
   "Send now": "Gửi ngay",
   "Send into the running turn now": "Gửi ngay vào lượt đang chạy",
   "The turn ended before this message could join it. It stays queued.": "Lượt đã kết thúc trước khi tin nhắn này kịp tham gia. Tin nhắn vẫn nằm trong hàng đợi.",
+  "Keep the computer awake": "Giữ máy tính không ngủ",
+  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Khi một cuộc trò chuyện đang làm việc, máy tính không chuyển sang chế độ ngủ để các tác vụ dài tiếp tục chạy. Màn hình vẫn có thể tắt.",
   "Notify when a chat finishes": "Thông báo khi một cuộc trò chuyện xong",
   "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Hiện thông báo khi câu trả lời của một cuộc trò chuyện hoàn tất trong lúc cửa sổ này ở chế độ nền. Worker và các cuộc trò chuyện bật Goal hoặc Loop sẽ không thông báo."
 }
