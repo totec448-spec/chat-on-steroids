@@ -2309,5 +2309,7 @@
   "Messages during a running turn": "Mensagens durante um turno em curso",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "O que uma mensagem enviada enquanto o ChatGPT trabalha faz por predefinição. ⌘⇧Enter (Ctrl+Shift+Enter no Windows e Linux) envia-a da outra forma.",
   "Join the running turn": "Juntar-se ao turno em curso",
-  "Wait until the turn ends": "Esperar que o turno termine"
+  "Wait until the turn ends": "Esperar que o turno termine",
+  "Notify when a chat finishes": "Avisar quando um chat terminar",
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Uma notificação quando a resposta de um chat fica pronta enquanto esta janela está em segundo plano. Os workers e os chats com Goal ou Loop ativado não avisam."
 }

@@ -2309,5 +2309,7 @@
   "Messages during a running turn": "Сообщения во время хода",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Что по умолчанию делает сообщение, отправленное, пока ChatGPT работает. ⌘⇧Enter (Ctrl+Shift+Enter в Windows и Linux) отправляет его другим способом.",
   "Join the running turn": "Добавить в текущий ход",
-  "Wait until the turn ends": "Ждать окончания хода"
+  "Wait until the turn ends": "Ждать окончания хода",
+  "Notify when a chat finishes": "Уведомлять, когда чат закончил",
+  "A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.": "Уведомление, когда ответ чата готов, пока это окно в фоне. Воркеры и чаты с включённой Целью или Циклом не уведомляют."
 }
