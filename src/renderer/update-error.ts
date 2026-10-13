@@ -6,7 +6,7 @@ export function updateErrorText(source: string): string {
     case 'There is no downloaded update to install yet':
       return t('The downloaded update could not be confirmed for installation.');
     case 'Could not read plugin-refresh state':
-      return t('The saved connector update state could not be read.');
+      return t('The saved plugin update state could not be read.');
     case 'the latest release has no usable version tag':
     case 'the release page named no usable version tag':
       return t('The release information has no valid version number.');

@@ -273,25 +273,25 @@
     "message": "ワーカーチャットは現在の会話のまま維持され、手動で圧縮したり再開したりすることはありません。"
   },
   "content_connector_identity_ambiguous": {
-    "message": "インストール済みコネクターの識別情報を取得できないか、特定できません"
+    "message": "インストール済みプラグインの識別情報を取得できないか、特定できません"
   },
   "content_connector_refresh_claim_unconfirmed": {
-    "message": "コネクターの更新要求またはページの所有状態を確認できませんでした"
+    "message": "プラグインの更新要求またはページの所有状態を確認できませんでした"
   },
   "content_connector_refresh_schema_unchanged": {
     "message": "更新を要求しましたが、一致するスキーマの変更を確認できませんでした"
   },
   "content_connector_refresh_unverified": {
-    "message": "コネクターの更新を確認できませんでした"
+    "message": "プラグインの更新を確認できませんでした"
   },
   "content_connector_schema_no_refresh": {
-    "message": "コネクターのスキーマが異なりますが、ChatGPTに更新ボタンがありません。現在のツールスキーマを読み込むには、このカスタムアプリを再作成するか再公開してください。"
+    "message": "プラグインのスキーマが異なりますが、ChatGPTに更新ボタンがありません。現在のツールスキーマを読み込むには、このプラグインを再作成するか再公開してください。"
   },
   "content_connector_settings_unreadable": {
-    "message": "このリクエストに対応するページでコネクター設定を読み取れませんでした"
+    "message": "このリクエストに対応するページでプラグイン設定を読み取れませんでした"
   },
   "content_connector_settings_unverified": {
-    "message": "コネクターの正確な設定を確認できませんでした"
+    "message": "プラグインの正確な設定を確認できませんでした"
   },
   "content_delivery_attachment_transfer_failed": {
     "message": "添付ファイルの転送に失敗しました。メッセージは送信されていません。"
