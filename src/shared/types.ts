@@ -176,6 +176,8 @@ export interface UiPrefs {
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
+  /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
+  turnNotifications?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
   followUp?: 'steer' | 'queue';
   /** Codex's "Enter key behavior": Enter sends (missing or true), or only Cmd/Ctrl+Enter sends (false). */
