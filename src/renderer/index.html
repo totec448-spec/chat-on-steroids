@@ -147,6 +147,15 @@
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
+      <div class="notice offer-card" id="pluginRefreshOffer" role="region" aria-labelledby="pluginRefreshOfferTitle" hidden>
+        <div class="offer-icon"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i></div>
+        <div class="offer-text">
+          <b id="pluginRefreshOfferTitle">Keep plugins up to date in ChatGPT</b>
+          <em>When an update changes a plugin's tools, Chat On Steroids refreshes it in ChatGPT for you. You can change this later in Settings.</em>
+        </div>
+        <button class="offer-later" id="pluginRefreshOfferLater" type="button">Not now</button>
+        <button class="offer-accept" id="pluginRefreshOfferAccept" type="button">Turn on</button>
+      </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
         <i class="ico ph ph-activity" aria-hidden="true"></i>
         <span>The tools of a Chat On Steroids plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
@@ -160,7 +169,7 @@
       <div class="notice" id="recordingStorageFull" role="status" hidden>
         <i class="ico ph ph-warning" aria-hidden="true"></i>
         <span>Recording storage is full. New images and long texts are no longer saved in your chats.</span>
-        <button class="btn btn-quiet" id="freeRecordingStorage" type="button">Free image storage</button>
+        <button class="btn btn-quiet" id="freeRecordingStorage" type="button">Free storage</button>
         <button class="btn btn-icon" id="dismissRecordingStorageFull" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
       </div>
@@ -1098,8 +1107,21 @@
                     </select>
                   </div>
                   <div class="setting">
-                    <span class="setting-text"><b>Recording storage</b><em id="recordingStorageUsage">Images and long texts recorded from your chats, up to 2 GB.</em></span>
-                    <button class="btn" id="settingsFreeImageStorage" type="button">Free image storage</button>
+                    <span class="setting-text"><b>Recording storage</b><em id="recordingStorageUsage">Images and long texts recorded from your chats.</em></span>
+                    <button class="btn" id="settingsFreeImageStorage" type="button">Free storage</button>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b id="recordingStorageLimitTitle">Storage size</b>
+                      <em>How much space recordings may use on this computer. When it is full, new images and the full copies of long texts are no longer kept.</em>
+                    </span>
+                    <select id="recordingStorageLimit" aria-labelledby="recordingStorageLimitTitle">
+                      <option value="2">2 GB</option>
+                      <option value="5">5 GB</option>
+                      <option value="10">10 GB</option>
+                      <option value="20">20 GB</option>
+                      <option value="50">50 GB</option>
+                    </select>
                   </div>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">API provider</h2><p>Set the provider, model, and credentials for API-based decisions.</p></div></header>
