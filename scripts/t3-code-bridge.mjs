@@ -122,6 +122,7 @@ function sendBody(value, delegate) {
       'Assignments (JSON):', JSON.stringify({ context: value.context ?? '', workers: value.workers })
     ].join('\n\n');
   }
+  text(body.text, 64_000);
   return body;
 }
 
@@ -160,12 +161,15 @@ function updates(connection, route, from, durationMs, limit) {
             if (!data) continue;
             const value = JSON.parse(data);
             if (lines.some(line => line === 'event: end')) {
-              finish(typeof value.reason === 'string' && /^[a-z_]{1,80}$/.test(value.reason) ? value.reason : 'ended'); return;
+              const reason = value.reason;
+              if (!['stopped', 'max_duration', 'slow_consumer', 'session_gone', 'error'].includes(reason)) fail('invalid_event');
+              finish(reason, ['slow_consumer', 'session_gone', 'error'].includes(reason) ? new Error(reason === 'error' ? 'stream_error' : reason) : undefined);
+              return;
             }
             const id = lines.find(line => line.startsWith('id:'))?.slice(3).trim();
             if (!/^\d{1,8}$/.test(id ?? '') || value.seq !== Number(id)) fail('invalid_event');
-            if (value.seq < nextFrom) continue;
-            nextFrom = value.seq + 1;
+            if (value.seq < from) continue;
+            nextFrom = Math.max(nextFrom, value.seq + 1);
             emit({ event: value, nextFrom });
             if (++count >= limit) { finish('limit'); return; }
           }
@@ -236,7 +240,11 @@ try {
       const streamQuery = new URLSearchParams(route.split('?')[1]);
       const pageQuery = new URLSearchParams({ from: streamQuery.get('from'), limit: String(input.limit ?? 100), kinds: streamQuery.get('kinds') });
       const page = await request(connection, route.split('/events/stream')[0] + '/events?' + pageQuery);
-      for (const event of page.events) emit({ event, nextFrom: event.seq + 1 });
+      let nextFrom = input.from ?? 0;
+      for (const event of page.events) {
+        nextFrom = Math.max(nextFrom, event.seq + 1);
+        emit({ event, nextFrom });
+      }
       emit({ end: 'page', nextFrom: page.nextFrom });
     }
   }

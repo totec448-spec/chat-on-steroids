@@ -189,3 +189,35 @@ it('stops at the event limit and leaves later events available at the returned c
   };
   expect((await run('updates', { sessionId, limit: 1 })).rows).toEqual([{ event: { seq: 1, kind: 'progress' }, nextFrom: 2 }, { end: 'limit', nextFrom: 2 }]);
 });
+
+it('returns failure and the consumed cursor when CoS ends a stream with an error', async () => {
+  answer = (_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('id: 4\nevent: progress\ndata: {"seq":4,"kind":"progress"}\n\nevent: end\ndata: {"reason":"error"}\n\n');
+  };
+  const result = await run('updates', { sessionId });
+  expect(result.code).toBe(1);
+  expect(result.rows).toEqual([{ event: { seq: 4, kind: 'progress' }, nextFrom: 5 }, { end: 'error', nextFrom: 5 }, { error: 'stream_error' }]);
+});
+
+it('refuses a delegation whose serialized assignments exceed the CoS message ceiling', async () => {
+  let contacted = false;
+  answer = (_req, res) => { contacted = true; json(res, {}); };
+  const result = await run('delegate', { id: messageId, workers: Array.from({ length: 8 }, () => ({ task: '"'.repeat(4000) })) });
+  expect(result.rows[0].error).toBe('invalid_text');
+  expect(contacted).toBe(false);
+});
+
+it.each(['stream', 'page'])('keeps revisions and later timeline rows when sequences arrive out of order (%s)', async mode => {
+  if (mode === 'page') routes = ['/v1/sessions/{id}/events'];
+  const events = [{ seq: 9, kind: 'assistant_message' }, { seq: 7, kind: 'turn_end' }];
+  answer = (_req, res) => {
+    if (mode === 'page') json(res, { events, nextFrom: 10, total: 2 });
+    else {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(events.map(event => `id: ${event.seq}\nevent: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`).join('') + 'event: end\ndata: {"reason":"stopped"}\n\n');
+    }
+  };
+  const result = await run('updates', { sessionId, from: 7 });
+  expect(result.rows).toEqual([{ event: events[0], nextFrom: 10 }, { event: events[1], nextFrom: 10 }, { end: mode === 'page' ? 'page' : 'stopped', nextFrom: 10 }]);
+});
