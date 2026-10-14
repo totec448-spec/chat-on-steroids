@@ -214,7 +214,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters); a click opens the chat. |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
-| Keep awake | On (`ui.keepAwake`, missing means on). | Codex's "Prevent sleep while running". `keep-awake.ts` holds `powerSaveBlocker` (`prevent-app-suspension`: the system stays awake, the screen may sleep) while any session is working by `sessionWorkingAt` with the bridge's `sessionActivityExpiresAt` deadline, so a chat that died mid-turn releases it when its deadline passes. Refreshed on session changes, at the nearest deadline, every 60 s and when the setting changes. |
+| Keep awake | The computer (`ui.keepAwake` on, missing means on; `ui.keepScreenAwake` off). | Codex's "Prevent sleep while running". One select: Off / The computer / The computer and screen. `keep-awake.ts` holds `powerSaveBlocker` (`prevent-app-suspension`: the system stays awake, the screen may sleep; with `keepScreenAwake`, `prevent-display-sleep`, because Windows Modern Standby laptops go to standby once the screen turns off whatever else is held, and the hold is swapped when the choice changes) while any session is working by `sessionWorkingAt` with the bridge's `sessionActivityExpiresAt` deadline, so a chat that died mid-turn releases it when its deadline passes. Refreshed on session changes, at the nearest deadline, every 60 s and when the setting changes. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 | Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
@@ -2008,8 +2008,9 @@ Settings. `syncCosBrowser()` starts it after the bridge listens (the extension l
 as soon as it loads), stops it when another browser is chosen, and the app stops it on quit.
 
 - **Session.** One persistent partition (`persist:cos-browser`). Its windows are `BaseWindow`s
-  with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing or
-  minimizing one hides it. The first time the user does that, one desktop notice (a `MAIN_TEXTS`
+  with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing one
+  hides it. Minimizing is an ordinary minimize: the window stays in the taskbar/Dock, and the
+  extension sees it `minimized` until it is restored (#1464). The first time the user closes one, one desktop notice (a `MAIN_TEXTS`
   pair, "menu bar" on macOS) says it is still running and how to bring it back; `ui.cosBrowserTrayHint`
   keeps it to once per install, and a hide the app makes itself never counts. `cosBrowser:show` (preload `showCosBrowser()`) brings its last window
   forward, or opens one on ChatGPT; opening a chat from the app reveals that chat's window.
@@ -3434,6 +3435,8 @@ in §19. Do not infer permission to launch development subagents from a product 
 completion boundary, and decide whether another useful instruction is owed. Goal can stop
 when its finish line is met. Loop continues improving/checking within that task until Off;
 it must not invent an unrelated project just to keep generating.
+
+**Repeating Goal.** Goal sees answers, not tool results. When the last three rounds of a Goal chat end in the same visible answer (case, punctuation and spacing ignored), a `continue` decision is not sent: `pauseRepeatingGoal` switches Goal off for that chat, records a timeline note naming the answer, and shows the translated `Goal paused` desktop notice (`STOP_NOTICE_TEXTS`). Loop is exempt.
 
 `goal.ts` owns objectives, chat switches, reply obligations, helper roles and decision attempts.
 `shared/goal.ts` owns bounded prompt/contracts; `goal.ts` projects applicability and the outbox

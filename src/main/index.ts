@@ -454,7 +454,11 @@ void app.whenReady().then(async () => {
   const keepAwake = createKeepAwake({
     sessions: async () => (await listSessions()).map(summary => ({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) })),
     enabled: () => getConfig().ui.keepAwake !== false,
-    blocker: { start: () => powerSaveBlocker.start('prevent-app-suspension'), stop: id => { if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id); } }
+    screen: () => getConfig().ui.keepScreenAwake === true,
+    blocker: {
+      start: kind => powerSaveBlocker.start(kind === 'screen' ? 'prevent-display-sleep' : 'prevent-app-suspension'),
+      stop: id => { if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id); }
+    }
   });
   installKeepAwake(keepAwake);
   onSessionChange(() => void keepAwake.refresh());

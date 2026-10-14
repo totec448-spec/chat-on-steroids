@@ -8759,7 +8759,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean }>();
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
 /**
  * How many slowed extra bursts an automatic pre-Send ticket gets before it is abandoned like a
@@ -8790,9 +8790,10 @@ function expediteCompactionPickup(conversationId: string): boolean {
   if (watch && watch.token === entry.token && watch.phase === phase) {
     if (watch.attempts >= COMPACTION_PICKUPS[phase].attempts) return false;
     watch.nextAt = 0;
+    watch.streamLost = true;
     return true;
   }
-  compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0 });
+  compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0, streamLost: true });
   return true;
 }
 
@@ -8995,7 +8996,11 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     // on 2026-10-12 a page lost its stream, the model stopped calling tools, and the open turn kept
     // the handoff from being asked for until someone intervened.
     const grant = activeUntil.get(entry.from);
-    const silent = grant?.sessionId === entry.sessionId && grant.until + schedule.every <= now && runningToolProgress(entry.from) === null;
+    // The page said this answer's stream is gone (expediteCompactionPickup): its turn is not working,
+    // whatever its silence window says. A turn above High has twenty minutes of it, and on 2026-10-14
+    // a prime's handoff sat at Preparing that long after "resume HTTP 404". A running tool still waits.
+    const silent = runningToolProgress(entry.from) === null &&
+      (watch.streamLost === true || (grant?.sessionId === entry.sessionId && grant.until + schedule.every <= now));
     if (phase === 'asking' && session && !silent && sessionInputActivity(session).exact) {
       watch.nextAt = now + schedule.every;
       continue;
@@ -9069,6 +9074,8 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     }
     if (!acted) continue;
 
+    // One pickup per reported loss: after it, a turn that works again counts as working.
+    watch.streamLost = false;
     watch.attempts += 1;
     watch.nextAt = now + schedule.every;
     queued = true;
