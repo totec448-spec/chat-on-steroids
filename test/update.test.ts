@@ -20,10 +20,17 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawned: Array<{ file: string; args: string[] }> = [];
+/** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
+const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
 vi.mock('node:child_process', () => ({
   spawn: (file: string, args: string[]) => {
     spawned.push({ file, args });
     return { on: () => undefined, unref: () => undefined };
+  },
+  execFile: (file: string, args: string[], _options: unknown, done: (err: (Error & { code?: number | string }) | null) => void) => {
+    icacls.calls.push({ file, args });
+    const result = icacls.result;
+    queueMicrotask(() => done(result === null ? null : Object.assign(new Error('icacls failed'), { code: result })));
   }
 }));
 
@@ -52,7 +59,7 @@ const {
   markInstallOnQuit,
   releaseVersion,
   resetUpdateForTests,
-  setInstallFolderWritableForTests,
+  setInstallFolderAccessForTests,
   stagedArtifact,
   startUpdateChecks,
   updateStatus
@@ -276,15 +283,16 @@ describe('staging the new version', () => {
   });
 
   /**
-   * #1490: installed where only an administrator may write (the installer lets people pick the
-   * folder, e.g. C:\\Program Files), the silent installer stopped for lack of rights and nothing
-   * said so. Windows now asks for permission; a per-user install stays silent and unprompted.
+   * #1490: the installer re-grants the Chromium sandbox read access on the install folder, which
+   * needs the right to change its permissions. In a folder an administrator created (a custom
+   * D:\\ path, C:\\Program Files) a user may write files but not that, so the silent installer
+   * stopped and nothing said so. Windows now asks for permission; a per-user install stays silent.
    */
   it('asks Windows for permission when the install folder needs an administrator', async () => {
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());
     const staged = path.join(userData, 'updates', NEXT, WINDOWS_ASSET);
-    setInstallFolderWritableForTests(async () => false);
+    setInstallFolderAccessForTests(async () => false);
     expect(markInstallOnQuit(NEXT)).toBe(true);
     await asPlatform('win32', undefined, () => applyStagedUpdate());
     expect(spawned).toHaveLength(1);
@@ -298,9 +306,23 @@ describe('staging the new version', () => {
   it('keeps the silent per-user install when the folder is the user’s own', async () => {
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());
-    setInstallFolderWritableForTests(async () => true);
+    setInstallFolderAccessForTests(async () => true);
     await asPlatform('win32', undefined, () => applyStagedUpdate());
     expect(spawned).toEqual([{ file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated'] }]);
+  });
+
+  it('decides by repeating the installer’s own access grant on the app folder', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    for (const [result, elevated] of [[5, true], [null, false], ['ENOENT', false]] as const) {
+      spawned.length = 0; icacls.calls.length = 0; icacls.result = result;
+      await asPlatform('win32', undefined, () => applyStagedUpdate());
+      expect(icacls.calls).toEqual([{ file: expect.stringMatching(/icacls\.exe$/i),
+        args: [path.dirname(process.execPath), '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q'] }]);
+      expect(spawned[0]?.file === 'powershell.exe', String(result)).toBe(elevated);
+      await asPlatform('win32', undefined, () => checkForUpdates());
+    }
+    icacls.result = null;
   });
 
   /**
