@@ -2358,5 +2358,11 @@
   "Told when a chat finishes": "聊天完成时通知",
   "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "应用在后台时，聊天完成会发出通知；聊天工作时电脑保持唤醒。",
   "Worker chats out of the way": "worker 聊天不再碍事",
-  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "开启后，应用不再需要的 worker 聊天会在 ChatGPT 中归档。"
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "开启后，应用不再需要的 worker 聊天会在 ChatGPT 中归档。",
+  "Minimize the built-in browser to": "内置浏览器最小化到",
+  "Where its window goes when you minimize it. Its chats go on either way.": "最小化时窗口的去处。无论哪种，聊天都会继续。",
+  "Taskbar": "任务栏",
+  "Tray": "系统托盘",
+  "Dock": "程序坞",
+  "Menu bar": "菜单栏"
 }

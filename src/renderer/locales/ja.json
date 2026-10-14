@@ -2358,5 +2358,11 @@
   "Told when a chat finishes": "チャットが終わったら通知",
   "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "アプリがバックグラウンドのときにチャットが終わると通知し、作業中はコンピューターをスリープさせません。",
   "Worker chats out of the way": "ワーカーのチャットを片付け",
-  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "オンにすると、アプリが使い終えたワーカーのチャットを ChatGPT でアーカイブします。"
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "オンにすると、アプリが使い終えたワーカーのチャットを ChatGPT でアーカイブします。",
+  "Minimize the built-in browser to": "内蔵ブラウザの最小化先",
+  "Where its window goes when you minimize it. Its chats go on either way.": "最小化したときのウィンドウの行き先です。どちらでもチャットは続きます。",
+  "Taskbar": "タスクバー",
+  "Tray": "システムトレイ",
+  "Dock": "Dock",
+  "Menu bar": "メニューバー"
 }

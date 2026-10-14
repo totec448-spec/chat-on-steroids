@@ -2358,5 +2358,11 @@
   "Told when a chat finishes": "채팅이 끝나면 알림",
   "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "앱이 백그라운드에 있을 때 채팅이 끝나면 알림을 보내고, 작업하는 동안 컴퓨터를 깨어 있게 둡니다.",
   "Worker chats out of the way": "워커 채팅 정리",
-  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "켜 두면 앱이 더 이상 쓰지 않는 워커 채팅을 ChatGPT에서 보관합니다."
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "켜 두면 앱이 더 이상 쓰지 않는 워커 채팅을 ChatGPT에서 보관합니다.",
+  "Minimize the built-in browser to": "내장 브라우저 최소화 위치",
+  "Where its window goes when you minimize it. Its chats go on either way.": "창을 최소화했을 때 어디로 갈지 정합니다. 어느 쪽이든 채팅은 계속됩니다.",
+  "Taskbar": "작업 표시줄",
+  "Tray": "시스템 트레이",
+  "Dock": "Dock",
+  "Menu bar": "메뉴 막대"
 }

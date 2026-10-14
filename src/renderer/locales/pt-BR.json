@@ -2358,5 +2358,11 @@
   "Told when a chat finishes": "Aviso quando um chat termina",
   "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "Uma notificação quando um chat termina enquanto o app está em segundo plano, e o computador fica ativo enquanto ele trabalha.",
   "Worker chats out of the way": "Chats de workers fora do caminho",
-  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Ative, e os chats de workers são arquivados no ChatGPT quando o app não precisa mais deles."
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Ative, e os chats de workers são arquivados no ChatGPT quando o app não precisa mais deles.",
+  "Minimize the built-in browser to": "Minimizar o navegador integrado para",
+  "Where its window goes when you minimize it. Its chats go on either way.": "Para onde a janela vai quando você a minimiza. Os chats continuam de qualquer forma.",
+  "Taskbar": "Barra de tarefas",
+  "Tray": "Bandeja do sistema",
+  "Dock": "Dock",
+  "Menu bar": "Barra de menus"
 }
