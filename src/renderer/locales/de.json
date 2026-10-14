@@ -2381,5 +2381,7 @@
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "Die Erweiterung darf ChatGPT nicht öffnen",
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} hält die Erweiterung von chatgpt.com fern. Erlaube sie in den Details der Erweiterung auf chatgpt.com („Websitezugriff“ in Chrome, Edge und Brave, „Berechtigungen“ in Firefox) und lade ChatGPT dann neu.",
-  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} wurde nicht installiert; das ist noch {1}. Wähle „Installieren“, um es erneut zu versuchen; Windows fragt eventuell nach einer Berechtigung."
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} wurde nicht installiert; das ist noch {1}. Wähle „Installieren“, um es erneut zu versuchen; Windows fragt eventuell nach einer Berechtigung.",
+  "Keep plugin URLs across restarts": "Plugin-URLs über Neustarts behalten",
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Für einen eigenen Tunnel, etwa einen benannten Cloudflare-Tunnel, dessen URL ChatGPT speichert. Wer diese URL hat, kann deine Chat-On-Steroids-Plugins nutzen, bis du das ausschaltest. Braucht sicheren Speicher."
 }
