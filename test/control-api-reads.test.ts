@@ -40,6 +40,7 @@ const inputModule = await import('../src/main/session/input.js');
 const readModelModule = await import('../src/main/session/read-model.js');
 const reads = await import('../src/main/control-reads.js');
 const agentsModule = await import('../src/main/agents.js');
+const chatModelsModule = await import('../src/main/chat-models.js');
 
 let dir: string;
 let port = 0;
@@ -129,9 +130,9 @@ describe('read routes', () => {
   it('are listed by health and need the token like every other route', async () => {
     const health = await call('/v1/health');
     expect(health.body.routes).toEqual([
-      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log'
+      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log', '/v1/models'
     ]);
-    for (const route of ['/v1/sessions', `/v1/sessions/${sessionId}`, `/v1/sessions/${sessionId}/events`, '/v1/inputs', '/v1/agents', '/v1/log']) {
+    for (const route of ['/v1/sessions', `/v1/sessions/${sessionId}`, `/v1/sessions/${sessionId}/events`, '/v1/inputs', '/v1/agents', '/v1/log', '/v1/models']) {
       expect((await call(route, {})).status).toBe(401);
       expect((await call(route)).status).toBe(200);
     }
@@ -736,6 +737,23 @@ describe('delivery proof', () => {
     expect(reads.projectInput(row({ silenceBoundary: { turnId: 't', conversationId: 'c', workSeq: 1 } })).automatic).toBe(false);
     expect(reads.projectInput(row({ finishOwner: { turnId: 't', periodic: false } })).automatic).toBe(true);
     expect(reads.projectInput(row({ transportIntent: 'tool', state: 'tool', offeredAt: 5 }))).toMatchObject({ transportIntent: 'tool', delivery: 'unconfirmed' });
+  });
+});
+
+describe('models', () => {
+  it("serves the saved catalog of the account's models, without the app's own bookkeeping", async () => {
+    const catalog = vi.spyOn(chatModelsModule, 'getChatModels').mockReturnValue({
+      state: 'ready', requestedAt: 5, observedAt: 10, waiting: 'inspecting', error: 'an old failure',
+      models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['medium', 'high'], aliases: ['gpt-6-thinking'] }]
+    });
+    try {
+      expect((await call('/v1/models')).body).toEqual({
+        state: 'ready', observedAt: 10, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['medium', 'high'] }]
+      });
+      expect((await call('/v1/models?refresh=1')).status).toBe(400);
+    } finally {
+      catalog.mockRestore();
+    }
   });
 });
 
