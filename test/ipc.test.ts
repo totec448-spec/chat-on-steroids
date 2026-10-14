@@ -64,6 +64,7 @@ const {
 } = await import('../src/main/agents.js');
 const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
+const bridgeModule = await import('../src/main/bridge.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
@@ -2023,6 +2024,47 @@ describe('session IPC contracts', () => {
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
   });
+
+  it.each([
+    ['cos', true],
+    ['cos', false],
+    ['chrome', true],
+    ['chrome', false],
+    ['edge', true],
+    ['edge', false],
+    ['brave', true],
+    ['brave', false]
+  ] as const)(
+    'routes history chat with preference %s when extension claim is %s',
+    async (browser, extensionClaimsChat) => {
+      const original = getConfig();
+      const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const session = await createSession({ title: 'route by browser preference', conversationId });
+      const reveal = vi.spyOn(bridgeModule, 'revealChatInBrowser').mockResolvedValue(extensionClaimsChat);
+      try {
+        await saveConfig({ ...original, ui: { ...original.ui, chatBrowser: browser } });
+        vi.mocked(openInPreferredBrowser).mockClear();
+
+        const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
+
+        expect(reply.ok, reply.error).toBe(true);
+        const url = `https://chatgpt.com/c/${conversationId}`;
+        if (browser === 'cos') {
+          expect(reveal).not.toHaveBeenCalled();
+          expect(openInPreferredBrowser).toHaveBeenCalledWith(url, { reveal: true });
+        } else if (extensionClaimsChat) {
+          expect(reveal).toHaveBeenCalledWith(conversationId);
+          expect(openInPreferredBrowser).not.toHaveBeenCalled();
+        } else {
+          expect(reveal).toHaveBeenCalledWith(conversationId);
+          expect(openInPreferredBrowser).toHaveBeenCalledWith(url, { reveal: true });
+        }
+      } finally {
+        reveal.mockRestore();
+        await saveConfig(original);
+      }
+    }
+  );
 });
 
 it('follows only the newest chat selection when an earlier lookup finishes last (#1249, #1267)', async () => {
