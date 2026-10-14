@@ -23,10 +23,11 @@ import { pluginManager } from './plugins/manager.js';
 import { updateStatus } from './update.js';
 import { APP_VERSION } from './version.js';
 import { closeEventStreams, eventStreamSession, serveEventStream } from './control-stream.js';
+import { serveWorkerRead } from './control-workers.js';
 
 /**
  * The local control API: an opt-in loopback listener for a trusted local caller. It reads by
- * default; a second switch lets it send messages, start new chats and cancel messages through the outbox.
+ * default; a second switch allows outbox actions and direct local worker-broker control.
  *
  * Its caller is typically an MCP server an agent launched to watch this app from outside its
  * process. It is deliberately not a fourth MCP surface: those are published through tunnels and
@@ -437,6 +438,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, token
 
 /** Every read that asks an owner something. `/v1/health` asks nobody and is answered before this. */
 async function read(route: string, params: URLSearchParams): Promise<unknown> {
+  const workers = await serveWorkerRead(route, params);
+  if (workers !== undefined) return workers;
   if (route !== '/v1/status') return serveRead(route, params);
   return projectStatus({
     connection: getStatus(),

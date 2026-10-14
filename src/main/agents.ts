@@ -251,6 +251,8 @@ interface Run {
   primeConversationId: string | null;
   /** Inbound HTTP request that created this family before its chat was known. */
   primeRequestId?: string;
+  /** Trusted local control API principal; never a claimed ChatGPT conversation. */
+  localOwnerId?: string;
   startedAt: number;
   agents: Map<string, Agent>;
   /**
@@ -322,6 +324,7 @@ interface DormantRun {
   setupProfileId?: string;
   primeConversationId: string | null;
   primeRequestId?: string;
+  localOwnerId?: string;
   startedAt: number;
   parkedAt: number;
   agents: Map<string, Agent>;
@@ -672,6 +675,8 @@ export function onSpawnRequest(handler: (workers: WorkerSpawn[]) => void): () =>
  * What a caller can offer as proof of who it is. No field is ever an agent id.
  */
 export interface Caller {
+  /** Set only by the authenticated local control API, absent from MCP caller arguments. */
+  localOwnerId?: string;
   /**
    * The ChatGPT conversation this call was proven to come from. A permitted unresolved
    * prime keeps its separate requestId until that proof arrives.
@@ -691,7 +696,7 @@ export interface Caller {
 }
 
 type Family = Run | DormantRun;
-type FamilyOwner = Pick<Run, 'primeConversationId' | 'primeRequestId' | 'setupProfileId'>;
+type FamilyOwner = Pick<Run, 'primeConversationId' | 'primeRequestId' | 'localOwnerId' | 'setupProfileId'>;
 
 /** Parked fleets keep their last incarnation, even when several have the same prime. */
 function familyKey(owner: Family): string {
@@ -769,10 +774,17 @@ function exactCaller(caller: Caller): Caller {
 }
 
 function hasCallerIdentity(caller: Caller): boolean {
+  if (caller.localOwnerId) return validLocalOwner(caller.localOwnerId) && !caller.conversationId && !caller.requestId;
   return Boolean(caller.conversationId || (getConfig().multiAgent.allowUnattributedCalls && caller.requestId));
 }
 
+function validLocalOwner(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
+
 function ownsPrime(caller: Caller, owner: FamilyOwner): boolean {
+  if (owner.localOwnerId) return hasCallerIdentity(caller) && caller.localOwnerId === owner.localOwnerId;
+  if (caller.localOwnerId) return false;
   // Once attached, only the current frontend owns the fleet. In particular, an old request
   // from A cannot recover prime authority after the durable session has moved to B.
   if (owner.primeConversationId) return caller.conversationId === owner.primeConversationId;
@@ -1015,6 +1027,7 @@ function reactivateDormantRun(dormant: DormantRun): Run | null {
     setupProfileId: dormant.setupProfileId,
     primeConversationId: dormant.primeConversationId,
     primeRequestId: dormant.primeRequestId,
+    localOwnerId: dormant.localOwnerId,
     // The browser-command fence gets a new incarnation id, but this is still the same prime's
     // worker history. Keep the original history start instead of pretending the workers were
     // created again when one of them wakes.
@@ -1587,6 +1600,7 @@ function parkRun(run: Run | null, reason: string): boolean {
     setupProfileId: current.setupProfileId,
     primeConversationId: current.primeConversationId,
     primeRequestId: current.primeRequestId,
+    localOwnerId: current.localOwnerId,
     startedAt: current.startedAt,
     parkedAt: Date.now(),
     agents: current.agents,
@@ -2135,6 +2149,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
         setupProfileId: setupProfileId(input.caller.setupProfileId),
         primeConversationId: conversationId,
         primeRequestId: conversationId ? undefined : input.caller.requestId!,
+        localOwnerId: input.caller.localOwnerId,
         startedAt: Date.now(),
         agents: new Map([[PRIME_ID, makePrime(conversationId)]]),
         transfer: null,
@@ -2809,7 +2824,7 @@ export function offerMessagesForCaller(
     let budget = MAX_INBOX_OFFER_CHARS;
     const messages = owned.flatMap(owner => offerAgentMessages(owner.agents.get(PRIME_ID)!, onFinish, budget).map(message => {
       budget -= message.text.length;
-      return owned.length > 1 ? { ...message, runId: familyKey(owner) } : message;
+      return owned.length > 1 || caller.localOwnerId ? { ...message, runId: familyKey(owner) } : message;
     }));
     return { agentId: PRIME_ID, messages };
   }
@@ -2837,11 +2852,13 @@ export function acknowledgeOffers(id: string, byFinish = false, callStartedAt = 
 function acknowledgeAgentOffers(
   agent: Agent,
   byFinish = false,
-  callStartedAt = Number.POSITIVE_INFINITY
+  callStartedAt = Number.POSITIVE_INFINITY,
+  messageIds?: ReadonlySet<string>
 ): AgentMessage[] {
   const offered = agent.queue.filter(
     (message) =>
       message.ackedAt === null &&
+      (!messageIds || messageIds.has(message.id)) &&
       message.offeredAt !== null &&
       // A call proves only what was already delivered before that call began. This matters for
       // revival ACKs because the browser can submit the user message while an older MCP handler
@@ -2897,6 +2914,18 @@ export function acknowledgeOffersForCaller(
     acknowledgeAgentOffers(owner.agents.get(PRIME_ID)!, byFinish, callStartedAt)) };
   if (caller.runId && !selectedFamily(caller)) return null;
   return acknowledgeOffersForConversation(caller.conversationId, byFinish, callStartedAt, allowDormantWorkerFinishRetry);
+}
+
+/** Explicit local receipts retire only report ids the caller says it consumed. */
+export function acknowledgeLocalReports(caller: Caller, messageIds: readonly string[]): AgentMessage[] {
+  requireEnabled();
+  if (!caller.localOwnerId || !hasCallerIdentity(caller)) throw new IdentityLostError();
+  requireFamilySelection(caller);
+  const ids = new Set(messageIds);
+  const acknowledged = familiesForCaller(caller).filter(owner => ownsPrime(caller, owner) && (!caller.runId || answersTo(owner, caller.runId)))
+    .flatMap(owner => acknowledgeAgentOffers(owner.agents.get(PRIME_ID)!, false, Number.POSITIVE_INFINITY, ids));
+  if (acknowledged.length) changed('critical');
+  return acknowledged;
 }
 
 export function pendingCount(id: string, runId?: string): number {
@@ -5002,6 +5031,7 @@ interface DormantRunSnapshot {
   setupProfileId?: string;
   primeConversationId: string | null;
   primeRequestId?: string;
+  localOwnerId?: string;
   startedAt: number;
   parkedAt: number;
   agents: SerializedAgent[];
@@ -5017,12 +5047,13 @@ export interface SwarmSnapshot {
    * cannot honour.
    */
   version: 4 | 5 | 6 | 7;
-  activeRuns?: Array<{ runId: string; formerRunIds?: string[]; setupProfileId?: string; primeConversationId: string | null; primeRequestId?: string; startedAt: number; agents: SerializedAgent[] }>;
+  activeRuns?: Array<{ runId: string; formerRunIds?: string[]; setupProfileId?: string; primeConversationId: string | null; primeRequestId?: string; localOwnerId?: string; startedAt: number; agents: SerializedAgent[] }>;
   savedAt: number;
   /** Top-level fields are the active incarnation; all are null/empty while only history remains. */
   runId: string | null;
   setupProfileId?: string;
   primeConversationId: string | null;
+  localOwnerId?: string;
   startedAt: number | null;
   agents: SerializedAgent[];
   dormantRuns?: DormantRunSnapshot[];
@@ -5182,11 +5213,13 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
     activeRuns: active.map(r => ({ runId: r.runId, ...(r.formerRunIds?.length ? { formerRunIds: r.formerRunIds } : {}),
       ...(r.setupProfileId ? { setupProfileId: r.setupProfileId } : {}), primeConversationId: r.primeConversationId,
       primeRequestId: r.primeRequestId,
+      localOwnerId: r.localOwnerId,
       startedAt: r.startedAt, agents: serializeAgents(r.agents, includeUnpublished) })),
     ...(retiredManagedWorkerConversations.size ? { managedRetiredConversations: [...retiredManagedWorkerConversations] } : {}),
     dormantRuns: dormant.map(h => ({ ...(h.formerRunIds?.length ? { formerRunIds: h.formerRunIds } : {}),
       ...(h.setupProfileId ? { setupProfileId: h.setupProfileId } : {}), primeConversationId: h.primeConversationId, startedAt: h.startedAt,
       primeRequestId: h.primeRequestId,
+      localOwnerId: h.localOwnerId,
       parkedAt: h.parkedAt, agents: serializeAgents(h.agents, includeUnpublished) })) };
   const offers = collectManagedWorktreeCleanupOffers([
     ...(snapshot.activeRuns ?? []).map(run => run.agents),
@@ -5321,10 +5354,11 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   const occupiedRequests = new Set<string>();
   const validRequestOwner = (value: unknown): value is string =>
     typeof value === 'string' && /^[a-z0-9_-]{1,100}$/i.test(value);
-  const acceptOwner = (primeConversationId: string | null, agents: Map<string, Agent>, primeRequestId?: string): boolean => {
+  const acceptOwner = (primeConversationId: string | null, agents: Map<string, Agent>, primeRequestId?: string, localOwnerId?: string): boolean => {
     const prime = agents.get(PRIME_ID);
     if (!prime || prime.info.role !== 'prime' || prime.info.conversationId !== primeConversationId) return false;
-    if (!primeConversationId && !validRequestOwner(primeRequestId)) return false;
+    if (localOwnerId !== undefined && (!validLocalOwner(localOwnerId) || primeConversationId || primeRequestId)) return false;
+    if (!primeConversationId && !validRequestOwner(primeRequestId) && !validLocalOwner(localOwnerId)) return false;
     if (primeRequestId && (!validRequestOwner(primeRequestId) || occupiedRequests.has(primeRequestId))) return false;
     if (primeConversationId && (occupiedWorkers.has(primeConversationId) ||
       (snapshot.version < 7 && occupiedPrimes.has(primeConversationId)) ||
@@ -5348,7 +5382,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   if (snapshot.version >= 5 && Array.isArray(snapshot.dormantRuns)) {
     for (const saved of snapshot.dormantRuns) {
       if (!saved || (!(typeof saved.primeConversationId === 'string' && saved.primeConversationId) &&
-        !(snapshot.version === 7 && saved.primeConversationId === null && validRequestOwner(saved.primeRequestId))) || !Array.isArray(saved.agents)) {
+        !(snapshot.version === 7 && saved.primeConversationId === null && (validRequestOwner(saved.primeRequestId) || validLocalOwner(saved.localOwnerId)))) || !Array.isArray(saved.agents)) {
         repaired = true;
         continue;
       }
@@ -5366,7 +5400,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
         ? previousRunId : randomUUID();
       const restoredSetupProfileId = setupProfileId(saved.setupProfileId);
       if (saved.setupProfileId !== undefined && !restoredSetupProfileId) repaired = true;
-      if (dormantRuns.has(runId) || !acceptOwner(saved.primeConversationId, restored.agents, snapshot.version === 7 ? saved.primeRequestId : undefined)) {
+      if (dormantRuns.has(runId) || !acceptOwner(saved.primeConversationId, restored.agents, snapshot.version === 7 ? saved.primeRequestId : undefined, saved.localOwnerId)) {
         repaired = true;
         logWarn(`multi-agent: discarded conflicting dormant history for ${saved.primeConversationId}`);
         continue;
@@ -5381,6 +5415,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
         ...(restoredSetupProfileId ? { setupProfileId: restoredSetupProfileId } : {}),
         primeConversationId: saved.primeConversationId,
         primeRequestId: snapshot.version === 7 ? saved.primeRequestId : undefined,
+        localOwnerId: saved.localOwnerId,
         startedAt: Number.isFinite(saved.startedAt) ? saved.startedAt : snapshot.savedAt || Date.now(),
         parkedAt: Number.isFinite(saved.parkedAt) ? saved.parkedAt : snapshot.savedAt || Date.now(),
         agents: restored.agents,
@@ -5396,7 +5431,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
     if (!saved) { repaired = true; continue; }
     const hasActive =
       ((typeof saved.primeConversationId === 'string' && Boolean(saved.primeConversationId)) ||
-        (snapshot.version === 7 && saved.primeConversationId === null && 'primeRequestId' in saved && validRequestOwner(saved.primeRequestId))) &&
+        (snapshot.version === 7 && saved.primeConversationId === null && (('primeRequestId' in saved && validRequestOwner(saved.primeRequestId)) || validLocalOwner(saved.localOwnerId)))) &&
       typeof saved.runId === 'string' &&
       Boolean(saved.runId) &&
       Array.isArray(saved.agents);
@@ -5410,7 +5445,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
         ? saved.primeRequestId : undefined;
       const restored = deserializeAgents(saved.agents, snapshot.savedAt);
       repaired ||= restored.repaired;
-      if (runs.has(saved.runId!) || dormantRuns.has(saved.runId!) || !acceptOwner(primeConversationId, restored.agents, primeRequestId)) {
+      if (runs.has(saved.runId!) || dormantRuns.has(saved.runId!) || !acceptOwner(primeConversationId, restored.agents, primeRequestId, saved.localOwnerId)) {
         logWarn(`multi-agent: discarded active run for ${primeConversationId} because its conversation ownership conflicted`);
         repaired = true;
       } else {
@@ -5432,6 +5467,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
           ...(restoredSetupProfileId ? { setupProfileId: restoredSetupProfileId } : {}),
           primeConversationId,
           primeRequestId,
+          localOwnerId: saved.localOwnerId,
           startedAt: Number.isFinite(saved.startedAt) ? (saved.startedAt as number) : snapshot.savedAt || Date.now(),
           agents: restored.agents,
           transfer: null,
