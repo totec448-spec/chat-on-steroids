@@ -2378,5 +2378,7 @@
   "Add the Chat On Steroids add-on to Firefox": "Firefox에 Chat On Steroids 부가 기능 추가",
   "Get the add-on": "부가 기능 받기",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox가 부가 기능을 추가하기 전에 묻습니다. ‘추가’를 선택하세요.",
-  "Mozilla Firefox": "Mozilla Firefox"
+  "Mozilla Firefox": "Mozilla Firefox",
+  "The extension may not open ChatGPT": "확장 프로그램이 ChatGPT를 열 수 없습니다",
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0}에서 확장 프로그램의 chatgpt.com 접근을 막고 있습니다. 확장 프로그램 세부정보에서 chatgpt.com 접근을 허용한 뒤(Chrome·Edge·Brave는 ‘사이트 액세스’, Firefox는 ‘권한’) ChatGPT를 새로고침하세요."
 }
