@@ -2029,6 +2029,10 @@ projected as `externalExtension.chatgptAccess`. A live `false` (Chrome's site ac
 revoked Firefox permission) keeps Setup's first step open with instructions: without that access no
 content script runs, so the extension could pair and take work that nothing on the page would do.
 Older extensions say nothing, which stays unknown rather than a claimed lack of access.
+With several browsers connected, the projection stays with the kind chosen for ChatGPT while it
+is present: Firefox's `gecko` add-on when Firefox is chosen, a Chromium copy otherwise (Chrome, Edge
+and Brave cannot be told apart, so among them the last one polling wins). Lasting install proof
+is still recorded for every browser.
 
 Firefox (`chatBrowser: 'firefox'`) runs the Mozilla-signed add-on that each release attaches as
 `Chat-On-Steroids-Firefox.xpi` (`shared/firefox-addon.ts`); Setup opens this app version's download
