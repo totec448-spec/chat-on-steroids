@@ -1048,8 +1048,11 @@ the port's explicit line-ending mode and readable parse/match failures.
 
 **Code checkpoints.** After a patch has verified and before it executes, the first patch of a
 turn (standalone or intercepted from `exec_command`) in a session's own Local Project Git
-repository takes one checkpoint: a temporary index outside the repository, read from HEAD,
-`add -A` of the project folder, `write-tree`. It writes Git objects only: no ref, branch, HEAD,
+repository takes one checkpoint: a temporary index outside the repository, seeded as a copy of the
+repository's own index (`rev-parse --git-path index`) so its stat data lets `add -A` hash only
+what changed, then `add -A` of the project folder and `write-tree`. With no index to copy, or when
+the seeded index cannot be written as a tree, it starts again from `read-tree` of HEAD. Paths
+outside the project keep what the seed holds; nothing compares or restores them. It writes Git objects only: no ref, branch, HEAD,
 user index or working file changes, and every checkpoint Git command passes
 `--no-replace-objects`. The key is the exact proven session plus `responseTurnId(activeTurnId)`;
 with no active turn it is that request id, and an unproven session, a session without a project,
