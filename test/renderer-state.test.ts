@@ -3182,16 +3182,19 @@ it('offers the follow-up behavior, starting at joining the running turn, and sav
   expect(mounted.calls.at(-1)?.ui.followUp).toBe('queue');
 });
 
-// Codex's "Prevent sleep while running": on unless switched off in General.
-it('keeps the computer awake while a chat works unless switched off', async () => {
+// Codex's "Prevent sleep while running": the computer by default, the screen too on request, or off.
+it('keeps the computer awake while a chat works, the screen too when chosen, or neither', async () => {
   const mounted = await mountChat({});
   const w = mounted.window;
-  const keepAwake = w.document.getElementById('keepAwake') as HTMLInputElement;
-  expect(keepAwake.checked).toBe(true);
-  keepAwake.checked = false;
-  keepAwake.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await settle();
-  expect(mounted.calls.at(-1)?.ui.keepAwake).toBe(false);
+  const keepAwake = w.document.getElementById('keepAwake') as HTMLSelectElement;
+  expect(keepAwake.value).toBe('computer');
+  for (const [value, saved] of [['screen', { keepAwake: true, keepScreenAwake: true }], ['off', { keepAwake: false, keepScreenAwake: false }],
+    ['computer', { keepAwake: true, keepScreenAwake: false }]] as const) {
+    keepAwake.value = value;
+    keepAwake.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await settle();
+    expect(mounted.calls.at(-1)?.ui, value).toMatchObject(saved);
+  }
 });
 
 // Codex's "Enter key behavior", in General.

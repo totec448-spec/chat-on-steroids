@@ -2304,8 +2304,6 @@
   "Send now": "今すぐ送信",
   "Send into the running turn now": "実行中のターンに今すぐ送信",
   "The turn ended before this message could join it. It stays queued.": "このメッセージが加わる前にターンが終了しました。キューに残っています。",
-  "Keep the computer awake": "コンピューターをスリープさせない",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "チャットが作業している間はコンピューターがスリープしないので、長い作業が止まりません。画面はオフになることがあります。",
   "Messages during a running turn": "実行中のターン中のメッセージ",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT の作業中に送ったメッセージの既定の動作です。⌘⇧Enter（Windows と Linux では Ctrl+Shift+Enter）でもう一方の方法で送信します。",
   "Join the running turn": "実行中のターンに加える",
@@ -2346,5 +2344,9 @@
   "Archive worker chats in ChatGPT when they are retired": "終了したワーカーのチャットを ChatGPT でアーカイブする",
   "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "ワーカーが再び使えなくなると（ワーカーを消去した、またはメインのチャットが閉じられた）、そのチャットは ChatGPT でアーカイブされ、チャット一覧から消えます。ChatGPT の設定から復元できます。このアプリは記録を保持します。何も削除されません。",
   "Goal paused": "ゴールを一時停止しました",
-  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT が 3 回続けて同じ回答をしたため、ゴールは問いかけをやめました。続けるにはチャットを開いてください。"
+  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT が 3 回続けて同じ回答をしたため、ゴールは問いかけをやめました。続けるにはチャットを開いてください。",
+  "Keep awake while a chat works": "チャットの作業中はスリープさせない",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "コンピューターがスリープしないようにして、長い実行を続けます。一部の Windows ノート PC は画面が消えるとスリープします。その場合は「コンピューターと画面」を選んでください。",
+  "The computer": "コンピューター",
+  "The computer and screen": "コンピューターと画面"
 }
