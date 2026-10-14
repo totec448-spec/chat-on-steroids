@@ -37,9 +37,9 @@
  * wrong.
  */
 
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, rename, rm } from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -458,9 +458,9 @@ export function markInstallOnQuit(expectedVersion?: string): boolean {
  *
  * Windows gets the NSIS installer in silent mode. It is a per-user install by default
  * (electron-builder.yml sets `perMachine: false`), so `/S` needs no elevation and shows no prompt.
- * But the installer lets people choose the folder, and one only an administrator may write to
- * (C:\\Program Files) made that silent installer stop for lack of rights, with nothing said
- * (#1490). There the installer is started through Windows' own permission prompt instead.
+ * But the installer lets people choose the folder, and in one an administrator created (a custom
+ * D:\\ path, C:\\Program Files) the silent installer stops on its access step for lack of rights,
+ * with nothing said (#1490). There it is started through Windows' own permission prompt instead.
  * Detached, because this process is about to stop existing.
  *
  * An AppImage has no installer: the file that is running is the whole application, so the update
@@ -468,23 +468,26 @@ export function markInstallOnQuit(expectedVersion?: string): boolean {
  * that path — writing through it would corrupt the process that is still shutting down, while a
  * rename gives the new build a new inode and leaves the old one alive until it exits.
  */
-/** Whether this user may write the app's own folder; only a definite refusal says no. */
-const probeInstallFolder = async (folder: string): Promise<boolean> => {
-  const probe = path.join(folder, `.cos-update-probe-${process.pid}-${Date.now()}`);
-  try {
-    await writeFile(probe, '');
-    await rm(probe, { force: true });
-    return true;
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    return code !== 'EPERM' && code !== 'EACCES';
-  }
-};
-let installFolderWritable = probeInstallFolder;
+/**
+ * Whether the installer's own first step will succeed without an administrator.
+ *
+ * Every install and update re-grants the Chromium sandbox read access on the app folder
+ * (scripts/windows-installer-acl.nsh). Changing a folder's permissions needs more than writing
+ * files into it: in a folder an administrator created, a user may write but not re-grant, and the
+ * silent installer then stops on that step with nothing said (#1490). So the app repeats exactly
+ * that idempotent grant first. An icacls exit code means the installer would fail the same way;
+ * an icacls that cannot start at all says nothing, and the update keeps the silent path.
+ */
+const probeInstallFolder = (folder: string): Promise<boolean> => new Promise(resolve => {
+  const icacls = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe');
+  execFile(icacls, [folder, '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q'], { windowsHide: true, timeout: 15_000 },
+    err => resolve(!err || typeof (err as NodeJS.ErrnoException & { code?: unknown }).code !== 'number'));
+});
+let installFolderAccess = probeInstallFolder;
 
-/** Test seam: answers the install-folder write probe. */
-export function setInstallFolderWritableForTests(probe: (folder: string) => Promise<boolean>): void {
-  installFolderWritable = probe;
+/** Test seam: answers whether the installer could re-grant the app folder's access by itself. */
+export function setInstallFolderAccessForTests(probe: (folder: string) => Promise<boolean>): void {
+  installFolderAccess = probe;
 }
 
 export async function applyStagedUpdate(): Promise<void> {
@@ -501,7 +504,7 @@ export async function applyStagedUpdate(): Promise<void> {
       // `--force-run` is added only when the user pressed Install and is waiting for the app to
       // come back; an update applied on the way out of an ordinary quit must not reopen it.
       const args = relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
-      const elevate = process.platform === 'win32' && !(await installFolderWritable(path.dirname(process.execPath)));
+      const elevate = process.platform === 'win32' && !(await installFolderAccess(path.dirname(process.execPath)));
       const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
       const installer = elevate
         ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
@@ -535,7 +538,7 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
-  installFolderWritable = probeInstallFolder;
+  installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;
   pass = null;
