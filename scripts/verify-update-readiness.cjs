@@ -222,11 +222,13 @@ app.whenReady().then(async () => {
       if(lang==='ja'){await pause(200);await shot('legacy-migration-ja.png');}
       await js(`(()=>{const next=structuredClone(window.fixtureMacState);next.bridge.extensionVersion='99.0.1';window.fixturePush(next)})()`);
       assert.ok(await js(`document.querySelector('[data-update-part="extension"]').textContent.includes(${JSON.stringify(copy('Choose Update all to check for updates and update the app.'))})`),lang+' newer extension directs the person to update the app');
-      for (const [present, extensionVersion, key] of [
-        [true, '0.0.1', 'Let active chats finish, then reload the browser extension in your browser.'],
-        [false, version, 'Open ChatGPT with the browser extension enabled, then choose Review setup.']
+      for (const [present, key] of [
+        [true, 'Let active chats finish, then reload the browser extension in your browser.'],
+        [false, 'Open ChatGPT with the browser extension enabled, then choose Review setup.']
       ]) {
-        await js(`(()=>{const next=structuredClone(window.fixtureState);next.bridge.present=${present};next.bridge.extensionVersion=${JSON.stringify(extensionVersion)};window.fixturePush(next)})()`);
+        await js(present
+          ? `(()=>{const next=structuredClone(window.fixtureState);next.bridge.present=true;next.bridge.extensionVersion='0.0.1';window.fixturePush(next)})()`
+          : `(()=>{const next=structuredClone(window.fixtureState);next.bridge.present=false;window.fixturePush(next)})()`);
         assert.ok(await js(`document.querySelector('[data-update-part="extension"]').textContent.includes(${JSON.stringify(copy(key))})`),lang+' browser extension recovery');
         assert.doesNotMatch(await js(`document.querySelector('.update-readiness').textContent`), /\bconnectors?\b|\bcompanion extension\b/i, lang+' current visible terminology');
         if(lang==='en'){await pause(200);await shot(present?'older-browser-extension-en.png':'missing-browser-extension-en.png');}
