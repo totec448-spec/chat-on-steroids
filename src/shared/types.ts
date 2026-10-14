@@ -185,6 +185,8 @@ export interface UiPrefs {
   enterSends?: boolean;
   /** Keep the computer from sleeping while a chat is working (Codex: Prevent sleep while running). Missing means on. */
   keepAwake?: boolean;
+  /** With keepAwake: also keep the screen on (Modern Standby laptops sleep once it turns off). */
+  keepScreenAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */

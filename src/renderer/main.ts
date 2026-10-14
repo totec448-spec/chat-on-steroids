@@ -729,7 +729,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
-      keepAwake: $<HTMLInputElement>('keepAwake').checked,
+      keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
+      keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
@@ -1631,7 +1632,8 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
-  applyChecked($<HTMLInputElement>('keepAwake'), config.ui.keepAwake !== false, previousState ? previousState.config.ui.keepAwake !== false : undefined);
+  const awakeChoice = (ui: typeof config.ui) => ui.keepAwake === false ? 'off' : ui.keepScreenAwake === true ? 'screen' : 'computer';
+  applyValue($<HTMLSelectElement>('keepAwake'), awakeChoice(config.ui), previousState ? awakeChoice(previousState.config.ui) : undefined);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);

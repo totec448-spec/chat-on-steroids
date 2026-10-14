@@ -2304,8 +2304,6 @@
   "Send now": "Şimdi gönder",
   "Send into the running turn now": "Devam eden tura şimdi gönder",
   "The turn ended before this message could join it. It stays queued.": "Bu mesaj katılamadan tur sona erdi. Sırada kalmaya devam ediyor.",
-  "Keep the computer awake": "Bilgisayarı uyanık tut",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Bir sohbet çalışırken bilgisayar uyku moduna geçmez, böylece uzun işler devam eder. Ekran yine de kapanabilir.",
   "Messages during a running turn": "Devam eden bir tur sırasında mesajlar",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT çalışırken gönderdiğin bir mesajın varsayılan davranışı. ⌘⇧Enter (Windows ve Linux'ta Ctrl+Shift+Enter) onu diğer şekilde gönderir.",
   "Join the running turn": "Devam eden tura katıl",
@@ -2344,5 +2342,9 @@
   "Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.": "Bu projedeki commit edilmemiş değişiklikleri incele. Hataları, gerilemeleri ve eksik testleri ara ve bulduklarını dosya ve satırla birlikte önem sırasına göre listele. Hiçbir dosyayı değiştirme.",
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "Bu proje için bir AGENTS.md oluştur. Önce projeyi oku, sonra nasıl derlendiğini, test edildiğini ve çalıştırıldığını, nasıl düzenlendiğini ve bir kodlama ajanının uyması gereken kuralları anlat. Kısa ve doğru tut.",
   "Archive worker chats in ChatGPT when they are retired": "Emekliye ayrılan worker sohbetlerini ChatGPT'de arşivle",
-  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Bir worker artık kullanılamadığında (yardımcı ajanları temizlediğinde ya da ana sohbet kapandığında) sohbeti ChatGPT'de arşivlenir ve sohbet listenden kalkar. ChatGPT ayarlarından geri yükleyebilirsin; bu uygulama dökümünü saklar. Hiçbir şey silinmez."
+  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Bir worker artık kullanılamadığında (yardımcı ajanları temizlediğinde ya da ana sohbet kapandığında) sohbeti ChatGPT'de arşivlenir ve sohbet listenden kalkar. ChatGPT ayarlarından geri yükleyebilirsin; bu uygulama dökümünü saklar. Hiçbir şey silinmez.",
+  "Keep awake while a chat works": "Bir sohbet çalışırken uyanık tut",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Bilgisayarın uyku moduna geçmesini engeller, böylece uzun çalışmalar sürer. Bazı Windows dizüstü bilgisayarlar ekran kapanınca yine de uyur; bunlar için Bilgisayar ve ekran seçeneğini seç.",
+  "The computer": "Bilgisayar",
+  "The computer and screen": "Bilgisayar ve ekran"
 }
