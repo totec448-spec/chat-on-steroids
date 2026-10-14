@@ -2013,8 +2013,6 @@
   "Copy this chat's ChatGPT link": "Скопировать ссылку на этот чат в ChatGPT",
   "Link copied": "Ссылка скопирована",
   "ChatGPT is waiting for your approval": "ChatGPT ждёт вашего разрешения",
-  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Чат приостановлен, пока вы не разрешите или не отклоните вызов инструмента в ChatGPT. Нажмите, чтобы открыть его.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT ждёт, пока вы разрешите или отклоните вызов инструмента в этом чате. Ничего не продолжится, пока вы не ответите там.",
   "The tool approval ChatGPT asked for in this chat was answered.": "На запрос ChatGPT о разрешении инструмента в этом чате дан ответ.",
   "What's new": "Что нового",
   "Full release notes": "Полные примечания к выпуску",
@@ -2364,5 +2362,14 @@
   "Taskbar": "Панель задач",
   "Tray": "Область уведомлений",
   "Dock": "Dock",
-  "Menu bar": "Строка меню"
+  "Menu bar": "Строка меню",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.": "Чат приостановлен, пока вы не разрешите или не отклоните вызов инструмента в ChatGPT. Нажмите, чтобы ответить в приложении.",
+  "Deny": "Отклонить",
+  "Allow once": "Разрешить один раз",
+  "Sending your answer to ChatGPT…": "Ваш ответ отправляется в ChatGPT…",
+  "ChatGPT showed a different card by then. Nothing was pressed; answer the new one.": "К тому времени ChatGPT показывал другую карточку. Ничего не нажато; ответьте на новую.",
+  "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT больше не предлагал этот вариант. Ничего не нажато.",
+  "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "Страница чата не приняла ваш ответ вовремя. Ничего не нажато; откройте его в браузере и ответьте там.",
+  "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT не разрешает это в этом чате. Можно только отклонить.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT ждёт, пока вы разрешите или отклоните вызов инструмента в этом чате. Ничего не продолжится, пока вы не ответите — здесь или в браузере."
 }

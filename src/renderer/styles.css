@@ -2598,6 +2598,13 @@ input[readonly] {
 .meta.approval-wait.is-waiting { color: var(--ink); }
 .meta.approval-wait.is-waiting .thinking-ico { color: var(--ink); }
 .meta.approval-wait .btn { margin-left: 2px; padding: 3px 9px; }
+/* ChatGPT's approval card, answered in the app (2.1.38): its words, Deny and Allow once. */
+.approval-wait-box { display: grid; gap: 6px; }
+.approval-card { margin: 0 0 4px 22px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); display: grid; gap: 8px; }
+.approval-card-words { display: grid; gap: 2px; color: var(--soft); overflow-wrap: anywhere; }
+.approval-card-words strong { color: var(--ink); font-weight: 600; }
+.approval-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.approval-card-status { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 
 .meta.is-bad {
   color: var(--red);

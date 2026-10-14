@@ -2013,8 +2013,6 @@
   "Copy this chat's ChatGPT link": "Copiar o link do ChatGPT desta conversa",
   "Link copied": "Link copiado",
   "ChatGPT is waiting for your approval": "O ChatGPT está aguardando sua aprovação",
-  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "Um chat está pausado até você permitir ou negar uma chamada de ferramenta no ChatGPT. Clique para abri-lo.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "O ChatGPT está aguardando você permitir ou negar uma chamada de ferramenta neste chat. Nada continua até você responder lá.",
   "The tool approval ChatGPT asked for in this chat was answered.": "A aprovação de ferramenta que o ChatGPT pediu neste chat foi respondida.",
   "What's new": "Novidades",
   "Full release notes": "Notas completas da versão",
@@ -2364,5 +2362,14 @@
   "Taskbar": "Barra de tarefas",
   "Tray": "Bandeja do sistema",
   "Dock": "Dock",
-  "Menu bar": "Barra de menus"
+  "Menu bar": "Barra de menus",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.": "Um chat está pausado até você permitir ou negar uma chamada de ferramenta no ChatGPT. Clique para responder no app.",
+  "Deny": "Negar",
+  "Allow once": "Permitir uma vez",
+  "Sending your answer to ChatGPT…": "Enviando sua resposta ao ChatGPT…",
+  "ChatGPT showed a different card by then. Nothing was pressed; answer the new one.": "Nesse momento o ChatGPT mostrava outro cartão. Nada foi pressionado; responda ao novo.",
+  "ChatGPT no longer offered that choice. Nothing was pressed.": "O ChatGPT não oferecia mais essa opção. Nada foi pressionado.",
+  "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "A página do chat não recebeu sua resposta a tempo. Nada foi pressionado; abra-o no navegador para responder lá.",
+  "ChatGPT does not allow it in this chat. You can only deny it.": "O ChatGPT não permite isso neste chat. Você só pode negar.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "O ChatGPT está esperando você permitir ou negar uma chamada de ferramenta neste chat. Nada continua até você responder, aqui ou no navegador."
 }
