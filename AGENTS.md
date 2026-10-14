@@ -1055,8 +1055,8 @@ user index or working file changes, and every checkpoint Git command passes
 with no active turn it is that request id, and an unproven session, a session without a project,
 a non-Git project or a patch whose files lie outside the project takes none. Concurrent patches
 of one turn share one capture. Capture is bounded in time; a failure or timeout is logged and
-the turn takes no checkpoint, and the patch result, permissions and rollback stay exactly as
-without checkpoints. Commands that edit files through the shell are not checkpointed by
+the turn takes no checkpoint, not even from a later patch (the first one has already run), and
+the patch result, permissions and rollback stay exactly as without checkpoints. Commands that edit files through the shell are not checkpointed by
 themselves; a later patch in the same turn does not move the turn's checkpoint.
 
 ### Terminal execution and custody
@@ -4191,7 +4191,8 @@ revision again after the dialog, then first takes a "Before restore" checkpoint 
 state, so a restore can itself be undone.
 Each file is rewritten (through `cat-file --filters`, temp file and rename) or removed only if
 its content still hashes to what that new checkpoint captured; a file edited in between is
-skipped and reported. Symlinks, submodules and paths outside the project are never written.
+skipped and reported. Line endings follow the repository's Git settings, as a checkout would
+write them, and parent folders removed since the checkpoint are recreated. Symlinks, submodules and paths outside the project are never written.
 HEAD, branches and the user's index are untouched.
 
 An exact successful `apply_patch` may also retain a bounded immutable before/after review asset
