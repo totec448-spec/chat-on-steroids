@@ -3359,6 +3359,14 @@ byte budget (`mcp.test.ts`) without trimming existing guidance. Labels cannot re
 names in one batch are rejected before mutation. The app does not infer task identity from prose.
 Rejected acceptance restores that prior metadata; accepted work keeps its new metadata even
 if browser wake fails. Historical reports remain in the prime inbox and recorded history.
+A failed wake (`failWorkerRevival`) returns the worker to sleep and tells the prime; two in a row
+with nothing heard from the chat (`WAKE_FAILURES_BEFORE_GIVING_UP`) end it as revivable-failed.
+A page that redeemed the wake and failed before the native Send (no usable composer before or after
+model selection, or a send refused as `draft-changed`, `page-busy`, `mention-changed` or
+`send-not-ready`) acks with `detail: 'transient'`; the broker keeps the worker `waking` and asks for
+the same revival again after `TRANSIENT_WAKE_RETRY_MS` (15 s), at most `TRANSIENT_WAKE_RETRIES`
+(2) times per chat, without a prime report; the next one counts as an ordinary strike. A wake that
+expires unredeemed (the chat never showed a message box) still counts at once (#1086).
 A worker proving it never stopped clears its obsolete result while retaining the same task.
 The local UI swarm projection also includes dormant workers in `retainedWorkers`, so parking
 a family preserves its displayed name and task. The panel matches the exact worker conversation;

@@ -1567,7 +1567,7 @@ function endRun(run: Run, reason: string): void {
   retiredPersist?.();
   const what = `${run.runId} (${[...run.agents.keys()].join(', ')})`;
   runs.delete(run.runId);
-  for (const worker of retired) consecutiveWakeFailures.delete(worker.conversationId);
+  for (const worker of retired) { consecutiveWakeFailures.delete(worker.conversationId); transientWakeRetries.delete(worker.conversationId); }
   logInfo(`multi-agent: ended run ${what} — ${reason}`);
   for (const listener of endListeners) listener(reason, retired, run.runId);
   announceRetired(retired.map((worker) => worker.conversationId));
@@ -3800,6 +3800,15 @@ function returnWakingWorkerToStopped(agent: Agent, sleptAt: number, reason: stri
 export const WAKE_FAILURES_BEFORE_GIVING_UP = 2;
 /** Failed wakes per worker conversation since that chat last proved alive. Memory-only: a restart forgives one. */
 const consecutiveWakeFailures = new Map<string, number>();
+/**
+ * Wakes the app repeats by itself after a page that redeemed the wake and failed before Send
+ * (#1086: no message box after choosing the model, or its own draft refused as changed). Those
+ * pages loaded the chat and typed nothing, so the chat is not in doubt: only after these does such
+ * a failure count as a strike. A chat that never loads still counts at once.
+ */
+export const TRANSIENT_WAKE_RETRIES = 2;
+export const TRANSIENT_WAKE_RETRY_MS = 15_000;
+const transientWakeRetries = new Map<string, number>();
 
 /**
  * The browser could not wake this worker, so the slot it was holding goes back.
@@ -3809,11 +3818,27 @@ const consecutiveWakeFailures = new Map<string, number>();
  * moment ago — so it returns to `sleeping` and the prime can try again. The prime is told,
  * because it is holding a message it believes was delivered.
  */
-export function failWorkerRevival(id: string, why: string, runId?: string): AgentMessage | null {
+export function failWorkerRevival(id: string, why: string, runId?: string, options: { transient?: boolean } = {}): AgentMessage | null {
   const run = scopedRun(runId);
   const agent = run?.agents.get(id);
   if (!agent || agent.info.state !== 'waking') return null;
   const chat = agent.info.conversationId ?? id;
+  if (options.transient) {
+    const retries = (transientWakeRetries.get(chat) ?? 0) + 1;
+    if (retries <= TRANSIENT_WAKE_RETRIES) {
+      // Still waking: the slot stays reserved and the prime is not troubled. The same broker
+      // incarnation asks again; a wake that was answered, withdrawn or ended meanwhile is not.
+      transientWakeRetries.set(chat, retries);
+      const forRun = run!.runId;
+      logWarn(`multi-agent: ${id}'s page was not ready (${why}); waking it again in ${TRANSIENT_WAKE_RETRY_MS / 1000} s (${retries}/${TRANSIENT_WAKE_RETRIES})`);
+      const timer = setTimeout(() => {
+        if (scopedRun(forRun)?.agents.get(id) === agent && agent.info.state === 'waking') requestWorkerRevivals([id], forRun);
+      }, TRANSIENT_WAKE_RETRY_MS);
+      timer.unref?.();
+      return null;
+    }
+    transientWakeRetries.delete(chat);
+  }
   const strikes = (consecutiveWakeFailures.get(chat) ?? 0) + 1;
   consecutiveWakeFailures.set(chat, strikes);
   if (strikes >= WAKE_FAILURES_BEFORE_GIVING_UP && !ceilingCrossed(agent.info)) {
@@ -4071,6 +4096,7 @@ export function noteAgentAlive(
   if (!agent) return null;
   // Reachability clears a failed browser wake, but does not renew the work deadline.
   consecutiveWakeFailures.delete(conversationId);
+  transientWakeRetries.delete(conversationId);
   const now = Date.now();
   // Page reports establish attachment, never work. Preserve the work clock even when a
   // closed tab returns, so repeated recovery cannot lease an inactive worker forever.
@@ -4769,6 +4795,7 @@ export function resetSwarm(): void {
   const reason = 'the run was cleared in the app';
   for (const run of [...runs.values()]) endRun(run, reason);
   consecutiveWakeFailures.clear();
+  transientWakeRetries.clear();
   const retiredAt = Date.now();
   let retiredDormant = false;
   const dormantChats: string[] = [];
@@ -5545,6 +5572,7 @@ export function resetAgentsForTests(): void {
   managedWorktreeCleanupHistory.clear();
   archivedAssignments.clear();
   consecutiveWakeFailures.clear();
+  transientWakeRetries.clear();
   pageGenerating.clear();
   unpublishedRuns.clear();
   activeSpawnStages.clear();
