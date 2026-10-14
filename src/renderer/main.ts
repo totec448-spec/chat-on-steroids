@@ -1186,10 +1186,15 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   // A mismatched companion can fail the protocol gate before it becomes present.
   // Retain its last observed version until a matching companion actually reports in.
   const missing = !stale && bridge.running && !bridge.present && isRunning(status.state) && browserExtensionRequired(config);
-  if (!stale && !missing && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
+  if (!stale && !missing && !update.latest && update.stage === 'idle' && !update.checkedAt && !update.notInstalled) return null;
 
   const lines: string[] = [];
   let tone: UpdateTone = 'work';
+  // #1490: an installer that stopped silently left this start on the old version.
+  if (update.notInstalled) {
+    lines.push(t("Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
+    tone = 'bad';
+  }
   if (update.latest) {
     // `latest` set with a stage of `idle` is the deliberate case: a new version exists and this
     // installation - a Linux .deb, macOS, a development tree, an architecture with no artifact -
@@ -1205,13 +1210,13 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
             ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ?? t("the download stopped")])
             : t("Chat On Steroids {0} is out. This installation has to be updated by hand.", [update.latest])
     );
-    if (update.stage === 'failed') tone = 'bad';
+    if (update.stage === 'failed' || update.notInstalled) tone = 'bad';
   } else if (update.stage === 'failed') {
     lines.push(t("Could not check for a newer version: {0}.", [update.error ?? t("the check stopped")]));
     tone = 'bad';
   } else if (update.stage === 'checking') {
     lines.push(t("Checking for a newer version…"));
-  } else if (!stale && !missing) {
+  } else if (!stale && !missing && !update.notInstalled) {
     const extension = bridge.present && bridge.extensionVersion ? t(" · extension {0}", [bridge.extensionVersion]) : '';
     lines.push(t("Up to date! Chat On Steroids {0}{1}", [update.current, extension]));
     tone = 'ok';

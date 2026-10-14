@@ -2378,5 +2378,6 @@
   "Add the Chat On Steroids add-on to Firefox": "Ajoutez le module Chat On Steroids à Firefox",
   "Get the add-on": "Obtenir le module",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox demande avant d’ajouter le module. Choisissez « Ajouter ».",
-  "Mozilla Firefox": "Mozilla Firefox"
+  "Mozilla Firefox": "Mozilla Firefox",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} ne s’est pas installé ; c’est toujours la {1}. Choisissez Installer pour réessayer ; Windows peut demander une autorisation."
 }
