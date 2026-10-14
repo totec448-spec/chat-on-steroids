@@ -2362,6 +2362,28 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
 });
 
+// #924 / #1401: stable connector URLs for a tunnel of one's own, opt-in, only with secure storage.
+it('saves the stable connector URL option from For developers, and only with secure storage', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const box = doc.getElementById('mcpPersistentUrls') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="general"]')!.contains(box)).toBe(true);
+  expect(box.checked).toBe(false);
+  const instructions = mounted.state.config.mcp?.instructions ?? '';
+  box.checked = true;
+  box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({ instructions, persistentUrls: true }));
+  const unavailable = structuredClone(mounted.state) as any;
+  unavailable.secureStorage = { available: false };
+  unavailable.config.mcp = { instructions, persistentUrls: false };
+  mounted.push(unavailable);
+  expect(box.disabled).toBe(true);
+  // Already on without the store: it stays usable, so it can always be turned off.
+  unavailable.config.mcp = { instructions, persistentUrls: true };
+  mounted.push(structuredClone(unavailable));
+  expect(box.disabled).toBe(false);
+});
+
 it('always requires the live browser because recording is an invariant', async () => {
   const mounted = await mountChat({
     hasApiKey: true,

@@ -2381,5 +2381,7 @@
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "擴充功能無法開啟 ChatGPT",
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} 阻止擴充功能存取 chatgpt.com。請在擴充功能詳細資料中允許存取 chatgpt.com（Chrome、Edge 和 Brave 為「網站存取權」，Firefox 為「權限」），然後重新載入 ChatGPT。",
-  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} 未能安裝；目前仍是 {1}。選擇「安裝」再試一次；Windows 可能會要求權限。"
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} 未能安裝；目前仍是 {1}。選擇「安裝」再試一次；Windows 可能會要求權限。",
+  "Keep plugin URLs across restarts": "重新啟動後保留外掛程式 URL",
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "適用於 ChatGPT 會儲存其 URL 的自有通道，例如具名的 Cloudflare 通道。在你關閉此項之前，任何擁有該 URL 的人都能使用你的 Chat On Steroids 外掛程式。需要安全儲存空間。"
 }

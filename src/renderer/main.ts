@@ -745,7 +745,9 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       appearance: over.appearance ?? previous.ui.appearance
     },
     controlApi: { enabled: $<HTMLInputElement>('controlApiEnabled').checked, allowActions: $<HTMLInputElement>('controlApiAllowActions').checked },
-    ...chatPatch
+    ...chatPatch,
+    // After the chat patch, which still carries the stored mcp settings it no longer edits.
+    mcp: { instructions: previous.mcp?.instructions ?? '', persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked }
   };
   requestedSettings = patch;
 
@@ -777,7 +779,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     ui: previous.ui,
     sessions: previous.sessions,
     compaction: previous.compaction,
-    mcp: previous.mcp ?? { instructions: '' },
+    mcp: previous.mcp ?? { instructions: '', persistentUrls: false },
     controlApi: previous.controlApi ?? { enabled: false, allowActions: false },
     multiAgent: previous.multiAgent,
     goal: previous.goal
@@ -1653,6 +1655,9 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
+  applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
+  // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
+  $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
   applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
   // Actions need the API itself, so the switch stays off and disabled until it is on.
   $<HTMLInputElement>('controlApiAllowActions').disabled = config.controlApi?.enabled !== true;
@@ -2670,6 +2675,7 @@ for (const id of [
   'mentionCore',
   'controlApiEnabled',
   'controlApiAllowActions',
+  'mcpPersistentUrls',
   'privacyScreenshots',
   'tunnelKind',
   'tunnelId',
