@@ -47,3 +47,28 @@ describe('fetchWithRetry (native source downloads)', () => {
     expect(signals[0]).not.toBe(signals[1]);
   });
 });
+
+// fetchFirst is imported by the same untyped script module as fetchWithRetry.
+describe('fetchFirst (a source with mirrors)', () => {
+  it('falls back to the next mirror when the original keeps failing or is missing', async () => {
+    const { fetchFirst } = await import('../scripts/fetch-retry.mjs' as string) as { fetchFirst: (urls: string[], o: object, d: object) => Promise<Response> };
+    const calls: string[] = [];
+    const answer = await fetchFirst(['https://origin.test/a', 'https://mirror.test/a'], {}, { ...noWait, log: () => undefined,
+      fetchImpl: async (url: string) => { calls.push(url); if (url.startsWith('https://origin')) throw reset(); return ok('from mirror'); } });
+    expect(await answer.text()).toBe('from mirror');
+    expect(calls.filter(url => url.startsWith('https://origin'))).toHaveLength(4);
+
+    const missing = await fetchFirst(['https://origin.test/b', 'https://mirror.test/b'], {}, { ...noWait, log: () => undefined,
+      fetchImpl: async (url: string) => url.startsWith('https://origin') ? new Response('', { status: 404 }) : ok('mirror b') });
+    expect(await missing.text()).toBe('mirror b');
+  });
+
+  it('reports the last failure when every address fails', async () => {
+    const { fetchFirst } = await import('../scripts/fetch-retry.mjs' as string) as { fetchFirst: (urls: string[], o: object, d: object) => Promise<Response> };
+    const last = await fetchFirst(['https://origin.test/c', 'https://mirror.test/c'], {}, { ...noWait, log: () => undefined,
+      fetchImpl: async (url: string) => new Response('', { status: url.startsWith('https://origin') ? 503 : 404 }) });
+    expect(last.status).toBe(404);
+    await expect(fetchFirst(['https://origin.test/d'], {}, { ...noWait, log: () => undefined, fetchImpl: async () => { throw reset(); } }))
+      .rejects.toThrow('fetch failed');
+  });
+});

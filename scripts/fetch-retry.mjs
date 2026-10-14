@@ -29,3 +29,26 @@ export async function fetchWithRetry(url, { timeoutMs = 180_000 } = {},
     return response;
   }
 }
+
+/**
+ * The first good answer from a source's address and then its mirrors, in order (2026-10-14:
+ * cairographics.org answered one request in three). Each address gets fetchWithRetry's retries.
+ * Returns the last non-OK answer when none is OK, and throws the last error when none answered.
+ */
+export async function fetchFirst(urls, options = {}, dependencies = {}) {
+  let last = null;
+  let failure = null;
+  for (const url of urls) {
+    try {
+      const response = await fetchWithRetry(url, options, dependencies);
+      if (response.ok) return response;
+      last = response;
+      (dependencies.log ?? console.warn)(`Download of ${url} answered HTTP ${response.status}; trying the next address.`);
+    } catch (error) {
+      failure = error;
+      (dependencies.log ?? console.warn)(`Download of ${url} failed after retries; trying the next address.`);
+    }
+  }
+  if (last) return last;
+  throw failure;
+}
