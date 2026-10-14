@@ -373,6 +373,11 @@ export interface MultiAgentSettings {
    * identity and history are never reclaimed by this switch.
    */
   endSleepingWorkerProcesses?: boolean;
+  /**
+   * Archive each worker's ChatGPT chat once its run has ended (#1460). ChatGPT's own reversible
+   * archive; nothing is deleted. Off by default.
+   */
+  archiveWorkerChats?: boolean;
 }
 
 /** The user's own additions to what each MCP connector tells the model about itself. */

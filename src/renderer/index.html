@@ -1055,6 +1055,14 @@
                     <input id="endSleepingWorkerProcesses" type="checkbox" />
                   </label>
 
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Archive worker chats in ChatGPT when they are retired</b>
+                      <em>Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                    </span>
+                    <input id="archiveWorkerChats" type="checkbox" />
+                  </label>
+
                   <div id="swarmList"></div>
                   <div class="step-actions">
                     <button class="btn" id="swarmReset" type="button">Clear workers</button>

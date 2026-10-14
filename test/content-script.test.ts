@@ -23371,3 +23371,43 @@ describe('a chat deleted in ChatGPT', () => {
     expect(live.sent.some(message => message.type === 'conversation_deleted')).toBe(false);
   });
 });
+
+/** A retired worker chat, archived with ChatGPT's own reversible archive when the setting is on (#1460). */
+describe('archiving a retired worker chat', () => {
+  it('archives exactly that chat in this account and nothing else', async () => {
+    live = await harness('https://chatgpt.com/');
+    const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
+    const calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
+    let patchStatus = 200;
+    (live.window as any).fetch = vi.fn(async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', headers: init.headers ?? {}, ...(init.body ? { body: init.body } : {}) });
+      if (String(url).endsWith('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ accessToken: 'token-1', account: { id: 'account-1' } }) };
+      return { ok: patchStatus < 300, status: patchStatus, json: async () => ({ success: patchStatus < 300 }) };
+    });
+
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat.toUpperCase() })).toEqual({ outcome: 'archived' });
+    expect(calls).toEqual([
+      { url: 'https://chatgpt.com/api/auth/session', method: 'GET', headers: {} },
+      { url: `https://chatgpt.com/backend-api/conversation/${chat}`, method: 'PATCH',
+        headers: { Authorization: 'Bearer token-1', 'Content-Type': 'application/json', 'ChatGPT-Account-Id': 'account-1' },
+        body: JSON.stringify({ is_archived: true }) }
+    ]);
+
+    patchStatus = 429;
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat })).toEqual({ outcome: 'failed' });
+    calls.length = 0;
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: '../conversations' })).toEqual({ outcome: 'failed' });
+    expect(calls).toEqual([]);
+  });
+
+  it('fails without a ChatGPT sign-in, before touching the chat', async () => {
+    live = await harness('https://chatgpt.com/');
+    const calls: string[] = [];
+    (live.window as any).fetch = vi.fn(async (url: string) => {
+      calls.push(String(url));
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' })).toEqual({ outcome: 'failed' });
+    expect(calls).toEqual(['https://chatgpt.com/api/auth/session']);
+  });
+});
