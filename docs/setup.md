@@ -37,7 +37,7 @@ Core, Desktop and Plugins are separate plugins in ChatGPT. Configure each surfac
 
 **Cloudflare quick tunnel:** connect in CoS and use the displayed public URL as the MCP server URL in ChatGPT. The random path is a secret and changes on restart.
 
-**Your own HTTPS tunnel:** forward to the loopback URL shown by CoS and preserve its secret path. Treat the resulting URL like a password.
+**Your own HTTPS tunnel** (for example a named Cloudflare tunnel): forward to the loopback URL shown by CoS and preserve its secret path. Treat the resulting URL like a password. The secret path changes every time CoS starts, even when your hostname stays the same, so after each restart update the URL in each Chat On Steroids app in ChatGPT and refresh it. Until then, ChatGPT still lists the app but has no tools from it. The OpenAI Secure Tunnel avoids this, because ChatGPT stores its tunnel ID instead of a URL.
 
 ## Browser bridge port
 
