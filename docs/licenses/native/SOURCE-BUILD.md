@@ -20,7 +20,8 @@ is included alongside the older source. Use that recorded current commit rather
 than resolving the tag again. The commit archive has different directory/compression
 bytes from the recipe's tagged archive, so adjust the cache filename/hash accordingly.
 TIFF and Fontconfig include mirrored source archives where original download endpoints
-were unavailable. Windows libxml2's recipe directory must resolve to `2.15`.
+were unavailable. Cairo and Pixman list Debian's byte-identical `.orig` archives as `mirrors`,
+tried only when cairographics.org fails; the pinned SHA-256 decides either way. Windows libxml2's recipe directory must resolve to `2.15`.
 GVDB uses GNOME's GitHub mirror at the same pinned commit after the GitLab archive
 endpoint returned HTTP 406. Its archive bytes, size and SHA-256 are unchanged; all
 14 archived files also match that commit's Git tree.
