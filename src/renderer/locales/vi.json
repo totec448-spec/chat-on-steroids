@@ -2383,5 +2383,11 @@
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} đang chặn tiện ích truy cập chatgpt.com. Trong chi tiết tiện ích, hãy cho phép truy cập chatgpt.com (“Quyền truy cập trang web” trên Chrome, Edge và Brave, “Quyền” trên Firefox), rồi tải lại ChatGPT.",
   "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} chưa được cài đặt; đây vẫn là {1}. Chọn Cài đặt để thử lại; Windows có thể hỏi quyền.",
   "Keep plugin URLs across restarts": "Giữ URL của plugin qua các lần khởi động lại",
-  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Dành cho đường hầm riêng của bạn, ví dụ đường hầm Cloudflare có tên, có URL được ChatGPT lưu. Ai có URL đó đều dùng được các plugin Chat On Steroids của bạn cho đến khi bạn tắt tùy chọn này. Cần bộ lưu trữ an toàn."
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Dành cho đường hầm riêng của bạn, ví dụ đường hầm Cloudflare có tên, có URL được ChatGPT lưu. Ai có URL đó đều dùng được các plugin Chat On Steroids của bạn cho đến khi bạn tắt tùy chọn này. Cần bộ lưu trữ an toàn.",
+  "Start a fresh turn after": "Bắt đầu lượt mới sau",
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.": "Công việc dài tiếp tục trong một lượt mới với Tiếp tục tự động, ngay sau một kết quả công cụ. Lượt ngắn hơn ít bị ngắt hơn. Không dùng với mô hình Pro, Goal, Loop hay tác tử con.",
+  "20 minutes": "20 phút",
+  "30 minutes": "30 phút",
+  "45 minutes": "45 phút",
+  "60 minutes": "60 phút"
 }

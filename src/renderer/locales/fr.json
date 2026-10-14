@@ -2383,5 +2383,11 @@
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} empêche l’extension d’accéder à chatgpt.com. Dans les détails de l’extension, autorisez-la sur chatgpt.com (« Accès aux sites » dans Chrome, Edge et Brave, « Permissions » dans Firefox), puis rechargez ChatGPT.",
   "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} ne s’est pas installé ; c’est toujours la {1}. Choisissez Installer pour réessayer ; Windows peut demander une autorisation.",
   "Keep plugin URLs across restarts": "Conserver les URL des plugins après un redémarrage",
-  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Pour votre propre tunnel, comme un tunnel Cloudflare nommé, dont ChatGPT enregistre l’URL. Toute personne disposant de cette URL peut utiliser vos plugins Chat On Steroids jusqu’à ce que vous désactiviez ceci. Nécessite un stockage sécurisé."
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Pour votre propre tunnel, comme un tunnel Cloudflare nommé, dont ChatGPT enregistre l’URL. Toute personne disposant de cette URL peut utiliser vos plugins Chat On Steroids jusqu’à ce que vous désactiviez ceci. Nécessite un stockage sécurisé.",
+  "Start a fresh turn after": "Démarrer un nouveau tour après",
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.": "Un long travail continue dans un nouveau tour avec un Continuer automatique, juste après un résultat d’outil. Les tours plus courts s’interrompent moins souvent. Pas avec les modèles Pro, Goal, Loop ni les sous-agents.",
+  "20 minutes": "20 minutes",
+  "30 minutes": "30 minutes",
+  "45 minutes": "45 minutes",
+  "60 minutes": "60 minutes"
 }

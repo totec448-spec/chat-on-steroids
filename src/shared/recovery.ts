@@ -69,3 +69,11 @@ export function recoveryMessage(): string {
 
 /** The existing silence clock gets one half-window only when the native page is busy. */
 export const recoveryBusyMs = (pro: boolean): number => (pro ? 5 : 1) * 60_000;
+
+/**
+ * The app's automatic continue that starts a fresh turn in a long one (#1402). Plain on purpose:
+ * it is sent into a turn the model is still working in, and only has to carry the work on.
+ */
+export function rotationMessage(): string {
+  return 'Continue the task from where you are. (Chat On Steroids starts a fresh turn every so often so long work stays reliable; nothing else changed.)';
+}
