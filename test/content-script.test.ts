@@ -10433,7 +10433,12 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
   });
 
-  it.each([[false, 1], [true, 0]])('treats a clean, lasting regeneration of the settled question as a turn (failure banner: %s)', async (banner, starts) => {
+  it.each([[null, 1], ['Message delivery timed out. Please try again.', 0],
+    // A German account, 2026-10-14: these banners were not read as failures, so every recovery
+    // reload claimed a phantom turn for the dead question and cancelled its own Continue.
+    ['Zeitüberschreitung bei der Übermittlung der Nachricht. Bitte versuche es erneut.', 0],
+    ['Verbindung unterbrochen. Warten auf die vollständige Antwort.', 0]
+  ] as const)('treats a clean, lasting regeneration of the settled question as a turn (failure banner: %s)', async (banner, starts) => {
     // A Compact & Resume brief rewritten by ChatGPT's Retry after "Resume stream unavailable"
     // is a real generation of the same question; a phantom shows the failure banner instead.
     live = await harness(
@@ -10442,7 +10447,7 @@ describe('a content script reloaded into a turn already in flight', () => {
       midTurn
     );
     await live.hook.pullActivity();
-    if (banner) alertBanner(live.document, 'Message delivery timed out. Please try again.');
+    if (banner) alertBanner(live.document, banner);
     for (let at = 0; at < 7; at++) {
       live.hook.observe();
       await settle();
