@@ -822,6 +822,21 @@ Load command 11
     expect(release).toContain('publish/firefox-updates.json');
   });
 
+  // Proves the AMO credentials and Mozilla's validation before a release depends on them, without
+  // spending a release version: it signs <app version>.<run number + 1000>, never the release number.
+  it('can check Firefox signing on demand without using up a release version', () => {
+    const check = yamlFile('.github/workflows/firefox-sign-check.yml');
+    expect(Object.keys(check.on)).toEqual(['workflow_dispatch']);
+    const steps = check.jobs.sign.steps as Array<Record<string, any>>;
+    const script = steps.map(step => String(step.run ?? '')).join('\n');
+    expect(script).toContain('node scripts/stage-firefox-extension.mjs');
+    expect(script).toMatch(/\$\{pkg\}\.\$\(\(\s*GITHUB_RUN_NUMBER \+ 1000\s*\)\)/);
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
+    expect(script).not.toMatch(/--api-(key|secret)/);
+    expect(JSON.stringify(steps.map(step => step.env ?? {}))).toContain('${{ secrets.AMO_JWT_SECRET }}');
+    expect(check.permissions).toEqual({ contents: 'read' });
+  });
+
   it('keeps version metadata aligned and validates artifacts independently of editorial release notes', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string };
     const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
