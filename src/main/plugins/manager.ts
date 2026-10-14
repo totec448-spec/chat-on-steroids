@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ToolSchema } from '@modelcontextprotocol/core';
-import { Client, ProtocolError, StreamableHTTPClientTransport, UnauthorizedError, type Tool, type CallToolResult } from '@modelcontextprotocol/client';
+import { Client, ProtocolError, SdkError, SdkErrorCode, StreamableHTTPClientTransport, UnauthorizedError, type Tool, type CallToolResult } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { getMcpConfigForManifest, vAny } from '@anthropic-ai/mcpb/browser';
 import { getSecret, setSecret, clearSecret } from '../secrets.js';
@@ -905,6 +905,10 @@ export class PluginManager {
       // a successful response that violated the contract CoS discovered for the tool.
       if (error instanceof ProtocolError && !isLocalToolOutputValidationError(error))
         return errorResult(`PLUGIN_TOOL_ERROR: ${error.message}`);
+      // An SDK request deadline/abort cancels only this call. The transport
+      // remains usable; actual disconnects are handled by client.onclose.
+      if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout)
+        return errorResult('PLUGIN_CALL_TIMEOUT: The call timed out or was cancelled. The operation may have completed; inspect its state before retrying. CoS did not retry.');
       // A failed/ambiguous call must not leave a broken process running idle.
       if (this.live.get(row.id) === live && this.records.includes(row)) {
         const needsAuth = error instanceof PluginNeedsAuth || error instanceof UnauthorizedError;
