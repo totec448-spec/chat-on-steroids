@@ -2371,5 +2371,9 @@
   "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT ya no ofrecía esa opción. No se pulsó nada.",
   "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "La página del chat no recibió tu respuesta a tiempo. No se pulsó nada; ábrelo en el navegador para responder allí.",
   "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT no lo permite en este chat. Solo puedes rechazarlo.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT está esperando a que permitas o rechaces una llamada a una herramienta en este chat. Nada continúa hasta que respondas, aquí o en el navegador."
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT está esperando a que permitas o rechaces una llamada a una herramienta en este chat. Nada continúa hasta que respondas, aquí o en el navegador.",
+  "Add the Chat On Steroids add-on to Firefox": "Añade el complemento de Chat On Steroids a Firefox",
+  "Get the add-on": "Obtener el complemento",
+  "Firefox asks before it adds the add-on. Choose Add.": "Firefox pregunta antes de añadir el complemento. Elige «Añadir».",
+  "Mozilla Firefox": "Mozilla Firefox"
 }

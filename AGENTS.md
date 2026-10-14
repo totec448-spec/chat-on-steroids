@@ -2006,7 +2006,7 @@ and narrow/zoomed layouts with isolated data.
 **Intent:** make native ChatGPT observable and controllable for an exact authorized operation,
 while leaving ChatGPT's messages, model execution and account permissions with the provider.
 
-Setup's first step installs and version-checks the companion in the person's Chrome, Edge or Brave,
+Setup's first step installs and version-checks the companion in the person's Chrome, Edge, Brave or Firefox,
 then offers two equally weighted places for ChatGPT to run: the built-in CoS browser (opt-in, never
 preselected) or that browser, preserving the saved setting, and waits for ChatGPT to be signed in
 where it runs. The browser chosen for installation is a local choice until one place is picked;
@@ -2023,6 +2023,15 @@ companion reaching the app (`bridge.cosExtension`, from its requests or its `?ho
 Chrome's sign-in never completes the CoS path, nor the reverse. Once ChatGPT surely answers signed
 in, Setup's sign-in button opens ChatGPT's own sign-out (`chatgpt:signOut`) where it runs, and the
 status follows its next answer.
+
+Firefox (`chatBrowser: 'firefox'`) runs the Mozilla-signed add-on that each release attaches as
+`Chat-On-Steroids-Firefox.xpi` (`shared/firefox-addon.ts`); Setup opens this app version's download
+(`browser:setupOpen` with `firefox`/`extensions`) instead of the Developer mode and folder steps.
+Firefox gets the URL alone, without Chromium's switches. Its add-on sends
+`x-extension-engine: gecko`; the bridge projects that as `externalExtension.engine`. Firefox updates
+the add-on itself through its update manifest, so the extension never asks `/extension/update` or
+reloads there and reports the hold `browser-updates-itself` instead. The CoS browser's Google
+sign-in handoff offers only Chrome, Edge and Brave.
 
 ### Built-in browser
 

@@ -2371,5 +2371,9 @@
   "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT không còn đưa ra lựa chọn đó. Không có gì được nhấn.",
   "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "Trang của cuộc trò chuyện không nhận câu trả lời kịp thời. Không có gì được nhấn; hãy mở trong trình duyệt để trả lời ở đó.",
   "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT không cho phép điều này trong cuộc trò chuyện này. Bạn chỉ có thể từ chối.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT đang chờ bạn cho phép hoặc từ chối một lệnh gọi công cụ trong cuộc trò chuyện này. Không có gì tiếp tục cho đến khi bạn trả lời, tại đây hoặc trong trình duyệt."
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT đang chờ bạn cho phép hoặc từ chối một lệnh gọi công cụ trong cuộc trò chuyện này. Không có gì tiếp tục cho đến khi bạn trả lời, tại đây hoặc trong trình duyệt.",
+  "Add the Chat On Steroids add-on to Firefox": "Thêm tiện ích Chat On Steroids vào Firefox",
+  "Get the add-on": "Tải tiện ích",
+  "Firefox asks before it adds the add-on. Choose Add.": "Firefox sẽ hỏi trước khi thêm tiện ích. Chọn “Thêm”.",
+  "Mozilla Firefox": "Mozilla Firefox"
 }
