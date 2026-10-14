@@ -2343,6 +2343,8 @@
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "请为此项目创建一个 AGENTS.md。先阅读项目，然后说明如何构建、测试和运行它，它的结构，以及编码代理应遵循的约定。保持简短准确。",
   "Archive worker chats in ChatGPT when they are retired": "在 ChatGPT 中归档已退役 worker 的聊天",
   "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "当某个 worker 不能再使用时（你清除了子智能体，或主聊天已关闭），它的聊天会在 ChatGPT 中归档，并从你的聊天列表中移除。你可以在 ChatGPT 的设置中恢复它；本应用会保留其记录。不会删除任何内容。",
+  "Goal paused": "目标已暂停",
+  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT 连续三次给出相同的回答，因此目标停止了追问。打开聊天以继续。",
   "Keep awake while a chat works": "聊天工作时保持唤醒",
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "阻止电脑进入睡眠，让长时间运行继续。部分 Windows 笔记本在屏幕关闭后仍会睡眠；对于这类电脑，请选择“电脑和屏幕”。",
   "The computer": "电脑",
