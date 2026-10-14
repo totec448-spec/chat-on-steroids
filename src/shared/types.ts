@@ -184,6 +184,8 @@ export interface UiPrefs {
    * automatic continue (0 = off). Missing means 30.
    */
   rotateTurnMinutes?: number;
+  /** Usage › Other apps: read Codex's and Claude Code's local logs (numbers only). Missing means on. */
+  localAppUsage?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
   followUp?: 'steer' | 'queue';
   /** Codex's "Enter key behavior": Enter sends (missing or true), or only Cmd/Ctrl+Enter sends (false). */
