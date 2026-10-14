@@ -2304,8 +2304,6 @@
   "Send now": "Envoyer maintenant",
   "Send into the running turn now": "Envoyer maintenant dans le tour en cours",
   "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente.",
-  "Keep the computer awake": "Garder l'ordinateur éveillé",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Pendant qu'un chat travaille, l'ordinateur ne se met pas en veille, pour que les longues tâches continuent. L'écran peut tout de même s'éteindre.",
   "Messages during a running turn": "Messages pendant un tour en cours",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Ce que fait par défaut un message envoyé pendant que ChatGPT travaille. ⌘⇧Entrée (Ctrl+Maj+Entrée sous Windows et Linux) l'envoie dans l'autre sens.",
   "Join the running turn": "Rejoindre le tour en cours",
@@ -2344,5 +2342,9 @@
   "Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.": "Relis les modifications non validées de ce projet. Cherche les bugs, les régressions et les tests manquants, et liste ce que tu trouves par gravité avec le fichier et la ligne. Ne modifie aucun fichier.",
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "Crée un AGENTS.md pour ce projet. Lis d'abord le projet, puis décris comment il est compilé, testé et lancé, comment il est organisé et les conventions qu'un agent de code doit suivre. Reste bref et exact.",
   "Archive worker chats in ChatGPT when they are retired": "Archiver dans ChatGPT les chats des workers retirés",
-  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Dès qu'un worker ne peut plus servir (vous avez effacé les workers, ou le chat principal a été fermé), son chat est archivé dans ChatGPT et quitte votre liste de chats. Vous pouvez le restaurer depuis les paramètres de ChatGPT ; cette app conserve sa transcription. Rien n'est supprimé."
+  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Dès qu'un worker ne peut plus servir (vous avez effacé les workers, ou le chat principal a été fermé), son chat est archivé dans ChatGPT et quitte votre liste de chats. Vous pouvez le restaurer depuis les paramètres de ChatGPT ; cette app conserve sa transcription. Rien n'est supprimé.",
+  "Keep awake while a chat works": "Garder éveillé pendant qu’un chat travaille",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Empêche l’ordinateur de se mettre en veille, pour que les longues exécutions continuent. Certains portables Windows se mettent quand même en veille dès que l’écran s’éteint ; pour eux, choisissez L’ordinateur et l’écran.",
+  "The computer": "L’ordinateur",
+  "The computer and screen": "L’ordinateur et l’écran"
 }

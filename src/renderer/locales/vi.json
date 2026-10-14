@@ -2304,8 +2304,6 @@
   "Send now": "Gửi ngay",
   "Send into the running turn now": "Gửi ngay vào lượt đang chạy",
   "The turn ended before this message could join it. It stays queued.": "Lượt đã kết thúc trước khi tin nhắn này kịp tham gia. Tin nhắn vẫn nằm trong hàng đợi.",
-  "Keep the computer awake": "Giữ máy tính không ngủ",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Khi một cuộc trò chuyện đang làm việc, máy tính không chuyển sang chế độ ngủ để các tác vụ dài tiếp tục chạy. Màn hình vẫn có thể tắt.",
   "Messages during a running turn": "Tin nhắn trong lượt đang chạy",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Điều mà tin nhắn bạn gửi khi ChatGPT đang làm việc thực hiện theo mặc định. ⌘⇧Enter (Ctrl+Shift+Enter trên Windows và Linux) sẽ gửi theo cách còn lại.",
   "Join the running turn": "Tham gia lượt đang chạy",
@@ -2344,5 +2342,9 @@
   "Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.": "Hãy xem xét các thay đổi chưa commit trong dự án này. Tìm lỗi, hồi quy và các bài kiểm tra còn thiếu, rồi liệt kê những gì bạn tìm thấy theo mức độ nghiêm trọng kèm tệp và dòng. Không thay đổi tệp nào.",
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "Hãy tạo một AGENTS.md cho dự án này. Đọc dự án trước, rồi mô tả cách xây dựng, kiểm thử và chạy, cách tổ chức và các quy ước mà một tác tử lập trình cần tuân theo. Ngắn gọn và chính xác.",
   "Archive worker chats in ChatGPT when they are retired": "Lưu trữ cuộc trò chuyện của worker đã kết thúc trong ChatGPT",
-  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Khi một worker không thể dùng lại nữa (bạn đã xóa worker, hoặc cuộc trò chuyện chính đã đóng), cuộc trò chuyện của nó được lưu trữ trong ChatGPT và rời khỏi danh sách trò chuyện. Bạn có thể khôi phục trong phần cài đặt của ChatGPT; ứng dụng này giữ bản ghi của nó. Không có gì bị xóa."
+  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Khi một worker không thể dùng lại nữa (bạn đã xóa worker, hoặc cuộc trò chuyện chính đã đóng), cuộc trò chuyện của nó được lưu trữ trong ChatGPT và rời khỏi danh sách trò chuyện. Bạn có thể khôi phục trong phần cài đặt của ChatGPT; ứng dụng này giữ bản ghi của nó. Không có gì bị xóa.",
+  "Keep awake while a chat works": "Giữ thức khi một cuộc trò chuyện đang làm việc",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Ngăn máy tính chuyển sang chế độ ngủ để các lần chạy dài tiếp tục. Một số laptop Windows vẫn ngủ khi màn hình tắt; với những máy đó, hãy chọn Máy tính và màn hình.",
+  "The computer": "Máy tính",
+  "The computer and screen": "Máy tính và màn hình"
 }

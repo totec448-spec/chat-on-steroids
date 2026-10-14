@@ -2304,8 +2304,6 @@
   "Send now": "立即发送",
   "Send into the running turn now": "立即发送到正在进行的这一轮",
   "The turn ended before this message could join it. It stays queued.": "这一轮在此消息加入前已结束。它仍在队列中。",
-  "Keep the computer awake": "保持电脑唤醒",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "聊天工作时电脑不会进入睡眠，长时间任务得以继续。屏幕仍可能关闭。",
   "Messages during a running turn": "正在进行的轮次中的消息",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "在 ChatGPT 工作时发送的消息默认如何处理。⌘⇧Enter（Windows 和 Linux 上为 Ctrl+Shift+Enter）按另一种方式发送。",
   "Join the running turn": "加入正在进行的这一轮",
@@ -2344,5 +2342,9 @@
   "Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.": "请审查此项目中未提交的更改。查找错误、回归和缺失的测试，并按严重程度列出发现的问题，注明文件和行号。不要修改任何文件。",
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "请为此项目创建一个 AGENTS.md。先阅读项目，然后说明如何构建、测试和运行它，它的结构，以及编码代理应遵循的约定。保持简短准确。",
   "Archive worker chats in ChatGPT when they are retired": "在 ChatGPT 中归档已退役 worker 的聊天",
-  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "当某个 worker 不能再使用时（你清除了子智能体，或主聊天已关闭），它的聊天会在 ChatGPT 中归档，并从你的聊天列表中移除。你可以在 ChatGPT 的设置中恢复它；本应用会保留其记录。不会删除任何内容。"
+  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "当某个 worker 不能再使用时（你清除了子智能体，或主聊天已关闭），它的聊天会在 ChatGPT 中归档，并从你的聊天列表中移除。你可以在 ChatGPT 的设置中恢复它；本应用会保留其记录。不会删除任何内容。",
+  "Keep awake while a chat works": "聊天工作时保持唤醒",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "阻止电脑进入睡眠，让长时间运行继续。部分 Windows 笔记本在屏幕关闭后仍会睡眠；对于这类电脑，请选择“电脑和屏幕”。",
+  "The computer": "电脑",
+  "The computer and screen": "电脑和屏幕"
 }
