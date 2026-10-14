@@ -714,6 +714,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       defaultChatModel: $<HTMLSelectElement>('defaultChatModel').value || undefined,
       defaultChatReasoning: ($<HTMLSelectElement>('defaultChatReasoning').value || undefined) as Config['ui']['defaultChatReasoning'],
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
+      cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
@@ -1610,6 +1611,9 @@ function apply(next: AppState): void {
   );
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
   applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
+  applyValue($<HTMLSelectElement>('cosBrowserMinimize'), config.ui.cosBrowserMinimize ?? 'taskbar', previousState?.config.ui.cosBrowserMinimize ?? 'taskbar');
+  // Only the built-in browser has a window of the app's own to minimize.
+  $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
@@ -1657,9 +1661,13 @@ function apply(next: AppState): void {
   if (next.platform?.family === 'macos') {
     ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window."));
     ui($('minimizeToTrayCopy'), 'textContent', () => t("Hide the window to the menu bar when closed"));
+    ui($('cosBrowserMinimizeTaskbar'), 'textContent', () => t("Dock"));
+    ui($('cosBrowserMinimizeTray'), 'textContent', () => t("Menu bar"));
   } else {
     ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window."));
     ui($('minimizeToTrayCopy'), 'textContent', () => t("Keep running in the tray when closed"));
+    ui($('cosBrowserMinimizeTaskbar'), 'textContent', () => t("Taskbar"));
+    ui($('cosBrowserMinimizeTray'), 'textContent', () => t("Tray"));
   }
 
   const openai = config.tunnel.kind === 'openai';

@@ -282,6 +282,29 @@ it('keeps a window the user minimizes in the taskbar, and reports it minimized u
   expect(host.model.window(windowId)?.state).toBe('maximized');
 });
 
+// The maintainer's idea (2026-10-14): let people choose where a minimized built-in browser goes.
+it('hides a window the user minimizes to the tray when that is the chosen place, and keeps it in the taskbar otherwise', () => {
+  let place: 'taskbar' | 'tray' = 'tray';
+  const onUserHide = vi.fn();
+  const host = new CosBrowser({ preloadDir: 'unused', rendererUrl: () => null, rendererDir: 'unused', onUserHide,
+    minimizeTo: () => place }) as any;
+  const windowId = host.model.createWindow({ type: 'normal', state: 'normal' });
+  const base = { hide: vi.fn(), isVisible: () => true, isFocused: () => false, isMaximized: () => false,
+    isDestroyed: () => false, getContentBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }) };
+  host.frames.set(windowId, { id: windowId, base, toolbar: { setBounds: vi.fn() }, shown: true });
+  host.userMinimize(windowId);
+  expect(base.hide).toHaveBeenCalledTimes(1);
+  expect(onUserHide).toHaveBeenCalledTimes(1);
+  expect(host.frames.get(windowId).shown).toBe(false);
+  expect(host.model.window(windowId)?.state).toBe('minimized');
+
+  place = 'taskbar';
+  host.frames.get(windowId).shown = true;
+  host.userMinimize(windowId);
+  expect(base.hide).toHaveBeenCalledTimes(1);
+  expect(host.frames.get(windowId).shown).toBe(true);
+});
+
 it('loads only web pages and the empty page into a tab, whatever the extension asks', () => {
   const { host, contents } = browserFixture('https://chatgpt.com/');
   for (const url of ['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'chrome://settings', 'not a url']) host.control.navigate(contents.id, url);

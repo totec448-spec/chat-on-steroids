@@ -3197,6 +3197,25 @@ it('keeps the computer awake while a chat works, the screen too when chosen, or 
   }
 });
 
+// The maintainer's idea (2026-10-14): where a minimized built-in browser goes. Only shown for that browser.
+it('offers where the built-in browser minimizes to, only while it is the chosen browser, and saves the tray', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const choice = w.document.getElementById('cosBrowserMinimize') as HTMLSelectElement;
+  expect(choice.closest('.setting')!.hasAttribute('hidden')).toBe(true);
+  const state = structuredClone(mounted.state);
+  state.config.ui = { ...state.config.ui, chatBrowser: 'cos' };
+  mounted.push(state);
+  await settle();
+  expect(choice.closest('.setting')!.hasAttribute('hidden')).toBe(false);
+  expect(choice.value).toBe('taskbar');
+  expect([...choice.options].map(option => option.value)).toEqual(['taskbar', 'tray']);
+  choice.value = 'tray';
+  choice.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.cosBrowserMinimize).toBe('tray');
+});
+
 // Codex's "Enter key behavior", in General.
 it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
   const mounted = await mountChat({});
