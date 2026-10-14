@@ -1000,7 +1000,8 @@ function externalExtensionStatus(): BridgeStatus['externalExtension'] {
     lastSeenAt: externalExtension?.seenAt ?? null,
     signedIn: externalExtensionPresent() && externalExtension?.loginAt != null && Date.now() - externalExtension.loginAt < BROWSER_PRESENT_MS
       ? externalExtension.signedIn ?? null : null,
-    proof: proof && { version: proof.version, signedIn: proof.signedIn }
+    proof: proof && { version: proof.version, signedIn: proof.signedIn },
+    ...(externalExtension?.engine ? { engine: externalExtension.engine } : {})
   };
 }
 
@@ -1023,7 +1024,7 @@ export function browserWakeConnected(): boolean { return browserWake?.connected(
  * Version observations do not grant presence. Old peers without a host header are unknown:
  * an older built-in worker also lacks that header and must not complete external Setup.
  */
-let externalExtension: { seenAt: number | null; version: string | null; browserId?: string; signedIn?: boolean | null; loginAt?: number } | null = null;
+let externalExtension: { seenAt: number | null; version: string | null; browserId?: string; signedIn?: boolean | null; loginAt?: number; engine?: 'gecko' } | null = null;
 
 /** The CoS browser's own copy of the extension, last heard from: its sign-in step needs it connected. */
 let cosExtensionSeenAt: number | null = null;
@@ -1050,7 +1051,9 @@ function noteExternalExtension(req: http.IncomingMessage): boolean {
   const browserId = browserOf(req) ?? undefined;
   const sameBrowser = browserId !== undefined && externalExtension?.browserId === browserId && externalExtensionPresent();
   const appeared = !sameBrowser || externalExtension?.version !== version;
-  externalExtension = { ...(sameBrowser ? externalExtension : {}), seenAt: Date.now(), version, browserId };
+  // Firefox runs a signed add-on it updates itself (x-extension-engine: gecko); Chromium sends none.
+  const engine = req.headers['x-extension-engine'] === 'gecko' ? 'gecko' as const : undefined;
+  externalExtension = { ...(sameBrowser ? externalExtension : {}), seenAt: Date.now(), version, browserId, engine };
   // Lasting evidence for Setup: this browser has the extension, in this version.
   const proved = browserId !== undefined && version !== null && noteExternalInstalled(browserId, version);
   return appeared || proved;
@@ -1137,7 +1140,7 @@ function json(res: http.ServerResponse, status: number, body: unknown, origin: s
   };
   if (origin) {
     headers['access-control-allow-origin'] = origin;
-    headers['access-control-allow-headers'] = 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host';
+    headers['access-control-allow-headers'] = 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host, x-extension-engine';
     headers['access-control-allow-methods'] = 'GET, POST, OPTIONS';
   }
   res.writeHead(status, headers);
@@ -1198,7 +1201,8 @@ const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
   commands: 'a browser command is still pending',
   'chat-busy': 'a ChatGPT tab is still answering',
   'already-tried': 'it already tried this update once; reload it in chrome://extensions',
-  'folder-not-ready': 'its folder does not hold the new build yet'
+  'folder-not-ready': 'its folder does not hold the new build yet',
+  'browser-updates-itself': 'Firefox updates the signed add-on itself (about:addons → Check for Updates)'
 };
 let extensionUpdateHoldLogged: string | null = null;
 
@@ -1238,8 +1242,10 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     if (shipped && stamp && stamp !== shipped) {
       // Expected after every app update: the extension updates itself once no chat is busy.
       // Only an extension loaded from some other folder stays behind and needs a manual reload.
-      logInfo(
-        `bridge: the browser is running extension build ${stamp}, but this app ships ${shipped}. ` +
+      logInfo(req.headers['x-extension-engine'] === 'gecko'
+        ? `bridge: Firefox is running add-on build ${stamp}, but this app ships ${shipped}. Firefox updates the ` +
+          'add-on by itself; to do it now, choose Check for Updates on its about:addons page.'
+        : `bridge: the browser is running extension build ${stamp}, but this app ships ${shipped}. ` +
           'It updates itself once no chat is busy. If it stays on the old build, Chrome loaded it from a ' +
           'different folder: load the CoS extension folder again at chrome://extensions.'
       );
@@ -2203,7 +2209,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!origin) return json(res, 403, { error: 'forbidden_origin' }, null);
     res.writeHead(204, {
       'access-control-allow-origin': origin,
-      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host',
+      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host, x-extension-engine',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
       // Chrome asks for this before letting an extension reach a loopback address.
       'access-control-allow-private-network': 'true',

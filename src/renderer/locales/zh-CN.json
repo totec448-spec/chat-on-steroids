@@ -2371,5 +2371,9 @@
   "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT 已不再提供该选项。未按下任何按钮。",
   "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "聊天页面未能及时接收你的回答。未按下任何按钮；请在浏览器中打开并在那里回答。",
   "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT 不允许在此聊天中这样做。你只能拒绝。",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT 正在等待你允许或拒绝此聊天中的工具调用。在你于此处或浏览器中回答之前，什么都不会继续。"
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT 正在等待你允许或拒绝此聊天中的工具调用。在你于此处或浏览器中回答之前，什么都不会继续。",
+  "Add the Chat On Steroids add-on to Firefox": "将 Chat On Steroids 附加组件添加到 Firefox",
+  "Get the add-on": "获取附加组件",
+  "Firefox asks before it adds the add-on. Choose Add.": "Firefox 会在添加附加组件前询问。请选择“添加”。",
+  "Mozilla Firefox": "Mozilla Firefox"
 }

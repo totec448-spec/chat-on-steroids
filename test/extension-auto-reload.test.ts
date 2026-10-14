@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const code = background.slice(background.indexOf('let extensionReloadPending = false;'), background.indexOf('async function maintainOnce() {'));
 
-function worker(options: { running?: string; pings?: Array<object | null>; prepared?: object; attempt?: string } = {}) {
+function worker(options: { running?: string; pings?: Array<object | null>; prepared?: object; attempt?: string; firefox?: boolean } = {}) {
   const store: Record<string, unknown> = options.attempt ? { extensionReloadAttempt: options.attempt } : {};
   const reload = vi.fn();
   const call = vi.fn(async () => ({ ok: true, data: options.prepared ?? { build: 'bbbbbbbbbbbb', ready: true } }));
@@ -13,7 +13,7 @@ function worker(options: { running?: string; pings?: Array<object | null>; prepa
   const context = vm.createContext({
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], workerStampReady: Promise.resolve(), workerStampValue: options.running ?? 'aaaaaaaaaaaa', call,
     tabReply: async (id: number) => pings[id - 1] ?? null,
-    chrome: { runtime: { reload }, tabs: { query: async () => pings.map((_, index) => ({ id: index + 1 })) },
+    chrome: { runtime: { reload, ...(options.firefox ? { getBrowserInfo: async () => ({ name: 'Firefox' }) } : {}) }, tabs: { query: async () => pings.map((_, index) => ({ id: index + 1 })) },
       storage: { local: { get: async (key: string) => ({ [key]: store[key] }), set: async (value: Record<string, unknown>) => Object.assign(store, value) } } }
   });
   vm.runInContext(`${code}\nglobalThis.run = reloadForExtensionUpdate; globalThis.hold = () => extensionUpdateHold;`, context);
@@ -87,4 +87,14 @@ it('clears the reason once nothing is offered or the update goes ahead', async (
   await ready.run();
   expect(ready.reload).toHaveBeenCalledTimes(1);
   expect(ready.hold()).toBeNull();
+});
+
+// A signed Firefox add-on is installed from its .xpi: Firefox updates it through its update
+// manifest, and reloading the worker only reloads the same build. Nothing is copied or reloaded.
+it('leaves updating to Firefox itself', async () => {
+  const h = worker({ firefox: true });
+  await h.run();
+  expect(h.call).not.toHaveBeenCalled();
+  expect(h.reload).not.toHaveBeenCalled();
+  expect(h.hold()).toBe('browser-updates-itself');
 });
