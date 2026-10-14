@@ -2623,6 +2623,57 @@ describe('automatic compaction', () => {
     }
   }
 
+  /**
+   * 2026-10-14, a live prime at Extra High: its ticket was filed at 401,797 tokens while it kept
+   * working; 20 minutes later ChatGPT's stream broke ("resume HTTP 404"). The transport failure
+   * brought the ticket's pickup forward, but the asking phase still waited for the turn to stop
+   * working, and a turn above High has a 20-minute silence window. The handoff sat at Preparing.
+   */
+  it('asks a compacting chat for its handoff on the next pass after its stream breaks, even in a long thinking window', async () => {
+    try {
+      await pair();
+      const conversationId = randomUUID();
+      await withThreshold(10_000, async () => {
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'model_selection', time: Date.now(), model: 'GPT-6 Thinking', reasoningEffort: 'xhigh' },
+          { kind: 'turn_start', time: Date.now(), turnId: 'deliberate-turn' },
+          ...over(),
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Checked the dashboards' }
+        ] } });
+        const sessionId = (await request('GET', `/activity?conversationId=${conversationId}`)).body.sessionId as string;
+        await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
+        vi.useFakeTimers();
+        // The turn keeps working past the ticket's first pickup interval: nothing to ask yet.
+        await vi.advanceTimersByTimeAsync(3 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Opened the map' }
+        ] } });
+        await sweepStaleSwarm(Date.now());
+        const offered = async () => ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string }>)
+          .filter(row => row.conversationId === conversationId);
+        expect(await offered()).toEqual([]);
+        // The page reports the answer's stream gone: the handoff is due on the next pass.
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'chat_error', time: Date.now(), turnId: 'deliberate-turn', recoverable: true,
+            text: 'Connection interrupted. Waiting for the complete answer' }
+        ] } });
+        await vi.advanceTimersByTimeAsync(30_000);
+        await sweepStaleSwarm(Date.now());
+        const [pickup] = await offered() as Array<{ conversationId: string; reason: string; token: string }>;
+        expect(pickup).toMatchObject({ reason: 'compaction' });
+        // One pickup per reported loss: once reloaded, a turn that works again is left alone.
+        expect((await request('POST', '/repairs/claim', { body: { token: pickup!.token } })).body.allowed).toBe(true);
+        await request('GET', `/status?repaired=${encodeURIComponent(pickup!.token)}&repairAction=reloaded`);
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Back at work' }
+        ] } });
+        await sweepStaleSwarm(Date.now());
+        expect(await offered()).toEqual([]);
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['failed', 'old-turn', 'new-question', 'completed', 'stopped', 'auto-off', 'pro'] as const)(
     'compacts only the exact failed oversized source after a transport error (%s)', async scenario => {
       await pair();
