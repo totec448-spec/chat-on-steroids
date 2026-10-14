@@ -1992,6 +1992,11 @@ async function run(draft: GoalDraft): Promise<void> {
       draft.reply = '';
       return settle(draft, 'no-reply');
     }
+    // A Goal whose chat keeps giving the same visible answer cannot be satisfied by asking again:
+    // it sees answers, not tool results. On 2026-10-14 one got thirteen "verify it" follow-ups to
+    // "done" in ten minutes. Loop is exempt; repeating is its job.
+    const repeated = draft.mode === 'goal' ? goalRepeatsItself(messages) : null;
+    if (repeated !== null) return pauseRepeatingGoal(draft, repeated);
     // Typed rather than written. See humanReply: the em dashes go, and a couple of the
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
     draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
@@ -2467,6 +2472,42 @@ function deltaOf(parsed: unknown): string {
   const choice = choices[0] as { delta?: { content?: unknown }; message?: { content?: unknown } };
   const content = choice?.delta?.content ?? choice?.message?.content;
   return typeof content === 'string' ? content : '';
+}
+
+/** Answers that differ only in case, punctuation or spacing count as the same answer. */
+const REPEAT_ROUNDS = 3;
+function answerKey(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * The answer a Goal chat has given at the end of each of its last three rounds, when it is the
+ * same every time; otherwise null. A round is everything after one user message. Exported for tests.
+ */
+export function goalRepeatsItself(messages: readonly ChatMessage[], rounds = REPEAT_ROUNDS): string | null {
+  const finals: string[] = [];
+  let inRound = false;
+  for (const message of messages) {
+    if (message.role === 'user') { inRound = true; finals.push(''); continue; }
+    if (inRound) finals[finals.length - 1] = message.content;
+  }
+  const last = finals.slice(-rounds);
+  if (last.length < rounds) return null;
+  const key = answerKey(last[0]!);
+  return key && last.every(answer => answerKey(answer) === key) ? last.at(-1)!.trim() : null;
+}
+
+async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<void> {
+  logInfo(`goal: ${draft.conversationId} gave the same answer ${REPEAT_ROUNDS} times in a row; pausing Goal instead of asking again`);
+  await setGoalSwitchNow(draft.conversationId, 'goal', false).catch(() => undefined);
+  const shown = answer.length > 80 ? `${answer.slice(0, 77)}...` : answer;
+  const { recordNote } = await import('./session/recorder.js');
+  await recordNote(draft.sessionId, `Goal paused: ChatGPT gave the same answer three times in a row ("${shown}"). ` +
+    'Goal sees answers, not tool results, so asking again would only repeat itself. Check the chat, then send a message or switch Goal back on.').catch(() => undefined);
+  const { noticeChatStopped } = await import('./stuck-notice.js');
+  noticeChatStopped('Goal paused', 'ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.', draft.sessionId);
+  draft.reply = '';
+  settle(draft, 'no-reply');
 }
 
 interface ChatMessage {

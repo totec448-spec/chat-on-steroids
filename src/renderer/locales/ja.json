@@ -2344,5 +2344,7 @@
   "Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.": "このプロジェクトの未コミットの変更をレビューしてください。バグ、リグレッション、不足しているテストを探し、見つかったものを重大度順にファイルと行番号付きで挙げてください。ファイルは変更しないでください。",
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "このプロジェクトの AGENTS.md を作成してください。まずプロジェクトを読み、ビルド・テスト・実行の方法、構成、コーディングエージェントが従うべき規約を説明してください。短く正確にまとめてください。",
   "Archive worker chats in ChatGPT when they are retired": "終了したワーカーのチャットを ChatGPT でアーカイブする",
-  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "ワーカーが再び使えなくなると（ワーカーを消去した、またはメインのチャットが閉じられた）、そのチャットは ChatGPT でアーカイブされ、チャット一覧から消えます。ChatGPT の設定から復元できます。このアプリは記録を保持します。何も削除されません。"
+  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "ワーカーが再び使えなくなると（ワーカーを消去した、またはメインのチャットが閉じられた）、そのチャットは ChatGPT でアーカイブされ、チャット一覧から消えます。ChatGPT の設定から復元できます。このアプリは記録を保持します。何も削除されません。",
+  "Goal paused": "ゴールを一時停止しました",
+  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT が 3 回続けて同じ回答をしたため、ゴールは問いかけをやめました。続けるにはチャットを開いてください。"
 }

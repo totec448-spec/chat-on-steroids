@@ -2344,5 +2344,7 @@
   "Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.": "請審查此專案中尚未提交的變更。找出錯誤、回歸與缺少的測試，並依嚴重程度列出發現的問題，註明檔案與行號。不要修改任何檔案。",
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "請為此專案建立一份 AGENTS.md。先閱讀專案，再說明如何建置、測試與執行，它的結構，以及程式碼代理應遵循的慣例。保持簡短準確。",
   "Archive worker chats in ChatGPT when they are retired": "在 ChatGPT 中封存已退役 worker 的聊天",
-  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "當某個 worker 無法再使用時（你清除了子代理，或主聊天已關閉），它的聊天會在 ChatGPT 中封存，並從你的聊天清單中移除。你可以在 ChatGPT 的設定中還原；本應用程式會保留其記錄。不會刪除任何內容。"
+  "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "當某個 worker 無法再使用時（你清除了子代理，或主聊天已關閉），它的聊天會在 ChatGPT 中封存，並從你的聊天清單中移除。你可以在 ChatGPT 的設定中還原；本應用程式會保留其記錄。不會刪除任何內容。",
+  "Goal paused": "目標已暫停",
+  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT 連續三次給出相同的回答，因此目標停止了追問。開啟聊天以繼續。"
 }
