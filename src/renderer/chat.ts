@@ -5888,7 +5888,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -6088,9 +6088,12 @@ function scheduleReload(change?: SessionChange): void {
   }, 400);
 }
 
-/** Retired automatic drafts belong to their creation time, never the live composer queue. */
+/**
+ * Retired automatic drafts belong to their creation time, never the live composer queue. A dropped
+ * fresh-turn continue (#1402) is one too: the app files it again by itself.
+ */
 function historicalAutomaticInput(entry: InputEntry): boolean {
-  return (!!entry.recovery || (!!entry.finishOwner && !entry.finishOwner.userRequested)) &&
+  return (!!entry.recovery || (!!entry.finishOwner && !entry.finishOwner.userRequested) || entry.purpose === 'rotation') &&
     entry.state === 'cancelled' && !!entry.error;
 }
 
@@ -6198,7 +6201,7 @@ function paintPendingInputs(): void {
   // A pre-acceptance or failed-materialization row belongs only to its exact draft.
   // A fresh New Chat never inherits another opening.
   const unbound = (entry: InputEntry) => selectedId === null && pendingNewInput?.id === entry.id && pendingNewInput.generation === selectionGeneration && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
-  const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' &&
+  const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' && entry.purpose !== 'rotation' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
   const anchored = (entry: InputEntry) => detailFor === selectedId && (events.some(event =>
     event.kind === 'user_message' && (event.inputId === entry.id ||
