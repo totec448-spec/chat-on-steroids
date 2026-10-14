@@ -2526,26 +2526,54 @@ const PILL_PLACEHOLDER = /^\uE000(\d{1,4})\uE001$/;
 /**
  * ChatGPT's writing block: `:::writing{variant="…" id="…" title="…"}`, the text, then `:::`.
  * ChatGPT draws it as a card; as plain Markdown it showed its raw directive. It renders as a
- * quote with its title in bold, a shape the sanitised message view already styles.
+ * quote, a shape the sanitised message view already styles, inside a panel whose header names it
+ * and carries a Copy button, as ChatGPT's card does (#1477). The quote opens with a marker
+ * paragraph naming its slot; `writingPanels` swaps that for the panel after sanitising.
  */
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-const WRITING_BLOCK: TokenizerAndRendererExtension = {
-  name: 'writingBlock', level: 'block',
-  start: value => value.match(/^:::writing\b/m)?.index,
-  tokenizer(value) {
-    // Without its closing `:::` the block runs to the end of the message, as ChatGPT draws it:
-    // the block is still streaming, or the answer was stopped inside it.
-    const match = value.match(/^:::writing(\{[^}\n]*\})?[ \t]*\n([\s\S]*?)(?:\n:::[ \t]*(?:\n|$)|$)/);
-    if (!match) return undefined;
-    const title = match[1]?.match(/\btitle="([^"\n]*)"/)?.[1] ?? '';
-    return { type: 'writingBlock', raw: match[0], title, tokens: this.lexer.blockTokens(match[2] ?? '', []) };
-  },
-  renderer(token) {
-    const heading = token['title'] ? `<p><strong>${escapeHtml(String(token['title']))}</strong></p>` : '';
-    return `<blockquote>${heading}${this.parser.parse(token.tokens ?? [])}</blockquote>`;
+interface WritingSlot { label: string; source: string }
+const WRITING_MARKER = /^\uE010(\d{1,4})\uE011$/;
+function writingBlock(slots: WritingSlot[]): TokenizerAndRendererExtension {
+  return {
+    name: 'writingBlock', level: 'block',
+    start: value => value.match(/^:::writing\b/m)?.index,
+    tokenizer(value) {
+      // Without its closing `:::` the block runs to the end of the message, as ChatGPT draws it:
+      // the block is still streaming, or the answer was stopped inside it.
+      const match = value.match(/^:::writing(\{[^}\n]*\})?[ \t]*\n([\s\S]*?)(?:\n:::[ \t]*(?:\n|$)|$)/);
+      if (!match) return undefined;
+      const attribute = (name: string): string => match[1]?.match(new RegExp(`\\b${name}="([^"\\n]*)"`))?.[1] ?? '';
+      const slot = slots.push({ label: attribute('title') || attribute('subject'), source: (match[2] ?? '').trim() }) - 1;
+      return { type: 'writingBlock', raw: match[0], slot, tokens: this.lexer.blockTokens(match[2] ?? '', []) };
+    },
+    renderer(token) {
+      return `<blockquote><p>\uE010${Number(token['slot'])}\uE011</p>${this.parser.parse(token.tokens ?? [])}</blockquote>`;
+    }
+  };
+}
+
+/** Turns each marked writing-block quote into its panel: a header with its name and Copy. */
+function writingPanels(box: HTMLElement, slots: readonly WritingSlot[]): void {
+  for (const quote of box.querySelectorAll('blockquote')) {
+    const marker = quote.firstElementChild;
+    const slot = marker?.tagName === 'P' ? slots[Number(marker.textContent?.match(WRITING_MARKER)?.[1] ?? -1)] : undefined;
+    if (!slot) continue;
+    marker!.remove();
+    const panel = el('div', 'markdown-writing');
+    const header = el('div', 'tool-output-header');
+    header.append(icon('i-file-text', 'ico'), slot.label ? el('strong', '', slot.label) : el('strong', '', () => t('Text')));
+    const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
+    copy.type = 'button';
+    copy.addEventListener('click', () => void (async () => {
+      if (await run(api.writeClipboard(slot.source))) ui(copy, 'textContent', () => t('Copied'));
+      else toast(t('Could not copy text.'));
+    })());
+    header.append(copy);
+    quote.replaceWith(panel);
+    panel.append(header, quote);
   }
-};
+}
 
 /**
  * A native ChatGPT form is not safe to replay in Electron. The recorded markup can, however,
@@ -2644,8 +2672,9 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const byIndex = new Map((references ?? []).map(reference => [reference.index, reference]));
   let directives = 0;
   const math: MathSlots = { formulas: [] };
+  const writing: WritingSlot[] = [];
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
-  const parser = new Marked({ gfm: true, extensions: [WRITING_BLOCK, ...mathExtensions(math), {
+  const parser = new Marked({ gfm: true, extensions: [writingBlock(writing), ...mathExtensions(math), {
     name: 'inlineReference', level: 'inline',
     start: value => { const at = value.search(/:{1,2}chatgpt-content-reference\{/); return at < 0 ? undefined : at; },
     tokenizer(value) { const match = value.match(INLINE_REFERENCE); return match ? { type: 'inlineReference', raw: match[0], probe: directives++ } : undefined; },
@@ -2689,6 +2718,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const html = parser.parse(separateDisplayMath(text), { async: false });
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
   drawMath(box, math);
+  writingPanels(box, writing);
   if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
     const template = document.createElement('template');
     template.innerHTML = capture.text;
