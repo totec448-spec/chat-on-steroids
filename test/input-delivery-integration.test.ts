@@ -3062,3 +3062,29 @@ describe('this install\'s connector names', () => {
     await saveConfig(defaultConfig());
   });
 });
+
+// 2026-10-14: a prime's answer broke ("Connection interrupted") and was reloaded; the user's
+// "weiter" for the running turn could not be taken by the page and was cancelled after 60 s.
+// Nothing was sent, so it is kept and delivered after the turn instead.
+it('keeps a message for the running turn that the page could not take, for after the turn', async () => {
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Message for a broken turn', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'user_message', messageId: randomUUID(), text: 'Inspect the current task', time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await attributedMcp(conversationId);
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+  expect(row).toMatchObject({ directTurn: { id: turnId } });
+  expect((await post('/input/claim', { id: row.id, owner: 'turn-page', conversationId, requiresAuthorization: true })).body.input)
+    .toMatchObject({ id: row.id });
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    vi.setSystemTime(Date.now() + 61_000);
+    const kept = (await input.listInputs()).find(entry => entry.id === row.id);
+    expect(kept).toMatchObject({ state: 'queued', mode: 'after-turn', owner: null });
+    expect(kept?.directTurn).toBeUndefined();
+    expect(kept?.error).toMatch(/after the running answer/);
+  } finally { vi.useRealTimers(); }
+});
