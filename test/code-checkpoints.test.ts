@@ -312,3 +312,85 @@ it('keeps a bounded ledger across restarts, and an unknown or pruned tree reads 
   expect(await readProjectGitSnapshot(projectId, `${CHECKPOINT_REF_PREFIX}${'e'.repeat(32)}`)).toMatchObject({ state: 'unavailable', changes: [] });
   expect(await readProjectGitSnapshot(projectId, `${CHECKPOINT_REF_PREFIX}${'f'.repeat(32)}`)).toMatchObject({ state: 'unavailable', changes: [] });
 });
+
+it('starts the capture from the repository index, so unchanged files keep their stat data', async () => {
+  // Staged inside the project, then edited again: the checkpoint holds the working tree.
+  await fs.writeFile(path.join(root, 'kept.txt'), 'staged\n');
+  await git(root, 'add', 'kept.txt');
+  await fs.writeFile(path.join(root, 'kept.txt'), 'working tree\n');
+  const before = await repositoryState();
+  const calls: string[][] = [];
+  const runGit = projectGit.runGit;
+  vi.spyOn(projectGit, 'runGit').mockImplementation(async (cwd, args, maxBytes, options) => {
+    if (options?.indexFile) calls.push(args.filter(arg => !arg.startsWith('core.') && arg !== '-c'));
+    return runGit(cwd, args, maxBytes, options);
+  });
+
+  await applyPatch(editApp('export const value = 1;', 'export const value = 2;'));
+  const [checkpoint] = await listCheckpoints(projectId);
+  expect(checkpoint).toBeDefined();
+  const captureCalls = calls.filter(args => ['read-tree', 'add', 'write-tree'].includes(args[0]!));
+  expect(captureCalls.map(args => args[0])).toEqual(['add', 'write-tree']);
+  expect(await git(root, 'show', `${checkpoint!.treeOid}:kept.txt`)).toBe('working tree\n');
+  expect(await git(root, 'show', `${checkpoint!.treeOid}:app.ts`)).toBe('export const value = 1;\n');
+  // The user's own index still holds what they staged.
+  expect((await repositoryState()).slice(0, 3)).toEqual(before.slice(0, 3));
+  expect(await git(root, 'show', ':kept.txt')).toBe('staged\n');
+});
+
+it('falls back to reading HEAD when the repository index cannot seed the capture', async () => {
+  const calls: string[][] = [];
+  const runGit = projectGit.runGit;
+  vi.spyOn(projectGit, 'runGit').mockImplementation(async (cwd, args, maxBytes, options) => {
+    if (options?.indexFile) calls.push(args.filter(arg => !arg.startsWith('core.') && arg !== '-c'));
+    // The repository reports an index that is not there.
+    if (!options?.indexFile && args[0] === 'rev-parse' && args[1] === '--git-path') {
+      return { code: 0, stdout: Buffer.from('missing-index-file\n'), stderr: '' };
+    }
+    return runGit(cwd, args, maxBytes, options);
+  });
+
+  await fs.writeFile(path.join(root, 'notes.md'), 'untracked\n');
+  await applyPatch(editApp('export const value = 1;', 'export const value = 2;'));
+  const [checkpoint] = await listCheckpoints(projectId);
+  expect(checkpoint).toBeDefined();
+  expect(calls.filter(args => ['read-tree', 'add', 'write-tree'].includes(args[0]!)).map(args => args[0])).toEqual(['read-tree', 'add', 'write-tree']);
+  expect(await git(root, 'show', `${checkpoint!.treeOid}:notes.md`)).toBe('untracked\n');
+  expect(await git(root, 'show', `${checkpoint!.treeOid}:app.ts`)).toBe('export const value = 1;\n');
+});
+
+it('falls back to reading HEAD when the seeded index cannot be written as a tree', async () => {
+  const calls: string[][] = [];
+  const runGit = projectGit.runGit;
+  let failedOnce = false;
+  vi.spyOn(projectGit, 'runGit').mockImplementation(async (cwd, args, maxBytes, options) => {
+    if (options?.indexFile) calls.push(args.filter(arg => !arg.startsWith('core.') && arg !== '-c'));
+    // An unresolved merge outside the project makes write-tree refuse the seeded index.
+    if (options?.indexFile && args.at(-1) === 'write-tree' && !failedOnce) {
+      failedOnce = true;
+      return { code: 128, stdout: Buffer.alloc(0), stderr: 'error: other.txt: unmerged (deadbeef)' };
+    }
+    return runGit(cwd, args, maxBytes, options);
+  });
+
+  await applyPatch(editApp('export const value = 1;', 'export const value = 2;'));
+  const [checkpoint] = await listCheckpoints(projectId);
+  expect(checkpoint).toBeDefined();
+  expect(calls.filter(args => ['read-tree', 'add', 'write-tree'].includes(args[0]!)).map(args => args[0]))
+    .toEqual(['add', 'write-tree', 'read-tree', 'add', 'write-tree']);
+  expect(await git(root, 'show', `${checkpoint!.treeOid}:app.ts`)).toBe('export const value = 1;\n');
+});
+
+it('rehashes a file edited in the same second as the last index write, even with the same size', async () => {
+  // Without ctime, only Git's racy-clean check against the index file's mtime can see this edit.
+  await git(root, 'config', 'core.trustctime', 'false');
+  const indexPath = path.join(root, '.git', 'index');
+  const indexTime = (await fs.stat(indexPath)).mtime;
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 7;\n');
+  await fs.utimes(path.join(root, 'app.ts'), indexTime, indexTime);
+  await new Promise(resolve => setTimeout(resolve, 1_100));
+
+  await applyPatch(editApp('export const value = 7;', 'export const value = 8;'));
+  const [checkpoint] = await listCheckpoints(projectId);
+  expect(await git(root, 'show', `${checkpoint!.treeOid}:app.ts`)).toBe('export const value = 7;\n');
+});

@@ -35,21 +35,68 @@ function rememberFailedTurn(flight: string): void {
   }
 }
 
-async function captureTree(context: RepositoryContext): Promise<{ treeOid: string; headOid: string | null }> {
-  return withTemporaryIndex(async indexFile => {
-    const git = (args: string[]) => runGit(context.projectReal, args, 64 * 1024, { indexFile, noReplaceObjects: true });
-    const head = await git(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
-    const headOid = head.code === 0 ? decode(head.stdout).trim() : null;
-    if (headOid !== null && !OID.test(headOid)) throw new Error('Git returned an invalid HEAD');
+/**
+ * The repository's own index, as Git resolves it for this worktree, or null when it has none yet
+ * (a new repository, an unborn branch). Read without the temporary index in the environment.
+ */
+async function repositoryIndexPath(context: RepositoryContext): Promise<string | null> {
+  const result = await runGit(context.projectReal, ['rev-parse', '--git-path', 'index'], 64 * 1024, { noReplaceObjects: true });
+  if (result.code !== 0) return null;
+  const relative = decode(result.stdout).replace(/\r?\n$/, '');
+  if (!relative) return null;
+  return path.resolve(context.projectReal, relative);
+}
+
+/** Starts the temporary index as a copy of the repository's, so its stat data is valid. */
+async function seedFromRepositoryIndex(context: RepositoryContext, indexFile: string): Promise<boolean> {
+  const source = await repositoryIndexPath(context).catch(() => null);
+  if (!source) return false;
+  try {
+    const stats = await fs.stat(source);
+    await fs.copyFile(source, indexFile);
+    // Git treats an entry as racily clean by comparing it with the index file's own mtime; the
+    // copy keeps the original's (rounded down), or a file edited in the same second as the last
+    // index write with an unchanged size would read as unchanged.
+    const mtime = new Date(Math.floor(stats.mtimeMs));
+    await fs.utimes(indexFile, mtime, mtime);
+    return true;
+  } catch {
+    await fs.rm(indexFile, { force: true }).catch(() => undefined);
+    return false;
+  }
+}
+
+async function snapshotTree(context: RepositoryContext, indexFile: string, seeded: boolean): Promise<{ treeOid: string; headOid: string | null }> {
+  // A full index in the temporary file: a split index would write its shared part next to it.
+  const git = (args: string[]) => runGit(context.projectReal, ['-c', 'core.splitIndex=false', ...args], 64 * 1024, { indexFile, noReplaceObjects: true });
+  const head = await git(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+  const headOid = head.code === 0 ? decode(head.stdout).trim() : null;
+  if (headOid !== null && !OID.test(headOid)) throw new Error('Git returned an invalid HEAD');
+  if (!seeded) {
+    // A freshly read index has no stat data, so the add below hashes every tracked file.
     const read = await git(headOid ? ['read-tree', headOid] : ['read-tree', '--empty']);
     if (read.code !== 0) throw new Error(read.stderr || 'Git could not read HEAD');
-    // From the project folder, `.` limits the snapshot to the project; the rest stays at HEAD.
-    const added = await git(['add', '-A', '--', '.']);
-    if (added.code !== 0) throw new Error(added.stderr || 'Git could not snapshot the project');
-    const tree = await git(['write-tree']);
-    const treeOid = decode(tree.stdout).trim();
-    if (tree.code !== 0 || !OID.test(treeOid)) throw new Error(tree.stderr || 'Git could not write the checkpoint tree');
-    return { treeOid, headOid };
+  }
+  // From the project folder, `.` limits the snapshot to the project. Outside it the tree keeps
+  // what the seed holds (the user's staged state, or HEAD); nothing compares or restores there.
+  const added = await git(['add', '-A', '--', '.']);
+  if (added.code !== 0) throw new Error(added.stderr || 'Git could not snapshot the project');
+  const tree = await git(['write-tree']);
+  const treeOid = decode(tree.stdout).trim();
+  if (tree.code !== 0 || !OID.test(treeOid)) throw new Error(tree.stderr || 'Git could not write the checkpoint tree');
+  return { treeOid, headOid };
+}
+
+async function captureTree(context: RepositoryContext): Promise<{ treeOid: string; headOid: string | null }> {
+  return withTemporaryIndex(async indexFile => {
+    if (await seedFromRepositoryIndex(context, indexFile)) {
+      try { return await snapshotTree(context, indexFile, true); } catch (error) {
+        // An index Git cannot write as a tree (an unresolved merge outside the project, say).
+        logWarn(`code checkpoint: the repository index could not seed the snapshot, reading HEAD instead: ${error instanceof Error ? error.message : String(error)}`);
+        await fs.rm(indexFile, { force: true }).catch(() => undefined);
+      }
+    }
+    return snapshotTree(context, indexFile, false);
   });
 }
 
