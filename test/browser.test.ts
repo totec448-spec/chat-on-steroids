@@ -27,7 +27,9 @@ describe('browser-backed ChatGPT commands', () => {
   it('finds Firefox where each platform installs it', () => {
     expect(preferredBrowserCandidates('win32', { ProgramFiles: 'C:\\Program Files', 'ProgramFiles(x86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' }, undefined, 'firefox'))
       .toEqual(expect.arrayContaining(['C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
-        'C:\\Users\\a\\AppData\\Local\\Mozilla Firefox\\firefox.exe']));
+        'C:\\Users\\a\\AppData\\Local\\Mozilla Firefox\\firefox.exe',
+        // Developer Edition and Nightly install to folders of their own (seen on the test VM, 2026-10-14).
+        'C:\\Program Files\\Firefox Developer Edition\\firefox.exe', 'C:\\Program Files\\Firefox Nightly\\firefox.exe']));
     expect(preferredBrowserCandidates('darwin', {}, '/Users/a', 'firefox')).toEqual(expect.arrayContaining([
       '/Applications/Firefox.app/Contents/MacOS/firefox', '/Users/a/Applications/Firefox.app/Contents/MacOS/firefox',
       '/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox', '/Applications/Firefox Nightly.app/Contents/MacOS/firefox']));

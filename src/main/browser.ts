@@ -126,16 +126,18 @@ export function preferredBrowserCandidates(
 ): string[] {
   if (platform === 'win32') {
     const p = path.win32;
-    const parts = browser === 'firefox'
-      ? ['Mozilla Firefox', 'firefox.exe']
-      : browser === 'edge'
+    const roots = [env.LOCALAPPDATA, env.ProgramFiles, env['ProgramFiles(x86)']].filter((root): root is string => Boolean(root));
+    // Release first; Developer Edition and Nightly install to folders of their own.
+    if (browser === 'firefox') {
+      return ['Mozilla Firefox', 'Firefox Developer Edition', 'Firefox Nightly']
+        .flatMap(folder => roots.map(root => p.join(root, folder, 'firefox.exe')));
+    }
+    const parts = browser === 'edge'
       ? ['Microsoft', 'Edge', 'Application', 'msedge.exe']
       : browser === 'brave'
         ? ['BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe']
         : ['Google', 'Chrome', 'Application', 'chrome.exe'];
-    return [env.LOCALAPPDATA, env.ProgramFiles, env['ProgramFiles(x86)']]
-      .filter((root): root is string => Boolean(root))
-      .map(root => p.join(root, ...parts));
+    return roots.map(root => p.join(root, ...parts));
   }
 
   if (platform === 'darwin') {
