@@ -1394,11 +1394,32 @@
             <h1>Activity</h1>
             <p>Recent local events and failures.</p>
           </header>
-          <section class="card update-actions" id="updateActions" aria-label="Update all">
-            <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="You will be asked before the app restarts. Finish active work before installing.">Update all</button>
-            <p class="muted" id="updateAllNotice">You will be asked before the app restarts. Finish active work before installing.</p>
-            <p class="muted">After updating, the app connects once to finish plugin checks, even if automatic connection is off.</p>
-            <p class="is-warn" id="updateAllError" role="alert" hidden></p>
+          <section class="card update-readiness" id="updateReadinessCard" aria-labelledby="updateReadinessTitle">
+            <h2 id="updateReadinessTitle">Update status</h2>
+            <div class="update-readiness-status">
+              <div class="update-readiness-header">
+                <button class="btn update-readiness-toggle" id="updateReadinessToggle" type="button" aria-controls="updateReadinessDetails" aria-expanded="true">
+                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary">Not checked yet</span>
+                </button>
+                <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="You will be asked before the app restarts. Finish active work before installing.">Update all</button>
+              </div>
+              <span class="sr-only" id="updateReadinessAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <p id="updateAllError" class="is-warn" role="alert" hidden></p>
+            </div>
+            <details id="updateReadinessDetails" open>
+              <summary>Component details</summary>
+              <p class="muted">App, browser extension and plugins in ChatGPT.</p>
+              <ul id="updateReadinessRows"></ul>
+              <p class="muted">Your settings are kept. Manual steps appear in the status list.</p>
+              <p class="muted" id="updateConnectionNotice">After updating, the app connects once to finish plugin checks, even if automatic connection is off.</p>
+              <button class="btn" id="updateReviewSetup" type="button">Review setup</button>
+            </details>
+            <div class="update-readiness-actions">
+              <p class="sr-only" id="updateAllNotice">You will be asked before the app restarts. Finish active work before installing.</p>
+              <div class="update-readiness-buttons">
+                <button class="btn" id="updateDiagnosticsReport" type="button" hidden>Diagnostics report</button>
+              </div>
+            </div>
           </section>
           <section class="card">
             <h2>
