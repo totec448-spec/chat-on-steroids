@@ -1,0 +1,58 @@
+name: Firefox signing check
+
+# Run by hand to prove the AMO credentials and Mozilla's validation before a release depends on
+# them. Mozilla signs each version once, so this signs <app version>.<run number + 1000>, a version
+# no release uses and that every later release outranks. The signed package is kept as an
+# artifact for testing; it is never attached to a release.
+#   gh workflow run firefox-sign-check.yml
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    name: Sign a test build of the Firefox add-on
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Stage a test version
+        run: |
+          set -euo pipefail
+          node scripts/write-extension-stamp.mjs
+          node scripts/stage-firefox-extension.mjs release/firefox-extension
+          pkg=$(node -p "require('./package.json').version")
+          version="${pkg}.$(( GITHUB_RUN_NUMBER + 1000 ))"
+          node -e "const f='release/firefox-extension/manifest.json',fs=require('fs'),m=JSON.parse(fs.readFileSync(f,'utf8'));m.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(m,null,2)+'\n')" "$version"
+          echo "Signing test version $version"
+          npx --yes web-ext@10.7.0 lint --source-dir release/firefox-extension --self-hosted
+
+      - name: Sign with Mozilla
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
+            echo "::error::Set the AMO_JWT_ISSUER and AMO_JWT_SECRET repository secrets (addons.mozilla.org → Manage API Keys)." >&2
+            exit 1
+          fi
+          npx --yes web-ext@10.7.0 sign --channel=unlisted --source-dir release/firefox-extension \
+            --artifacts-dir release/firefox-signed --approval-timeout 1500000
+          ls -l release/firefox-signed
+
+      - name: Keep the signed test package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firefox-sign-check-${{ github.run_number }}
+          path: release/firefox-signed/
+          if-no-files-found: error
+          retention-days: 7

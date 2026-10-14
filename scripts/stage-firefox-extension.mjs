@@ -1,6 +1,7 @@
 import { cp, copyFile, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { FIREFOX_ADDON_ID, FIREFOX_UPDATE_URL } from './firefox-update-manifest.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensionRoot = path.join(root, 'extension');
@@ -24,8 +25,10 @@ export function firefoxManifest(source) {
   manifest.content_security_policy = { extension_pages: "script-src 'self'; object-src 'self'" };
   manifest.browser_specific_settings = {
     gecko: {
-      id: 'chat-on-steroids-companion@local',
-      strict_min_version: '128.0',
+      id: FIREFOX_ADDON_ID,
+      // 140 is the ESR line, and the first with tab groups and data_collection_permissions.
+      strict_min_version: '140.0',
+      update_url: FIREFOX_UPDATE_URL,
       data_collection_permissions: {
         required: ['personalCommunications', 'websiteContent']
       }

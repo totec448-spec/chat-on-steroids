@@ -345,6 +345,8 @@ var CLF_DOM = (() => {
     // The same failures on a pt-BR account, as measured 2026-10-12 (a send that never reached the
     // model, and its dropped answer). Only observed wording; other languages stay unrecognised.
     if (/^(?:a entrega da mensagem atingiu o tempo limite(?:\. tente novamente\.?)?|conexão interrompida\.? aguardando a resposta completa\.?)(?: tentar novamente)?$/i.test(line)) return true;
+    // The same two on a German account, as measured 2026-10-14 after a long answer's stream broke.
+    if (/^(?:zeitüberschreitung bei der übermittlung der nachricht(?:\. bitte versuche es erneut\.?)?|verbindung unterbrochen\.? warten auf die vollständige antwort\.?)(?: erneut versuchen)?$/i.test(line)) return true;
     return /^(?:message delivery timed out(?:\. please try again\.?)?|connection interrupted\.? waiting for the complete answer\.?|chatgpt stream recovery polling timed out\.?|stream cache expired\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|a network error occurred\.?(?: please check your connection and try again\.?)?|resume stream unavailable\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)(?: retry)?$/i.test(line);
   }
 
