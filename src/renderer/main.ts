@@ -56,6 +56,7 @@ import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
+import { updateErrorNextStep, updateErrorText } from './update-error.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
 
 declare global {
@@ -163,7 +164,7 @@ let updateAllError: string | null = null;
 function paintUpdateOperation(): void {
   const error = $('updateAllError');
   error.hidden = !updateAllError;
-  ui(error, 'textContent', () => updateAllError ? t('Update all could not finish: {0}', [t(updateAllError)]) + '\n' + t('Choose Update all to retry.') : '');
+  ui(error, 'textContent', () => updateAllError ? t('Update all could not finish: {0}', [updateErrorText(updateAllError)]) + '\n' + updateErrorNextStep(updateAllError) : '');
 }
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
@@ -2512,11 +2513,11 @@ updateAllButton.addEventListener('click', async () => {
   paintUpdateOperation();
   try {
     const reply = await api.updateAll();
-    if (!reply.ok) { updateAllError = reply.error; toast(t(reply.error)); return; }
+    if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
-    else if (result === 'checking-connectors') toast(t('Plugin checks requested. Any remaining steps are shown in Update status.'));
+    else if (result === 'checking-connectors') toast(document.getElementById('updateReadinessCard') ? t('Plugin checks requested. Any remaining steps are shown in Update status.') : t('Checking…'));
     else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
     updateAllError = error instanceof Error ? error.message : String(error);
