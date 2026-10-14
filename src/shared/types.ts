@@ -718,6 +718,8 @@ export interface UpdateStatus {
   error: string | null;
   /** When the release API last answered, as epoch ms. Null until it has. */
   checkedAt: number | null;
+  /** A version handed to its installer that this start is still older than: it did not install. */
+  notInstalled?: string | null;
 }
 
 /** Receipt only; authoritative component state still establishes completion. */

@@ -2380,5 +2380,6 @@
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox はアドオンを追加する前に確認します。「追加」を選んでください。",
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "拡張機能が ChatGPT を開けません",
-  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} が拡張機能による chatgpt.com へのアクセスを止めています。拡張機能の詳細で chatgpt.com へのアクセスを許可し（Chrome・Edge・Brave は「サイトへのアクセス」、Firefox は「権限」）、ChatGPT を再読み込みしてください。"
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} が拡張機能による chatgpt.com へのアクセスを止めています。拡張機能の詳細で chatgpt.com へのアクセスを許可し（Chrome・Edge・Brave は「サイトへのアクセス」、Firefox は「権限」）、ChatGPT を再読み込みしてください。",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} はインストールされませんでした。現在も {1} です。「インストール」を選んでもう一度お試しください。Windows が許可を求める場合があります。"
 }

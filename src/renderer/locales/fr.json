@@ -2380,5 +2380,6 @@
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox demande avant d’ajouter le module. Choisissez « Ajouter ».",
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "L’extension ne peut pas ouvrir ChatGPT",
-  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} empêche l’extension d’accéder à chatgpt.com. Dans les détails de l’extension, autorisez-la sur chatgpt.com (« Accès aux sites » dans Chrome, Edge et Brave, « Permissions » dans Firefox), puis rechargez ChatGPT."
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} empêche l’extension d’accéder à chatgpt.com. Dans les détails de l’extension, autorisez-la sur chatgpt.com (« Accès aux sites » dans Chrome, Edge et Brave, « Permissions » dans Firefox), puis rechargez ChatGPT.",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} ne s’est pas installé ; c’est toujours la {1}. Choisissez Installer pour réessayer ; Windows peut demander une autorisation."
 }

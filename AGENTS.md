@@ -5016,6 +5016,11 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
+On Windows the handoff first repeats the installer's own `icacls` sandbox grant on the app folder;
+an exit code there means the folder needs an administrator, so the installer is started through
+`Start-Process -Verb RunAs` (#1490). The handoff leaves `updates/handoff.json`; a next start still
+older than that version reports `UpdateStatus.notInstalled` once (the update line says it did not
+install and never "Up to date" over it), and installing again clears it.
 
 CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
 assembles installers, the Chromium extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`

@@ -2380,5 +2380,6 @@
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox 会在添加附加组件前询问。请选择“添加”。",
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "扩展无法打开 ChatGPT",
-  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} 阻止了扩展访问 chatgpt.com。请在扩展详情中允许访问 chatgpt.com（Chrome、Edge 和 Brave 中为“网站访问权限”，Firefox 中为“权限”），然后重新加载 ChatGPT。"
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} 阻止了扩展访问 chatgpt.com。请在扩展详情中允许访问 chatgpt.com（Chrome、Edge 和 Brave 中为“网站访问权限”，Firefox 中为“权限”），然后重新加载 ChatGPT。",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} 未能安装；当前仍是 {1}。选择“安装”重试；Windows 可能会请求权限。"
 }
