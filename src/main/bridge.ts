@@ -1000,7 +1000,8 @@ function externalExtensionStatus(): BridgeStatus['externalExtension'] {
     lastSeenAt: externalExtension?.seenAt ?? null,
     signedIn: externalExtensionPresent() && externalExtension?.loginAt != null && Date.now() - externalExtension.loginAt < BROWSER_PRESENT_MS
       ? externalExtension.signedIn ?? null : null,
-    proof: proof && { version: proof.version, signedIn: proof.signedIn }
+    proof: proof && { version: proof.version, signedIn: proof.signedIn },
+    ...(externalExtension?.chatgptAccess !== undefined && externalExtensionPresent() ? { chatgptAccess: externalExtension.chatgptAccess } : {})
   };
 }
 
@@ -1023,7 +1024,7 @@ export function browserWakeConnected(): boolean { return browserWake?.connected(
  * Version observations do not grant presence. Old peers without a host header are unknown:
  * an older built-in worker also lacks that header and must not complete external Setup.
  */
-let externalExtension: { seenAt: number | null; version: string | null; browserId?: string; signedIn?: boolean | null; loginAt?: number } | null = null;
+let externalExtension: { seenAt: number | null; version: string | null; browserId?: string; signedIn?: boolean | null; loginAt?: number; chatgptAccess?: boolean } | null = null;
 
 /** The CoS browser's own copy of the extension, last heard from: its sign-in step needs it connected. */
 let cosExtensionSeenAt: number | null = null;
@@ -2491,7 +2492,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     let revealRequested = false;
     let imageExportRequested = false;
     if (req.method === 'POST') {
-      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown; canExportImages?: unknown; chatGptSignedIn?: unknown };
+      const body = await readBody(req) as { openConversations?: unknown; stalledConversations?: unknown; updateHold?: unknown; canReveal?: unknown; canExportImages?: unknown; chatGptSignedIn?: unknown; chatgptAccess?: unknown };
       if (!Array.isArray(body?.openConversations) || body.openConversations.length > 10_000 || body.openConversations.some(id => !conversationId(id))) {
         return json(res, 400, { error: 'invalid_open_conversations' }, origin);
       }
@@ -2506,6 +2507,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       imageExportRequested = body.canExportImages === true;
       if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
           externalExtension.browserId === browserOf(req)) {
+        // Whether this browser may open chatgpt.com at all; older extensions say nothing (unknown).
+        const access = typeof body.chatgptAccess === 'boolean' ? body.chatgptAccess : undefined;
+        if (externalExtension.chatgptAccess !== access) { externalExtension.chatgptAccess = access; changed(); }
         noteExternalLogin(externalExtension.browserId, typeof body.chatGptSignedIn === 'boolean' ? body.chatGptSignedIn : null);
       }
     }

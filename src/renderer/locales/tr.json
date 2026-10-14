@@ -2374,5 +2374,7 @@
   "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT artık bu seçeneği sunmuyordu. Hiçbir şeye basılmadı.",
   "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "Sohbetin sayfası yanıtınızı zamanında almadı. Hiçbir şeye basılmadı; orada yanıtlamak için tarayıcıda açın.",
   "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT buna bu sohbette izin vermiyor. Yalnızca reddedebilirsiniz.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT bu sohbette bir araç çağrısına izin vermenizi veya reddetmenizi bekliyor. Burada ya da tarayıcıda yanıtlayana kadar hiçbir şey devam etmez."
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT bu sohbette bir araç çağrısına izin vermenizi veya reddetmenizi bekliyor. Burada ya da tarayıcıda yanıtlayana kadar hiçbir şey devam etmez.",
+  "The extension may not open ChatGPT": "Uzantı ChatGPT’yi açamıyor",
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0}, uzantının chatgpt.com’a erişmesini engelliyor. Uzantı ayrıntılarında chatgpt.com erişimine izin verin (Chrome, Edge ve Brave’de “Site erişimi”, Firefox’ta “İzinler”), ardından ChatGPT’yi yeniden yükleyin."
 }

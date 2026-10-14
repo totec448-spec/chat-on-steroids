@@ -621,6 +621,20 @@ describe('who is allowed to talk to it', () => {
     expect((await bridgeStatus()).externalExtension?.present).toBe(false);
   });
 
+  // A browser that may not open chatgpt.com runs no content script: Setup has to say so (2026-10-14).
+  it('projects whether the external browser may access ChatGPT', async () => {
+    await pair();
+    const status = (chatgptAccess?: boolean) => request('POST', '/status', { host: 'browser', browser: 'ffffffffffffffff0001',
+      body: { openConversations: [], ...(chatgptAccess === undefined ? {} : { chatgptAccess }) } });
+    await status(false);
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, chatgptAccess: false });
+    await status(true);
+    expect((await bridgeStatus()).externalExtension?.chatgptAccess).toBe(true);
+    // An older extension says nothing: unknown, never a claimed lack of access.
+    await status();
+    expect((await bridgeStatus()).externalExtension?.chatgptAccess).toBeUndefined();
+  });
+
   it('retains an incompatible external version without granting presence', async () => {
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     try {

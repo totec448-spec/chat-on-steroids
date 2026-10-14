@@ -2024,6 +2024,12 @@ Chrome's sign-in never completes the CoS path, nor the reverse. Once ChatGPT sur
 in, Setup's sign-in button opens ChatGPT's own sign-out (`chatgpt:signOut`) where it runs, and the
 status follows its next answer.
 
+Each status poll also reports `chatgptAccess` (`permissions.contains` for `https://chatgpt.com/*`),
+projected as `externalExtension.chatgptAccess`. A live `false` (Chrome's site access "On click", a
+revoked Firefox permission) keeps Setup's first step open with instructions: without that access no
+content script runs, so the extension could pair and take work that nothing on the page would do.
+Older extensions say nothing, which stays unknown rather than a claimed lack of access.
+
 ### Built-in browser
 
 `ui.chatBrowser: 'cos'` runs ChatGPT and the unchanged companion extension in the app's own
