@@ -5461,6 +5461,25 @@ describe('retired worker chats', () => {
     expect(retired).toEqual([['c-worker-1']]);
   });
 
+  it('names the workers of a parked run when its history expires after a week (polish 2.1.37)', () => {
+    const retired: string[][] = [];
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    fillContext('c-worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(releaseQuiescentRun()).toBe(true);
+    const saved = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    // Registered before the app restores its saved runs, as index.ts does.
+    onWorkerChatsRetired((ids) => retired.push([...ids]));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      restoreSwarm(saved);
+      expect(retired).toEqual([['c-worker-1']]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('names the workers when clearing the prime row ends its run', () => {
     const retired: string[][] = [];
     onWorkerChatsRetired((ids) => retired.push([...ids]));
