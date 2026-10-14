@@ -3,7 +3,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FIREFOX_ADDON_ID, FIREFOX_XPI, firefoxUpdateManifest, writeFirefoxUpdateManifest } from '../scripts/firefox-update-manifest.mjs';
+// @ts-expect-error The script is plain Node without type declarations.
+import * as script from '../scripts/firefox-update-manifest.mjs';
+
+const { FIREFOX_ADDON_ID, FIREFOX_XPI, firefoxUpdateManifest, writeFirefoxUpdateManifest } = script as {
+  FIREFOX_ADDON_ID: string; FIREFOX_XPI: string;
+  firefoxUpdateManifest(options: { version: string; sha256: string }): unknown;
+  writeFirefoxUpdateManifest(options: { xpi: string; version: string; out: string }): Promise<void>;
+};
 
 // Firefox checks the add-on's update_url (the latest release's firefox-updates.json) and installs
 // the signed package it names, after checking that package's hash.
