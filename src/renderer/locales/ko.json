@@ -2381,5 +2381,7 @@
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "확장 프로그램이 ChatGPT를 열 수 없습니다",
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0}에서 확장 프로그램의 chatgpt.com 접근을 막고 있습니다. 확장 프로그램 세부정보에서 chatgpt.com 접근을 허용한 뒤(Chrome·Edge·Brave는 ‘사이트 액세스’, Firefox는 ‘권한’) ChatGPT를 새로고침하세요.",
-  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0}이(가) 설치되지 않았습니다. 아직 {1}입니다. ‘설치’를 선택해 다시 시도하세요. Windows에서 권한을 요청할 수 있습니다."
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0}이(가) 설치되지 않았습니다. 아직 {1}입니다. ‘설치’를 선택해 다시 시도하세요. Windows에서 권한을 요청할 수 있습니다.",
+  "Keep plugin URLs across restarts": "재시작 후에도 플러그인 URL 유지",
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "이름이 지정된 Cloudflare 터널처럼 ChatGPT가 URL을 저장하는 직접 운영하는 터널용입니다. 이 설정을 끌 때까지 그 URL을 가진 사람은 누구나 Chat On Steroids 플러그인을 사용할 수 있습니다. 보안 저장소가 필요합니다."
 }
