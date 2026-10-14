@@ -826,6 +826,17 @@
                       <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.</p>
                     </div>
                   </details>
+                  <!-- #1495: a workspace member without admin rights can neither add a custom app nor
+                       see the workspace's Platform organization; say whom to ask and for what. -->
+                  <details class="setup-optional step-wide" id="workspaceMemberHelp">
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>ChatGPT workspace without admin rights <span class="tag is-optional">optional</span></summary>
+                    <div class="field workspace-member-help">
+                      <p class="hint">In Business, Enterprise and Edu workspaces, admins decide who may add custom apps. If Plugins offers no way to add a custom MCP server, ask a workspace admin to add the Core plugin with the name, description and tunnel ID shown here.</p>
+                      <p class="hint">The tunnel must belong to your workspace's organization on platform.openai.com. If Platform only shows your Personal organization, ask an admin to invite you to that organization, or to create the tunnel and a restricted key (Tunnels: Read and Use) for you.</p>
+                      <p class="hint">A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).</p>
+                      <p class="hint">Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.</p>
+                    </div>
+                  </details>
                   <div class="connectors step-wide" id="connectorCards"></div>
                 </div>
               </li>
