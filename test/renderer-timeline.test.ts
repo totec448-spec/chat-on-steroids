@@ -5675,3 +5675,19 @@ it('adds a line with Enter when Cmd/Ctrl+Enter is chosen to send', async () => {
 it.each([{ metaKey: true }, { ctrlKey: true }])('sends with %o + Enter when that is chosen', async modifier => {
   expect(await pressInComposer(false, modifier)).toEqual({ sent: 1, prevented: true });
 });
+
+// Polish 2.1.37: the new Enter-key choice and the slash menu meet in the same keystroke.
+it.each([true, false])('runs the highlighted slash command with Enter whatever Enter sends (enterSends=%s)', async enterSends => {
+  const app = await boot([], true, [], [], { enterSends });
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/status'; input.setSelectionRange(7, 7); input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  await settle();
+  const event = new app.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  input.dispatchEvent(event);
+  await settle(300);
+  expect(event.defaultPrevented).toBe(true);
+  expect(app.live.sent).toHaveLength(0);
+  expect(app.w.document.getElementById('contextMeterButton')!.getAttribute('aria-expanded')).toBe('true');
+  expect(input.value).toBe('');
+});
