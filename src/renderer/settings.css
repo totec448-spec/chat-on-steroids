@@ -362,6 +362,12 @@
 .usage-message-surface > #modelUsage { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--line); }
 .usage-message-surface .usage-limits > .usage-limit { padding-inline: 0; }
 .usage-message-surface .usage-limits > .usage-limit:last-child { padding-bottom: 0; }
+/* Other apps: the switch on its own row, the readings under it across the full width. */
+.usage-other-apps .usage-message-surface > .setting { grid-column: 1 / -1; padding: 0; }
+.usage-other-apps .usage-message-surface > #otherAppsUsage { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--line); }
+.usage-other-apps #otherAppsUsage > p { margin: 12px 0 0; }
+/* Usage's number fields are wide; its one switch keeps the switch size at every width. */
+.usage-panel .usage-other-apps .setting > input[type='checkbox'] { flex: 0 0 34px; width: 34px; max-width: none; }
 .usage-panel #modelUsage:has(> .usage-limits:empty) { display: none; }
 @container settings-content (max-width: 540px) {
   .usage-panel .usage-message-surface { grid-template-columns: minmax(0, 1fr); }

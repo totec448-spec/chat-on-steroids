@@ -354,6 +354,15 @@
                   <div id="modelUsage"><div class="usage-limits" id="usageLimits"></div></div>
                 </div>
               </section>
+              <section class="settings-section usage-section usage-other-apps" aria-labelledby="usageOtherAppsTitle">
+                <header class="settings-section-head">
+                  <div><h2 id="usageOtherAppsTitle">Other apps on this computer</h2><p>Codex and Claude Code, read from their own logs here. Limits are as the app last reported them; tokens are counted from the logs.</p></div>
+                </header>
+                <div class="settings-surface usage-message-surface">
+                  <label class="setting"><span class="setting-text"><b>Read Codex and Claude Code usage</b><em>Only numbers, never what you wrote. Nothing leaves this computer unless you ask for your usage in a chat.</em></span><input id="localAppUsage" type="checkbox" /></label>
+                  <div class="usage-limits" id="otherAppsUsage" aria-live="polite"></div>
+                </div>
+              </section>
               <section class="settings-section usage-section">
                 <header class="settings-section-head">
                   <div><h2>Token activity per day</h2><p id="usageHeatmapCaption">Estimated context processed per tool call · last 52 weeks</p></div>
