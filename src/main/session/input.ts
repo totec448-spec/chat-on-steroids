@@ -510,6 +510,14 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
       // A never-authorized Continue still owes delivery. Retain its ticket and
       // pickup budget, but never replay a possibly consumed Stop after losing a page.
       if (row.recovery) return releaseRecoveryClaim(row);
+      // A message the user sent into the running answer that the page could not take (its answer
+      // broke and was reloaded, 2026-10-14) was never sent: keep it for after that turn rather than
+      // cancelling what the person typed.
+      if (row.directTurn && manualInput(row) && !row.opening && !row.companionInputId) {
+        const { directTurn: _turn, owner: _owner, offeredAt: _offered, requiresAuthorization: _authorization, ...rest } = row;
+        return { ...rest, state: 'queued', mode: 'after-turn', owner: null,
+          error: 'Kept for after the running answer: ChatGPT could not take it into the answer.' };
+      }
       return { ...row, state: 'cancelled', error: row.requiresAuthorization && row.sendAuthorizedAt === undefined
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
         : UNCONFIRMED_SEND };
@@ -1985,6 +1993,8 @@ export async function requestBrowserDecision(text: string, signal: AbortSignal, 
   sourceSessionId?: string; conversationId?: string | null; model?: string | null;
   reasoningEffort?: InputArgs['reasoningEffort'] | null;
   publish?: (text: string) => void;
+  /** ChatGPT took the prompt (exact receipt) and it ended without an answer. */
+  onSentUnanswered?: () => void;
 } = {}): Promise<string> {
   if (!text.trim() || text.length > MAX_CHATGPT_MESSAGE_CHARS) throw new Error('goal_context_too_large');
   signal.throwIfAborted();
@@ -2034,12 +2044,15 @@ export async function requestBrowserDecision(text: string, signal: AbortSignal, 
     signal.removeEventListener('abort', cancel);
     // Catch an abort that raced enqueue before the answer was awaited.
     void answer.catch(() => undefined);
+    let sentUnanswered = false;
     await serial(async () => {
       const current = await load();
+      sentUnanswered = current.some(row => row.id === id && row.state === 'decision');
       if (current.some((row) => row.id === id && !terminal(row))) {
         await commit(current.map((row) => row.id === id && !terminal(row) ? { ...row, state: 'cancelled' } : row));
       }
     });
+    if (sentUnanswered) options.onSentUnanswered?.();
   }
 }
 export function completeBrowserDecision(id: string, owner: string, response: string, conversationId?: string | null): Promise<boolean> {

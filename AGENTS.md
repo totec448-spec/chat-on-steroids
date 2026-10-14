@@ -202,7 +202,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Ambiguous or unnamed input selects none; explicit `/id` or `/prompt id` always wins. |
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
-| Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460. Worker chats the broker retires for good (`onWorkerChatsRetired`: an ended run, or Clear workers retiring parked histories; never a parked run) queue in `worker-archive.ts` (`state/worker-archive.json`). The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
+| Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460. Worker chats the broker retires for good (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days; never a run that is merely parked) queue in `worker-archive.ts` (`state/worker-archive.json`). The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6` High (`DEFAULT_HELPER_CHAT_MODEL`, which High runs on its thinking lane); a config holding a superseded helper (`SUPERSEDED_HELPER_CHAT_MODELS`: `gpt-5.6-sol`, `gpt-6-thinking`) adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
@@ -1324,6 +1324,9 @@ start decides eligibility; earlier or running MCP calls do not revoke it. Rechec
 before Send. Navigation, a newer question or an occupied draft during preparation can revoke
 delivery. A claimed browser correction never also enters a tool result. After-turn entries
 retain their source-boundary policy and never acquire interruption authority.
+A manual direct correction whose 60 s preparation window ends before Send authorization (a broken,
+reloaded answer the page cannot match to the frozen turn) is not cancelled: it is requeued as an
+after-turn entry without `directTurn`, claim or authorization, with a visible reason.
 
 Native **Thinking failed** is recognized only by its exact visible disclosure button inside the
 current assistant turn, excluding quoted Markdown, old turns and app UI. It immediately records
@@ -3568,7 +3571,11 @@ allowance and explicit clipping. Exact same-session outbox `finishOwner` identit
 automatic messages; unknown native user-role rows do not prove human authorship. Both API and
 browser receive reference data rather than the helper's own prior assistant turns. Temporary
 planners retain their staged-workflow role. Browser budgeting includes prompts and JSON escaping
-inside the complete 96,000-character envelope. Each browser decision receives its complete bounded
+inside the complete 96,000-character envelope, or the smaller size learned for this account
+(`goal-helper-size.ts`, durable `goal-helper-size`, #1471): a helper prompt ChatGPT took (exact
+receipt, `onSentUnanswered`) whose draft then hit its 3-minute timeout makes later prompts at most
+60% of its length, never below 16,000 characters; a cancellation or an unsent prompt teaches
+nothing, and the learned size is forgotten after 7 days. Each browser decision receives its complete bounded
 reference; there is no reusable-helper delta context. The existing `temporary-planner` transport
 owns all three helper modes. Verify native Temporary Chat before sending. Accepted helper output
 immediately retires its exact tab after fresh document/epoch, idle, pin and draft checks; cleanup

@@ -47,3 +47,48 @@ describe('fetchWithRetry (native source downloads)', () => {
     expect(signals[0]).not.toBe(signals[1]);
   });
 });
+
+// fetchFirst is imported by the same untyped script module as fetchWithRetry.
+describe('fetchFirst (a source with mirrors)', () => {
+  it('falls back to the next mirror when the original keeps failing or is missing', async () => {
+    const { fetchFirst } = await import('../scripts/fetch-retry.mjs' as string) as { fetchFirst: (urls: string[], o: object, d: object) => Promise<Response> };
+    const calls: string[] = [];
+    const answer = await fetchFirst(['https://origin.test/a', 'https://mirror.test/a'], {}, { ...noWait, log: () => undefined,
+      fetchImpl: async (url: string) => { calls.push(url); if (url.startsWith('https://origin')) throw reset(); return ok('from mirror'); } });
+    expect(await answer.text()).toBe('from mirror');
+    expect(calls.filter(url => url.startsWith('https://origin'))).toHaveLength(4);
+
+    const missing = await fetchFirst(['https://origin.test/b', 'https://mirror.test/b'], {}, { ...noWait, log: () => undefined,
+      fetchImpl: async (url: string) => url.startsWith('https://origin') ? new Response('', { status: 404 }) : ok('mirror b') });
+    expect(await missing.text()).toBe('mirror b');
+  });
+
+  it('reports the last failure when every address fails', async () => {
+    const { fetchFirst } = await import('../scripts/fetch-retry.mjs' as string) as { fetchFirst: (urls: string[], o: object, d: object) => Promise<Response> };
+    const last = await fetchFirst(['https://origin.test/c', 'https://mirror.test/c'], {}, { ...noWait, log: () => undefined,
+      fetchImpl: async (url: string) => new Response('', { status: url.startsWith('https://origin') ? 503 : 404 }) });
+    expect(last.status).toBe(404);
+    await expect(fetchFirst(['https://origin.test/d'], {}, { ...noWait, log: () => undefined, fetchImpl: async () => { throw reset(); } }))
+      .rejects.toThrow('fetch failed');
+  });
+});
+
+// 2026-10-14: a canary build failed on "Could not bundle tunnel-client: fetch failed", one dropped
+// connection in a packaging download that had no retry.
+describe('packaging downloads', () => {
+  it('sends the request headers on every attempt', async () => {
+    const seen: Array<string | null> = [];
+    const answers: Array<() => Response> = [() => { throw reset(); }, () => ok()];
+    await fetchWithRetry('https://example.test/h', { headers: { 'user-agent': 'chat-on-steroids-build' } }, { ...noWait, log: () => undefined,
+      fetchImpl: async (_url: string, init: RequestInit) => { seen.push(new Headers(init.headers).get('user-agent')); return answers.shift()!(); } });
+    expect(seen).toEqual(['chat-on-steroids-build', 'chat-on-steroids-build']);
+  });
+
+  it.each(['fetch-tunnel-client.mjs', 'fetch-ripgrep.mjs', 'prepare-packaging-native.mjs', 'package-native-sources.mjs'])(
+    '%s downloads through the retrying helper', async script => {
+      const { readFileSync } = await import('node:fs');
+      const source = readFileSync(`scripts/${script}`, 'utf8');
+      expect(source).not.toMatch(/(?<![\w.])fetch\(/);
+      expect(source).toMatch(/fetch(?:WithRetry|First)\(/);
+    });
+});
