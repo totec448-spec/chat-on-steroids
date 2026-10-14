@@ -1615,6 +1615,7 @@ function pruneDormantRuns(now = Date.now()): boolean {
     (dormant, index) => now - dormant.parkedAt >= DORMANT_RUN_TTL_MS || candidates.length - index > MAX_DORMANT_RUNS
   );
   if (evict.length === 0) return false;
+  const expired: string[] = [];
   for (const dormant of evict) {
     dormantRuns.delete(familyKey(dormant));
     retireManagedWorktreeCleanupOffers(dormant.agents.values(), 'evicted');
@@ -1627,10 +1628,13 @@ function pruneDormantRuns(now = Date.now()): boolean {
         reason: 'its parked worker history was dropped',
         retiredAt: now
       });
+      expired.push(agent.info.conversationId);
     }
-    logInfo(`multi-agent: dropped the parked worker history of conversation ${dormant.primeConversationId}`);
+    logInfo(`multi-agent: dropped the parked worker history of ${dormant.primeConversationId ? `conversation ${dormant.primeConversationId}` : 'a prime chat that never got a conversation'}`);
   }
   retiredPersist?.();
+  // These workers are retired for good too: the archive setting (#1460) must hear about them.
+  announceRetired(expired);
   return true;
 }
 
