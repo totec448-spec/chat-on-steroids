@@ -83,6 +83,8 @@ import {
   GOAL_OBJECTIVES_STATE,
   GOAL_REPLIES_STATE,
   GOAL_SWITCHES_STATE,
+  GOAL_HELPER_SIZE_STATE,
+  restoreGoalHelperSize,
   goalSwitchEnabledFor,
   restoreGoalObjectives,
   restoreGoalReplies,
@@ -512,6 +514,7 @@ void app.whenReady().then(async () => {
   const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalReplies(savedGoalReplies);
+  restoreGoalHelperSize(await readDurable(GOAL_HELPER_SIZE_STATE));
   // Request ownership must exist before either side of the bridge can race in. A request id
   // that was proved yesterday remains the same workflow today even if its ChatGPT tab closed.
   await restoreRequestCorrelations();
