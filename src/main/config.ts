@@ -188,7 +188,9 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   autoWorktrees: false,
   // Off: ending an OS process is a real side effect even though the worker identity survives.
   // The user must opt in before sleeping-worker runtime maintenance can terminate anything.
-  endSleepingWorkerProcesses: false
+  endSleepingWorkerProcesses: false,
+  // Off: archiving changes the user's ChatGPT chat list, so it is opt-in (#1460).
+  archiveWorkerChats: false
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -426,7 +428,8 @@ const configSchema = z.object({
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
       waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false),
       autoWorktrees: z.boolean().optional().default(DEFAULT_MULTI_AGENT.autoWorktrees ?? false),
-      endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false)
+      endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false),
+      archiveWorkerChats: z.boolean().optional().default(DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false)
     })
     .optional()
     .default({
@@ -438,7 +441,8 @@ const configSchema = z.object({
       recoverAgentTabs: DEFAULT_MULTI_AGENT.recoverAgentTabs,
       waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false,
       autoWorktrees: DEFAULT_MULTI_AGENT.autoWorktrees ?? false,
-      endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false
+      endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false,
+      archiveWorkerChats: DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false
     }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
