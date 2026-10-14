@@ -52,6 +52,7 @@ const {
   markInstallOnQuit,
   releaseVersion,
   resetUpdateForTests,
+  setInstallFolderWritableForTests,
   stagedArtifact,
   startUpdateChecks,
   updateStatus
@@ -272,6 +273,34 @@ describe('staging the new version', () => {
     // and without starting the app again behind a user who quit for their own reasons.
     await applyStagedUpdate();
     expect(spawned).toEqual([{ file: staged, args: ['/S', '--updated'] }]);
+  });
+
+  /**
+   * #1490: installed where only an administrator may write (the installer lets people pick the
+   * folder, e.g. C:\\Program Files), the silent installer stopped for lack of rights and nothing
+   * said so. Windows now asks for permission; a per-user install stays silent and unprompted.
+   */
+  it('asks Windows for permission when the install folder needs an administrator', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    const staged = path.join(userData, 'updates', NEXT, WINDOWS_ASSET);
+    setInstallFolderWritableForTests(async () => false);
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.file).toBe('powershell.exe');
+    const script = spawned[0]!.args.at(-1)!;
+    expect(script).toContain(`Start-Process -FilePath '${staged.replaceAll("'", "''")}'`);
+    expect(script).toContain("-ArgumentList '/S','--updated','--force-run'");
+    expect(script).toContain('-Verb RunAs');
+  });
+
+  it('keeps the silent per-user install when the folder is the user’s own', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderWritableForTests(async () => true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(spawned).toEqual([{ file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated'] }]);
   });
 
   /**
