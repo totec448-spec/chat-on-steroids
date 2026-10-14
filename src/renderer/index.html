@@ -189,7 +189,9 @@
               <header class="settings-section-head"><div><h2>Chats</h2><p>What you see while ChatGPT answers, and what your messages carry.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em>What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.</em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Send messages with</b><em>Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.</em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier">⌘Enter / Ctrl+Enter</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Keep the computer awake</b><em>While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.</em></span><input id="keepAwake" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
@@ -911,7 +913,15 @@
                 <button data-view="compact" type="button">Handoff</button>
               </span>
               <span class="subhead-note" id="chatState"></span>
-
+              <!-- Find in chat (⌘F / Ctrl+F): searches the whole recording of the open chat. -->
+              <div class="chat-find" id="chatFind" role="search" aria-label="Find in chat" hidden>
+                <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+                <input id="chatFindField" type="text" placeholder="Find in chat" aria-label="Find in chat" spellcheck="false" autocomplete="off" />
+                <span class="chat-find-count" id="chatFindCount" aria-live="polite"></span>
+                <button class="btn btn-icon" id="chatFindPrev" type="button" title="Previous match" aria-label="Previous match"><i class="ico ph ph-caret-up" aria-hidden="true"></i></button>
+                <button class="btn btn-icon" id="chatFindNext" type="button" title="Next match" aria-label="Next match"><i class="ico ph ph-caret-down" aria-hidden="true"></i></button>
+                <button class="btn btn-icon" id="chatFindClose" type="button" title="Close" aria-label="Close"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+              </div>
             </div>
 
             <div class="scroll" id="chatBody">
@@ -1043,6 +1053,14 @@
                       <em>The worker chat and history stay reusable. Off by default; each cleanup is recorded in that worker's transcript.</em>
                     </span>
                     <input id="endSleepingWorkerProcesses" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Archive worker chats in ChatGPT when they are retired</b>
+                      <em>Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                    </span>
+                    <input id="archiveWorkerChats" type="checkbox" />
                   </label>
 
                   <div id="swarmList"></div>

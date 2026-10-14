@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { hasContentReference, modelFacingText, plainTextOfHtml } from '../src/shared/content-reference.js';
+import { hasContentReference, modelFacingText, plainTextOfHtml, providerEntitiesAsMarkdown } from '../src/shared/content-reference.js';
 
 const pointer = '::chatgpt-content-reference{index="0" source_message_id="d2b82e00-509e-4a87-aa93-00bcde251680"}';
 
@@ -37,4 +37,25 @@ it('handles directives ChatGPT adds later without a new fix per name', async () 
   expect(hasProviderDirective(':::writing{title="x"}\nText\n:::')).toBe(false);
   expect(hasProviderDirective('Great :smile: work')).toBe(false);
   expect(hasProviderDirective('Note: the ratio is 3::1 here')).toBe(false);
+});
+
+// ChatGPT's raw text marks link cards as private-use entities (U+E200 url U+E202 label U+E202 address
+// U+E201). Shown or exported as plain text they read "urlGitHub-Vergleich öffnen…https://…" (2026-10-13).
+it('writes link entities as Markdown links and drops other provider markers', () => {
+  const link = 'urlGitHub-Vergleich öffnenhttps://github.com/owner/repo/compare/main...fix?expand=1';
+  expect(providerEntitiesAsMarkdown(`Open it here:\n\n${link}\n\nThen merge.`))
+    .toBe('Open it here:\n\n[GitHub-Vergleich öffnen](https://github.com/owner/repo/compare/main...fix?expand=1)\n\nThen merge.');
+  // Citation markers and unknown widgets carry nothing readable on their own.
+  expect(providerEntitiesAsMarkdown('Fact.citeturn0search1 More.fileciteturn1file0'))
+    .toBe('Fact. More.');
+  expect(providerEntitiesAsMarkdown('Anewwidget{"x":1}B')).toBe('AB');
+  // A link without a label shows its address; stray markers go.
+  expect(providerEntitiesAsMarkdown('urlhttps://example.com')).toBe('https://example.com');
+  expect(providerEntitiesAsMarkdown('half open')).toBe('half open');
+  const plain = 'No markers here.';
+  expect(providerEntitiesAsMarkdown(plain)).toBe(plain);
+});
+
+it('gives models the link as Markdown too', () => {
+  expect(modelFacingText('See urlthe PRhttps://example.com/pr/1.')).toBe('See [the PR](https://example.com/pr/1).');
 });
