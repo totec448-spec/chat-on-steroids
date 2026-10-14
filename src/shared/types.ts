@@ -598,6 +598,8 @@ export interface BridgeStatus {
     present: boolean; version: string | null; lastSeenAt: number | null; signedIn?: boolean | null;
     /** Kept across restarts: the version last seen there, and whether ChatGPT last answered signed in. */
     proof?: { version: string; signedIn: boolean | null } | null;
+    /** false: that browser may not open chatgpt.com, so no content script can run there. */
+    chatgptAccess?: boolean;
   } | null;
   /** The CoS browser's own copy of the extension, connected right now. */
   cosExtension?: { present: boolean };
