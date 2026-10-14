@@ -40,13 +40,14 @@ export function noticeChatStopped(title: StopNoticeText, body: StopNoticeText, s
 
 /**
  * Reports one chat whose ChatGPT page waits for the user to answer a tool approval card.
- * The caller notices once per card; the click opens the page where the card is answered.
+ * The caller notices once per card; the click opens the chat in the app, where the card can be
+ * answered since 2.1.38 (its row offers Deny and Allow once), or opened in the browser.
  */
 export function noticeApprovalWaiting(sessionId: string): void {
   const title = 'ChatGPT is waiting for your approval';
-  const body = 'A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.';
+  const body = 'A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.';
   try {
-    notify?.(translations.get(title) ?? title, translations.get(body) ?? body, sessionId, 'browser');
+    notify?.(translations.get(title) ?? title, translations.get(body) ?? body, sessionId);
   } catch {
     // The chat's timeline row still says it.
   }
