@@ -2191,7 +2191,7 @@ it('counts a plugin ChatGPT used in an earlier run, so a restart does not reopen
 // Mounts the whole app many times over; under a fully parallel suite that alone can pass 30 s.
 it('recognizes a finished first step after a restart from live or lasting evidence, without a click', async () => {
   type External = { present: boolean; version: string | null; lastSeenAt: number | null; signedIn?: boolean | null;
-    proof?: { version: string; signedIn: boolean } | null };
+    proof?: { version: string; signedIn: boolean } | null; chatgptAccess?: boolean };
   // Each scenario is a fresh launch: main.ts binds to the window it is first imported into.
   const launch = async (overrides: Record<string, unknown> = {}) => { vi.resetModules(); return mountChat(overrides, []); };
   const scenario = async (browser: 'chrome' | 'cos', external: External | null, extra: Record<string, unknown> = {}) => {
@@ -2218,6 +2218,10 @@ it('recognizes a finished first step after a restart from live or lasting eviden
   // Chrome open with no ChatGPT tab: no live answer, the lasting one stands.
   result = await scenario('chrome', { present: true, version: app, lastSeenAt: now, signedIn: null, proof: { version: app, signedIn: true } });
   expect(result).toMatchObject({ done: true, status: 'Extension connected and up to date' });
+  // Connected, but the browser keeps it off chatgpt.com: nothing could run on a ChatGPT page.
+  result = await scenario('chrome', { present: true, version: app, lastSeenAt: now, signedIn: null, proof: { version: app, signedIn: true }, chatgptAccess: false });
+  expect(result).toMatchObject({ done: false, choosing: false, status: 'The extension may not open ChatGPT' });
+  expect(document.getElementById('extensionSetupDetail')!.textContent).toContain('chatgpt.com');
   // A live signed-out answer wins over the lasting one.
   result = await scenario('chrome', { present: true, version: app, lastSeenAt: now, signedIn: false, proof: { version: app, signedIn: true } });
   expect(result.done).toBe(false);
