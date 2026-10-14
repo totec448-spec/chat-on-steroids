@@ -2349,5 +2349,14 @@
   "The computer": "컴퓨터",
   "The computer and screen": "컴퓨터와 화면",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "워커를 더 이상 사용할 수 없게 되면(워커를 지웠거나, 메인 채팅이 닫혔거나, 끝난 작업이 일주일 동안 그대로였던 경우) 그 채팅이 ChatGPT에서 보관되어 채팅 목록에서 사라집니다. ChatGPT 설정에서 복원할 수 있으며, 이 앱은 기록을 유지합니다. 아무것도 삭제되지 않습니다.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "진행 중인 답변 이후로 보류됨: ChatGPT가 답변에 포함하지 못했습니다."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "진행 중인 답변 이후로 보류됨: ChatGPT가 답변에 포함하지 못했습니다.",
+  "Find in chat, slash commands, and messages that go where you want.": "채팅에서 찾기, 슬래시 명령, 원하는 곳으로 가는 메시지.",
+  "{0} searches the whole chat, older messages included.": "{0}로 이전 메시지까지 채팅 전체를 검색합니다.",
+  "Slash commands": "슬래시 명령",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "메시지 상자에 / 를 입력하면 모델 선택, 채팅 이름 변경이나 고정, 상태 확인 등을 할 수 있습니다.",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "대기 중인 메시지를 진행 중인 답변에 바로 넣을 수 있고, Enter의 동작도 고를 수 있습니다.",
+  "Told when a chat finishes": "채팅이 끝나면 알림",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "앱이 백그라운드에 있을 때 채팅이 끝나면 알림을 보내고, 작업하는 동안 컴퓨터를 깨어 있게 둡니다.",
+  "Worker chats out of the way": "워커 채팅 정리",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "켜 두면 앱이 더 이상 쓰지 않는 워커 채팅을 ChatGPT에서 보관합니다."
 }
