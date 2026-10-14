@@ -2380,5 +2380,6 @@
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox sẽ hỏi trước khi thêm tiện ích. Chọn “Thêm”.",
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "Tiện ích không được mở ChatGPT",
-  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} đang chặn tiện ích truy cập chatgpt.com. Trong chi tiết tiện ích, hãy cho phép truy cập chatgpt.com (“Quyền truy cập trang web” trên Chrome, Edge và Brave, “Quyền” trên Firefox), rồi tải lại ChatGPT."
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} đang chặn tiện ích truy cập chatgpt.com. Trong chi tiết tiện ích, hãy cho phép truy cập chatgpt.com (“Quyền truy cập trang web” trên Chrome, Edge và Brave, “Quyền” trên Firefox), rồi tải lại ChatGPT.",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} chưa được cài đặt; đây vẫn là {1}. Chọn Cài đặt để thử lại; Windows có thể hỏi quyền."
 }

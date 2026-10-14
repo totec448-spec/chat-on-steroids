@@ -39,7 +39,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, rename, rm } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -175,7 +175,28 @@ function set(next: Partial<UpdateStatus>): void {
  * The timer is unreferenced: it is a background courtesy, never a reason for the process to stay
  * alive, and the shutdown sequence does not have to know it exists.
  */
+/** The note the handover leaves: which version was given to the installer. */
+const handoffNote = () => path.join(app.getPath('userData'), 'updates', 'handoff.json');
+
+/**
+ * Says once when the last handover did not install (#1490). An installer that stops silently
+ * (a folder that needs an administrator, a blocked unsigned file) left the next start on the old
+ * version with nothing said. A start that is still older than the noted version reports it; a
+ * start that is that version, or newer, just forgets the note.
+ */
+export async function restoreUpdateHandoff(): Promise<void> {
+  let note: { version?: unknown } | null = null;
+  try { note = JSON.parse(await readFile(handoffNote(), 'utf8')); } catch { return; }
+  await rm(handoffNote(), { force: true }).catch(() => undefined);
+  const version = typeof note?.version === 'string' && /^\d+\.\d+\.\d+$/.test(note.version) ? note.version : null;
+  if (version && isNewer(version, APP_VERSION)) {
+    set({ notInstalled: version });
+    logWarn(`update: ${version} was handed to its installer, but this is still ${APP_VERSION}; it did not install`);
+  }
+}
+
 export function startUpdateChecks(): void {
+  void restoreUpdateHandoff();
   if (recheck) clearInterval(recheck);
   recheck = setInterval(() => void checkForUpdates(), RECHECK_MS);
   recheck.unref();
@@ -446,6 +467,7 @@ async function download(version: string, name: string, expected: string): Promis
 export function markInstallOnQuit(expectedVersion?: string): boolean {
   if (!staged || (expectedVersion !== undefined && staged.version !== expectedVersion)) return false;
   runAfterInstall = true;
+  if (status.notInstalled) set({ notInstalled: null });
   return true;
 }
 
@@ -511,6 +533,7 @@ export async function applyStagedUpdate(): Promise<void> {
           `Start-Process -FilePath ${quoted(ready.file)} -ArgumentList ${args.map(quoted).join(',')} -Verb RunAs`],
           { detached: true, stdio: 'ignore', windowsHide: true })
         : spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() })).catch(() => undefined);
       if (elevate) logInfo(`update: the install folder needs an administrator; Windows asks for permission to install ${ready.version}`);
       // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
       // child process would take the quit down with it.
