@@ -252,7 +252,7 @@ describe('with actions switched off', () => {
     expect(refused.status).toBe(403);
     expect(refused.continued).toBe(false);
     expect((await call('GET', '/v1/inputs')).status).toBe(200);
-    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel'] });
+    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel', 'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack'] });
   });
 
   it('follows the switch on the next request without restarting the listener', async () => {

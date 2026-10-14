@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createServer } from 'node:http';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
 import { zipSync, strToU8 } from 'fflate';
 import sharp from 'sharp';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -204,6 +204,77 @@ describe('external plugin authority', () => {
 
     expect(JSON.stringify(await manager.call('Echo.Mixed', { value: 'still connected' }))).toContain('still connected');
     expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+  });
+
+  it.each(['timeout', 'abort'] as const)('keeps a plugin ready after SDK %s and cancels only that request', async (failure) => {
+    const callsLog = path.join(dir, 'calls.jsonl');
+    const cancelsLog = path.join(dir, 'cancels.jsonl');
+    await fs.writeFile(entry, fixture
+      .replace('if(m.id===undefined)return;',
+        "if(m.method==='notifications/cancelled'){require('node:fs').appendFileSync(process.env.CANCELS_LOG,JSON.stringify(m.params)+'\\n');return;}if(m.id===undefined)return;")
+      .replace("if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){",
+        "if(m.method==='tools/call'){require('node:fs').appendFileSync(process.env.CALLS_LOG,JSON.stringify(m)+'\\n');if(m.params.arguments.value==='hang')return;}if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){"));
+    const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] },
+      config: { CALLS_LOG: callsLog, CANCELS_LOG: cancelsLog } })).plugins[0]!;
+    const realCallTool = Client.prototype.callTool;
+    const failures: unknown[] = [];
+    const clients: Client[] = [];
+    const controller = new AbortController();
+    const upstream = vi.spyOn(Client.prototype, 'callTool').mockImplementation(async function (this: Client, params, options) {
+      clients.push(this);
+      try {
+        // Keep real SDK request, deadline/abort and notifications/cancelled; only shorten the test deadline.
+        const limited = params.arguments?.value === 'hang'
+          ? failure === 'timeout' ? { ...options, timeout: 500 } : { ...options, signal: controller.signal }
+          : options;
+        return await realCallTool.call(this, params, limited);
+      } catch (error) { failures.push(error); throw error; }
+    });
+
+    const outcome = vi.fn();
+    const hanging = manager.call('Echo.Mixed', { value: 'hang' }, outcome);
+    const sibling = manager.call('Echo.Mixed', { value: 'concurrent' });
+    if (failure === 'abort') {
+      await vi.waitFor(async () => {
+        const lines = (await fs.readFile(callsLog, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+        expect(lines.some(line => line.params.arguments.value === 'hang')).toBe(true);
+      });
+      controller.abort(new Error('Caller cancelled'));
+    }
+    expect((await sibling).structuredContent).toEqual({ value: 'concurrent' });
+    const timedOut = await hanging;
+    expect(failures).toEqual([expect.any(SdkError)]);
+    expect((failures[0] as SdkError).code).toBe(SdkErrorCode.RequestTimeout);
+    expect(timedOut.isError).toBe(true);
+    expect(JSON.stringify(timedOut)).toContain('PLUGIN_CALL_TIMEOUT');
+    expect(JSON.stringify(timedOut)).toContain('may have completed');
+    expect(JSON.stringify(timedOut)).toContain('CoS did not retry');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_execution_error');
+    expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+    expect((await manager.call('Echo.Mixed', { value: 'after cancellation' })).structuredContent).toEqual({ value: 'after cancellation' });
+    expect(manager.snapshot().plugins[0]?.id).toBe(row.id);
+    expect(upstream).toHaveBeenCalledTimes(3);
+    expect(new Set(clients).size).toBe(1); // No reconnect; healthy sibling and next call reuse the same client.
+
+    const calls = (await fs.readFile(callsLog, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const original = calls.filter(call => call.params.arguments.value === 'hang');
+    expect(original).toHaveLength(1); // No retry, even if the server completes the operation later.
+    await vi.waitFor(async () => expect((await fs.readFile(cancelsLog, 'utf8')).trim().split('\n')).toHaveLength(1));
+    const cancelled = JSON.parse((await fs.readFile(cancelsLog, 'utf8')).trim());
+    expect(cancelled.requestId).toBe(original[0].id);
+  });
+
+  it('marks a real MCP transport disconnect fatal instead of treating it as a call timeout', async () => {
+    await fs.writeFile(entry, fixture.replace("if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){",
+      "if(m.method==='tools/call'&&m.params.arguments.value==='disconnect')process.exit(1);if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){"));
+    await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } });
+    const failed = await manager.call('Echo.Mixed', { value: 'disconnect' });
+    expect(failed.isError).toBe(true);
+    expect(JSON.stringify(failed)).toContain('PLUGIN_CALL_FAILED');
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('error'));
+    const outcome = vi.fn();
+    expect(JSON.stringify(await manager.call('Echo.Mixed', { value: 'must not reconnect' }, outcome))).toContain('PLUGIN_UNAVAILABLE');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_rejected');
   });
 
   it('preserves accepted protocol results and treats upstream error text only as execution output', async () => {

@@ -76,7 +76,9 @@ export async function serveEventStream(
   streams.add(stream);
 
   const send = (events: ControlApiEvent[], nextFrom: number): void => {
-    for (const event of events) res.write(frame(event));
+    // A client can stop between frames. Sequence order makes Last-Event-ID safe even when
+    // presentation chronology placed a revised message ahead of an earlier-sequence row.
+    for (const event of events.toSorted((left, right) => left.seq - right.seq)) res.write(frame(event));
     from = Math.max(from, nextFrom);
     if (res.writableLength > MAX_BUFFERED_BYTES) end('slow_consumer');
   };

@@ -89,7 +89,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
 
 const api = window.api;
@@ -2526,26 +2526,54 @@ const PILL_PLACEHOLDER = /^\uE000(\d{1,4})\uE001$/;
 /**
  * ChatGPT's writing block: `:::writing{variant="…" id="…" title="…"}`, the text, then `:::`.
  * ChatGPT draws it as a card; as plain Markdown it showed its raw directive. It renders as a
- * quote with its title in bold, a shape the sanitised message view already styles.
+ * quote, a shape the sanitised message view already styles, inside a panel whose header names it
+ * and carries a Copy button, as ChatGPT's card does (#1477). The quote opens with a marker
+ * paragraph naming its slot; `writingPanels` swaps that for the panel after sanitising.
  */
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-const WRITING_BLOCK: TokenizerAndRendererExtension = {
-  name: 'writingBlock', level: 'block',
-  start: value => value.match(/^:::writing\b/m)?.index,
-  tokenizer(value) {
-    // Without its closing `:::` the block runs to the end of the message, as ChatGPT draws it:
-    // the block is still streaming, or the answer was stopped inside it.
-    const match = value.match(/^:::writing(\{[^}\n]*\})?[ \t]*\n([\s\S]*?)(?:\n:::[ \t]*(?:\n|$)|$)/);
-    if (!match) return undefined;
-    const title = match[1]?.match(/\btitle="([^"\n]*)"/)?.[1] ?? '';
-    return { type: 'writingBlock', raw: match[0], title, tokens: this.lexer.blockTokens(match[2] ?? '', []) };
-  },
-  renderer(token) {
-    const heading = token['title'] ? `<p><strong>${escapeHtml(String(token['title']))}</strong></p>` : '';
-    return `<blockquote>${heading}${this.parser.parse(token.tokens ?? [])}</blockquote>`;
+interface WritingSlot { label: string; source: string }
+const WRITING_MARKER = /^\uE010(\d{1,4})\uE011$/;
+function writingBlock(slots: WritingSlot[]): TokenizerAndRendererExtension {
+  return {
+    name: 'writingBlock', level: 'block',
+    start: value => value.match(/^:::writing\b/m)?.index,
+    tokenizer(value) {
+      // Without its closing `:::` the block runs to the end of the message, as ChatGPT draws it:
+      // the block is still streaming, or the answer was stopped inside it.
+      const match = value.match(/^:::writing(\{[^}\n]*\})?[ \t]*\n([\s\S]*?)(?:\n:::[ \t]*(?:\n|$)|$)/);
+      if (!match) return undefined;
+      const attribute = (name: string): string => match[1]?.match(new RegExp(`\\b${name}="([^"\\n]*)"`))?.[1] ?? '';
+      const slot = slots.push({ label: attribute('title') || attribute('subject'), source: (match[2] ?? '').trim() }) - 1;
+      return { type: 'writingBlock', raw: match[0], slot, tokens: this.lexer.blockTokens(match[2] ?? '', []) };
+    },
+    renderer(token) {
+      return `<blockquote><p>\uE010${Number(token['slot'])}\uE011</p>${this.parser.parse(token.tokens ?? [])}</blockquote>`;
+    }
+  };
+}
+
+/** Turns each marked writing-block quote into its panel: a header with its name and Copy. */
+function writingPanels(box: HTMLElement, slots: readonly WritingSlot[]): void {
+  for (const quote of box.querySelectorAll('blockquote')) {
+    const marker = quote.firstElementChild;
+    const slot = marker?.tagName === 'P' ? slots[Number(marker.textContent?.match(WRITING_MARKER)?.[1] ?? -1)] : undefined;
+    if (!slot) continue;
+    marker!.remove();
+    const panel = el('div', 'markdown-writing');
+    const header = el('div', 'tool-output-header');
+    header.append(icon('i-file-text', 'ico'), slot.label ? el('strong', '', slot.label) : el('strong', '', () => t('Text')));
+    const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
+    copy.type = 'button';
+    copy.addEventListener('click', () => void (async () => {
+      if (await run(api.writeClipboard(slot.source))) ui(copy, 'textContent', () => t('Copied'));
+      else toast(t('Could not copy text.'));
+    })());
+    header.append(copy);
+    quote.replaceWith(panel);
+    panel.append(header, quote);
   }
-};
+}
 
 /**
  * A native ChatGPT form is not safe to replay in Electron. The recorded markup can, however,
@@ -2644,8 +2672,9 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const byIndex = new Map((references ?? []).map(reference => [reference.index, reference]));
   let directives = 0;
   const math: MathSlots = { formulas: [] };
+  const writing: WritingSlot[] = [];
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
-  const parser = new Marked({ gfm: true, extensions: [WRITING_BLOCK, ...mathExtensions(math), {
+  const parser = new Marked({ gfm: true, extensions: [writingBlock(writing), ...mathExtensions(math), {
     name: 'inlineReference', level: 'inline',
     start: value => { const at = value.search(/:{1,2}chatgpt-content-reference\{/); return at < 0 ? undefined : at; },
     tokenizer(value) { const match = value.match(INLINE_REFERENCE); return match ? { type: 'inlineReference', raw: match[0], probe: directives++ } : undefined; },
@@ -2689,6 +2718,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const html = parser.parse(separateDisplayMath(text), { async: false });
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
   drawMath(box, math);
+  writingPanels(box, writing);
   if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
     const template = document.createElement('template');
     template.innerHTML = capture.text;
@@ -2793,6 +2823,75 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     }
   }
   return box;
+}
+
+/**
+ * ChatGPT's tool approval card, answered in the app (2.1.38, the maintainer's request).
+ *
+ * Shows the card's own words as the page reported them (plain text, never markup) and offers Deny
+ * and Allow once for exactly that card; "always" is never offered. Where ChatGPT itself disabled
+ * Allow once ("External app access is unavailable in this conversation"), only Deny is offered.
+ * The click files one answer; the page presses the button only while it still shows that card, so
+ * the panel then follows the outcome until the row turns into "answered".
+ */
+function approvalCardPanel(sessionId: string): HTMLElement {
+  const panel = el('div', 'approval-card');
+  panel.hidden = true;
+  const words = el('div', 'approval-card-words');
+  const actions = el('div', 'approval-card-actions');
+  const status = el('p', 'approval-card-status');
+  status.hidden = true;
+  const deny = el('button', 'btn btn-solid', () => t('Deny')) as HTMLButtonElement;
+  const allow = el('button', 'btn btn-solid is-primary', () => t('Allow once')) as HTMLButtonElement;
+  deny.type = allow.type = 'button';
+  actions.append(deny, allow);
+  panel.append(words, actions, status);
+  let card: ApprovalCardView | null = null;
+  const say = (text: () => string): void => { status.hidden = false; ui(status, 'textContent', text); };
+  const show = (next: ApprovalCardView | null): void => {
+    card = next;
+    if (!next) { panel.hidden = true; return; }
+    panel.hidden = false;
+    words.replaceChildren(...next.lines.map((text, index) => el(index === 1 ? 'strong' : 'span', '', text)));
+    const pending = next.answer !== null && next.answer.outcome === null;
+    deny.disabled = pending;
+    allow.disabled = pending || !next.allow;
+    const outcome = next.answer?.outcome;
+    if (pending) say(() => t('Sending your answer to ChatGPT…'));
+    else if (outcome === 'card_changed') say(() => t('ChatGPT showed a different card by then. Nothing was pressed; answer the new one.'));
+    else if (outcome === 'unavailable') say(() => t('ChatGPT no longer offered that choice. Nothing was pressed.'));
+    else if (outcome === 'expired') say(() => t('The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.'));
+    else if (!next.allow) say(() => t('ChatGPT does not allow it in this chat. You can only deny it.'));
+    else status.hidden = true;
+  };
+  const refresh = async (): Promise<ApprovalCardView | null> => {
+    const reply = await api.approvalCard(sessionId);
+    const next = reply.ok ? reply.data : null;
+    if (panel.isConnected || next) show(next);
+    return next;
+  };
+  const answer = async (choice: 'allow' | 'deny'): Promise<void> => {
+    if (!card) return;
+    deny.disabled = allow.disabled = true;
+    const reply = await api.answerApproval(sessionId, card.id, choice);
+    if (!reply.ok || !reply.data.ok) {
+      await refresh();
+      if (!card || (reply.ok && !reply.data.ok && reply.data.error === 'card_changed'))
+        say(() => t('ChatGPT showed a different card by then. Nothing was pressed; answer the new one.'));
+      return;
+    }
+    say(() => t('Sending your answer to ChatGPT…'));
+    // The page takes the answer on its next poll (every 2 s while the card stands).
+    for (let attempt = 0; attempt < 40 && panel.isConnected; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const next = await refresh();
+      if (!next || (next.answer && next.answer.outcome !== null)) return;
+    }
+  };
+  deny.addEventListener('click', () => void answer('deny'));
+  allow.addEventListener('click', () => void answer('allow'));
+  void refresh();
+  return panel;
 }
 
 /**
@@ -3298,7 +3397,8 @@ function paintMessageReaction(box: HTMLElement, value: unknown): void {
 
 /** The approval row in the interface language. Literal `t()` calls keep the catalog audit able to see each key. */
 function approvalRowText(text: string): string {
-  if (text === APPROVAL_WAITING_TEXT) return t('ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.');
+  // The recorded English stays as it was written; since 2.1.38 the row offers the answer itself.
+  if (text === APPROVAL_WAITING_TEXT) return t('ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.');
   if (text === APPROVAL_ANSWERED_TEXT) return t('The tool approval ChatGPT asked for in this chat was answered.');
   return text;
 }
@@ -3427,6 +3527,9 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         open.append(icon('i-out'), el('span', '', () => t('Open in browser')));
         open.addEventListener('click', () => void run(api.openSessionChat(owner)));
         line.append(open);
+        const box = el('div', 'approval-wait-box');
+        box.append(line, approvalCardPanel(owner));
+        return box;
       }
       return line;
     }
@@ -5782,7 +5885,7 @@ function applyAutoCompactHint(config: Config): void {
  * expire by age.
  */
 const CHAT_INPUTS = [
-  'chatBrowser', 'browserBridgePort',
+  'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
   'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',

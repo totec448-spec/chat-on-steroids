@@ -2643,6 +2643,57 @@ describe('automatic compaction', () => {
     }
   }
 
+  /**
+   * 2026-10-14, a live prime at Extra High: its ticket was filed at 401,797 tokens while it kept
+   * working; 20 minutes later ChatGPT's stream broke ("resume HTTP 404"). The transport failure
+   * brought the ticket's pickup forward, but the asking phase still waited for the turn to stop
+   * working, and a turn above High has a 20-minute silence window. The handoff sat at Preparing.
+   */
+  it('asks a compacting chat for its handoff on the next pass after its stream breaks, even in a long thinking window', async () => {
+    try {
+      await pair();
+      const conversationId = randomUUID();
+      await withThreshold(10_000, async () => {
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'model_selection', time: Date.now(), model: 'GPT-6 Thinking', reasoningEffort: 'xhigh' },
+          { kind: 'turn_start', time: Date.now(), turnId: 'deliberate-turn' },
+          ...over(),
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Checked the dashboards' }
+        ] } });
+        const sessionId = (await request('GET', `/activity?conversationId=${conversationId}`)).body.sessionId as string;
+        await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
+        vi.useFakeTimers();
+        // The turn keeps working past the ticket's first pickup interval: nothing to ask yet.
+        await vi.advanceTimersByTimeAsync(3 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Opened the map' }
+        ] } });
+        await sweepStaleSwarm(Date.now());
+        const offered = async () => ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string }>)
+          .filter(row => row.conversationId === conversationId);
+        expect(await offered()).toEqual([]);
+        // The page reports the answer's stream gone: the handoff is due on the next pass.
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'chat_error', time: Date.now(), turnId: 'deliberate-turn', recoverable: true,
+            text: 'Connection interrupted. Waiting for the complete answer' }
+        ] } });
+        await vi.advanceTimersByTimeAsync(30_000);
+        await sweepStaleSwarm(Date.now());
+        const [pickup] = await offered() as Array<{ conversationId: string; reason: string; token: string }>;
+        expect(pickup).toMatchObject({ reason: 'compaction' });
+        // One pickup per reported loss: once reloaded, a turn that works again is left alone.
+        expect((await request('POST', '/repairs/claim', { body: { token: pickup!.token } })).body.allowed).toBe(true);
+        await request('GET', `/status?repaired=${encodeURIComponent(pickup!.token)}&repairAction=reloaded`);
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Back at work' }
+        ] } });
+        await sweepStaleSwarm(Date.now());
+        expect(await offered()).toEqual([]);
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['failed', 'old-turn', 'new-question', 'completed', 'stopped', 'auto-off', 'pro'] as const)(
     'compacts only the exact failed oversized source after a transport error (%s)', async scenario => {
       await pair();
@@ -5459,6 +5510,28 @@ describe('delivering a bootstrap', () => {
     // The second wake reaches the browser now, not only after the first one's page claims it.
     expect(status.body.revivals.map((entry: { conversationId: string }) => entry.conversationId).sort()).toEqual([...chats].sort());
     expect(status.body.revival).toEqual(status.body.revivals[0]);
+  });
+
+  // #1086: a page that redeemed the wake and failed before Send says so ("transient"); the
+  // broker wakes it again itself instead of spending a strike and troubling the prime.
+  it('keeps a worker waking when its page was merely not ready before Send', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'dcdcdcdc-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'one more thing' }]);
+    const { id } = await waitForRevival();
+    await request('POST', '/commands/redeem', { body: { id, client: 'tab-slow', conversationId } });
+    const primeBefore = swarmState().agents.find((agent) => agent.role === 'prime')!.pending;
+    const ack = await request('POST', '/commands/ack', {
+      body: { id, status: 'failed', error: 'ChatGPT never re-exposed a usable composer after model selection', detail: 'transient', client: 'tab-slow' }
+    });
+    expect(ack.status).toBe(200);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+    expect(swarmState().agents.find((agent) => agent.role === 'prime')!.pending).toBe(primeBefore);
+    expect(getLog().some(entry => entry.message.includes("worker-1's page was not ready"))).toBe(true);
   });
 
   it('puts the worker back to sleep, with its slot and its message intact, when the browser cannot wake it', async () => {

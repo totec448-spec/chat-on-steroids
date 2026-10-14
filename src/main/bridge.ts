@@ -20,7 +20,7 @@ import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
-import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
+import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { tunnelRouteSettling } from './tunnel/route-settle.js';
 import { armProjectCreate, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
@@ -120,7 +120,7 @@ import {
   type PageCallEvidence
 } from './session/recorder.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
-import { approvalCardWaiting, noteApprovalCard, resetApprovalWaits, type ApprovalWaitDeps } from './approval-wait.js';
+import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -2410,9 +2410,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (route === '/plugin-refresh' && req.method === 'POST') {
     const raw = await readBody(req);
     const body = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    if (body.action === 'pending') return json(res, 200, { requests: getConfig().ui.autoRefreshPlugins === true ? await pendingPluginRefreshes() : [] }, origin);
-    // Turning the setting off also revokes a request already handed to the page.
-    if (body.action === 'claim' && getConfig().ui.autoRefreshPlugins !== true) return json(res, 409, { ok: false, error: 'automatic_refresh_disabled' }, origin);
+    if (body.action === 'pending') return json(res, 200, { requests: await pendingPluginRefreshes(getConfig().ui.autoRefreshPlugins === true) }, origin);
+    // Disabling automatic refresh revokes its claims; an explicit Update all round is separate.
+    if (body.action === 'claim' && getConfig().ui.autoRefreshPlugins !== true && !await hasRequestedPluginRefresh()) return json(res, 409, { ok: false, error: 'automatic_refresh_disabled' }, origin);
     if (typeof body.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(body.id)) return json(res, 400, { error: 'invalid_request' }, origin);
     let ok = false;
     const tunnelId = typeof body.tunnelId === 'string' && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(body.tunnelId) ? body.tunnelId : undefined;
@@ -2422,7 +2422,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     };
     if (body.action === 'fail' && typeof body.error === 'string') ok = await failPluginRefresh({ id: body.id, error: body.error.slice(0, 200) });
     else if (typeof body.appId === 'string' && /^asdk_app_[a-zA-Z0-9_-]{1,160}$/.test(body.appId)) {
-      if ((body.action === 'claim' || body.action === 'current') && typeof body.connectorName === 'string') ok = await claimPluginRefresh({ id: body.id, appId: body.appId, connectorName: body.connectorName, tools: body.tools, tunnelId, ownsTunnel, alreadyCurrent: body.action === 'current' });
+      if ((body.action === 'claim' || body.action === 'current') && typeof body.connectorName === 'string') ok = await claimPluginRefresh({ id: body.id, appId: body.appId, connectorName: body.connectorName, tools: body.tools, tunnelId, ownsTunnel, alreadyCurrent: body.action === 'current' }, getConfig().ui.autoRefreshPlugins === true);
       if (body.action === 'manual' && typeof body.connectorName === 'string' && typeof body.error === 'string') ok = await requireManualPluginRefresh({ id: body.id, appId: body.appId, connectorName: body.connectorName, tools: body.tools, tunnelId, ownsTunnel, error: body.error.slice(0, 200) });
       if (body.action === 'complete') ok = await completePluginRefresh({ id: body.id, appId: body.appId, tools: body.tools, versionId: typeof body.versionId === 'string' ? body.versionId.slice(0, 200) : undefined });
     }
@@ -2561,7 +2561,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Apps proven to be this install's connectors, so a renamed connector is still recognized.
         connectorApps: Object.fromEntries(Object.entries(connectorApps()).map(([surface, apps]) =>
           [surface, apps.map(({ appId, linkId, name }) => ({ appId, linkId, name }))])),
-        pluginRefreshRequests: getConfig().ui.autoRefreshPlugins === true ? pluginRefreshPublications().map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })) : [],
+        pluginRefreshRequests: (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         projectCreateRequests: await pendingProjectCreates(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
@@ -3106,8 +3106,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const astraSession = await findSessionByConversation(id, { requireUnique: true });
     // ChatGPT's own tool approval card on this page: see approval-wait.ts. Older extensions omit it.
     const pageApproval = url.searchParams.get('approval');
+    // The page's word on an answer the person gave in the app, then the card it shows now.
+    const approvalResult = parseApprovalResult(url.searchParams.get('approvalResult'));
+    if (approvalResult && settleApprovalAnswer(id, approvalResult.token, approvalResult.outcome))
+      logInfo(`bridge: ${id} approval card answer ${approvalResult.outcome}`);
     if (pageApproval === '1' || pageApproval === '0')
-      void noteApprovalCard(id, pageApproval === '1', astraSession?.id ?? null, approvalWaitDeps).catch(() => undefined);
+      void noteApprovalCard(id, pageApproval === '1', astraSession?.id ?? null, approvalWaitDeps, Date.now(),
+        pageApproval === '1' ? parseApprovalCard(url.searchParams.get('approvalCard')) : null).catch(() => undefined);
+    // An answer waits here for this chat's page, which presses it only on the same card.
+    const approvalReply = (): { approvalAnswer?: NonNullable<ReturnType<typeof approvalAnswerFor>> } => {
+      const answer = approvalAnswerFor(id);
+      return answer ? { approvalAnswer: answer } : {};
+    };
     const finishOnly = !!astraSession && await astraFinishOnly(astraSession.id, id);
     const silenceSuppressed = finishOnly || await suppressProSilence(id);
     const goalView = async () => {
@@ -3198,6 +3208,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
                 context: contextView(false)
               }
             : {}),
+          ...approvalReply(),
           ...(retiredWorker ? { retiredWorker } : {})
         },
         origin
@@ -3465,6 +3476,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // How this chat's own Compact & Resume is going, so the page can say what is
         // happening instead of spinning.
         job: resumeJobFor(live.sessionId),
+        // An answer to ChatGPT's approval card the person gave in the app (approval-wait.ts).
+        ...approvalReply(),
         // The goal loop: whether it is on, whether it *can* be on, and whatever draft this
         // chat currently has in flight. The draft's text grows on this feed, which is what
         // the panel above the composer streams — there is no second connection to hold open.
@@ -4615,6 +4628,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const status: AckStatus = raw === 'failed' ? 'failed' : 'sent';
     const error = typeof body['error'] === 'string' ? body['error'].slice(0, 200) : null;
     const rawDetail = typeof body['detail'] === 'string' ? body['detail'] : '';
+    // The page loaded the chat, redeemed the command and failed before Send (#1086).
+    const transientFailure = rawDetail === 'transient';
     const projectEntryDetail = /^project-entry:[a-z0-9:=.-]{1,146}$/.test(rawDetail)
       ? rawDetail.slice('project-entry:'.length)
       : null;
@@ -4911,7 +4926,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const why = error
         ? `the worker's chat did not take the message — ${error}`
         : "the browser could not reopen the worker's chat";
-      failWorkerRevival(command.spec.agent, why, command.spec.runId);
+      failWorkerRevival(command.spec.agent, why, command.spec.runId, { transient: transientFailure && !!error });
       receipt = {
         id,
         client: client || command.owner,
@@ -8760,7 +8775,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean }>();
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
 /**
  * How many slowed extra bursts an automatic pre-Send ticket gets before it is abandoned like a
@@ -8791,9 +8806,10 @@ function expediteCompactionPickup(conversationId: string): boolean {
   if (watch && watch.token === entry.token && watch.phase === phase) {
     if (watch.attempts >= COMPACTION_PICKUPS[phase].attempts) return false;
     watch.nextAt = 0;
+    watch.streamLost = true;
     return true;
   }
-  compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0 });
+  compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0, streamLost: true });
   return true;
 }
 
@@ -8996,7 +9012,11 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     // on 2026-10-12 a page lost its stream, the model stopped calling tools, and the open turn kept
     // the handoff from being asked for until someone intervened.
     const grant = activeUntil.get(entry.from);
-    const silent = grant?.sessionId === entry.sessionId && grant.until + schedule.every <= now && runningToolProgress(entry.from) === null;
+    // The page said this answer's stream is gone (expediteCompactionPickup): its turn is not working,
+    // whatever its silence window says. A turn above High has twenty minutes of it, and on 2026-10-14
+    // a prime's handoff sat at Preparing that long after "resume HTTP 404". A running tool still waits.
+    const silent = runningToolProgress(entry.from) === null &&
+      (watch.streamLost === true || (grant?.sessionId === entry.sessionId && grant.until + schedule.every <= now));
     if (phase === 'asking' && session && !silent && sessionInputActivity(session).exact) {
       watch.nextAt = now + schedule.every;
       continue;
@@ -9070,6 +9090,8 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     }
     if (!acted) continue;
 
+    // One pickup per reported loss: after it, a turn that works again counts as working.
+    watch.streamLost = false;
     watch.attempts += 1;
     watch.nextAt = now + schedule.every;
     queued = true;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { serveWorkerAction } from './control-workers.js';
 import type { ControlApiCancelResult, ControlApiSendResult } from '../shared/control-api.js';
 import { getConfig } from './config.js';
 import { projectInput, RequestError } from './control-reads.js';
@@ -11,7 +12,7 @@ import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
 
 /**
  * The action routes of the local control API: send a message to an existing chat or start a new
- * chat with it, and cancel one that has not been handed over.
+ * chat with it, cancel one that has not been handed over, or delegate to the existing worker broker.
  *
  * There is no new send path. A message goes through `sendDesktopInput`, the same entry the
  * composer uses, and is cancelled through `cancelDesktopInput`; the outbox stays the only owner
@@ -56,7 +57,7 @@ const CANCEL_ROUTE = /^\/v1\/inputs\/([0-9a-f-]{36})\/cancel$/;
 
 /** Every path an action can arrive on, whatever the id, so one gate can refuse them all alike. */
 export function isActionPath(route: string): boolean {
-  return route === '/v1/inputs' || /^\/v1\/inputs\/[^/]+\/cancel$/.test(route);
+  return route === '/v1/inputs' || /^\/v1\/inputs\/[^/]+\/cancel$/.test(route) || /^\/v1\/workers\/[^/]+\/(spawn|message|ack)$/.test(route);
 }
 
 export interface ActionReply {
@@ -207,6 +208,10 @@ async function cancel(id: string, rawBody: unknown): Promise<ActionReply> {
 /** Undefined when the method and path are not an action. */
 export async function serveAction(method: string, route: string, body: unknown): Promise<ActionReply | undefined> {
   if (method !== 'POST') return undefined;
+  const worker = await serveWorkerAction(method, route, body, () => {
+    if (!actionsAllowed()) throw new RequestError(403, 'actions_disabled');
+  });
+  if (worker) return worker;
   if (route === '/v1/inputs') return send(body);
   const match = CANCEL_ROUTE.exec(route);
   if (match) return cancel(match[1]!, body);

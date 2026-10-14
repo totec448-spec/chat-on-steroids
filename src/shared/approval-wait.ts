@@ -12,3 +12,11 @@ export const APPROVAL_WAITING_TEXT =
 export const APPROVAL_ANSWERED_TEXT = 'The tool approval ChatGPT asked for in this chat was answered.';
 
 export const APPROVAL_TEXTS = [APPROVAL_WAITING_TEXT, APPROVAL_ANSWERED_TEXT] as const;
+
+/** ChatGPT's approval card as the app shows it, with the last answer the person gave there. */
+export interface ApprovalCardView {
+  id: string;
+  lines: string[];
+  allow: boolean;
+  answer: { choice: 'allow' | 'deny'; outcome: 'clicked' | 'card_changed' | 'unavailable' | 'expired' | null } | null;
+}

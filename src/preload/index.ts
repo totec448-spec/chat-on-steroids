@@ -1,4 +1,5 @@
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
+import type { ApprovalCardView } from '../shared/approval-wait.js';
 import type { DictationEvent } from '../shared/dictation.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
@@ -254,6 +255,8 @@ const api = {
   // installer runs, and the app comes back as the new version. It takes no argument because
   // there is nothing here to choose - the main process knows what is staged.
   installUpdate: () => call<boolean>('update:install'),
+  /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
+  updateAll: () => call<import('../shared/types.js').UpdateAllResult>('update:all'),
   downloadUpdate: () => call<boolean>('update:download'),
   /** Settings opened: re-check for an update if the last answer is older than ten minutes. */
   refreshUpdate: () => call<boolean>('update:refresh'),
@@ -347,6 +350,11 @@ const api = {
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  /** ChatGPT's tool approval card in this chat's page, as the app may show it (2.1.38). */
+  approvalCard: (id: string) => call<ApprovalCardView | null>('sessions:approvalCard', { id }),
+  /** The person's answer to that exact card; the page presses it only if the card still stands. */
+  answerApproval: (id: string, cardId: string, choice: 'allow' | 'deny') =>
+    call<{ ok: true } | { ok: false; error: string }>('sessions:answerApproval', { id, cardId, choice }),
   followSessionTab: (id: string) => call<boolean>('sessions:followTab', { id }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press

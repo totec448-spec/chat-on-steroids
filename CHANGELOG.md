@@ -9,6 +9,50 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.37] — Find in chat, slash commands and Send now
+
+Everyday comforts for working in chats: find text in a chat with ⌘F, reach most actions with `/` commands, choose what Enter does and what a message during a running answer does, send a queued message right away, and get a notification when a chat finishes. Long runs keep your computer awake, the final answer of a long turn shows where it belongs, and worker chats can leave your ChatGPT chat list once they're done.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ Highlights
+
+- **Find in chat.** Press **⌘F** (**Ctrl+F** on Windows and Linux) in an open chat to search the whole chat, including older messages that aren't loaded yet. Enter or ↓ goes to the next match, Shift+Enter or ↑ to the previous one, and matches are highlighted in the messages.
+- **Slash commands.** Type `/` in the message box for `/model`, `/reasoning`, `/new`, `/rename`, `/pin`, `/status`, `/review`, `/init`, `/usage`, `/plugins`, `/pet` and `/feedback`, next to `/plan`, `/goal`, `/loop` and `/compact`.
+- **Send a queued message now.** A message waiting for the running answer has a **Send now** button that puts it into that answer right away, like Codex's steer.
+- **Your choice for messages during a running answer.** **Settings → General → Messages during a running turn** sets whether a message joins the running answer or waits until it ends. **⌘⇧Enter** (**Ctrl+Shift+Enter**) sends it the other way.
+- **Choose what Enter does.** **Settings → General → Send messages with**: Enter, or ⌘Enter / Ctrl+Enter, so Enter starts a new line.
+- **A notification when a chat finishes** while the app is in the background, with the start of the answer. Workers and chats with Goal or Loop on stay quiet. **Settings → General → Notify when a chat finishes**.
+- **The computer stays awake while a chat works**, so long runs keep going. **Settings → General → Keep awake while a chat works**: the computer (default), the computer and screen for Windows laptops that sleep as soon as the screen turns off, or off.
+- **Archive worker chats.** With **Settings → Agents & automation → Archive worker chats in ChatGPT when they are retired** on, each worker's chat is archived in ChatGPT once the app can no longer use that worker (you cleared the workers, the main chat closed, or its finished task sat for a week). Nothing is deleted: you can restore them from ChatGPT's settings, and the app keeps its transcript. Off by default.
+- **More room for recordings.** **Settings → Agents & automation → Browser & history → Storage size** goes up to 50 GB, and **Free storage** removes the images and long texts of chats you haven't used for a week, oldest first.
+
+### 🛠 Fixed
+
+- **Compact & Resume after a broken answer.** When ChatGPT's answer stream broke in a long thinking turn ("Connection interrupted"), the handoff could wait up to 20 minutes at Preparing. It now continues right away.
+- **A message you send while ChatGPT's answer is broken** is now kept and sent after that answer. Before, it was dropped after a minute when the page couldn't take it into the broken answer.
+- **Goal after a reloaded long answer.** When a long answer was reloaded and ChatGPT's final answer arrived afterwards, Goal could stay at "Checking the answer is finished" for good. It now continues.
+- **Goal in long chats on the ChatGPT Free plan.** When ChatGPT refuses Goal's helper message as too long, the next one is shorter. Before, Goal waited 3 minutes and failed the same way every round.
+- **Minimizing the built-in browser** now keeps it in the taskbar or Dock, where you can restore it. Before, it disappeared into the tray.
+- **The final answer of a long turn** now shows at the end of the chat. It was filed where it started, sometimes far up among the tool calls, and in long chats it didn't show at all. This also fixes chats recorded before the update.
+- **Links in ChatGPT's answers** now come out as proper links when you copy or export an answer, in search results and in notifications, instead of their label and address run together.
+- **Opening a chat from History** now uses the built-in browser when you chose it, also while the browser extension is connected in Chrome or Edge.
+- **The app's own requests** (update check, Skills from GitHub, Goal providers, remote plugins) now go through your system's proxy, like the tunnel since 2.1.36.
+
+### ✨ Improved
+
+- **Goal pauses instead of going in circles.** When ChatGPT gives the same answer three times in a row, Goal stops asking, tells you why and switches itself off for that chat.
+- **Automatic plugin refresh** is offered once in the app, so you don't have to find the setting.
+- **Setup:** using your own HTTPS tunnel now explains that its secret path changes every time the app starts.
+
+### 💛 Thank you
+
+To **@mch1902879100-cmyk** for fixing the History browser choice, **@atsu6** for the groundwork of the coming update workflow, and **@abdulsalamgs** for tidying up how workers are admitted.
+
+And to everyone whose reports led to changes in this release: **@lambert-lincoln** (worker chats in the chat list), **@lic-twrightjay** (minimizing the built-in browser, Goal on the Free plan) and **@thecravenfoodie-rgb** (own tunnels).
+
 ## [2.1.36] — Steadier long runs, proxy support and ChatGPT's own words
 
 Long runs recover more reliably: a chat that stops on "Message delivery timed out" now continues by itself, and the app keeps its footing after your computer sleeps. The tunnel to ChatGPT works behind a proxy, Windows dictation is much more accurate, and the app now uses ChatGPT's own words and screens, in your language. Developers can start chats through the Local control API and follow them live.

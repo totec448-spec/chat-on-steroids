@@ -1,8 +1,9 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { setMainTextTranslations } from './main-texts.js';
+import { mainText, setMainTextTranslations } from './main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -154,6 +155,7 @@ import { onConnectorProofChange } from './connector-proof.js';
 import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import { openInPreferredBrowser } from './browser.js';
 import { checkForUpdatesIfStale, manualDownloadUrl, markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
+import { updateAll } from './update-all.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -211,6 +213,7 @@ const settingsPatch = z.object({
     defaultChatModel: z.string().trim().min(1).max(80).optional(),
     defaultChatReasoning: z.enum(REASONING_EFFORTS).optional(),
     chatBrowser: z.enum(CHAT_BROWSERS).optional(),
+    cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional(),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     followOutput: z.boolean().optional(),
@@ -237,6 +240,7 @@ const settingsPatch = z.object({
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
     keepAwake: z.boolean().optional(),
+    keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
     theme: z.enum(['light', 'dark'])
   }),
@@ -385,6 +389,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       defaultChatModel: pick(current.ui.defaultChatModel, base.ui.defaultChatModel, wanted.ui.defaultChatModel),
       defaultChatReasoning: pick(current.ui.defaultChatReasoning, base.ui.defaultChatReasoning, wanted.ui.defaultChatReasoning),
       chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
+      cosBrowserMinimize: pick(current.ui.cosBrowserMinimize, base.ui.cosBrowserMinimize, wanted.ui.cosBrowserMinimize),
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
@@ -414,6 +419,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
       keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
+      keepScreenAwake: pick(current.ui.keepScreenAwake, base.ui.keepScreenAwake, wanted.ui.keepScreenAwake),
       privacyScreenshots: pick(
         current.ui.privacyScreenshots,
         base.ui.privacyScreenshots,
@@ -691,7 +697,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // A changed Goal provider address may be one the system reaches directly.
     void refreshAppProxy();
     setRecordingStorageLimit(next.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
-    if ((before.ui.keepAwake !== false) !== (next.ui.keepAwake !== false)) refreshKeepAwake();
+    if ((before.ui.keepAwake !== false) !== (next.ui.keepAwake !== false) || (before.ui.keepScreenAwake === true) !== (next.ui.keepScreenAwake === true)) refreshKeepAwake();
     nativeTheme.themeSource = next.ui.theme;
     if (process.platform === 'win32') getWindow()?.setTitleBarOverlay(titleBarOverlayForTheme(next.ui.theme, next.ui.appearance));
     // BrowserWindow's native backing color is fixed at construction unless updated explicitly.
@@ -1220,6 +1226,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // artifact makes that mean anything. The quit is what applies it, at the end of the same
   // shutdown sequence every other quit runs; refusing here is how a press with nothing staged
   // avoids closing the app for no reason.
+  handle('update:all', async () => updateAll(quitToInstall, url => shell.openExternal(url), async version => {
+    const window = getWindow();
+    if (!window || window.isDestroyed()) return false;
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'question', title: 'Chat On Steroids',
+      message: mainText('Restart to install the update?'),
+      detail: `${version}\n${mainText('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.')}`,
+      buttons: [mainText('Keep working'), mainText('Restart and install')],
+      defaultId: 0, cancelId: 0, noLink: true
+    });
+    return response === 1 && getWindow() === window && !window.isDestroyed();
+  }));
   handle('update:install', async () => {
     if (!markInstallOnQuit()) throw new Error('There is no downloaded update to install yet');
     logInfo('update: install requested; quitting to hand the update over');
@@ -1460,6 +1478,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id } = sessionIdArg.parse(payload);
     await openSessionChat(id);
     return true;
+  });
+
+  // ChatGPT's tool approval card, answered in the app (approval-wait.ts). Only a person's click
+  // in the renderer reaches `answerApproval`; the page presses the button for that exact card.
+  handle('sessions:approvalCard', async (payload) => {
+    const { id } = sessionIdArg.parse(payload);
+    const conversationId = (await getSession(id))?.conversationId;
+    return conversationId ? approvalCardView(conversationId) : null;
+  });
+  handle('sessions:answerApproval', async (payload) => {
+    const { id, cardId, choice } = sessionIdArg.extend({ cardId: z.string().min(8).max(64), choice: z.enum(['allow', 'deny']) })
+      .strict().parse(payload);
+    const conversationId = (await getSession(id))?.conversationId;
+    if (!conversationId) return { ok: false as const, error: 'no_card' as const };
+    const answer = requestApprovalAnswer(conversationId, cardId, choice);
+    if (answer.ok) {
+      logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      return { ok: true as const };
+    }
+    return answer;
   });
 
   // Selecting a chat in the app selects its tab in the Background chats window (#1249). Only

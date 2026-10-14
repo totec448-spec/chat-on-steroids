@@ -3805,6 +3805,24 @@ async function bindPendingInputProject(message, source, conversationId) {
   return { ok: true, projectBound: claim.id };
 }
 
+/**
+ * The approval card's words and an answer's outcome, as this document reported them (2.1.38): the
+ * person answers ChatGPT's card in the app, and only the page that shows the card presses it.
+ * Bounded and reshaped here, so a page can send nothing else through these two parameters.
+ */
+function approvalQuery(message) {
+  let query = '';
+  const card = message.approvalCard;
+  if (card && typeof card === 'object' && typeof card.id === 'string' && Array.isArray(card.lines)) {
+    const lines = card.lines.filter(line => typeof line === 'string').slice(0, 8).map(line => line.slice(0, 300));
+    query += `&approvalCard=${encodeURIComponent(JSON.stringify({ id: card.id.slice(0, 64), lines, allow: card.allow === true }))}`;
+  }
+  const result = message.approvalResult;
+  if (result && typeof result === 'object' && typeof result.token === 'string' && typeof result.outcome === 'string')
+    query += `&approvalResult=${encodeURIComponent(JSON.stringify({ token: result.token.slice(0, 64), outcome: result.outcome.slice(0, 20) }))}`;
+  return query;
+}
+
 const HANDLERS = {
   // Only the tab this worker opened for that exact request may report on it. Creating the Project
   // navigates that tab to the Project's own page, which drops the marker, so the owner is kept.
@@ -4309,7 +4327,8 @@ const HANDLERS = {
       // Forward only the helper states this document may report; these are diagnostics.
       (['absent', 'empty', 'ok'].includes(message.fiber) ? `&fiber=${message.fiber}` : '') +
       (typeof message.generating === 'boolean' ? `&generating=${message.generating ? 1 : 0}` : '') +
-      (typeof message.approval === 'boolean' ? `&approval=${message.approval ? 1 : 0}` : '');
+      (typeof message.approval === 'boolean' ? `&approval=${message.approval ? 1 : 0}` : '') +
+      approvalQuery(message);
     const result = await call(`/activity${query}`);
     if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
       await recoverDeferredRevivals();

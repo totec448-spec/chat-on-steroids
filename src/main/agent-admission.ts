@@ -7,7 +7,17 @@ import { findSessionByConversation } from './session/store.js';
 import { isGitRepository } from './toolchain.js';
 import { allocWorkerWorkspace, validateWorkerWorkspaceLease, WorkerWorktreeError, type WorkerWorktreeLease, type WorkerWorkspace } from './worktrees/index.js';
 
-/** Measure sleeping workers before status or wake, then persist revoked revival authority. */
+/**
+ * Re-measures how full each sleeping worker's chat is before status or a possible wake.
+ *
+ * The context ceiling is what makes a stop final, and it is measured from the app's own
+ * durable session for that conversation rather than from anything a model reported. The
+ * broker keeps the figure in memory and in its snapshot, but a chat that grew while this app
+ * was not running, or one whose snapshot predates the measurement entirely, would otherwise
+ * be woken into a conversation with no room left in it. Reading it again before a wake makes
+ * the ceiling survive a crash rather than a restart quietly handing back a worker the prime
+ * was already told was finished.
+ */
 export async function measureSleepingWorkers(caller: Caller): Promise<void> {
   const state = swarmStateForCaller(caller);
   if (state.agents.length === 0) return;
@@ -75,8 +85,10 @@ export async function acceptAgentMutation(
 export async function spawnAgentWorkers(
   input: SpawnInput,
   workspace: () => Promise<WorkerWorkspace | null>,
-  canIsolate: () => boolean
+  canIsolate: () => boolean,
+  admission?: { validate(): Promise<void>; assertCurrent(): void; workspace?: WorkerWorkspace | null }
 ) {
+  admission?.assertCurrent();
   const staged = stageSpawn(input);
   // Newly staged admissions alone may own Git branches. A repeated spawn may show
   // existing workers in `created`, but must never reallocate their checkouts.
@@ -129,13 +141,16 @@ export async function spawnAgentWorkers(
     await acceptAgentMutation(staged,
       'The worker run could not cross its durable acceptance barrier. The spawn was rolled back; retry this same request.',
       undefined,
-      admittedLeases.length ? {
+      admittedLeases.length || admission ? {
         validate: async () => {
+          await admission?.validate();
           for (const lease of admittedLeases) {
             await validateWorkerWorkspaceLease(lease, getConfig().roots);
           }
         },
         assertCurrent: () => {
+          admission?.assertCurrent();
+          if (!admittedLeases.length) return;
           const liveConfig = getConfig();
           if (liveConfig.multiAgent.autoWorktrees !== true) {
             throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
@@ -178,6 +193,11 @@ export async function spawnAgentWorkers(
   // their owners. A failed stage retains its checkout but exposes no orphan cwd.
   for (const lease of admittedLeases) {
     setWorkspaceFor(`agent:${lease.runId}:${lease.agentId}`, lease.workspace);
+  }
+  if (admission?.workspace) {
+    for (const agentId of staged.newlyStagedWorkerIds) {
+      if (!admittedLeases.some(lease => lease.agentId === agentId)) setWorkspaceFor(`agent:${staged.runId}:${agentId}`, admission.workspace);
+    }
   }
   const { created, becamePrime, runId, defaultNotes } = staged;
   return { created, becamePrime, runId, defaultNotes, isolationNotes };
