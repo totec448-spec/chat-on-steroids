@@ -6,6 +6,7 @@ import {
   answerMarkdown, completedTurnIds, markdownFileName, sessionMarkdown, transcriptEntries, turnAnswerEntries
 } from '../../shared/markdown-export.js';
 import { getSession, readEvents, readOverflowText } from './store.js';
+import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 
 export type MarkdownExportRequest = {
   id: string;
@@ -19,8 +20,9 @@ export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: s
 
 /** The whole text: an answer cut in the log is read back from the overflow copy beside it. */
 async function fullText(sessionId: string, stored: StoredText): Promise<string> {
-  if (!stored.truncated || !stored.assetId) return stored.text;
-  return (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
+  // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links.
+  if (!stored.truncated || !stored.assetId) return providerEntitiesAsMarkdown(stored.text);
+  return providerEntitiesAsMarkdown((await readOverflowText(sessionId, stored.assetId)) ?? stored.text);
 }
 
 /** Builds a completed turn's answer or the session transcript and copies or saves it. */

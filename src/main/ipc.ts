@@ -38,7 +38,7 @@ import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
-import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
+import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -127,7 +127,7 @@ import {
   withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
-import { locateSearchMatch, searchSessions } from './session/search.js';
+import { findInSession, locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -225,6 +225,7 @@ const settingsPatch = z.object({
     backgroundChats: z.boolean().optional(),
     backgroundPlacement: z.enum(['window', 'group']).optional(),
     followUp: z.enum(['steer', 'queue']).optional(),
+    enterSends: z.boolean().optional(),
     browserBridgePort: browserBridgePortSchema.optional(),
     browserOnly: z.boolean().optional(),
     autoRefreshPlugins: z.boolean().optional(),
@@ -234,6 +235,7 @@ const settingsPatch = z.object({
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
+    turnNotifications: z.boolean().optional(),
     keepAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
     theme: z.enum(['light', 'dark'])
@@ -265,7 +267,8 @@ const settingsPatch = z.object({
     recoverAgentTabs: z.boolean(),
     waitForSubAgents: z.boolean().optional(),
     autoWorktrees: z.boolean().optional(),
-    endSleepingWorkerProcesses: z.boolean().optional()
+    endSleepingWorkerProcesses: z.boolean().optional(),
+    archiveWorkerChats: z.boolean().optional()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
   controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
@@ -397,6 +400,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       backgroundChats: pick(current.ui.backgroundChats, base.ui.backgroundChats, wanted.ui.backgroundChats),
       backgroundPlacement: pick(current.ui.backgroundPlacement, base.ui.backgroundPlacement, wanted.ui.backgroundPlacement),
       followUp: pick(current.ui.followUp, base.ui.followUp, wanted.ui.followUp),
+      enterSends: pick(current.ui.enterSends, base.ui.enterSends, wanted.ui.enterSends),
       browserBridgePort: wanted.ui.browserBridgePort === undefined ? current.ui.browserBridgePort
         : pick(current.ui.browserBridgePort ?? 'auto', base.ui.browserBridgePort ?? 'auto', wanted.ui.browserBridgePort),
       browserOnly: pick(current.ui.browserOnly, base.ui.browserOnly, wanted.ui.browserOnly),
@@ -408,6 +412,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
+      turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
       keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
       privacyScreenshots: pick(
         current.ui.privacyScreenshots,
@@ -480,6 +485,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.endSleepingWorkerProcesses ?? false,
         base.multiAgent.endSleepingWorkerProcesses ?? false,
         wanted.multiAgent.endSleepingWorkerProcesses ?? false
+      ),
+      archiveWorkerChats: pick(
+        current.multiAgent.archiveWorkerChats ?? false,
+        base.multiAgent.archiveWorkerChats ?? false,
+        wanted.multiAgent.archiveWorkerChats ?? false
       )
     },
     goal: {
@@ -540,6 +550,7 @@ async function buildState(): Promise<AppState> {
     connectorSchemas: Object.fromEntries(
       pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
     ),
+    connectorRefresh: await pluginRefreshStatuses(),
     confirmedConnectorSchemas: confirmedPluginSchemas(),
     pluginRefreshUnreadable: await pluginRefreshUnreadable(),
     recordingStorageFull: recordingStorageFull(),
@@ -587,8 +598,14 @@ export async function openSessionChat(id: string): Promise<void> {
   if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
     throw new Error('This session has no valid ChatGPT conversation');
   }
-  // The extension's own browser first: the OS may pick another browser or account (#882).
-  // An explicit user action: only the CoS browser uses `reveal`, to bring its window forward.
+  // The selected browser owns this explicit action. In particular, a connected companion in
+  // Chrome/Edge must not override the user's choice to open the chat in the CoS browser.
+  if (getConfig().ui.chatBrowser === 'cos') {
+    await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
+    return;
+  }
+  // For an explicitly selected external browser, reveal its existing chat first; otherwise open
+  // the conversation in that same preferred browser (never the system default by accident).
   if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
 }
 
@@ -1551,6 +1568,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return searchSessions(query);
   });
   // Where a text match is in its chat, so opening the result shows that message.
+  handle('sessions:find', async (payload) => {
+    const { id, query } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), query: z.string().max(200) }).strict().parse(payload);
+    return findInSession(id, query);
+  });
   handle('sessions:locate-match', async (payload) => {
     const { id, query } = sessionIdArg.extend({ query: z.string().max(200) }).parse(payload);
     return locateSearchMatch(id, query);
@@ -1908,6 +1929,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);
   onConnectorProofChange(pushState);
+  onPluginRefreshChange(pushState);
   // A project's native ChatGPT Project changes from the browser; the sidebar and a waiting new chat say so.
   onProjectLinkChange(() => push('session:changed'));
   // A creation armed before the app last quit becomes uncertain on time, not on the browser's next pass.

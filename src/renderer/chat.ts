@@ -1,5 +1,6 @@
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
+import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t } from './i18n.js';
@@ -57,6 +58,7 @@ import type {
   RunningToolActivity,
   SessionChange,
   SessionEvent,
+  SessionSearchLocation,
   SessionSummary,
   StoredText,
   SwarmState,
@@ -92,6 +94,7 @@ import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
+let chatFind: ReturnType<typeof initChatFind> | null = null;
 
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
 const KIND_ICON: Record<ActivitySummary['kind'], string> = {
@@ -262,7 +265,7 @@ async function removeProjectFromSidebar(id: string): Promise<void> {
       if (!selectedId) {
         const oldKey = draftKey();
         const authoredDraft = authoredComposerText();
-        selectedProjectId = null; selectionGeneration++; replaceComposerDraft();
+        selectedProjectId = null; selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
         // Keep the visible draft and its attachments while moving to unfiled.
         inputDrafts.set(draftKey(), authoredDraft); inputDrafts.delete(oldKey); newChatTasks.delete(oldKey);
         skillPicker?.restore();
@@ -1004,6 +1007,51 @@ function sessionRow(summary: SessionSummary): HTMLElement {
  * sidebar many times a second: the field, its text and its caret survive every repaint.
  */
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
+
+/** Slash commands that act on the open chat; New Chat does not offer them. */
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact']);
+function openChatSummary(): SessionSummary | null {
+  return selectedId === null ? null : sessions.find(row => row.id === selectedId) ?? null;
+}
+/** Puts a request in front of what is already typed, for the user to read and send. */
+function prefillComposer(text: string): void {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const rest = input.value.trim();
+  input.value = rest ? `${text}\n\n${rest}` : text;
+  input.setSelectionRange(input.value.length, input.value.length);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
+}
+function openSettingsTab(tab: string): void {
+  $('workspaceSettings').click();
+  document.querySelector<HTMLElement>(`[data-tab="${tab}"]`)?.click();
+}
+/** Codex's slash commands: each opens what the app already has, or prepares a request to send. */
+function runSlashCommand(name: string): void {
+  const chat = openChatSummary();
+  // The command's own click is still on its way to the outside-click handlers that close menus:
+  // open popups after it has passed.
+  const afterClick = (open: () => void): void => { window.setTimeout(open, 0); };
+  if (name === 'model' || name === 'reasoning') afterClick(() => {
+    const menu = $<HTMLDetailsElement>('modelMenu');
+    menu.open = true;
+    menu.querySelector<HTMLElement>('summary')?.focus();
+  });
+  else if (name === 'new') $('newChat').click();
+  else if (name === 'rename' && chat) startRename(chat);
+  else if (name === 'pin' && chat && pinnable(chat)) {
+    sidebarPins?.toggle(chat.id);
+    paintSessions();
+    toast(sidebarPins?.has(chat.id) ? t('Chat pinned') : t('Chat unpinned'));
+  } else if (name === 'pin') toast(t('This chat cannot be pinned yet.'));
+  else if (name === 'status') afterClick(() => { const meter = $('contextMeterButton'); if (meter.getAttribute('aria-expanded') !== 'true') meter.click(); });
+  else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
+  else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
+  else if (name === 'usage') openSettingsTab('usage');
+  else if (name === 'feedback') openSettingsTab('activity');
+  else if (name === 'plugins') $('sidebarPlugins').click();
+  else if (name === 'pet') $('sidebarPets').click();
+}
 
 function startRename(summary: SessionSummary): void {
   const current = summary.title || '';
@@ -2890,9 +2938,16 @@ function jumpToLatest(): void {
  */
 async function revealSearchMatch(id: string, query: string): Promise<void> {
   const selection = selectionGeneration;
-  const current = (): boolean => selection === selectionGeneration && selectedId === id;
   const location = await run(api.locateSearchMatch(id, query));
-  if (!location || !current()) return;
+  if (!location || selection !== selectionGeneration || selectedId !== id) return;
+  await revealChatLocation(id, location);
+}
+
+/** Scrolls the open chat to one recorded message, loading the history page around it when needed. */
+async function revealChatLocation(id: string, location: SessionSearchLocation): Promise<void> {
+  const selection = selectionGeneration;
+  const current = (): boolean => selection === selectionGeneration && selectedId === id;
+  if (!current()) return;
   // The chat's own first page, and the fill that follows it, settle first.
   for (const deadline = Date.now() + 5000; detailFor !== id || historyLoading || historyDemand !== null;) {
     if (Date.now() > deadline || !current()) return;
@@ -5336,7 +5391,8 @@ export function chatSettingsPatch(current: Config): {
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
       autoWorktrees: $<HTMLInputElement>('autoWorktrees').checked,
-      endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
+      endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked,
+      archiveWorkerChats: $<HTMLInputElement>('archiveWorkerChats').checked
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -5742,6 +5798,7 @@ const CHAT_INPUTS = [
   'waitForSubAgents',
   'autoWorktrees',
   'endSleepingWorkerProcesses',
+  'archiveWorkerChats',
   'autoContinue',
   'goalProvider',
   'goalBaseUrl',
@@ -5856,6 +5913,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('endSleepingWorkerProcesses'),
     config.multiAgent.endSleepingWorkerProcesses === true,
     previous?.multiAgent.endSleepingWorkerProcesses
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('archiveWorkerChats'),
+    config.multiAgent.archiveWorkerChats === true,
+    previous?.multiAgent.archiveWorkerChats
   );
 
   // The model and reasoning selects are painted by applyChatModels above, which resolves a saved
@@ -6452,7 +6514,7 @@ function showView(name: string): void {
 function selectSession(id: string): void {
   const ownerChanged = id !== selectedId;
   rememberDraft();
-  selectionGeneration++; replaceComposerDraft();
+  selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
@@ -6495,7 +6557,7 @@ function selectSession(id: string): void {
 }
 
 function selectNewChat(projectId: string | null = null): void {
-  rememberDraft(); selectionGeneration++; replaceComposerDraft(); pendingNewInput = null;
+  rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
@@ -6784,9 +6846,13 @@ export function initChat(next: Deps): void {
     list: scope => api.skillLibrary(scope), command: name => {
       if (name === 'plan') { $('createPlan').click(); return; }
       if (name === 'compact') { $('compactSession').click(); return; }
-      const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = name;
-      automation.dispatchEvent(new Event('change', { bubbles: true }));
-    } });
+      if (name === 'goal' || name === 'loop') {
+        const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = name;
+        automation.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+      }
+      runSlashCommand(name);
+    }, commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null });
   skillPicker.restore();
   $('generateFinishGoal').addEventListener('click', async () => {
     const button = $<HTMLButtonElement>('generateFinishGoal'), id = selectedId, turnId = controlledTurnId;
@@ -6865,7 +6931,9 @@ export function initChat(next: Deps): void {
   });
   $('chatInput').addEventListener('keydown', (event) => {
     if (skillPicker?.keydown(event)) return;
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
+    // Codex's "Enter key behavior": Enter sends, or only Cmd/Ctrl+Enter does and Enter adds a line.
+    const enterSends = deps.state()?.config.ui.enterSends !== false || event.metaKey || event.ctrlKey;
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && enterSends) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
     // Cmd/Ctrl+Shift+Enter sends the other way than the Follow-up default (Codex does the same).
     else if (event.key === 'Enter' && event.shiftKey && (event.metaKey || event.ctrlKey) && !event.isComposing) {
       event.preventDefault();
@@ -7001,6 +7069,11 @@ export function initChat(next: Deps): void {
     } else void sendComposer(undefined, undefined, undefined, controlAction);
   });
 
+  chatFind = initChatFind({
+    selectedId: () => selectedId,
+    find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,
+    reveal: revealChatLocation
+  });
   chatSearch = initChatSearch({
     select: (id, match) => {
       if (id !== selectedId) { pendingNewInput = null; selectSession(id); }

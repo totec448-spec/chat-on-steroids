@@ -518,6 +518,114 @@ describe('connection surface state', () => {
     expect(refresh.pluginRefreshPublications()).toEqual([]);
   });
 
+  it('describes configured optional connectors before connecting and follows capability changes while offline', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.tunnelId = 'tunnel_core';
+    mocks.config.tunnel.desktopTunnelId = 'tunnel_desktop';
+    mocks.config.tunnel.pluginsTunnelId = 'tunnel_plugins';
+    mocks.caps.screen = true;
+    const { PluginManager } = await import('../src/main/plugins/manager.js');
+    const catalog = vi.spyOn(PluginManager.prototype, 'tools').mockReturnValue([
+      { name: 'offline_catalog_tool', description: 'Retained test catalog', inputSchema: { type: 'object' } }
+    ]);
+    try {
+      const connection = await import('../src/main/connection.js');
+      const before = connection.getStatus();
+      expect(before.state).toBe('disconnected');
+      expect(before.surfaces.map(surface => surface.id)).toEqual(['core', 'desktop', 'plugins']);
+      expect(before.surfaces.find(surface => surface.id === 'desktop')).toMatchObject({ available: true, state: 'off', localUrl: null });
+      expect(before.surfaces.find(surface => surface.id === 'desktop')!.tools.length).toBeGreaterThan(0);
+      expect(before.surfaces.find(surface => surface.id === 'plugins')).toMatchObject({ available: true, state: 'off', tools: ['offline_catalog_tool'] });
+      mocks.caps.screen = false;
+      catalog.mockReturnValue([]);
+      const after = connection.getStatus();
+      expect(after.surfaces.find(surface => surface.id === 'desktop')).toMatchObject({ available: false, tools: [] });
+      expect(after.surfaces.find(surface => surface.id === 'plugins')!.tools).toEqual([]);
+      expect(mocks.starts).toBe(0);
+      expect(mocks.endpointStartReached).not.toHaveBeenCalled();
+    } finally { catalog.mockRestore(); }
+  });
+
+  it('refuses revoked connection authority when its lifecycle queue begins', async () => {
+    const connection = await import('../src/main/connection.js');
+    let current = true;
+    const pending = connection.connect(() => current);
+    current = false; await pending;
+    expect(mocks.endpointStartReached).not.toHaveBeenCalled(); expect(mocks.starts).toBe(0);
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
+  it.each(['endpoint', 'secret'])('retires startup resources when connection authority changes during %s startup', async boundary => {
+    const connection = await import('../src/main/connection.js');
+    let current = true, release!: () => void, reached!: () => void;
+    const started = new Promise<void>(resolve => { reached = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    if (boundary === 'endpoint') { mocks.endpointStartGate = gate; mocks.endpointStartReached.mockImplementationOnce(reached); }
+    else { mocks.secretGate = gate; mocks.secretReached.mockImplementationOnce(reached); }
+    const pending = connection.connect(() => current); await started;
+    current = false; release(); await pending;
+    expect(mocks.starts).toBe(0); expect(mocks.endpointStop).toHaveBeenCalledTimes(1);
+    expect(connection.getStatus()).toMatchObject({ state: 'disconnected', localUrl: null, publicUrl: null });
+  });
+
+  it('keeps connected health reports owned by the connection after startup authority ends', async () => {
+    const connection = await import('../src/main/connection.js');
+    let current = true;
+    await connection.connect(() => current);
+    current = false;
+    mocks.report?.({ state: 'offline', detail: 'A later connection health report' });
+    expect(connection.getStatus().state).toBe('offline');
+    await connection.disconnect();
+  });
+
+  it('does not start another connection when authority is revoked during the previous drain', async () => {
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    mocks.report?.({ state: 'auth-failed', detail: 'Retry needs a new connection' });
+    let current = true, release!: () => void, reached!: () => void;
+    const started = new Promise<void>(resolve => { reached = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    mocks.endpointStop.mockImplementationOnce(async () => { reached(); await gate; });
+    const pending = connection.connect(() => current); await started;
+    current = false; release(); await pending;
+    expect(mocks.endpointStartReached).toHaveBeenCalledTimes(1); expect(mocks.starts).toBe(1);
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
+  it('stops a late tunnel handle and refuses its report after startup authority is revoked', async () => {
+    const connection = await import('../src/main/connection.js');
+    let current = true, release!: () => void, reached!: () => void;
+    const started = new Promise<void>(resolve => { reached = resolve; });
+    mocks.tunnelStartGate = new Promise<void>(resolve => { release = resolve; });
+    mocks.tunnelStartReached.mockImplementationOnce(reached);
+    const pending = connection.connect(() => current); await started;
+    current = false; release(); await pending;
+    expect(mocks.tunnelStop).toHaveBeenCalledTimes(1);
+    expect(connection.getStatus().state).toBe('disconnected');
+  });
+
+  it('refuses a late optional tunnel report and retires both handles after startup authority changes', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.tunnelId = 'tunnel_core';
+    mocks.config.tunnel.pluginsTunnelId = 'tunnel_plugins';
+    const connection = await import('../src/main/connection.js');
+    let current = true, release!: () => void, reached!: () => void;
+    const started = new Promise<void>(resolve => { reached = resolve; });
+    mocks.optionalStartGate = new Promise<void>(resolve => { release = resolve; });
+    mocks.optionalStartReached.mockImplementationOnce(reached);
+    const lateReports: string[] = [];
+    const unsubscribe = connection.onStatusChange(status => {
+      if (!current && status.surfaces.find(surface => surface.id === 'plugins')?.state === 'live') lateReports.push('live');
+    });
+    try {
+      const pending = connection.connect(() => current); await started;
+      current = false; release(); await pending;
+      expect(lateReports).toEqual([]);
+      expect(mocks.tunnelStop).toHaveBeenCalledTimes(2);
+      expect(connection.getStatus().state).toBe('disconnected');
+    } finally { unsubscribe(); }
+  });
+
   it('drops the previous tunnel state and URL from connector cards after disconnect', async () => {
     const connection = await import('../src/main/connection.js');
 

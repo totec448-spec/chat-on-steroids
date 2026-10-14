@@ -1,4 +1,5 @@
 import type { ReasoningEffort, RecordingStorageLimitGiB } from './session.js';
+import type { PluginRefreshStatus } from './plugin-refresh.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from './browser-control.js';
 import type { CommandAllowlistSettings } from './command-allowlist.js';
@@ -176,8 +177,12 @@ export interface UiPrefs {
   minimizeToTray: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
+  /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
+  turnNotifications?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
   followUp?: 'steer' | 'queue';
+  /** Codex's "Enter key behavior": Enter sends (missing or true), or only Cmd/Ctrl+Enter sends (false). */
+  enterSends?: boolean;
   /** Keep the computer from sleeping while a chat is working (Codex: Prevent sleep while running). Missing means on. */
   keepAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
@@ -368,6 +373,11 @@ export interface MultiAgentSettings {
    * identity and history are never reclaimed by this switch.
    */
   endSleepingWorkerProcesses?: boolean;
+  /**
+   * Archive each worker's ChatGPT chat once its run has ended (#1460). ChatGPT's own reversible
+   * archive; nothing is deleted. Off by default.
+   */
+  archiveWorkerChats?: boolean;
 }
 
 /** The user's own additions to what each MCP connector tells the model about itself. */
@@ -753,6 +763,8 @@ export interface AppState {
    * local contract only; they are not evidence that ChatGPT has refreshed its cached tools.
    */
   connectorSchemas: Partial<Record<SurfaceId, string>>;
+  /** Provider declaration evidence scoped to the current local schema. */
+  connectorRefresh?: Partial<Record<SurfaceId, PluginRefreshStatus>>;
   /** Per surface, the declaration ChatGPT confirmed after a plugin refresh (or found already current). */
   confirmedConnectorSchemas?: Partial<Record<SurfaceId, string>>;
   /** Read-only ledger health; no stored content or filesystem paths cross IPC. */
