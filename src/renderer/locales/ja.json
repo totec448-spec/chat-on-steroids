@@ -2383,5 +2383,11 @@
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} が拡張機能による chatgpt.com へのアクセスを止めています。拡張機能の詳細で chatgpt.com へのアクセスを許可し（Chrome・Edge・Brave は「サイトへのアクセス」、Firefox は「権限」）、ChatGPT を再読み込みしてください。",
   "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} はインストールされませんでした。現在も {1} です。「インストール」を選んでもう一度お試しください。Windows が許可を求める場合があります。",
   "Keep plugin URLs across restarts": "再起動後もプラグインの URL を保持",
-  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "名前付き Cloudflare トンネルなど、ChatGPT が URL を保存する独自のトンネル向けです。この設定をオフにするまで、その URL を知っている人はあなたの Chat On Steroids プラグインを使えます。安全なストレージが必要です。"
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "名前付き Cloudflare トンネルなど、ChatGPT が URL を保存する独自のトンネル向けです。この設定をオフにするまで、その URL を知っている人はあなたの Chat On Steroids プラグインを使えます。安全なストレージが必要です。",
+  "Start a fresh turn after": "新しいターンを開始するまで",
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.": "長い作業はツール結果の直後に、自動の「続ける」で新しいターンに引き継がれます。短いターンほど途切れにくくなります。Pro モデル、ゴール、ループ、サブエージェントでは使われません。",
+  "20 minutes": "20分",
+  "30 minutes": "30分",
+  "45 minutes": "45分",
+  "60 minutes": "60分"
 }
