@@ -192,7 +192,7 @@
                 <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em>What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.</em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em>Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.</em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier">⌘Enter / Ctrl+Enter</option></select></label>
-                <label class="setting"><span class="setting-text"><b>Keep the computer awake</b><em>While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.</em></span><input id="keepAwake" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
               </div>
@@ -1058,7 +1058,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Archive worker chats in ChatGPT when they are retired</b>
-                      <em>Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                      <em>Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
                     </span>
                     <input id="archiveWorkerChats" type="checkbox" />
                   </label>
@@ -1092,6 +1092,7 @@
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
                   <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <label class="setting" id="cosBrowserMinimizeRow" hidden><span class="setting-text"><b>Minimize the built-in browser to</b><em>Where its window goes when you minimize it. Its chats go on either way.</em></span><select id="cosBrowserMinimize"><option value="taskbar" id="cosBrowserMinimizeTaskbar">Taskbar</option><option value="tray" id="cosBrowserMinimizeTray">Tray</option></select></label>
                   <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the browser extension from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
@@ -1393,6 +1394,33 @@
             <h1>Activity</h1>
             <p>Recent local events and failures.</p>
           </header>
+          <section class="card update-readiness" id="updateReadinessCard" aria-labelledby="updateReadinessTitle">
+            <h2 id="updateReadinessTitle">Update status</h2>
+            <div class="update-readiness-status">
+              <div class="update-readiness-header">
+                <button class="btn update-readiness-toggle" id="updateReadinessToggle" type="button" aria-controls="updateReadinessDetails" aria-expanded="true">
+                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary">Not checked yet</span>
+                </button>
+                <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="You will be asked before the app restarts. Finish active work before installing.">Update all</button>
+              </div>
+              <span class="sr-only" id="updateReadinessAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <p id="updateAllError" class="is-warn" role="alert" hidden></p>
+            </div>
+            <details id="updateReadinessDetails" open>
+              <summary>Component details</summary>
+              <p class="muted">App, browser extension and plugins in ChatGPT.</p>
+              <ul id="updateReadinessRows"></ul>
+              <p class="muted">Your settings are kept. Manual steps appear in the status list.</p>
+              <p class="muted" id="updateConnectionNotice">After updating, the app connects once to finish plugin checks, even if automatic connection is off.</p>
+              <button class="btn" id="updateReviewSetup" type="button">Review setup</button>
+            </details>
+            <div class="update-readiness-actions">
+              <p class="sr-only" id="updateAllNotice">You will be asked before the app restarts. Finish active work before installing.</p>
+              <div class="update-readiness-buttons">
+                <button class="btn" id="updateDiagnosticsReport" type="button" hidden>Diagnostics report</button>
+              </div>
+            </div>
+          </section>
           <section class="card">
             <h2>
               <span class="sr-only">Activity</span>

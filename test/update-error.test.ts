@@ -29,7 +29,7 @@ const reasons = [
   'fixture.exe is not the published file: sha256 ' + 'a'.repeat(64) + ' instead of ' + 'b'.repeat(64)
 ];
 it('covers the authored fixed updater errors outside the renderer source scan', () => {
-  for (const file of ['src/main/update.ts']) {
+  for (const file of ['src/main/update.ts', 'src/main/update-all.ts']) {
     const source = readFileSync(file, 'utf8');
     const fixed = [...source.matchAll(/throw new Error\('([^']+)'\)/g)].map(match => match[1]!);
     expect(fixed.length).toBeGreaterThan(0);

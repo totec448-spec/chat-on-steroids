@@ -49,3 +49,27 @@ it('holds the system awake only while work runs, and lets go when it is switched
   awake.dispose();
   expect(held.size).toBe(0);
 });
+
+// Some Windows laptops (Modern Standby) go to standby once the screen turns off, whatever the app
+// holds for the system alone (2.1.37 release round). "The computer and screen" keeps the screen on.
+it('holds the screen too when asked, and swaps the hold when the choice changes', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  vi.setSystemTime(NOW);
+  let screen = false;
+  const held = new Map<number, string>(); let next = 1;
+  const blocker = { start: vi.fn((kind: 'computer' | 'screen') => { const id = next++; held.set(id, kind); return id; }), stop: vi.fn((id: number) => { held.delete(id); }) };
+  const awake = createKeepAwake({ sessions: async () => [chat('a', NOW + 120_000)], enabled: () => true, screen: () => screen, blocker });
+
+  await awake.refresh();
+  expect([...held.values()]).toEqual(['computer']);
+  screen = true;
+  await awake.refresh();
+  expect([...held.values()]).toEqual(['screen']);
+  await awake.refresh();
+  expect(blocker.start).toHaveBeenCalledTimes(2);
+  screen = false;
+  await awake.refresh();
+  expect([...held.values()]).toEqual(['computer']);
+  awake.dispose();
+  expect(held.size).toBe(0);
+});

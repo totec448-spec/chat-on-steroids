@@ -2598,6 +2598,13 @@ input[readonly] {
 .meta.approval-wait.is-waiting { color: var(--ink); }
 .meta.approval-wait.is-waiting .thinking-ico { color: var(--ink); }
 .meta.approval-wait .btn { margin-left: 2px; padding: 3px 9px; }
+/* ChatGPT's approval card, answered in the app (2.1.38): its words, Deny and Allow once. */
+.approval-wait-box { display: grid; gap: 6px; }
+.approval-card { margin: 0 0 4px 22px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); display: grid; gap: 8px; }
+.approval-card-words { display: grid; gap: 2px; color: var(--soft); overflow-wrap: anywhere; }
+.approval-card-words strong { color: var(--ink); font-weight: 600; }
+.approval-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.approval-card-status { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 
 .meta.is-bad {
   color: var(--red);
@@ -2796,6 +2803,24 @@ input[readonly] {
   margin: 0;
   border: 0;
   border-radius: 0;
+}
+
+/* ChatGPT's writing block (#1477): the code panel's frame and header; its text reads as text, not a quote. */
+.msg.rich .markdown-writing {
+  margin: 0.55em 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+/* A title or subject, not code: the reading font, a step larger than the code header. */
+.msg.rich .markdown-writing .tool-output-header { font-family: inherit; font-size: calc(11.5px * var(--text-scale, 1)); }
+
+.msg.rich .markdown-writing blockquote {
+  margin: 0;
+  padding: 0.6em 0.9em;
+  border-inline-start: 0;
+  color: inherit;
 }
 
 .msg.rich a {

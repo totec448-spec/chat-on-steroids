@@ -384,7 +384,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     // never freezes on the first offline sample.
     opts.report({
       state: 'offline',
-      detail: `This PC cannot reach OpenAI — ${run.unreachableReason}. Last verified handshake ${ago(run.lastHandshake)}. ChatGPT cannot use the connector until it is back; the tunnel keeps retrying on its own.`,
+      detail: `This PC cannot reach OpenAI — ${run.unreachableReason}. Last verified handshake ${ago(run.lastHandshake)}. ChatGPT cannot use the plugin until it is back; the tunnel keeps retrying on its own.`,
       handshakeAt: run.lastHandshake,
       health: run.health
     });

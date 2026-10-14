@@ -185,10 +185,14 @@ export interface UiPrefs {
   enterSends?: boolean;
   /** Keep the computer from sleeping while a chat is working (Codex: Prevent sleep while running). Missing means on. */
   keepAwake?: boolean;
+  /** With keepAwake: also keep the screen on (Modern Standby laptops sleep once it turns off). */
+  keepScreenAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
+  /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */
+  cosBrowserMinimize?: 'taskbar' | 'tray';
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
   appearance?: import('./appearance.js').AppearanceSettings;
@@ -711,6 +715,9 @@ export interface UpdateStatus {
   /** When the release API last answered, as epoch ms. Null until it has. */
   checkedAt: number | null;
 }
+
+/** Receipt only; authoritative component state still establishes completion. */
+export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'cancelled';
 
 /** Where an installation that cannot update itself gets the new version by hand. */
 export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
