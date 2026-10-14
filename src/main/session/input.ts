@@ -510,6 +510,14 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
       // A never-authorized Continue still owes delivery. Retain its ticket and
       // pickup budget, but never replay a possibly consumed Stop after losing a page.
       if (row.recovery) return releaseRecoveryClaim(row);
+      // A message the user sent into the running answer that the page could not take (its answer
+      // broke and was reloaded, 2026-10-14) was never sent: keep it for after that turn rather than
+      // cancelling what the person typed.
+      if (row.directTurn && manualInput(row) && !row.opening && !row.companionInputId) {
+        const { directTurn: _turn, owner: _owner, offeredAt: _offered, requiresAuthorization: _authorization, ...rest } = row;
+        return { ...rest, state: 'queued', mode: 'after-turn', owner: null,
+          error: 'Kept for after the running answer: ChatGPT could not take it into the answer.' };
+      }
       return { ...row, state: 'cancelled', error: row.requiresAuthorization && row.sendAuthorizedAt === undefined
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
         : UNCONFIRMED_SEND };

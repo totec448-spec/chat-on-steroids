@@ -1324,6 +1324,9 @@ start decides eligibility; earlier or running MCP calls do not revoke it. Rechec
 before Send. Navigation, a newer question or an occupied draft during preparation can revoke
 delivery. A claimed browser correction never also enters a tool result. After-turn entries
 retain their source-boundary policy and never acquire interruption authority.
+A manual direct correction whose 60 s preparation window ends before Send authorization (a broken,
+reloaded answer the page cannot match to the frozen turn) is not cancelled: it is requeued as an
+after-turn entry without `directTurn`, claim or authorization, with a visible reason.
 
 Native **Thinking failed** is recognized only by its exact visible disclosure button inside the
 current assistant turn, excluding quoted Markdown, old turns and app UI. It immediately records
