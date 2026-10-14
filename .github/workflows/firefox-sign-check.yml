@@ -33,7 +33,7 @@ jobs:
           version="${pkg}.$(( GITHUB_RUN_NUMBER + 1000 ))"
           node -e "const f='release/firefox-extension/manifest.json',fs=require('fs'),m=JSON.parse(fs.readFileSync(f,'utf8'));m.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(m,null,2)+'\n')" "$version"
           echo "Signing test version $version"
-          npx --yes web-ext@10.7.0 lint --source-dir release/firefox-extension
+          npx --yes web-ext@10.7.0 lint --source-dir release/firefox-extension --self-hosted
 
       - name: Sign with Mozilla
         env:

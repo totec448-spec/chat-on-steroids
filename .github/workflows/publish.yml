@@ -122,7 +122,7 @@ jobs:
           set -euo pipefail
           node scripts/write-extension-stamp.mjs
           node scripts/stage-firefox-extension.mjs release/firefox-extension
-          npx --yes web-ext@10.7.0 lint --source-dir release/firefox-extension
+          npx --yes web-ext@10.7.0 lint --source-dir release/firefox-extension --self-hosted
 
       - name: Sign with Mozilla
         env:
