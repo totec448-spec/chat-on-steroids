@@ -2375,6 +2375,10 @@
   "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "A página do chat não recebeu a sua resposta a tempo. Nada foi premido; abra-o no navegador para responder lá.",
   "ChatGPT does not allow it in this chat. You can only deny it.": "O ChatGPT não permite isso neste chat. Só pode recusar.",
   "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "O ChatGPT está à espera que permita ou recuse uma chamada de ferramenta neste chat. Nada continua até responder, aqui ou no navegador.",
+  "Add the Chat On Steroids add-on to Firefox": "Adicione o extra do Chat On Steroids ao Firefox",
+  "Get the add-on": "Obter o extra",
+  "Firefox asks before it adds the add-on. Choose Add.": "O Firefox pergunta antes de adicionar o extra. Escolha “Adicionar”.",
+  "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "A extensão não pode abrir o ChatGPT",
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "O {0} impede a extensão de aceder a chatgpt.com. Nos detalhes da extensão, permita o acesso a chatgpt.com (“Acesso a sites” no Chrome, Edge e Brave, “Permissões” no Firefox) e recarregue o ChatGPT."
 }
