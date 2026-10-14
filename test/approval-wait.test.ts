@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  APPROVAL_FRESH_MS, APPROVAL_NOTICE_GRACE_MS, approvalCardWaiting, noteApprovalCard, resetApprovalWaits, type ApprovalWaitDeps
+  APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, noteApprovalCard,
+  requestApprovalAnswer, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
 } from '../src/main/approval-wait.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
 
@@ -61,10 +62,59 @@ describe('approval card episodes', () => {
   });
 });
 
+// The maintainer asked to answer the card from the app (2026-10-14). The app only ever relays a
+// person's click, for the exact card it showed them; it never answers on its own.
+describe('answering the card from the app', () => {
+  let deps: ApprovalWaitDeps;
+  const card = (id: string, allow = true) => ({ id, lines: ['Gmail', 'Allow ChatGPT to use Gmail?', 'Creates a draft.'], allow });
+  beforeEach(() => {
+    resetApprovalWaits();
+    deps = { record: async () => ({ seq: 1, time: 1 }), notify: () => undefined, log: () => undefined };
+  });
+
+  it('shows the card the page reported and relays one answer for exactly that card', async () => {
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card('c1'));
+    expect(approvalCardView('chat', 1_000)).toMatchObject({ id: 'c1', lines: ['Gmail', 'Allow ChatGPT to use Gmail?', 'Creates a draft.'], allow: true, answer: null });
+    expect(approvalAnswerFor('chat', 1_000)).toBeNull();
+    const asked = requestApprovalAnswer('chat', 'c1', 'deny', 1_100);
+    expect(asked).toMatchObject({ ok: true });
+    const token = asked.ok ? asked.token : '';
+    expect(approvalAnswerFor('chat', 1_200)).toEqual({ token, cardId: 'c1', choice: 'deny' });
+    // A second click while the first is on its way changes nothing.
+    expect(requestApprovalAnswer('chat', 'c1', 'allow', 1_300)).toEqual({ ok: false, error: 'answer_pending' });
+    expect(settleApprovalAnswer('chat', 'not-the-token', 'clicked')).toBe(false);
+    expect(settleApprovalAnswer('chat', token, 'clicked')).toBe(true);
+    expect(approvalAnswerFor('chat', 1_500)).toBeNull();
+    expect(approvalCardView('chat', 1_500)?.answer).toMatchObject({ choice: 'deny', outcome: 'clicked' });
+  });
+
+  it('refuses a stale card, a missing card and Allow where ChatGPT itself disabled it', async () => {
+    expect(requestApprovalAnswer('chat', 'c1', 'deny', 1_000)).toEqual({ ok: false, error: 'no_card' });
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card('c1', false));
+    expect(requestApprovalAnswer('chat', 'c1', 'allow', 1_100)).toEqual({ ok: false, error: 'allow_unavailable' });
+    expect(requestApprovalAnswer('chat', 'old-card', 'deny', 1_100)).toEqual({ ok: false, error: 'card_changed' });
+    expect(requestApprovalAnswer('chat', 'c1', 'always' as never, 1_100)).toEqual({ ok: false, error: 'bad_choice' });
+  });
+
+  it('drops an answer for a card that was replaced or one the page never took', async () => {
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card('c1'));
+    const first = requestApprovalAnswer('chat', 'c1', 'allow', 1_100);
+    expect(first.ok).toBe(true);
+    // ChatGPT shows a different card: the answer for the old one must never reach it.
+    await noteApprovalCard('chat', true, 'session', deps, 1_200, card('c2'));
+    expect(approvalAnswerFor('chat', 1_200)).toBeNull();
+    expect(approvalCardView('chat', 1_200)).toMatchObject({ id: 'c2', answer: null });
+    const second = requestApprovalAnswer('chat', 'c2', 'deny', 1_300);
+    expect(second.ok).toBe(true);
+    expect(approvalAnswerFor('chat', 1_300 + APPROVAL_ANSWER_MS)).toBeNull();
+    expect(approvalCardView('chat', 1_300 + APPROVAL_ANSWER_MS)?.answer).toMatchObject({ choice: 'deny', outcome: 'expired' });
+  });
+});
+
 describe('the page detector', () => {
   const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
   let dom: JSDOM;
-  let api: { approvalWaiting(): boolean };
+  let api: { approvalWaiting(): boolean; approvalCard(): null | { node: Element; lines: string[]; allow: boolean }; answerApprovalCard(node: Element, choice: string): string };
   beforeEach(() => {
     dom = new JSDOM('<main></main>', { url: 'https://chatgpt.com/c/chat', runScripts: 'outside-only', pretendToBeVisual: true });
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
@@ -83,6 +133,42 @@ describe('the page detector', () => {
     expect(api.approvalWaiting()).toBe(false);
     dom.window.document.querySelector('main')!.innerHTML = card();
     expect(api.approvalWaiting()).toBe(true);
+  });
+
+  // The live card's buttons on 2026-10-14 (German UI, Gmail): Deny carries an Esc key hint, Allow
+  // once a Return hint, with a menu of further options beside it. No label is read.
+  const liveCard = (allowDisabled = false) => `<div data-codex-approval-surface="true"><div role="alert" aria-atomic="true">
+    <div><div><svg></svg><span>Gmail</span></div><div><div>ChatGPT erlauben, Gmail zu verwenden?</div>
+    <div>Erstellt einen Entwurf. <button aria-haspopup="dialog">Details anzeigen</button></div></div></div></div>
+    <div><div><button>Ablehnen<span><kbd>Esc</kbd></span></button>
+    <div><button ${allowDisabled ? 'disabled' : ''}><span>Einmal zulassen</span><span><kbd>⏎</kbd></span></button><button aria-haspopup="menu" aria-label="Genehmigungsoptionen"></button></div></div></div></div>`;
+
+  it('reads the card\'s words without its buttons, and whether Allow once can be pressed', () => {
+    const main = dom.window.document.querySelector('main')!;
+    main.innerHTML = liveCard();
+    expect(api.approvalCard()).toMatchObject({ lines: ['Gmail', 'ChatGPT erlauben, Gmail zu verwenden?', 'Erstellt einen Entwurf.'], allow: true });
+    main.innerHTML = liveCard(true);
+    expect(api.approvalCard()?.allow).toBe(false);
+    main.innerHTML = '';
+    expect(api.approvalCard()).toBeNull();
+  });
+
+  it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', () => {
+    const main = dom.window.document.querySelector('main')!;
+    main.innerHTML = liveCard();
+    const clicks: string[] = [];
+    for (const button of main.querySelectorAll('button')) button.addEventListener('click', () => clicks.push(button.textContent!.replace(/\s+/g, ' ').trim() || button.getAttribute('aria-label')!));
+    const found = api.approvalCard()!;
+    expect(api.answerApprovalCard(found.node, 'deny')).toBe('clicked');
+    expect(api.answerApprovalCard(found.node, 'allow')).toBe('clicked');
+    expect(clicks).toEqual(['AblehnenEsc', 'Einmal zulassen⏎']);
+    expect(api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
+    main.innerHTML = liveCard(true);
+    expect(api.answerApprovalCard(api.approvalCard()!.node, 'allow')).toBe('unavailable');
+    // A card that is gone, or another one, is never answered by the old reference.
+    const old = api.approvalCard()!.node;
+    main.innerHTML = liveCard();
+    expect(api.answerApprovalCard(old, 'deny')).toBe('card_changed');
   });
 
   it('ignores an answered card, a hidden one and one on a kept page', () => {

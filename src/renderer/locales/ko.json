@@ -2013,8 +2013,6 @@
   "Copy this chat's ChatGPT link": "이 채팅의 ChatGPT 링크 복사",
   "Link copied": "링크를 복사했습니다",
   "ChatGPT is waiting for your approval": "ChatGPT가 승인을 기다리고 있습니다",
-  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT에서 도구 호출을 허용하거나 거부할 때까지 채팅이 일시 중지됩니다. 클릭하여 여세요.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT가 이 채팅에서 도구 호출을 허용하거나 거부하기를 기다리고 있습니다. 그곳에서 응답할 때까지 아무것도 진행되지 않습니다.",
   "The tool approval ChatGPT asked for in this chat was answered.": "이 채팅에서 ChatGPT가 요청한 도구 승인에 응답했습니다.",
   "What's new": "새로운 기능",
   "Full release notes": "전체 릴리스 노트",
@@ -2364,5 +2362,14 @@
   "Taskbar": "작업 표시줄",
   "Tray": "시스템 트레이",
   "Dock": "Dock",
-  "Menu bar": "메뉴 막대"
+  "Menu bar": "메뉴 막대",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.": "ChatGPT에서 도구 호출을 허용하거나 거부할 때까지 채팅이 일시 중지됩니다. 클릭하면 앱에서 응답할 수 있습니다.",
+  "Deny": "거부",
+  "Allow once": "한 번 허용",
+  "Sending your answer to ChatGPT…": "ChatGPT에 응답을 보내는 중…",
+  "ChatGPT showed a different card by then. Nothing was pressed; answer the new one.": "그사이 ChatGPT가 다른 카드를 표시했습니다. 아무것도 누르지 않았습니다. 새 카드에 응답하세요.",
+  "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT가 더 이상 그 선택지를 제공하지 않았습니다. 아무것도 누르지 않았습니다.",
+  "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "채팅 페이지가 제때 응답을 받지 못했습니다. 아무것도 누르지 않았습니다. 브라우저에서 열어 그곳에서 응답하세요.",
+  "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT가 이 채팅에서는 허용하지 않습니다. 거부만 할 수 있습니다.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT가 이 채팅에서 도구 호출을 허용할지 거부할지 기다리고 있습니다. 여기나 브라우저에서 응답할 때까지 아무것도 진행되지 않습니다."
 }

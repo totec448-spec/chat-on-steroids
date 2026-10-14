@@ -2013,8 +2013,6 @@
   "Copy this chat's ChatGPT link": "このチャットのChatGPTリンクをコピー",
   "Link copied": "リンクをコピーしました",
   "ChatGPT is waiting for your approval": "ChatGPT があなたの承認を待っています",
-  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT でツール呼び出しを許可または拒否するまで、チャットは一時停止しています。クリックして開きます。",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT はこのチャットでツール呼び出しを許可するか拒否するかを待っています。そこで応答するまで何も進みません。",
   "The tool approval ChatGPT asked for in this chat was answered.": "このチャットで ChatGPT が求めたツールの承認に応答しました。",
   "What's new": "新機能",
   "Full release notes": "リリースノート全文",
@@ -2364,5 +2362,14 @@
   "Taskbar": "タスクバー",
   "Tray": "システムトレイ",
   "Dock": "Dock",
-  "Menu bar": "メニューバー"
+  "Menu bar": "メニューバー",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.": "ChatGPT でツール呼び出しを許可または拒否するまで、チャットは一時停止しています。クリックするとアプリで回答できます。",
+  "Deny": "拒否",
+  "Allow once": "今回のみ許可",
+  "Sending your answer to ChatGPT…": "回答を ChatGPT に送信しています…",
+  "ChatGPT showed a different card by then. Nothing was pressed; answer the new one.": "その時点で ChatGPT は別のカードを表示していました。何も押されていません。新しいカードに回答してください。",
+  "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT はその選択肢をもう提示していませんでした。何も押されていません。",
+  "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "チャットのページが時間内に回答を受け取りませんでした。何も押されていません。ブラウザで開いてそこで回答してください。",
+  "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT はこのチャットでそれを許可していません。拒否のみできます。",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT はこのチャットでツール呼び出しを許可するか拒否するかを待っています。ここまたはブラウザで応答するまで何も進みません。"
 }

@@ -12,7 +12,7 @@ export const STOP_NOTICE_TEXTS = [
   'Recovery stopped',
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.",
   'ChatGPT is waiting for your approval',
-  'A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.',
+  'A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.',
   'Goal paused',
   'ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.'
 ] as const;
