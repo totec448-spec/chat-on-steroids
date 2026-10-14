@@ -8701,9 +8701,9 @@ function finishSilentChats(conversationIds: readonly string[], inspected?: Spent
  * The first number is the silence window over again, and deliberately the same one: two minutes
  * with nothing arriving is this app's standing definition of a chat that has stopped, and a
  * conversation the loop is driving does not get a different definition just because what stalled
- * was the pickup rather than the turn. Retries slow to fifteen minutes and retain that
- * cadence while the original bounded obligation remains eligible. A temporary outage
- * longer than five attempts must not silently strand still-owed work.
+ * was the pickup rather than the turn. The next two wait 5 and 10 minutes; after the third
+ * reload the schedule stops for good and the chat shows "Recovery stopped", with the
+ * obligation kept for a manual return (2026-10-06: endless reloads did more harm than good).
  */
 // Asserted non-empty: the opening gap is read unconditionally when a schedule is armed, and a
 // schedule with no first step would be a watchdog that never starts.
