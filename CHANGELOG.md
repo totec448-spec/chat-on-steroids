@@ -26,12 +26,14 @@ Everyday comforts for working in chats: find text in a chat with ⌘F, reach mos
 - **Choose what Enter does.** **Settings → General → Send messages with**: Enter, or ⌘Enter / Ctrl+Enter, so Enter starts a new line.
 - **A notification when a chat finishes** while the app is in the background, with the start of the answer. Workers and chats with Goal or Loop on stay quiet. **Settings → General → Notify when a chat finishes**.
 - **The computer stays awake while a chat works**, so long runs keep going. **Settings → General → Keep awake while a chat works**: the computer (default), the computer and screen for Windows laptops that sleep as soon as the screen turns off, or off.
-- **Archive worker chats.** With **Settings → Agents & automation → Archive worker chats in ChatGPT when they are retired** on, each worker's chat is archived in ChatGPT once the app can no longer use that worker (you cleared the workers, or the main chat closed). Nothing is deleted: you can restore them from ChatGPT's settings, and the app keeps its transcript. Off by default.
+- **Archive worker chats.** With **Settings → Agents & automation → Archive worker chats in ChatGPT when they are retired** on, each worker's chat is archived in ChatGPT once the app can no longer use that worker (you cleared the workers, the main chat closed, or its finished task sat for a week). Nothing is deleted: you can restore them from ChatGPT's settings, and the app keeps its transcript. Off by default.
 - **More room for recordings.** **Settings → Agents & automation → Browser & history → Storage size** goes up to 50 GB, and **Free storage** removes the images and long texts of chats you haven't used for a week, oldest first.
 
 ### 🛠 Fixed
 
 - **Compact & Resume after a broken answer.** When ChatGPT's answer stream broke in a long thinking turn ("Connection interrupted"), the handoff could wait up to 20 minutes at Preparing. It now continues right away.
+- **A message you send while ChatGPT's answer is broken** is now kept and sent after that answer. Before, it was dropped after a minute when the page couldn't take it into the broken answer.
+- **Goal in long chats on the ChatGPT Free plan.** When ChatGPT refuses Goal's helper message as too long, the next one is shorter. Before, Goal waited 3 minutes and failed the same way every round.
 - **Minimizing the built-in browser** now keeps it in the taskbar or Dock, where you can restore it. Before, it disappeared into the tray.
 - **The final answer of a long turn** now shows at the end of the chat. It was filed where it started, sometimes far up among the tool calls, and in long chats it didn't show at all. This also fixes chats recorded before the update.
 - **Links in ChatGPT's answers** now come out as proper links when you copy or export an answer, in search results and in notifications, instead of their label and address run together.
@@ -48,7 +50,7 @@ Everyday comforts for working in chats: find text in a chat with ⌘F, reach mos
 
 To **@mch1902879100-cmyk** for fixing the History browser choice, **@atsu6** for the groundwork of the coming update workflow, and **@abdulsalamgs** for tidying up how workers are admitted.
 
-And to everyone whose reports led to changes in this release: **@lambert-lincoln** (worker chats in the chat list), **@lic-twrightjay** (minimizing the built-in browser) and **@thecravenfoodie-rgb** (own tunnels).
+And to everyone whose reports led to changes in this release: **@lambert-lincoln** (worker chats in the chat list), **@lic-twrightjay** (minimizing the built-in browser, Goal on the Free plan) and **@thecravenfoodie-rgb** (own tunnels).
 
 ## [2.1.36] — Steadier long runs, proxy support and ChatGPT's own words
 
