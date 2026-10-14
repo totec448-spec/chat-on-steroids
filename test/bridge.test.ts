@@ -16161,3 +16161,30 @@ describe('a chat deleted in ChatGPT', () => {
     }
   });
 });
+
+/** Worker chats of ended runs, archived in ChatGPT by the extension when the setting is on (#1460). */
+describe('archiving worker chats', () => {
+  it('hands the extension one leased chat at a time and takes its result', async () => {
+    await pair();
+    const config = await import('../src/main/config.js');
+    const archive = await import('../src/main/worker-archive.js');
+    const before = config.getConfig();
+    await config.saveConfig({ ...before, multiAgent: { ...before.multiAgent, archiveWorkerChats: true } });
+    try {
+      const chat = randomUUID();
+      archive.queueWorkerArchives([chat]);
+      expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId: chat });
+      // Leased: the next browser pass does not get the same chat.
+      expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId: null });
+      expect((await request('POST', '/worker-archive/result', { body: { conversationId: chat, outcome: 'deleted' } })).status).toBe(400);
+      expect((await request('POST', '/worker-archive/result', { body: { conversationId: 'not a chat', outcome: 'archived' } })).status).toBe(400);
+      // No ChatGPT tab: handed out again on the next pass.
+      expect((await request('POST', '/worker-archive/result', { body: { conversationId: chat, outcome: 'deferred' } })).body).toEqual({ ok: true });
+      expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId: chat });
+      expect((await request('POST', '/worker-archive/result', { body: { conversationId: chat, outcome: 'archived' } })).body).toEqual({ ok: true });
+      expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId: null });
+    } finally {
+      await config.saveConfig(before);
+    }
+  });
+});

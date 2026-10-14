@@ -5391,7 +5391,8 @@ export function chatSettingsPatch(current: Config): {
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
       autoWorktrees: $<HTMLInputElement>('autoWorktrees').checked,
-      endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked
+      endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked,
+      archiveWorkerChats: $<HTMLInputElement>('archiveWorkerChats').checked
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -5797,6 +5798,7 @@ const CHAT_INPUTS = [
   'waitForSubAgents',
   'autoWorktrees',
   'endSleepingWorkerProcesses',
+  'archiveWorkerChats',
   'autoContinue',
   'goalProvider',
   'goalBaseUrl',
@@ -5911,6 +5913,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('endSleepingWorkerProcesses'),
     config.multiAgent.endSleepingWorkerProcesses === true,
     previous?.multiAgent.endSleepingWorkerProcesses
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('archiveWorkerChats'),
+    config.multiAgent.archiveWorkerChats === true,
+    previous?.multiAgent.archiveWorkerChats
   );
 
   // The model and reasoning selects are painted by applyChatModels above, which resolves a saved
