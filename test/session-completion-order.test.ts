@@ -171,6 +171,44 @@ describe('completed request ownership', () => {
     else expect(final).toBeNull();
   });
 
+  /**
+   * 2026-10-14, the maintainer's own chat: the ten-minute check closed a long answer as `stalled`
+   * (it sat behind ChatGPT's tool approval card), the reload opened a second document-local turn
+   * for the same question, and ChatGPT's final arrived for the first turn while the second one
+   * completed. The completed second end counted as newer work after that final, so Goal was told
+   * "chat_still_working" for good. A turn that only reopens the same unanswered question after a
+   * stalled end is the same response; a new question, or a second answer after a real end (Regenerate),
+   * is not.
+   */
+  it.each([
+    ['the reopened same question', 'stalled', false, true],
+    ['a new question before the reopen', 'stalled', true, false],
+    ['a second answer after a completed end', 'completed', false, false]
+  ] as const)('a final whose stalled turn was reopened after a reload completes the response: %s', async (_name, firstEnd, newQuestion, complete) => {
+    const began = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(began);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: began, messageId: 'question', text: 'Write the report.' },
+      { kind: 'turn_start', time: began + 1, turnId: turn }
+    ]);
+    clock.mockReturnValue(began + 600_000);
+    await recordChatObservations(chat, [{ kind: 'turn_end', time: Date.now(), turnId: turn, outcome: firstEnd }]);
+    clock.mockReturnValue(began + 1_200_000);
+    if (newQuestion) await recordChatObservations(chat, [{ kind: 'user_message', time: Date.now(), messageId: 'next-question', text: 'And the tests?' }]);
+    await recordChatObservations(chat, [{ kind: 'turn_start', time: Date.now(), turnId: 'reopened-turn' }]);
+    clock.mockReturnValue(began + 1_260_000);
+    await recordChatObservations(chat, [
+      { kind: 'assistant_message', time: Date.now(), turnId: turn, messageId: 'answer',
+        providerMessageId: '11111111-2222-4333-8444-555555555555', text: 'The report is drafted.', final: true, state: 'final' },
+      { kind: 'turn_end', time: Date.now() + 1, turnId: 'reopened-turn', outcome: 'completed' }
+    ]);
+    const final = await readCompletedFinal(opened.sessionId!, chat, turn);
+    if (complete) {
+      expect(final).toMatchObject({ messageId: 'answer', turnId: turn });
+      expect(await readCompletedFinal(opened.sessionId!, chat)).toMatchObject({ messageId: 'answer' });
+    } else expect(final).toBeNull();
+  });
+
   it('still reopens a falsely completed view without native final proof', async () => {
     const { id, began, clock } = await completed(false);
     clock.mockReturnValue(began + 30);
