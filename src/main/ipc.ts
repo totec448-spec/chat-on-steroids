@@ -38,7 +38,7 @@ import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
-import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
+import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
  * IPC surface.
  *
@@ -544,6 +544,7 @@ async function buildState(): Promise<AppState> {
     connectorSchemas: Object.fromEntries(
       pluginRefreshPublications().map(({ surface, schemaId }) => [surface, schemaId])
     ),
+    connectorRefresh: await pluginRefreshStatuses(),
     confirmedConnectorSchemas: confirmedPluginSchemas(),
     pluginRefreshUnreadable: await pluginRefreshUnreadable(),
     recordingStorageFull: recordingStorageFull(),
@@ -1916,6 +1917,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);
   onConnectorProofChange(pushState);
+  onPluginRefreshChange(pushState);
   // A project's native ChatGPT Project changes from the browser; the sidebar and a waiting new chat say so.
   onProjectLinkChange(() => push('session:changed'));
   // A creation armed before the app last quit becomes uncertain on time, not on the browser's next pass.
