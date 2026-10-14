@@ -2349,8 +2349,6 @@
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Bilgisayarın uyku moduna geçmesini engeller, böylece uzun çalışmalar sürer. Bazı Windows dizüstü bilgisayarlar ekran kapanınca yine de uyur; bunlar için Bilgisayar ve ekran seçeneğini seç.",
   "The computer": "Bilgisayar",
   "The computer and screen": "Bilgisayar ve ekran",
-  "Keep the computer awake": "Bilgisayarı uyanık tut",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Bir sohbet çalışırken bilgisayar uyku moduna geçmez, böylece uzun işler devam eder. Ekran yine de kapanabilir.",
   "Find in chat, slash commands, and messages that go where you want.": "Sohbette bul, eğik çizgi komutları ve istediğin yere giden mesajlar.",
   "{0} searches the whole chat, older messages included.": "{0} eski mesajlar dahil tüm sohbette arar.",
   "Slash commands": "Eğik çizgi komutları",
