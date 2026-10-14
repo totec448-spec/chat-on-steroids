@@ -2378,5 +2378,6 @@
   "Add the Chat On Steroids add-on to Firefox": "Chat On Steroids アドオンを Firefox に追加",
   "Get the add-on": "アドオンを入手",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox はアドオンを追加する前に確認します。「追加」を選んでください。",
-  "Mozilla Firefox": "Mozilla Firefox"
+  "Mozilla Firefox": "Mozilla Firefox",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} はインストールされませんでした。現在も {1} です。「インストール」を選んでもう一度お試しください。Windows が許可を求める場合があります。"
 }

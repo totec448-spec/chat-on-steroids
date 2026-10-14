@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +59,7 @@ const {
   markInstallOnQuit,
   releaseVersion,
   resetUpdateForTests,
+  restoreUpdateHandoff,
   setInstallFolderAccessForTests,
   stagedArtifact,
   startUpdateChecks,
@@ -323,6 +324,48 @@ describe('staging the new version', () => {
       await asPlatform('win32', undefined, () => checkForUpdates());
     }
     icacls.result = null;
+  });
+
+  /**
+   * #1490: the installer failed silently and the next start was simply the old version again, with
+   * nothing said. The handover leaves a note; a start that is still older than it says so once.
+   */
+  it('says at the next start when the handed-over version did not install', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    const note = path.join(userData, 'updates', 'handoff.json');
+    expect(JSON.parse(readFileSync(note, 'utf8'))).toMatchObject({ version: NEXT });
+    resetUpdateForTests();
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled).toBe(NEXT);
+    expect(existsSync(note)).toBe(false);
+    // Said once: the next start no longer repeats it.
+    resetUpdateForTests();
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled ?? null).toBeNull();
+  });
+
+  it('forgets the note quietly when the handed-over version is the one running', async () => {
+    const note = path.join(userData, 'updates', 'handoff.json');
+    mkdirSync(path.dirname(note), { recursive: true });
+    writeFileSync(note, JSON.stringify({ version: APP_VERSION, at: Date.now() }));
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled ?? null).toBeNull();
+    expect(existsSync(note)).toBe(false);
+  });
+
+  it('clears the notice once the update is installed again', async () => {
+    const note = path.join(userData, 'updates', 'handoff.json');
+    mkdirSync(path.dirname(note), { recursive: true });
+    writeFileSync(note, JSON.stringify({ version: NEXT, at: Date.now() }));
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled).toBe(NEXT);
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    expect(updateStatus().notInstalled ?? null).toBeNull();
   });
 
   /**

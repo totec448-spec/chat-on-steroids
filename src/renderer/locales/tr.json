@@ -2378,5 +2378,6 @@
   "Add the Chat On Steroids add-on to Firefox": "Chat On Steroids eklentisini Firefox’a ekleyin",
   "Get the add-on": "Eklentiyi al",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox eklentiyi eklemeden önce sorar. “Ekle”yi seçin.",
-  "Mozilla Firefox": "Mozilla Firefox"
+  "Mozilla Firefox": "Mozilla Firefox",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} yüklenmedi; bu hâlâ {1}. Yeniden denemek için Yükle’yi seçin; Windows izin isteyebilir."
 }

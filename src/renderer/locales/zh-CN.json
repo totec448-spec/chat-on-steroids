@@ -2378,5 +2378,6 @@
   "Add the Chat On Steroids add-on to Firefox": "将 Chat On Steroids 附加组件添加到 Firefox",
   "Get the add-on": "获取附加组件",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox 会在添加附加组件前询问。请选择“添加”。",
-  "Mozilla Firefox": "Mozilla Firefox"
+  "Mozilla Firefox": "Mozilla Firefox",
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} 未能安装；当前仍是 {1}。选择“安装”重试；Windows 可能会请求权限。"
 }
