@@ -7,7 +7,17 @@ import { findSessionByConversation } from './session/store.js';
 import { isGitRepository } from './toolchain.js';
 import { allocWorkerWorkspace, validateWorkerWorkspaceLease, WorkerWorktreeError, type WorkerWorktreeLease, type WorkerWorkspace } from './worktrees/index.js';
 
-/** Measure sleeping workers before status or wake, then persist revoked revival authority. */
+/**
+ * Re-measures how full each sleeping worker's chat is before status or a possible wake.
+ *
+ * The context ceiling is what makes a stop final, and it is measured from the app's own
+ * durable session for that conversation rather than from anything a model reported. The
+ * broker keeps the figure in memory and in its snapshot, but a chat that grew while this app
+ * was not running, or one whose snapshot predates the measurement entirely, would otherwise
+ * be woken into a conversation with no room left in it. Reading it again before a wake makes
+ * the ceiling survive a crash rather than a restart quietly handing back a worker the prime
+ * was already told was finished.
+ */
 export async function measureSleepingWorkers(caller: Caller): Promise<void> {
   const state = swarmStateForCaller(caller);
   if (state.agents.length === 0) return;
