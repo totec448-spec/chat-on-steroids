@@ -161,6 +161,14 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateTurnMinutes: 0 } });
     expect((await loadConfig()).ui.rotateTurnMinutes).toBe(0);
   });
+  it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
+    expect(defaultConfig().ui.localAppUsage).toBe(true);
+    const legacy = defaultConfig(); delete legacy.ui.localAppUsage;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.localAppUsage).toBe(true);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, localAppUsage: false } });
+    expect((await loadConfig()).ui.localAppUsage).toBe(false);
+  });
   it('keeps the local control API off for fresh, legacy and malformed configs while preserving explicit opt-in', async () => {
     expect(defaultConfig().controlApi).toEqual({ enabled: false, allowActions: false });
     const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>; delete legacy.controlApi;

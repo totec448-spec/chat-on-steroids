@@ -254,7 +254,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
 | Built-in browser | `src/main/cos-browser/` (`selection.ts` opt-in loading, `index.ts` lifecycle, `host.ts` windows/tabs/extension/sign-in, `tab-model.ts`, `chrome-api.ts`, `extension-worker.ts`, `match-pattern.ts`, `sign-in.ts`, `sign-in-transfer.ts`); `src/preload/cos-browser{,-worker,-sign-in}.ts`; `src/renderer/cos-browser.{html,ts,css}` toolbar and `cos-browser-sign-in.{html,ts,css}` Google sign-in card; `src/shared/cos-browser-sites.ts`. See §13 Built-in browser. |
 | Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
-| Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
+| Models/usage | `src/main/chat-models.ts`, `session/usage.ts`, `provider-usage.ts`, `usage-tool.ts`; `src/shared/{chat-models,usage,provider-usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
 | Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
 | Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
@@ -2002,6 +2002,33 @@ leaving a gap; token-attribution/cache implementation notes are not persistent p
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.
+
+### Other apps on this computer (#482)
+
+**Usage › Other apps on this computer** shows Codex's and Claude Code's usage, read from their own
+logs (`$CODEX_HOME` or `~/.codex/sessions/YYYY/MM/DD/*.jsonl`; `$CLAUDE_CONFIG_DIR` or
+`~/.claude/projects/<project>/*.jsonl` plus `<session>/subagents/*.jsonl`). `ui.localAppUsage`
+(missing means on) gates every read; off, nothing is listed or opened. Two kinds of figure, never
+mixed: **reported** limits (Codex's `token_count` events carry the server's `rate_limits`: per pool
+`limit_id`, a primary and secondary window with `used_percent`, `window_minutes`, `resets_at`, plus
+credits, plan and `rate_limit_reached_type`; the newest reading per pool wins and keeps its own
+`observedAt`) and **counted** tokens (Codex: growth of each session's running
+`total_token_usage`, so a repeated event adds nothing; Claude Code: each assistant message's
+`usage`, once per `message.id` across all files, because a message is written once per content
+block and a resumed session can copy earlier messages; zero-token `<synthetic>` notices are left
+out). Claude Code keeps no plan limits on disk, so they read as not reported. A window whose
+`resets_at` has passed shows "Reset since this reading", never its old percentage.
+
+`src/main/provider-usage.ts` reads only files modified in the last 7 local days, each from the
+offset where the previous read ended (logs are append-only and run to gigabytes); a shorter file
+is read again, and a line is parsed only when it holds the marker (`"token_count"`,
+`"type":"assistant"`). Only numbers are kept, never content. Results are cached for 30 seconds;
+Refresh passes `fresh`. IPC `usage:providers` / preload `getProviderUsage(fresh)` return
+`ProviderUsage` (`src/shared/provider-usage.ts`). The Core tool `usage` (read-only, offered while a
+reading permission is on, like `read`) answers with ChatGPT's reported limits
+(`session/usage.ts` `reportedUsageLimits`), Codex's reported limits and both apps' counted tokens,
+each with its source and age; `src/main/usage-tool.ts` writes that text. Tests:
+`provider-usage-parse`, `provider-usage`, `usage-tool`, `renderer-usage`.
 
 ## 13. Extension, account models and browser preferences
 

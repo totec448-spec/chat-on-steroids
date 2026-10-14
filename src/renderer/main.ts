@@ -9,7 +9,7 @@ import { paintCredentialsNotice } from './credentials-notice.js';
 import { paintPluginRefreshOffer } from './plugin-refresh-offer.js';
 import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js';
 import { updateErrorText } from './update-error.js';
-import { initUsage, refreshUsage } from './usage.js';
+import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initViewMenu } from './view-menu.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
@@ -734,6 +734,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
@@ -1649,6 +1650,9 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
+  // The saved switch, not the click, decides what the main process reads.
+  if (previousState && (previousState.config.ui.localAppUsage !== false) !== (config.ui.localAppUsage !== false)) void refreshOtherApps(true);
   const awakeChoice = (ui: typeof config.ui) => ui.keepAwake === false ? 'off' : ui.keepScreenAwake === true ? 'screen' : 'computer';
   applyValue($<HTMLSelectElement>('keepAwake'), awakeChoice(config.ui), previousState ? awakeChoice(previousState.config.ui) : undefined);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);

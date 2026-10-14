@@ -1157,6 +1157,22 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   }
 
 
+  // ----------------------------------------------------------------- usage
+
+  // #482: read-only, so the person can ask for their usage from the chat. Each figure names its
+  // source and age; Codex and Claude Code are read only while Settings › Usage allows it. Like
+  // `read`, offered only while a reading permission is on.
+  if (exposedCaps.read || exposedCaps.browse || exposedCaps.metadata) reg.register('usage', toolDeclaration('usage', () => ({
+    title: 'Usage and limits',
+    description: 'Only when the user asks about their usage, limits or quota. Read-only: ChatGPT\'s and Codex\'s reported limits, and tokens counted from Codex\'s and Claude Code\'s local logs, each with source and age. Report missing figures as not reported; never estimate.',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  })), async () => guard('usage', async () => {
+    const report = usageReport(reportedUsageLimits(), await readProviderUsage(), Date.now());
+    return { content: [{ type: 'text', text: report.text }], structuredContent: report.structured };
+  }));
+
+
   // ----------------------------------------------------------------- agents
 
   if (reg.agentToolsExposed) registerAgentsTool(reg);
@@ -2445,3 +2461,6 @@ function boundedNumberedRead(
 
 export type { ToolResult };
 import { firstTaskRoot } from '../skill-access.js';
+import { reportedUsageLimits } from '../session/usage.js';
+import { readProviderUsage } from '../provider-usage.js';
+import { usageReport } from '../usage-tool.js';
