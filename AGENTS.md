@@ -3272,6 +3272,24 @@ attached to that worker's real root prime; the worker cannot control descendants
 Spawn acceptance remains atomic when proof arrives during its disk barrier: the unpublished
 family prevents a duplicate but remains hidden from status until accepted.
 
+A trusted local orchestrator can own broker workers through `localOwnerId`, a lowercase UUID
+supplied only by the authenticated local control API. It is a separate Caller/Run/DormantRun
+identity, never a claimed ChatGPT conversation or an unattributed MCP request. The broker's
+existing v7 active/dormant snapshots preserve it; restore refuses mixed local/chat/request
+ownership. MCP arguments cannot set this principal. The active Setup profile is frozen at
+admission, and local control cannot adopt an unrelated ChatGPT prime or another local owner's
+run. No ChatGPT prime conversation is opened. Worker topology, capacity, workspace isolation,
+sleep/reuse, inboxes and browser-command fences remain owned by the existing broker.
+
+`agent-admission.ts` is the shared staged durability/worktree/measurement implementation for
+MCP and local entry points. Browser bootstraps/revivals follow committed admission only.
+The local API rechecks its action grant, worker switch and Setup profile before commit; an unaccepted revision is
+rolled back and superseded durably. Local report reads offer bounded redacted inbox messages;
+explicit acknowledgements retire only previously offered receipt ids the caller consumed.
+Explicit local acknowledgements mark a critical revision and await its durable write before success.
+Status is compact and never acknowledges reports. Report run ids accompany local offers even
+when a family has parked; reactivation still rotates the incarnation and retains bounded aliases.
+
 A fresh family also freezes the Setup profile carried by the exact Core endpoint generation that
 accepted its spawn. That local profile ID survives active/dormant snapshots, restart and family
 reactivation; legacy histories without it remain unclaimed rather than being assigned from a later
@@ -4519,6 +4537,9 @@ return, read through `streamEvents` under the same heavy-read limit, with `id` =
 `Last-Event-ID` resumes after it (and wins over `from`). The recorder's `onSessionChange` says
 when to read again and a 5 s tick covers a missed notice. Everything that can refuse a stream
 does so as JSON before the first byte; the first read runs under the listener's read deadline.
+Each bounded stream page is emitted in ascending sequence order, so stopping between frames
+cannot skip a lower-sequence row that presentation chronology would place later. Paged reads
+keep their presentation order after selecting their bounded sequence window.
 At most `MAX_EVENT_STREAMS` (4) are open; each sends `: stream open` at once and a comment every
 15 s, ends after 30 minutes, on API stop (`closeEventStreams`, before the drain), when more than
 1 MiB waits in its socket, or when the session is gone, always with an `end` frame naming the
@@ -4564,6 +4585,38 @@ already cancelled), `not_sent` only for a terminal row whose Send was never auth
 `unconfirmed` for every other row that may have reached ChatGPT, and `pending` before it is handed
 out. Time, text, turn ids on the row and recorder sequence ranges are never evidence, and an
 unconfirmed row is never resent by this API.
+
+Direct worker control uses protocol 1 and the `/v1/workers/{ownerId}` routes
+advertised by health. `control-workers.ts` accepts a lowercase UUID as `ownerId`.
+It identifies a local caller under the existing filesystem token grant. It grants no
+access to another local owner's family or a ChatGPT prime family. All worker reads and
+mutations require `controlApi.allowActions` and `multiAgent.enabled`.
+The listener still enforces authentication, Origin and Host checks, JSON size limits,
+action serialization and deadlines. Disabling either switch returns 403 before any
+worker read or mutation. Ordinary read routes remain available.
+
+The worker contract is:
+
+| Request | Body or query | Response |
+| --- | --- | --- |
+| GET `/v1/workers/{ownerId}` | Optional `runId` query. | `runId`, `freeWorkerSlots`, `retainedHistory`, and compact `workers` with broker state and exact recorded `sessionId`. No task or result text. |
+| GET `/v1/workers/{ownerId}/reports` | Optional `runId` query. | Bounded redacted `messages` with `id`, `runId`, `from`, `time`, and `text`. Reading status does not consume reports. |
+| POST `/v1/workers/{ownerId}/spawn` | `workers` with `task` and optional `label`. Optional `runId`, `projectId`, and `context`. | 202 with `runId`, admitted `workers`, and `notes`. The saved worker model and effort defaults apply. |
+| POST `/v1/workers/{ownerId}/message` | `messages` with worker `to`, `text`, and optional `label`. Optional `runId`. | 202 with `runId`, `queued` receipt IDs and destinations, and `waking` worker IDs. A wake can return a new run incarnation. |
+| POST `/v1/workers/{ownerId}/ack` | `messageIds` and optional `runId`. | `acknowledged` receipt IDs. Only previously offered reports in an owned family can be acknowledged. Success follows the durable write. |
+
+Tasks, context and message text allow at most 4,000 characters. Labels allow 60.
+A spawn admits at most eight workers. A message call allows sixteen messages.
+An acknowledgement allows 128 IDs. Receipt IDs allow up to 100 ASCII letters,
+digits, underscores or hyphens. Unknown request fields and duplicate or unknown query
+keys are refused. Worker destinations use `worker-N`, with a positive integer of at
+most six digits. `runId` and `projectId` are lowercase UUIDs.
+
+Spawn may select an approved local project. MCP and local callers share
+`agent-admission.ts`. The adapter keeps no separate worker state.
+Callers follow a recorded worker session through the existing event page or stream.
+The stream emits events in ascending `seq` order so a reconnect after its last frame
+cannot skip a later revision that appears earlier in the displayed conversation.
 
 Cancel is narrower than the app's own cancel. It reads the row first and refuses, without asking
 the owner, a `sent` or `tool` row, a claim whose Send was authorized (it may already be in ChatGPT,
