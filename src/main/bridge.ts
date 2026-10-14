@@ -1044,6 +1044,23 @@ function externalExtensionPresent(): boolean {
   return server !== null && externalExtension?.seenAt != null && Date.now() - externalExtension.seenAt < BROWSER_PRESENT_MS;
 }
 
+/**
+ * Whether the external browser on record should stay the one Setup shows, over this request's.
+ *
+ * With Chrome and Firefox both connected, Setup showed whichever polled last rather than the
+ * browser chosen for ChatGPT (VM, 2026-10-14). The chosen kind keeps the record while it is
+ * present: Firefox's add-on says `gecko`, Chromium's copies say nothing, and Chrome, Edge and
+ * Brave cannot be told apart, so between those the last one still wins.
+ */
+function keepsExternalRecord(req: http.IncomingMessage): boolean {
+  const browserId = browserOf(req) ?? undefined;
+  if (!externalExtension || !externalExtensionPresent() || externalExtension.browserId === browserId) return false;
+  const chosen = getConfig().ui.chatBrowser;
+  if (chosen === 'cos') return false;
+  const fits = (gecko: boolean) => (chosen === 'firefox') === gecko;
+  return fits(externalExtension.engine === 'gecko') && !fits(req.headers['x-extension-engine'] === 'gecko');
+}
+
 function noteExternalExtension(req: http.IncomingMessage): boolean {
   if (req.headers['x-extension-host'] === 'cos') {
     const appeared = !cosExtensionPresent();
@@ -1054,6 +1071,8 @@ function noteExternalExtension(req: http.IncomingMessage): boolean {
   const header = req.headers['x-extension-version'];
   const version = typeof header === 'string' ? header.slice(0, 32) : null;
   const browserId = browserOf(req) ?? undefined;
+  // Lasting evidence still counts for every browser; only the live record is kept for the choice.
+  if (keepsExternalRecord(req)) return browserId !== undefined && version !== null && noteExternalInstalled(browserId, version);
   const sameBrowser = browserId !== undefined && externalExtension?.browserId === browserId && externalExtensionPresent();
   const appeared = !sameBrowser || externalExtension?.version !== version;
   // Firefox runs a signed add-on it updates itself (x-extension-engine: gecko); Chromium sends none.
@@ -1229,7 +1248,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     if (extensionBuildSeenAt.size > 16) extensionBuildSeenAt.delete(extensionBuildSeenAt.keys().next().value!);
   }
   if (typeof version !== 'string') return warnProtocol(protocol);
-  const externalChanged = req.headers['x-extension-host'] === 'browser' && externalExtension?.version !== version.slice(0, 32);
+  const externalChanged = req.headers['x-extension-host'] === 'browser' && externalExtension?.version !== version.slice(0, 32) && !keepsExternalRecord(req);
   if (externalChanged) externalExtension = { version: version.slice(0, 32), seenAt: null };
   extensionVersion = version.slice(0, 32);
   const key = `${extensionVersion}\u0000${stamp ?? ''}`;
