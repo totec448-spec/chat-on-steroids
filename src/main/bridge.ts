@@ -642,6 +642,10 @@ function extensionBuildOf(req: http.IncomingMessage): string | null {
  * exactly as before.
  */
 function staleCompanion(req: http.IncomingMessage): boolean {
+  // Firefox updates its signed add-on itself, up to a day after the app, while a Chromium copy
+  // updates within minutes. Where ChatGPT runs in Firefox, refusing its add-on meanwhile would
+  // leave every new chat unclaimed (measured 2026-10-14), so the chosen Firefox keeps working.
+  if (req.headers['x-extension-engine'] === 'gecko' && getConfig().ui.chatBrowser === 'firefox') return false;
   const stamp = extensionBuildOf(req);
   const shipped = shippedExtensionBuild();
   if (!stamp || !shipped || stamp === shipped) return false;

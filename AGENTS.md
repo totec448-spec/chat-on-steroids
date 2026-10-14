@@ -2030,8 +2030,10 @@ Firefox (`chatBrowser: 'firefox'`) runs the Mozilla-signed add-on that each rele
 Firefox gets the URL alone, without Chromium's switches. Its add-on sends
 `x-extension-engine: gecko`; the bridge projects that as `externalExtension.engine`. Firefox updates
 the add-on itself through its update manifest, so the extension never asks `/extension/update` or
-reloads there and reports the hold `browser-updates-itself` instead. The CoS browser's Google
-sign-in handoff offers only Chrome, Edge and Brave.
+reloads there and reports the hold `browser-updates-itself` instead. While Firefox is the ChatGPT
+browser, its add-on is never refused work as an out-of-date companion: Firefox may update it up to a
+day after the app, while a Chromium copy on the shipped build would otherwise win every claim. The
+CoS browser's Google sign-in handoff offers only Chrome, Edge and Brave.
 
 ### Built-in browser
 
