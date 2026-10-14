@@ -2378,5 +2378,7 @@
   "Add the Chat On Steroids add-on to Firefox": "將 Chat On Steroids 附加元件加入 Firefox",
   "Get the add-on": "取得附加元件",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox 會在加入附加元件前詢問。請選擇「新增」。",
-  "Mozilla Firefox": "Mozilla Firefox"
+  "Mozilla Firefox": "Mozilla Firefox",
+  "The extension may not open ChatGPT": "擴充功能無法開啟 ChatGPT",
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} 阻止擴充功能存取 chatgpt.com。請在擴充功能詳細資料中允許存取 chatgpt.com（Chrome、Edge 和 Brave 為「網站存取權」，Firefox 為「權限」），然後重新載入 ChatGPT。"
 }
