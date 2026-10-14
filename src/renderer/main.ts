@@ -719,6 +719,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       backgroundPlacement: $<HTMLSelectElement>('backgroundPlacement').value === 'group' ? 'group' : 'window',
+      followUp: $<HTMLSelectElement>('followUp').value === 'queue' ? 'queue' : 'steer',
+      enterSends: $<HTMLSelectElement>('enterSends').value !== 'modifier',
       browserBridgePort: (selectedBridgePort === 'auto' ? 'auto' : Number(selectedBridgePort)) as BrowserBridgePort,
       autoContinue: $<HTMLInputElement>('autoContinue').checked,
       browserOnly: $<HTMLInputElement>('browserOnly').checked,
@@ -726,6 +728,9 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoSelectSkills: $<HTMLInputElement>('autoSelectSkills').checked,
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
+      turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
+      keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
@@ -1611,6 +1616,8 @@ function apply(next: AppState): void {
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
+  applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
+  applyValue($<HTMLSelectElement>('enterSends'), config.ui.enterSends === false ? 'modifier' : 'enter', previousState ? (previousState.config.ui.enterSends === false ? 'modifier' : 'enter') : undefined);
   const bridgePortControl = $<HTMLSelectElement>('browserBridgePort');
   applyValue(bridgePortControl, String(config.ui.browserBridgePort ?? 'auto'), String(previousState?.config.ui.browserBridgePort ?? 'auto'));
   bridgePortControl.disabled = next.bridge.portOverridden === true;
@@ -1624,6 +1631,9 @@ function apply(next: AppState): void {
   $('startAtLoginRow').hidden = next.loginStartupAvailable !== true;
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
+  applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  const awakeChoice = (ui: typeof config.ui) => ui.keepAwake === false ? 'off' : ui.keepScreenAwake === true ? 'screen' : 'computer';
+  applyValue($<HTMLSelectElement>('keepAwake'), awakeChoice(config.ui), previousState ? awakeChoice(previousState.config.ui) : undefined);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
@@ -2601,10 +2611,14 @@ $('removeApiKey').addEventListener('click', async () => {
 for (const id of [
   'autoConnect',
   'startAtLogin',
+  'keepAwake',
   'minimizeToTray',
   'developerMode',
   'playfulStatus',
   'followOutput',
+  'followUp',
+  'enterSends',
+  'turnNotifications',
   'mentionCore',
   'controlApiEnabled',
   'controlApiAllowActions',

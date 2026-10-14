@@ -89,7 +89,8 @@ export async function readSessionEvents(
   if (options.from === undefined) {
     // Navigation uses immutable origins. `from` alone is a publication cursor
     // for live revisions and must never decide which history page owns a row.
-    const events = await readRecentEvents(id, cap, { before: options.before, after: options.after, kinds: options.kinds, orderByOrigin: true });
+    // A long turn's final answer is paged beside the turn's end, where it is drawn (`residenceOf`).
+    const events = await readRecentEvents(id, cap, { before: options.before, after: options.after, kinds: options.kinds, byResidence: true });
     const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
     return { summary, events, total: summary.events, nextFrom };
   }
