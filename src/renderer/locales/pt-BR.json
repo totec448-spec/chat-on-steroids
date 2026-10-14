@@ -2304,8 +2304,6 @@
   "Send now": "Enviar agora",
   "Send into the running turn now": "Enviar agora para o turno em andamento",
   "The turn ended before this message could join it. It stays queued.": "O turno terminou antes que esta mensagem pudesse entrar nele. Ela continua na fila.",
-  "Keep the computer awake": "Manter o computador ativo",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Enquanto um chat trabalha, o computador não entra em repouso, então tarefas longas continuam. A tela ainda pode desligar.",
   "Messages during a running turn": "Mensagens durante um turno em andamento",
   "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "O que uma mensagem enviada enquanto o ChatGPT trabalha faz por padrão. ⌘⇧Enter (Ctrl+Shift+Enter no Windows e Linux) a envia do outro jeito.",
   "Join the running turn": "Entrar no turno em andamento",
@@ -2346,5 +2344,9 @@
   "Archive worker chats in ChatGPT when they are retired": "Arquivar no ChatGPT os chats de workers encerrados",
   "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Quando um worker não puder mais ser usado (você limpou os workers ou o chat principal foi fechado), o chat dele é arquivado no ChatGPT e sai da sua lista de chats. Você pode restaurá-lo nas configurações do ChatGPT; este app mantém a transcrição. Nada é excluído.",
   "Goal paused": "Goal pausado",
-  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "O ChatGPT deu a mesma resposta três vezes seguidas, então o Goal parou de perguntar. Abra o chat para continuar."
+  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "O ChatGPT deu a mesma resposta três vezes seguidas, então o Goal parou de perguntar. Abra o chat para continuar.",
+  "Keep awake while a chat works": "Manter ativo enquanto um chat trabalha",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Impede que o computador entre em suspensão, para que execuções longas continuem. Alguns notebooks com Windows suspendem mesmo assim quando a tela apaga; para eles, escolha O computador e a tela.",
+  "The computer": "O computador",
+  "The computer and screen": "O computador e a tela"
 }
