@@ -1,0 +1,125 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { SftpClient, SftpError } from './sftp.js';
+
+/**
+ * The SSH side of SSH projects (#1469): the person's own `ssh` program makes every connection,
+ * so their `~/.ssh/config` (aliases, users, ports, ProxyJump), agent, keys and known hosts all
+ * apply, and nothing is installed on the server. Login is by key or agent only: `BatchMode`
+ * makes ssh fail instead of asking for a password or a new host key the app could not answer.
+ */
+
+export interface RemoteFolder {
+  /** As the person typed it: an ssh config alias or `user@host`; never starts with "-". */
+  host: string;
+  port?: number;
+  /** Absolute (`/srv/app`) or home-relative (`~/app`) folder on the server. */
+  path: string;
+}
+
+/** An alias, a hostname or IPv4, optionally `user@`; IPv6 only in brackets. */
+const HOST = /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9_][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])$/;
+
+export function parseRemote(address: string, folder: string): RemoteFolder {
+  let host = address.trim().replace(/^ssh:\/\//i, '');
+  let port: number | undefined;
+  const withPort = /^(.*):(\d+)$/.exec(host);
+  if (withPort && (!host.includes('[') || host.includes(']:'))) {
+    port = Number(withPort[2]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('The port must be between 1 and 65535.');
+    host = withPort[1]!;
+  }
+  if (!HOST.test(host)) throw new Error('Enter an SSH address such as dev, me@server or me@server:2222.');
+  host = host.replace(/^\[(.*)\]$/, '$1').replace(/@\[(.*)\]$/, '@$1');
+  const trimmed = folder.trim().replace(/(.)\/+$/, '$1');
+  // eslint-disable-next-line no-control-regex
+  if (!/^(?:\/|~(?:\/|$))/.test(trimmed) || /[\x00-\x1f]/.test(trimmed) || trimmed.split('/').includes('..')) {
+    throw new Error('Enter the folder on the server as an absolute path, such as /srv/app or ~/app.');
+  }
+  return port ? { host, port, path: trimmed } : { host, path: trimmed };
+}
+
+/** Arguments for `ssh`: options, then `--`, the host and the remote part. */
+export function sshArgs(remote: RemoteFolder, options: string[], rest: string[]): string[] {
+  return [
+    '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+    ...(remote.port ? ['-p', String(remote.port)] : []), ...options, '--', remote.host, ...rest
+  ];
+}
+
+export const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+
+/** A folder for `cd`: a leading `~` stays unquoted so the server's shell expands it. */
+const quoteFolder = (folder: string): string =>
+  folder === '~' ? '~' : folder.startsWith('~/') ? `~/${shellQuote(folder.slice(2))}` : shellQuote(folder);
+
+/** The command line the server runs: in the project folder, through the person's login shell. */
+export function remoteCommand(folder: string, command: string): string {
+  return `cd -- ${quoteFolder(folder)} && exec "\${SHELL:-/bin/sh}" -lc ${shellQuote(command)}`;
+}
+
+/** What ssh's own error output means for the person, in one sentence. */
+export function sshFailure(stderr: string): string {
+  const text = stderr.trim();
+  if (/Permission denied/i.test(text)) return 'The server did not accept your SSH key. Add the key to your SSH agent or ~/.ssh/config so `ssh <address>` works without a password.';
+  if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(text)) return 'This server is not trusted yet. Run `ssh <address>` once in a terminal and confirm its host key.';
+  if (/Could not resolve hostname/i.test(text)) return 'The server was not found. Check the address or its Host entry in ~/.ssh/config.';
+  if (/Connection refused/i.test(text)) return 'The server refused the connection. Check that SSH runs on it and the port is right.';
+  if (/timed out/i.test(text)) return 'The server did not answer in time.';
+  if (/subsystem request failed/i.test(text)) return 'The server does not offer SFTP, which SSH projects need for files.';
+  return text.split('\n').filter(Boolean).at(-1)?.slice(0, 300) || 'SSH could not connect.';
+}
+
+/** The system's own OpenSSH client. */
+export function sshProgram(): string {
+  if (process.platform === 'win32') {
+    const builtin = path.join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
+    if (existsSync(builtin)) return builtin;
+  }
+  return 'ssh';
+}
+
+export interface SshOptions { ssh?: string }
+
+/** One SFTP session over `ssh -s <host> sftp`; ssh's error output explains a failed start. */
+export async function openSftp(remote: RemoteFolder, options: SshOptions = {}): Promise<SftpClient> {
+  const child = spawn(options.ssh ?? sshProgram(), sshArgs(remote, ['-s'], ['sftp']), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 8192) stderr += chunk.toString('utf8'); });
+  const exited = new Promise<never>((_resolve, reject) => {
+    child.once('error', error => reject(new SftpError('ENOENT', `SSH is not available on this computer (${error.message})`)));
+    child.once('exit', () => reject(new SftpError('ECONNREFUSED', sshFailure(stderr))));
+  });
+  exited.catch(() => undefined);
+  try {
+    const client = await Promise.race([SftpClient.start(child.stdout, child.stdin, { handshakeMs: 30_000 }), exited]);
+    child.once('exit', () => client.close());
+    return client;
+  } catch (error) {
+    child.kill();
+    // A start that failed because ssh exited says why; the handshake's own error does not.
+    if (error instanceof SftpError && error.code !== 'ECONNREFUSED' && stderr.trim()) throw new SftpError('ECONNREFUSED', sshFailure(stderr));
+    throw error;
+  }
+}
+
+const sessions = new Map<string, Promise<SftpClient>>();
+const sessionKey = (remote: RemoteFolder) => `${remote.host}\u0000${remote.port ?? ''}`;
+
+/** The shared SFTP session for this address, opened on first use and again after it closed. */
+export function sftpFor(remote: RemoteFolder, options: SshOptions = {}): Promise<SftpClient> {
+  const key = sessionKey(remote);
+  const known = sessions.get(key);
+  if (known) return known.then(client => client.closed ? (sessions.delete(key), sftpFor(remote, options)) : client);
+  const opening = openSftp(remote, options);
+  sessions.set(key, opening);
+  opening.catch(() => { if (sessions.get(key) === opening) sessions.delete(key); });
+  return opening;
+}
+
+/** Closes every SFTP session (quit, tests). */
+export function closeRemoteSessions(): void {
+  for (const session of sessions.values()) session.then(client => client.close(), () => undefined);
+  sessions.clear();
+}
