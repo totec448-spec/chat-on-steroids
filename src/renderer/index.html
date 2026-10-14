@@ -573,6 +573,7 @@
                         <button type="button" role="radio" data-external-browser="chrome" aria-checked="true"><img src="./browser-icons/chrome.svg" alt="" /><span translate="no">Chrome</span></button>
                         <button type="button" role="radio" data-external-browser="edge" aria-checked="false" tabindex="-1"><img src="./browser-icons/edge.svg" alt="" /><span translate="no">Edge</span></button>
                         <button type="button" role="radio" data-external-browser="brave" aria-checked="false" tabindex="-1"><img src="./browser-icons/brave.svg" alt="" /><span translate="no">Brave</span></button>
+                        <button type="button" role="radio" data-external-browser="firefox" aria-checked="false" tabindex="-1"><img src="./browser-icons/firefox.svg" alt="" /><span translate="no">Firefox</span></button>
                       </div>
                       </div>
                     <h3 id="browserExtensionTitle" tabindex="-1">Connect your browser</h3>
@@ -580,11 +581,13 @@
                   <section id="browserExtensionStage" class="browser-stage" aria-labelledby="browserExtensionTitle">
                     <div class="browser-stage-copy">
                       <ol class="browser-install-steps">
-                        <li><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
+                        <li data-install-engine="gecko" hidden><div><b id="extensionStepAddon">Add the Chat On Steroids add-on to Firefox</b><button type="button" class="btn btn-solid" id="openFirefoxAddon"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i><span>Get the add-on</span></button>
+                          <p>Firefox asks before it adds the add-on. Choose Add.</p></div></li>
+                        <li data-install-engine="chromium"><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
                           <p id="extensionStepOpenHint">Click the address to copy it, then paste it into the address bar and press Enter.</p></div></li>
-                        <li><div><b id="extensionStepDev">Turn on Developer mode</b><p id="extensionStepDevWhere" hidden></p>
+                        <li data-install-engine="chromium"><div><b id="extensionStepDev">Turn on Developer mode</b><p id="extensionStepDevWhere" hidden></p>
                           <figure class="ext-figure" id="extensionPictureDev"></figure></div></li>
-                        <li><div><b id="extensionStepLoad">Click Load unpacked and choose the extension folder</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
+                        <li data-install-engine="chromium"><div><b id="extensionStepLoad">Click Load unpacked and choose the extension folder</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
                           <figure class="ext-figure" id="extensionPictureLoad"></figure></div></li>
                         <li><div><b id="extensionStepChatGpt">Open ChatGPT in your browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
                       </ol>
@@ -1091,7 +1094,7 @@
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="firefox">Mozilla Firefox</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
                   <label class="setting" id="cosBrowserMinimizeRow" hidden><span class="setting-text"><b>Minimize the built-in browser to</b><em>Where its window goes when you minimize it. Its chats go on either way.</em></span><select id="cosBrowserMinimize"><option value="taskbar" id="cosBrowserMinimizeTaskbar">Taskbar</option><option value="tray" id="cosBrowserMinimizeTray">Tray</option></select></label>
                   <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the browser extension from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>

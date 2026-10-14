@@ -1,4 +1,5 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -1285,9 +1286,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   // Installation does not change the saved execution browser or load the CoS host.
   handle('browser:setupOpen', async (payload) => {
-    const { browser, page } = z.object({ browser: z.enum(['chrome', 'edge', 'brave']), page: z.enum(['extensions', 'chatgpt']) }).strict().parse(payload);
+    const { browser, page } = z.object({ browser: z.enum(['chrome', 'edge', 'brave', 'firefox']), page: z.enum(['extensions', 'chatgpt']) }).strict().parse(payload);
     if (page === 'chatgpt') {
       await openInPreferredBrowser('https://chatgpt.com/', { browser, reveal: true });
+      return true;
+    }
+    // Firefox installs the signed add-on from its release download; it asks before adding it.
+    if (browser === 'firefox') {
+      await openInPreferredBrowser(firefoxAddonUrl(APP_VERSION), { browser, reveal: true });
       return true;
     }
     // A browser opens its own internal pages only from its address bar: given on the command line,
