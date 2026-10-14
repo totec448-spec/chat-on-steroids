@@ -242,15 +242,27 @@ function showConfigure(plugin: PluginView): void {
   const source = field(body, () => t("Server configuration (JSON)"), JSON.stringify(plugin.source), false, () => t("Keep credentials in the secure fields, not in command arguments or URLs."));
   const extraConfig = field(body, () => t("Additional configuration (JSON object)"), '{}', false, () => t("Non-secret settings and environment variables only."));
   const extraKey = field(body, () => t("Additional credential name (optional)"), '', false, () => t("Environment variable for local servers; header name for remote servers.")); const extraValue = field(body, () => t("Additional credential value"), '', true);
-  body.append(button(() => t("Save and reconnect"), async () => {
+  const longestCall = field(body, () => t("Longest call (seconds)"), String(plugin.longestCallSeconds ?? 120), false, () => t("1–1800 seconds per call; default 120. Changing only this limit does not restart the plugin."));
+  longestCall.type = 'number'; longestCall.min = '1'; longestCall.max = '1800'; longestCall.step = '1';
+  body.append(button(() => t("Save"), async () => {
+    const longestCallSeconds = Number(longestCall.value);
+    if (!longestCall.value.trim() || !Number.isInteger(longestCallSeconds) || longestCallSeconds < 1 || longestCallSeconds > 1800) {
+      longestCall.focus(); throw new Error(t("Enter a whole number from 1 to 1800 seconds."));
+    }
     const credentials = Object.fromEntries([...secrets].filter(([, input]) => input.value).map(([key, input]) => [key, input.value]));
     if (extraKey.value.trim() && extraValue.value) credentials[extraKey.value.trim()] = extraValue.value;
     const additions: unknown = JSON.parse(extraConfig.value);
     if (!additions || typeof additions !== 'object' || Array.isArray(additions) || !Object.values(additions).every((value) => typeof value === 'string')) throw new Error(t("Additional configuration must be an object of string values."));
     const configuredSource = JSON.parse(source.value) as PluginSource;
-    if (await mutate(window.api.pluginsConfigure(plugin.id, { name: name.value,
-      ...(JSON.stringify(configuredSource) !== JSON.stringify(plugin.source) ? { source: configuredSource } : {}),
-      config: { ...Object.fromEntries([...config].map(([key, input]) => [key, input.value])), ...additions as Record<string,string> }, credentials }))) box.close();
+    const configuredValues = { ...Object.fromEntries([...config].map(([key, input]) => [key, input.value])), ...additions as Record<string,string> };
+    const sourceChanged = JSON.stringify(configuredSource) !== JSON.stringify(plugin.source);
+    const otherChanges = name.value !== plugin.name || sourceChanged || Object.keys(credentials).length > 0 ||
+      Object.entries(configuredValues).some(([key, value]) => value !== (plugin.config[key] ?? '') ||
+        (Object.hasOwn(additions, key) && !Object.hasOwn(plugin.config, key)));
+    const limitOnly = longestCallSeconds !== (plugin.longestCallSeconds ?? 120) && !otherChanges;
+    if (await mutate(window.api.pluginsConfigure(plugin.id, limitOnly ? { longestCallSeconds } : { name: name.value,
+      ...(sourceChanged ? { source: configuredSource } : {}),
+      config: configuredValues, credentials, longestCallSeconds }), !limitOnly)) box.close();
   }, true));
 }
 function showCatalog(): void {
