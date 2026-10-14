@@ -805,7 +805,8 @@ Load command 11
     const env = JSON.stringify(steps.map(step => step.env ?? {}));
     expect(script).toContain('node scripts/write-extension-stamp.mjs');
     expect(script).toContain('node scripts/stage-firefox-extension.mjs');
-    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint/);
+    // Self-hosted: the add-on names its own update_url, which the default (AMO-listed) lint refuses.
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint --source-dir \S+ --self-hosted/);
     expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
     expect(script).toContain('node scripts/firefox-update-manifest.mjs');
     expect(env).toContain('${{ secrets.AMO_JWT_ISSUER }}');
@@ -830,6 +831,7 @@ Load command 11
     const steps = check.jobs.sign.steps as Array<Record<string, any>>;
     const script = steps.map(step => String(step.run ?? '')).join('\n');
     expect(script).toContain('node scripts/stage-firefox-extension.mjs');
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint --source-dir \S+ --self-hosted/);
     expect(script).toMatch(/\$\{pkg\}\.\$\(\(\s*GITHUB_RUN_NUMBER \+ 1000\s*\)\)/);
     expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
     expect(script).not.toMatch(/--api-(key|secret)/);
