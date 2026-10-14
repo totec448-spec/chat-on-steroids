@@ -19,7 +19,8 @@ type InputIntent = {
 /** A native upload may wait for a browser boundary while retaining immediate intent.
  * Admission and presentation must classify that same durable row identically. */
 export function manualInput(row: InputIntent): boolean {
-  return (row.requestedMode ?? row.mode) === 'auto' && !row.finishOwner && row.purpose !== 'decision' && row.attachmentDelivery !== 'tool';
+  return (row.requestedMode ?? row.mode) === 'auto' && !row.finishOwner && row.purpose !== 'decision' && row.purpose !== 'rotation' &&
+    row.attachmentDelivery !== 'tool';
 }
 export function queuedFollowup(row: InputIntent): boolean {
   return !row.opening && !manualInput(row) &&
