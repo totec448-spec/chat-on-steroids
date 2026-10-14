@@ -13572,6 +13572,9 @@ describe('content-script localization', () => {
     live.hook.toggleMenu();
 
     const control = live.document.querySelector('.clf-compact-btn') as HTMLElement;
+    // The gear is built from DOM nodes, not innerHTML (Mozilla review): still a full SVG with its two shapes.
+    expect(control.querySelector('svg circle')?.getAttribute('r')).toBe('3.1');
+    expect(control.querySelector('svg path')?.getAttribute('d')?.startsWith('M19.4 15a1.65')).toBe(true);
     const menu = live.document.querySelector('.clf-menu') as HTMLElement;
     expect(control.getAttribute('aria-label')).toBe('Chat On Steroids ayarları');
     expect(menu.getAttribute('aria-label')).toBe('Chat On Steroids ayarları');

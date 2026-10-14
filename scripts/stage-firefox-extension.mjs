@@ -18,6 +18,8 @@ const defaultOutput = path.join(releaseRoot, 'firefox-extension');
 export function firefoxManifest(source) {
   const manifest = structuredClone(source);
   delete manifest.minimum_chrome_version;
+  // Firefox has no DevTools protocol for extensions; Browser control and focus emulation say so at runtime.
+  manifest.permissions = manifest.permissions.filter(permission => permission !== 'debugger');
   manifest.background = { scripts: ['background.js'], type: 'module' };
   manifest.content_security_policy = { extension_pages: "script-src 'self'; object-src 'self'" };
   manifest.browser_specific_settings = {
