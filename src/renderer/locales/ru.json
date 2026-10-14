@@ -2349,8 +2349,6 @@
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Не даёт компьютеру уйти в сон, чтобы долгие запуски продолжались. Некоторые ноутбуки с Windows всё равно засыпают, когда гаснет экран; для них выберите «Компьютер и экран».",
   "The computer": "Компьютер",
   "The computer and screen": "Компьютер и экран",
-  "Keep the computer awake": "Не давать компьютеру уснуть",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Пока чат работает, компьютер не переходит в сон, и долгие задачи продолжаются. Экран при этом может выключаться.",
   "Find in chat, slash commands, and messages that go where you want.": "Поиск в чате, слэш-команды и сообщения, которые идут куда нужно.",
   "{0} searches the whole chat, older messages included.": "{0} ищет по всему чату, включая старые сообщения.",
   "Slash commands": "Слэш-команды",

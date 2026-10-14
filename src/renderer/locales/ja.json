@@ -2349,8 +2349,6 @@
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "コンピューターがスリープしないようにして、長い実行を続けます。一部の Windows ノート PC は画面が消えるとスリープします。その場合は「コンピューターと画面」を選んでください。",
   "The computer": "コンピューター",
   "The computer and screen": "コンピューターと画面",
-  "Keep the computer awake": "コンピューターをスリープさせない",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "チャットが作業している間はコンピューターがスリープしないので、長い作業が止まりません。画面はオフになることがあります。",
   "Find in chat, slash commands, and messages that go where you want.": "チャット内検索、スラッシュコマンド、思いどおりに届くメッセージ。",
   "{0} searches the whole chat, older messages included.": "{0} で、古いメッセージも含めてチャット全体を検索します。",
   "Slash commands": "スラッシュコマンド",

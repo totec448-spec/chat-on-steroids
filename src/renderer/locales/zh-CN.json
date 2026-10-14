@@ -2349,8 +2349,6 @@
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "阻止电脑进入睡眠，让长时间运行继续。部分 Windows 笔记本在屏幕关闭后仍会睡眠；对于这类电脑，请选择“电脑和屏幕”。",
   "The computer": "电脑",
   "The computer and screen": "电脑和屏幕",
-  "Keep the computer awake": "保持电脑唤醒",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "聊天工作时电脑不会进入睡眠，长时间任务得以继续。屏幕仍可能关闭。",
   "Find in chat, slash commands, and messages that go where you want.": "在聊天中查找、斜杠命令，以及去向由你决定的消息。",
   "{0} searches the whole chat, older messages included.": "{0} 可搜索整个聊天，包括较早的消息。",
   "Slash commands": "斜杠命令",

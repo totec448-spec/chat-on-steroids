@@ -2349,8 +2349,6 @@
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Impede que o computador entre em suspensão, para que execuções longas continuem. Alguns portáteis com Windows suspendem mesmo assim quando o ecrã se desliga; para esses, escolha O computador e o ecrã.",
   "The computer": "O computador",
   "The computer and screen": "O computador e o ecrã",
-  "Keep the computer awake": "Manter o computador ativo",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Enquanto um chat trabalha, o computador não entra em suspensão, para que as tarefas longas continuem. O ecrã pode na mesma desligar-se.",
   "Find in chat, slash commands, and messages that go where you want.": "Procurar no chat, comandos de barra e mensagens que vão para onde quer.",
   "{0} searches the whole chat, older messages included.": "{0} procura no chat inteiro, incluindo as mensagens mais antigas.",
   "Slash commands": "Comandos de barra",

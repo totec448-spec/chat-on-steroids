@@ -2349,8 +2349,6 @@
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Ngăn máy tính chuyển sang chế độ ngủ để các lần chạy dài tiếp tục. Một số laptop Windows vẫn ngủ khi màn hình tắt; với những máy đó, hãy chọn Máy tính và màn hình.",
   "The computer": "Máy tính",
   "The computer and screen": "Máy tính và màn hình",
-  "Keep the computer awake": "Giữ máy tính không ngủ",
-  "While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.": "Khi một cuộc trò chuyện đang làm việc, máy tính không chuyển sang chế độ ngủ để các tác vụ dài tiếp tục chạy. Màn hình vẫn có thể tắt.",
   "Find in chat, slash commands, and messages that go where you want.": "Tìm trong cuộc trò chuyện, lệnh gạch chéo và tin nhắn đi đúng nơi bạn muốn.",
   "{0} searches the whole chat, older messages included.": "{0} tìm trong toàn bộ cuộc trò chuyện, kể cả tin nhắn cũ.",
   "Slash commands": "Lệnh gạch chéo",
