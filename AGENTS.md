@@ -2593,6 +2593,8 @@ preserves open details across repaint and invalidates revised calls.
 
 ## 14. Bridge, durable browser commands and recovery
 
+Overview of every recovery path (trigger, clock, budget, owner, interactions): `docs/recovery-inventory.md`. Keep it in step when a path, clock or budget changes.
+
 ### Shared Continue, Goal and Loop recovery (2026-09-17)
 
 One decision boundary chooses the next automatic work: an unfinished response uses frozen
