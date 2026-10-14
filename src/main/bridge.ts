@@ -1,4 +1,5 @@
 import { nextWorkerArchive, settleWorkerArchive } from './worker-archive.js';
+import { considerTurnRotation, type RotationDeps } from './turn-rotation.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -19,7 +20,7 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
-import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, type InputActivity } from './session/input.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { tunnelRouteSettling } from './tunnel/route-settle.js';
@@ -9300,6 +9301,25 @@ function retireSpentRepairs(): void {
  * out is kept until exactly this line runs, so that a reload which did not help is not repeated
  * — see `retireSpentRepairs`. This call is the proof that it did help.
  */
+/** When each running turn started, read once per turn from its own `turn_start`. */
+const turnStarts = new Map<string, number>();
+const turnRotationDeps: RotationDeps = {
+  now: () => Date.now(),
+  minutes: () => getConfig().ui.rotateTurnMinutes ?? 30,
+  turnStartedAt: async (sessionId, turnId) => {
+    const key = `${sessionId}\u0000${turnId}`;
+    const known = turnStarts.get(key);
+    if (known !== undefined) return known;
+    const [start] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start'] });
+    if (start?.turnId !== turnId) return null;
+    turnStarts.set(key, start.time);
+    if (turnStarts.size > 500) turnStarts.delete(turnStarts.keys().next().value!);
+    return start.time;
+  },
+  file: (sessionId, turnId) => fileRotationInput(sessionId, turnId),
+  log: message => logInfo(message)
+};
+
 function noteCallAttribution(
   conversationId: string | null,
   sessionId: string,
@@ -9378,6 +9398,14 @@ function noteCallAttribution(
       goalPendingReplyFor(conversationId)?.silenceSourceTurnId ?? filedSession?.finishTurn?.turnId ?? null;
     grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
       { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
+    // #1402: a long turn continues in a fresh one, right after this tool result. Pro thinks long on
+    // purpose; a worker's or helper's turn end is its report, and Goal/Loop decide on turn ends.
+    if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
+        filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
+        !isWorkerConversation(conversationId) && !goalArmedFor(conversationId)) {
+      void considerTurnRotation(conversationId, sessionId, sourceTurnId, turnRotationDeps)
+        .catch(error => logWarn(`turn rotation: ${String(error)}`));
+    }
     // Exact calls are visible work even without a page. They cannot turn that
     // display into a worker wake, browser repair or continuation after departure.
     if (filedSession?.browserRecoveryDismissedAt !== undefined || filedSession?.endedAt !== null) return;
