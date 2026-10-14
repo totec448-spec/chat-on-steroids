@@ -40,9 +40,11 @@ describe('Firefox companion packaging groundwork', () => {
     expect(manifest.background).toEqual({ scripts: ['background.js'], type: 'module' });
     expect(manifest.content_security_policy).toEqual({ extension_pages: "script-src 'self'; object-src 'self'" });
     expect(manifest.browser_specific_settings).toEqual({
+      // The id is permanent once Mozilla signs it; updates come from the latest release.
       gecko: {
-        id: 'chat-on-steroids-companion@local',
-        strict_min_version: '128.0',
+        id: 'companion@chatonsteroids.app',
+        strict_min_version: '140.0',
+        update_url: 'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/firefox-updates.json',
         data_collection_permissions: { required: ['personalCommunications', 'websiteContent'] }
       }
     });
