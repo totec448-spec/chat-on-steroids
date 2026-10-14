@@ -354,6 +354,7 @@ let livenessFloor = 0;
 let spawnRequest: ((workers: WorkerSpawn[]) => void) | null = null;
 const listeners = new Set<() => void>();
 const endListeners = new Set<(reason: string, retired: RetiredChat[], runId: string) => void>();
+const retireListeners = new Set<(conversationIds: readonly string[]) => void>();
 let persist: (() => void) | null = null;
 let persistNow: ((snapshot: SwarmSnapshot | null) => Promise<void>) | null = null;
 let criticalMutationRevision = 0;
@@ -598,6 +599,23 @@ export async function persistAgentAuthorityNow(): Promise<boolean> {
 export function onSwarmEnd(listener: (reason: string, retired: RetiredChat[], runId: string) => void): () => void {
   endListeners.add(listener);
   return () => endListeners.delete(listener);
+}
+
+/**
+ * Worker chats that just became retired: the broker will never wake or message them again.
+ *
+ * Covers both ways a worker retires: its run ends (cleared, or the prime closed with nothing left
+ * to come back to) and Clear workers retiring parked histories. A parked run is not retirement;
+ * its prime can still wake those workers. Used to archive them in ChatGPT (#1460).
+ */
+export function onWorkerChatsRetired(listener: (conversationIds: readonly string[]) => void): () => void {
+  retireListeners.add(listener);
+  return () => retireListeners.delete(listener);
+}
+
+function announceRetired(conversationIds: readonly string[]): void {
+  if (conversationIds.length === 0) return;
+  for (const listener of retireListeners) listener(conversationIds);
 }
 
 /** A worker chat whose run ended and whose conversation must not immediately become an ordinary chat. */
@@ -1552,6 +1570,7 @@ function endRun(run: Run, reason: string): void {
   for (const worker of retired) consecutiveWakeFailures.delete(worker.conversationId);
   logInfo(`multi-agent: ended run ${what} — ${reason}`);
   for (const listener of endListeners) listener(reason, retired, run.runId);
+  announceRetired(retired.map((worker) => worker.conversationId));
 }
 
 /**
@@ -4748,6 +4767,7 @@ export function resetSwarm(): void {
   consecutiveWakeFailures.clear();
   const retiredAt = Date.now();
   let retiredDormant = false;
+  const dormantChats: string[] = [];
   for (const dormant of dormantRuns.values()) {
     retireManagedWorktreeCleanupOffers(dormant.agents.values(), 'cleared');
     for (const agent of dormant.agents.values()) {
@@ -4759,11 +4779,13 @@ export function resetSwarm(): void {
         reason,
         retiredAt
       });
+      dormantChats.push(agent.info.conversationId);
       retiredDormant = true;
     }
   }
   dormantRuns.clear();
   if (retiredDormant) retiredPersist?.();
+  announceRetired(dormantChats);
   changed();
 }
 
@@ -5536,4 +5558,5 @@ export function resetAgentsForTests(): void {
   retiredPersistNow = null;
   listeners.clear();
   endListeners.clear();
+  retireListeners.clear();
 }

@@ -5449,9 +5449,34 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
   });
 }
 
+/**
+ * Archives one retired worker chat the app has queued (#1460), from any ChatGPT page of this
+ * extension: the archive is an account-level request, so it needs no tab of that chat. At most
+ * one per pass. Without such a page the app hears `deferred`, which costs no attempt.
+ */
+async function drainWorkerArchive() {
+  await load();
+  const next = await call('/worker-archive/next', { method: 'POST', body: '{}' });
+  const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+  if (!conversationId) return;
+  let outcome = 'deferred';
+  for (const tab of await chrome.tabs.query({ url: ['https://chatgpt.com/*'] })) {
+    const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
+    if (!documentId) continue;
+    let reply;
+    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId }, { documentId }); }
+    catch { continue; } // that document is gone; another page may still do it
+    outcome = reply?.outcome === 'archived' ? 'archived' : 'failed';
+    break;
+  }
+  await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });
+}
+
 if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addListener === 'function') {
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (!alarm || alarm.name !== RETRY_ALARM) return;
+    // Independent of the command passes below: a failure in either never holds up the other.
+    void drainWorkerArchive().catch(() => undefined);
     void drainCommandAcks()
       .then(() => drain())
       .then(() => drainCloses())

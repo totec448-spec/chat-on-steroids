@@ -10,6 +10,7 @@ import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme,
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
+import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives } from './worker-archive.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import {
@@ -36,7 +37,8 @@ import { executableFingerprint, initKeychainNotice } from './keychain-notice.js'
 import { pluginManager } from './plugins/manager.js';
 import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, initSessionStore, listSessions, setRecordingStorageLimit } from './session/store.js';
+import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { createTurnNotifier } from './turn-notifications.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -56,6 +58,7 @@ import {
   bindConversation,
   onRetiredWorkersPersist,
   onRetiredWorkersPersistNow,
+  onWorkerChatsRetired,
   onSwarmPersist,
   onSwarmPersistNow,
   pauseSwarmForDisable,
@@ -80,6 +83,7 @@ import {
   GOAL_OBJECTIVES_STATE,
   GOAL_REPLIES_STATE,
   GOAL_SWITCHES_STATE,
+  goalSwitchEnabledFor,
   restoreGoalObjectives,
   restoreGoalReplies,
   restoreGoalSwitches,
@@ -263,6 +267,8 @@ function createWindow(): void {
   }
 }
 
+/** When a Session-finish or stuck notice last went out per chat, so a turn-done notice does not repeat it. */
+const chatNoticeAt = new Map<string, number>();
 function showWindow(): void {
   // Defense in depth for every current or future native activation source. The explicit gate
   // below additionally protects the long pre-window startup interval, while this invariant makes
@@ -279,6 +285,7 @@ function showWindow(): void {
 
 setFinishNotifier((title, body, sessionId, turnId) => {
   if (window?.isFocused() || !Notification.isSupported()) return false;
+  chatNoticeAt.set(sessionId, Date.now());
   const write = (): void => {
     showWindow();
     if (!window) return;
@@ -302,6 +309,7 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   // A person looking at the app already has the timeline note this accompanies; interrupting
   // them with the same sentence is noise, exactly as the finish notice treats a focused window.
   if (window?.isFocused() || !Notification.isSupported()) return false;
+  chatNoticeAt.set(sessionId, Date.now());
   const notice = new Notification({ title, body });
   notice.on('click', () => {
     if (opens === 'browser') {
@@ -407,6 +415,7 @@ void app.whenReady().then(async () => {
   });
   initConfigPath(userData);
   initConnectorProofPath(userData);
+  initWorkerArchivePath(userData);
   initBrowserProofPath(userData);
   initSecretsPath(userData);
   initKeychainNotice(userData, {
@@ -434,6 +443,9 @@ void app.whenReady().then(async () => {
   await loadConfig();
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
+  await loadWorkerArchive();
+  // Worker chats the broker retired for good are archived in ChatGPT when the setting is on (#1460).
+  onWorkerChatsRetired((conversationIds) => queueWorkerArchives(conversationIds));
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
   for (const surface of await enrolledPluginSurfaces()) notePluginInstalled(surface);
@@ -448,6 +460,31 @@ void app.whenReady().then(async () => {
   onSessionChange(() => void keepAwake.refresh());
   setInterval(() => void keepAwake.refresh(), 60_000).unref();
   void keepAwake.refresh();
+  // Codex's turn-completion notifications: a finished answer in a background window.
+  const turnNotifier = createTurnNotifier({
+    getSession,
+    lastAnswer: async id => {
+      const [answer] = await readRecentEvents(id, 1, { kinds: ['assistant_message'] });
+      return answer?.kind === 'assistant_message' ? answer.message.text : null;
+    },
+    enabled: () => getConfig().ui.turnNotifications !== false && Notification.isSupported(),
+    focused: () => window?.isFocused() === true,
+    automated: conversationId => goalSwitchEnabledFor(conversationId),
+    recentlyNotified: id => Date.now() - (chatNoticeAt.get(id) ?? 0) < 120_000,
+    show: (title, body, sessionId) => {
+      const notice = new Notification({ title, body });
+      notice.on('click', () => {
+        showWindow();
+        if (!window) return;
+        const target = window.webContents;
+        const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
+        if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+      });
+      notice.show();
+    }
+  });
+  turnNotifier.seed(await listSessions().catch(() => []));
+  onSessionChange(change => void turnNotifier.handle(change.sessionIds ?? []));
   // The app's own requests follow the system proxy too, not only the tunnel (#1255).
   configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
     ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),

@@ -20,7 +20,7 @@ vi.mock('../src/renderer/file-code-editor.js', () => ({
     return { destroy: () => view.remove(), language: 'TypeScript' };
   }
 }));
-import { positionOf, projectTimeline } from '../src/shared/chronology.js';
+import { positionOf, projectTimeline, residenceOf } from '../src/shared/chronology.js';
 
 /**
  * The session timeline as the user reads it while a chat is running.
@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -196,7 +196,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
       ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
@@ -298,10 +298,13 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       },
       getSession: (_id: string, options?: { from?: number; before?: number; after?: number; limit?: number }) => {
         const from = options?.from ?? 0;
+        // Pages as the store does: by residence (a turn's final answer beside its end). The CI
+        // fail-first run executes this file against code without residenceOf; position is its fallback there.
+        const residence = residenceOf ?? positionOf;
         const eligible = live.events.filter((event) => event.seq >= from &&
-          (options?.before === undefined || positionOf(event) < options.before) &&
-          (options?.after === undefined || positionOf(event) > options.after))
-          .sort((a, b) => options?.from !== undefined ? a.seq - b.seq : positionOf(a) - positionOf(b));
+          (options?.before === undefined || residence(event) < options.before) &&
+          (options?.after === undefined || residence(event) > options.after))
+          .sort((a, b) => options?.from !== undefined ? a.seq - b.seq : residence(a) - residence(b));
         const limit = options?.limit ?? 30;
         const page = options?.after !== undefined || options?.from !== undefined
           ? eligible.slice(0, limit) : eligible.slice(-limit);
@@ -5438,6 +5441,31 @@ it("never hangs the running turn's clock under an older question read further up
   expect(w.document.querySelector('#timeline .turn-status')).toBeNull();
 });
 
+// A long turn's answer was opened early and filled only at the end. The live update carrying the
+// finished answer was skipped as "an old revision owned by an older page", so the chat seemed to
+// stop at its last work heading with no summary.
+it("shows a long turn's final answer when it arrives live, at the end of the turn", async () => {
+  const TURN = 'g-long-0-1';
+  // Like the store, every row of the turn names its turn's start (`turnOrigin`).
+  const opened: SessionEvent = { seq: 2, time: T0 + 2000, source: 'extension', kind: 'assistant_message', messageId: 'answer', turnId: TURN, turnOrigin: 1, final: false, message: text('Restoring the fleet first.') };
+  const work = Array.from({ length: 120 }, (_, i) => ({ ...toolCall(3 + i, `call-${i}`), turnId: TURN, turnOrigin: 1 }) as SessionEvent);
+  const { w, live, append } = await boot([{ seq: 1, time: T0 + 1000, source: 'extension', kind: 'turn_start', turnId: TURN }, opened, ...work]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.textContent).not.toContain('Restoring the fleet first.');
+  // The store rewrites the same message: same origin, new sequence, final text.
+  live.events.splice(live.events.indexOf(opened), 1);
+  await append([
+    { seq: 123, origin: 2, contentSeq: 123, time: T0 + 2000, source: 'extension', kind: 'assistant_message', messageId: 'answer', turnId: TURN, turnOrigin: 1, final: true,
+      message: text('Restoring the fleet first. Done: 53 devices are back.') } as SessionEvent,
+    { seq: 124, time: T0 + 124_000, source: 'extension', kind: 'turn_end', turnId: TURN, turnOrigin: 1, outcome: 'completed' } as SessionEvent
+  ]);
+  expect(timeline.textContent).toContain('Done: 53 devices are back.');
+  const rows = [...timeline.querySelectorAll('[data-timeline-key]')];
+  const answerRow = rows.findIndex(row => row.textContent?.includes('Done: 53 devices are back.'));
+  const lastWork = rows.map((row, index) => row.matches('.tool-group, [data-timeline-key^="event:"][class*="tool"]') ? index : -1).reduce((a, b) => Math.max(a, b), -1);
+  expect(answerRow).toBeGreaterThan(lastWork);
+});
+
 // Like Codex's Steer: a message waiting for the end of the turn can be sent into it now.
 it('offers Send now on a queued message while the running turn can take it', async () => {
   const { w, live, append } = await boot([]);
@@ -5476,6 +5504,46 @@ it('says so when a queued message can no longer join the running turn', async ()
   expect(w.document.body.textContent).toContain('The turn ended before this message could join it. It stays queued.');
 });
 
+// Codex's Find in chat: ⌘F (Ctrl+F) searches the open chat's whole recording, newest match first.
+it('finds in the open chat with Cmd/Ctrl+F, steps through matches and closes with Escape', async () => {
+  const rows: SessionEvent[] = [
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'user_message', messageId: 'q1', message: text('Check the Windows installer') },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'assistant_message', messageId: 'a1', final: true, message: text('The windows installer builds.') },
+    { seq: 3, time: T0 + 3000, source: 'extension', kind: 'user_message', messageId: 'q2', message: text('Now the docs') }
+  ];
+  const { w } = await boot(rows);
+  const api = (w as any).api;
+  const find = vi.fn(async () => ({ ok: true, data: [
+    { seq: 1, kind: 'user_message', messageId: 'q1', position: 1 },
+    { seq: 2, kind: 'assistant_message', messageId: 'a1', position: 2 }
+  ] }));
+  api.findInChat = find;
+  const bar = w.document.getElementById('chatFind')!;
+  expect(bar.hidden).toBe(true);
+  // The app reads the platform as isMac() does: ⌘F there, Ctrl+F elsewhere; both keys at once is neither.
+  const mac = /^Mac/.test(globalThis.navigator.platform);
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+  expect(bar.hidden).toBe(true);
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'f', ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
+  expect(bar.hidden).toBe(false);
+  const field = w.document.getElementById('chatFindField') as HTMLInputElement;
+  expect(w.document.activeElement).toBe(field);
+  field.value = 'windows installer';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
+  expect(find).toHaveBeenCalledWith(summary(rows).id, 'windows installer');
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('1 of 2'));
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
+  find.mockResolvedValueOnce({ ok: true, data: [] });
+  field.value = 'linux';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('No matches'));
+  field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(bar.hidden).toBe(true);
+});
+
 // Codex's "Follow-up behavior": messages typed while a turn runs join it, or wait for its end.
 // Cmd/Ctrl+Shift+Enter sends the other way.
 async function sendDuringTurn(followUp: 'steer' | 'queue' | undefined, keys: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {}) {
@@ -5507,4 +5575,103 @@ it.each([
   [{ metaKey: true }, 'queue', 'auto'], [{ ctrlKey: true }, 'queue', 'auto']
 ] as const)('sends the other way with %o + Shift + Enter (default %s)', async (modifier, followUp, mode) => {
   expect((await sendDuringTurn(followUp, { ...modifier, shiftKey: true })).sent.mode).toBe(mode);
+});
+
+// Codex's slash commands, each opening what the app already has.
+async function slash(command: string, selectExisting = true) {
+  const app = await boot([], selectExisting);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = `/${command}`; input.setSelectionRange(input.value.length, input.value.length);
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  await settle();
+  const row = app.w.document.querySelector<HTMLElement>(`#skillPicker .slash-menu-option[title="/${command}"]`);
+  return { ...app, input, row };
+}
+
+it('lists the Codex slash commands in the composer menu', async () => {
+  const { w, input } = await slash('');
+  const listed = [...w.document.querySelectorAll<HTMLElement>('#skillPicker .slash-menu-option')].map(row => row.title);
+  expect(listed).toEqual(expect.arrayContaining(['/plan', '/goal', '/loop', '/compact', '/model', '/reasoning', '/new', '/rename', '/pin',
+    '/status', '/review', '/init', '/usage', '/plugins', '/pet', '/feedback']));
+  expect(input.value).toBe('/');
+});
+
+it('opens the model picker with /model (/reasoning opens the same picker)', async () => {
+  for (const command of ['model', 'reasoning']) {
+    const { w, row } = await slash(command);
+    row!.click(); await settle();
+    expect((w.document.getElementById('modelMenu') as HTMLDetailsElement).open).toBe(true);
+    break;
+  }
+});
+
+it('renames the open chat with /rename', async () => {
+  const { w, row, input } = await slash('rename');
+  row!.click(); await settle();
+  expect(w.document.querySelector('#sessionList .sess-rename')).not.toBeNull();
+  expect(input.value).toBe('');
+});
+
+it('pins the open chat with /pin', async () => {
+  const { w, row } = await slash('pin');
+  row!.click(); await settle();
+  expect(w.document.body.textContent).toContain('Chat pinned');
+});
+
+it('shows the context status with /status', async () => {
+  const { w, row } = await slash('status');
+  row!.click(); await settle();
+  expect(w.document.getElementById('contextMeterButton')!.getAttribute('aria-expanded')).toBe('true');
+});
+
+it('starts a review request with /review and keeps what was typed after it', async () => {
+  const app = await boot([]);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/review'; input.setSelectionRange(7, 7); input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  await settle();
+  app.w.document.querySelector<HTMLElement>('#skillPicker .slash-menu-option[title="/review"]')!.click(); await settle();
+  expect(input.value).toMatch(/^Review the uncommitted changes in this project/);
+});
+
+it('opens New chat, Usage, Plugins, Pets and the diagnostics report from their commands', async () => {
+  const { w, row } = await slash('usage');
+  row!.click(); await settle();
+  expect(w.document.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('settings');
+  expect(w.document.querySelector('[data-tab="usage"]')!.classList.contains('is-sel') || w.document.querySelector('[data-tab="usage"]')!.getAttribute('aria-selected') === 'true').toBe(true);
+});
+
+it('offers chat-only commands only while a chat is open', async () => {
+  const { w } = await slash('', false);
+  const listed = [...w.document.querySelectorAll<HTMLElement>('#skillPicker .slash-menu-option')].map(row => row.title);
+  expect(listed).toEqual(expect.arrayContaining(['/new', '/model', '/review']));
+  expect(listed).not.toEqual(expect.arrayContaining(['/rename']));
+  expect(listed).not.toContain('/pin');
+  expect(listed).not.toContain('/status');
+});
+
+// Codex's "Enter key behavior": Enter sends, or Cmd/Ctrl+Enter sends and Enter adds a line.
+async function pressInComposer(enterSends: boolean | undefined, keys: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }) {
+  const app = await boot([], true, [], [], enterSends === undefined ? {} : { enterSends });
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Run the tests';
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  const event = new app.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...keys });
+  input.dispatchEvent(event);
+  await settle(300);
+  return { sent: app.live.sent.length, prevented: event.defaultPrevented };
+}
+
+it('sends with Enter by default', async () => {
+  expect(await pressInComposer(undefined, {})).toEqual({ sent: 1, prevented: true });
+});
+it('keeps Shift+Enter as a new line', async () => {
+  expect(await pressInComposer(undefined, { shiftKey: true })).toEqual({ sent: 0, prevented: false });
+});
+it('adds a line with Enter when Cmd/Ctrl+Enter is chosen to send', async () => {
+  expect(await pressInComposer(false, {})).toEqual({ sent: 0, prevented: false });
+});
+it.each([{ metaKey: true }, { ctrlKey: true }])('sends with %o + Enter when that is chosen', async modifier => {
+  expect(await pressInComposer(false, modifier)).toEqual({ sent: 1, prevented: true });
 });

@@ -28,7 +28,8 @@ describe('portable browser-backed feature parity', () => {
         recoverAgentTabs: false,
         waitForSubAgents: false,
         autoWorktrees: false,
-        endSleepingWorkerProcesses: false
+        endSleepingWorkerProcesses: false,
+        archiveWorkerChats: false
       });
       expect(browserExtensionRequired(config)).toBe(true);
     }

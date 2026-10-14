@@ -188,7 +188,9 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   autoWorktrees: false,
   // Off: ending an OS process is a real side effect even though the worker identity survives.
   // The user must opt in before sleeping-worker runtime maintenance can terminate anything.
-  endSleepingWorkerProcesses: false
+  endSleepingWorkerProcesses: false,
+  // Off: archiving changes the user's ChatGPT chat list, so it is opt-in (#1460).
+  archiveWorkerChats: false
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -348,6 +350,7 @@ const configSchema = z.object({
     backgroundChats: z.boolean().optional().default(true),
     backgroundPlacement: z.enum(['window', 'group']).optional().default('window').catch('window'),
     followUp: z.enum(['steer', 'queue']).optional().default('steer').catch('steer'),
+    enterSends: z.boolean().optional().default(true),
     browserBridgePort: browserBridgePortSchema.optional().default('auto'),
     browserOnly: z.boolean().optional().default(false),
     autoRefreshPlugins: z.boolean().optional().default(false),
@@ -357,6 +360,7 @@ const configSchema = z.object({
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
+    turnNotifications: z.boolean().optional().default(true),
     keepAwake: z.boolean().optional().default(true),
     privacyScreenshots: z.boolean().optional().default(false),
     // Dark is the design the app is drawn for, and a config written before the theme
@@ -425,7 +429,8 @@ const configSchema = z.object({
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
       waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false),
       autoWorktrees: z.boolean().optional().default(DEFAULT_MULTI_AGENT.autoWorktrees ?? false),
-      endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false)
+      endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false),
+      archiveWorkerChats: z.boolean().optional().default(DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false)
     })
     .optional()
     .default({
@@ -437,7 +442,8 @@ const configSchema = z.object({
       recoverAgentTabs: DEFAULT_MULTI_AGENT.recoverAgentTabs,
       waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false,
       autoWorktrees: DEFAULT_MULTI_AGENT.autoWorktrees ?? false,
-      endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false
+      endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false,
+      archiveWorkerChats: DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false
     }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
@@ -570,7 +576,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, turnNotifications: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },
