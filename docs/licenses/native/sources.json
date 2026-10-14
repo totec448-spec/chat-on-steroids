@@ -338,7 +338,10 @@
         "win32"
       ],
       "file": "pixman-b02fe6d0.tar.gz",
-      "bytes": 827198
+      "bytes": 827198,
+      "mirrors": [
+        "https://deb.debian.org/debian/pool/main/p/pixman/pixman_0.46.4.orig.tar.gz"
+      ]
     },
     {
       "id": "cairo",
@@ -352,7 +355,10 @@
         "win32"
       ],
       "file": "cairo-ec33bc42.tar.xz",
-      "bytes": 32578804
+      "bytes": 32578804,
+      "mirrors": [
+        "https://deb.debian.org/debian/pool/main/c/cairo/cairo_1.18.4.orig.tar.xz"
+      ]
     },
     {
       "id": "fribidi",
