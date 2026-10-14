@@ -2349,5 +2349,11 @@
   "The computer": "電腦",
   "The computer and screen": "電腦和螢幕",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "當某個 worker 無法再使用時（你清除了子代理、主聊天已關閉，或其已完成的任務閒置了一週），它的聊天會在 ChatGPT 中封存，並從你的聊天清單中移除。你可以在 ChatGPT 的設定中還原；本應用程式會保留其記錄。不會刪除任何內容。",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "已保留到目前回答結束後傳送：ChatGPT 無法將其加入回答。"
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "已保留到目前回答結束後傳送：ChatGPT 無法將其加入回答。",
+  "Minimize the built-in browser to": "內建瀏覽器最小化到",
+  "Where its window goes when you minimize it. Its chats go on either way.": "最小化時視窗的去處。無論哪種，聊天都會繼續。",
+  "Taskbar": "工作列",
+  "Tray": "系統匣",
+  "Dock": "Dock",
+  "Menu bar": "選單列"
 }

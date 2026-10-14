@@ -2349,5 +2349,11 @@
   "The computer": "コンピューター",
   "The computer and screen": "コンピューターと画面",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "ワーカーが再び使えなくなると（ワーカーを消去した、メインのチャットが閉じられた、または終わったタスクが 1 週間そのままだった）、そのチャットは ChatGPT でアーカイブされ、チャット一覧から消えます。ChatGPT の設定から復元できます。このアプリは記録を保持します。何も削除されません。",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "実行中の回答の後に送るため保留しました: ChatGPT が回答に取り込めませんでした。"
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "実行中の回答の後に送るため保留しました: ChatGPT が回答に取り込めませんでした。",
+  "Minimize the built-in browser to": "内蔵ブラウザの最小化先",
+  "Where its window goes when you minimize it. Its chats go on either way.": "最小化したときのウィンドウの行き先です。どちらでもチャットは続きます。",
+  "Taskbar": "タスクバー",
+  "Tray": "システムトレイ",
+  "Dock": "Dock",
+  "Menu bar": "メニューバー"
 }

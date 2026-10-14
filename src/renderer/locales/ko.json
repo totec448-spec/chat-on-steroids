@@ -2349,5 +2349,11 @@
   "The computer": "컴퓨터",
   "The computer and screen": "컴퓨터와 화면",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "워커를 더 이상 사용할 수 없게 되면(워커를 지웠거나, 메인 채팅이 닫혔거나, 끝난 작업이 일주일 동안 그대로였던 경우) 그 채팅이 ChatGPT에서 보관되어 채팅 목록에서 사라집니다. ChatGPT 설정에서 복원할 수 있으며, 이 앱은 기록을 유지합니다. 아무것도 삭제되지 않습니다.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "진행 중인 답변 이후로 보류됨: ChatGPT가 답변에 포함하지 못했습니다."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "진행 중인 답변 이후로 보류됨: ChatGPT가 답변에 포함하지 못했습니다.",
+  "Minimize the built-in browser to": "내장 브라우저 최소화 위치",
+  "Where its window goes when you minimize it. Its chats go on either way.": "창을 최소화했을 때 어디로 갈지 정합니다. 어느 쪽이든 채팅은 계속됩니다.",
+  "Taskbar": "작업 표시줄",
+  "Tray": "시스템 트레이",
+  "Dock": "Dock",
+  "Menu bar": "메뉴 막대"
 }

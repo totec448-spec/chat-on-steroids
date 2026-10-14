@@ -19,7 +19,8 @@ export const cosBrowser = new CosBrowser({
   preloadDir: path.join(out, 'preload'),
   rendererDir: path.join(out, 'renderer'),
   rendererUrl: () => process.env.ELECTRON_RENDERER_URL ?? null,
-  onUserHide: showTrayHint
+  onUserHide: showTrayHint,
+  minimizeTo: () => getConfig().ui.cosBrowserMinimize === 'tray' ? 'tray' : 'taskbar'
 });
 
 /**

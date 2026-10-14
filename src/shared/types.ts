@@ -191,6 +191,8 @@ export interface UiPrefs {
   privacyScreenshots: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
+  /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */
+  cosBrowserMinimize?: 'taskbar' | 'tray';
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
   appearance?: import('./appearance.js').AppearanceSettings;

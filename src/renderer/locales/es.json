@@ -2349,5 +2349,11 @@
   "The computer": "El ordenador",
   "The computer and screen": "El ordenador y la pantalla",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Cuando un worker ya no puede volver a usarse (borraste los subagentes, se cerró el chat principal o su tarea terminada quedó una semana sin uso), su chat se archiva en ChatGPT y sale de tu lista de chats. Puedes restaurarlo desde la configuración de ChatGPT; esta app conserva su transcripción. No se elimina nada.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Guardado para después de la respuesta en curso: ChatGPT no pudo incluirlo en la respuesta."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Guardado para después de la respuesta en curso: ChatGPT no pudo incluirlo en la respuesta.",
+  "Minimize the built-in browser to": "Minimizar el navegador integrado en",
+  "Where its window goes when you minimize it. Its chats go on either way.": "Adónde va su ventana al minimizarla. Sus chats continúan en cualquier caso.",
+  "Taskbar": "Barra de tareas",
+  "Tray": "Bandeja del sistema",
+  "Dock": "Dock",
+  "Menu bar": "Barra de menús"
 }
