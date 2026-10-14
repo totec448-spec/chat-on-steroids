@@ -44,7 +44,7 @@
 
 import { requestBrowserDecision, authorizeBrowserHelperRetry } from './session/input.js';
 import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
-import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
+import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
 import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
@@ -55,6 +55,8 @@ import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
+import { goalHelperPromptLimit, noteGoalHelperUnanswered, resetGoalHelperSizeForTests } from './goal-helper-size.js';
+export { GOAL_HELPER_SIZE_STATE, restoreGoalHelperSize } from './goal-helper-size.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
@@ -1533,6 +1535,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
+  resetGoalHelperSizeForTests();
   invalidateGoalControlWrites(pendingGoalObjectives);
   invalidateGoalControlWrites(pendingGoalSwitches);
   pendingGoalObjectives.clear();
@@ -1734,7 +1737,8 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     const reference = request.messages.map(message => ({ ...message }));
     let omitted = false;
     const incomplete = replacement + ' Some older reference rows or text were omitted to fit the browser; absence is not completion.';
-    while (render(reference, omitted ? incomplete : replacement).length > MAX_CHATGPT_MESSAGE_CHARS) {
+    const limit = goalHelperPromptLimit();
+    while (render(reference, omitted ? incomplete : replacement).length > limit) {
       const firstUser = reference.findIndex(message => message.role === 'user');
       const last = reference.length - 1;
       const newestResult = reference.findLastIndex(message => message.role === 'assistant');
@@ -1753,10 +1757,13 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     const direction = omitted ? incomplete : replacement;
     // Each decision owns one Temporary Chat and the complete bounded reference.
     // Historical helper identities remain fenced, but never receive new requests.
-    const decision = normalizeGoalDecision(await requestBrowserDecision(render(reference, direction), request.signal, {
+    const prompt = render(reference, direction);
+    const decision = normalizeGoalDecision(await requestBrowserDecision(prompt, request.signal, {
       sourceSessionId: request.sourceSessionId, conversationId: null,
       lifetime: 'temporary-planner',
       publish: request.publish,
+      // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
+      onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
       ...goalHelperSelection()
     }), false);
     request.signal.throwIfAborted();
@@ -1932,7 +1939,7 @@ async function run(draft: GoalDraft): Promise<void> {
 
   const abort = new AbortController();
   draft.abort = abort;
-  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
   try {
     const decision = draft.backend === 'templates' ? templateGoalDecision(messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
       backend: draft.backend,

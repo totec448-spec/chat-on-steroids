@@ -676,6 +676,27 @@ describe('durable user input ownership', () => {
     expect(durable).not.toContain('PRIVATE');
     expect(durable).toContain('temporary-planner');
   });
+  // #1471: on a Free plan ChatGPT took the helper prompt and showed "message too long" instead of
+  // answering. Goal can only learn the size from a prompt that was sent and never answered.
+  it('tells the caller when a helper prompt ChatGPT took is abandoned unanswered, and only then', async () => {
+    configureInputDelivery({ applyAutomation: automate, changed, wakeDecision: vi.fn(async () => undefined) });
+    const sent = new AbortController(), sentUnanswered = vi.fn();
+    const answer = requestBrowserDecision('TAKEN BUT UNANSWERED', sent.signal, { lifetime: 'temporary-planner', onSentUnanswered: sentUnanswered });
+    await vi.waitFor(async () => expect(await pendingBrowserInputs()).toHaveLength(1));
+    const row = (await listInputs()).find(entry => entry.text === 'TAKEN BUT UNANSWERED')!;
+    await claimBrowserInput(row.id, 'temporary-page', null);
+    expect(await acknowledgeBrowserInput(row.id, 'temporary-page', null)).toBe(true);
+    sent.abort();
+    await expect(answer).rejects.toThrow();
+    expect(sentUnanswered).toHaveBeenCalledTimes(1);
+
+    const unsent = new AbortController(), unsentUnanswered = vi.fn();
+    const never = requestBrowserDecision('NEVER SENT', unsent.signal, { lifetime: 'temporary-planner', onSentUnanswered: unsentUnanswered });
+    await vi.waitFor(async () => expect((await listInputs()).some(entry => entry.text === 'NEVER SENT')).toBe(true));
+    unsent.abort();
+    await expect(never).rejects.toThrow();
+    expect(unsentUnanswered).not.toHaveBeenCalled();
+  });
   it('retains the opening Loop delivery preference across restart, Off and the exact send receipt', async () => {
     const entry = await enqueueInput(input({ sessionId: null, automation: 'loop', loopAfterTurn: true }));
     resetInputForTests();
