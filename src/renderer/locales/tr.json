@@ -2379,5 +2379,7 @@
   "Get the add-on": "Eklentiyi al",
   "Firefox asks before it adds the add-on. Choose Add.": "Firefox eklentiyi eklemeden önce sorar. “Ekle”yi seçin.",
   "Mozilla Firefox": "Mozilla Firefox",
+  "The extension may not open ChatGPT": "Uzantı ChatGPT’yi açamıyor",
+  "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0}, uzantının chatgpt.com’a erişmesini engelliyor. Uzantı ayrıntılarında chatgpt.com erişimine izin verin (Chrome, Edge ve Brave’de “Site erişimi”, Firefox’ta “İzinler”), ardından ChatGPT’yi yeniden yükleyin.",
   "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} yüklenmedi; bu hâlâ {1}. Yeniden denemek için Yükle’yi seçin; Windows izin isteyebilir."
 }

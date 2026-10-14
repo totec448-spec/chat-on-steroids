@@ -2024,6 +2024,12 @@ Chrome's sign-in never completes the CoS path, nor the reverse. Once ChatGPT sur
 in, Setup's sign-in button opens ChatGPT's own sign-out (`chatgpt:signOut`) where it runs, and the
 status follows its next answer.
 
+Each status poll also reports `chatgptAccess` (`permissions.contains` for `https://chatgpt.com/*`),
+projected as `externalExtension.chatgptAccess`. A live `false` (Chrome's site access "On click", a
+revoked Firefox permission) keeps Setup's first step open with instructions: without that access no
+content script runs, so the extension could pair and take work that nothing on the page would do.
+Older extensions say nothing, which stays unknown rather than a claimed lack of access.
+
 Firefox (`chatBrowser: 'firefox'`) runs the Mozilla-signed add-on that each release attaches as
 `Chat-On-Steroids-Firefox.xpi` (`shared/firefox-addon.ts`); Setup opens this app version's download
 (`browser:setupOpen` with `firefox`/`extensions`) instead of the Developer mode and folder steps.

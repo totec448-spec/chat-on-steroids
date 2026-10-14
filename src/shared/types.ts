@@ -600,6 +600,8 @@ export interface BridgeStatus {
     proof?: { version: string; signedIn: boolean | null } | null;
     /** `gecko`: Firefox's signed add-on, which Firefox updates itself. */
     engine?: 'gecko';
+    /** false: that browser may not open chatgpt.com, so no content script can run there. */
+    chatgptAccess?: boolean;
   } | null;
   /** The CoS browser's own copy of the extension, connected right now. */
   cosExtension?: { present: boolean };
