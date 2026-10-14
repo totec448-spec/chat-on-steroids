@@ -261,7 +261,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -274,6 +274,7 @@ function request(
   if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
   if (options.browser) headers['x-extension-browser'] = options.browser;
   if (options.host) headers['x-extension-host'] = options.host;
+  if (options.engine) headers['x-extension-engine'] = options.engine;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -633,6 +634,19 @@ describe('who is allowed to talk to it', () => {
     // An older extension says nothing: unknown, never a claimed lack of access.
     await status();
     expect((await bridgeStatus()).externalExtension?.chatgptAccess).toBeUndefined();
+  });
+
+  // Firefox updates its signed add-on itself (2.1.38): Setup and the log must know which engine it is.
+  it('tells a Firefox add-on apart and lets its preflight carry the engine', async () => {
+    await pair();
+    const preflight = await request('OPTIONS', '/events', { auth: null });
+    expect(preflight.headers['access-control-allow-headers']).toContain('x-extension-engine');
+    await request('GET', '/status', { host: 'browser', engine: 'gecko' });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
+    await request('GET', '/status', { host: 'browser', engine: 'webkit' });
+    expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
+    await request('GET', '/status', { host: 'browser' });
+    expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
   });
 
   it('retains an incompatible external version without granting presence', async () => {
@@ -1226,9 +1240,11 @@ describe('extension update holds', () => {
     expect(lines().slice(before).map(entry => entry.message)).toEqual(['bridge: the browser extension waits to update: a ChatGPT tab is still answering']);
     await status('already-tried');
     expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
+    await status('browser-updates-itself');
+    expect(lines().at(-1)!.message).toContain('Firefox updates the signed add-on itself');
     // An unknown reason is not logged, and a report without a hold resets it.
     await status('made-up'); await status(); await status('chat-busy');
-    expect(lines().slice(before)).toHaveLength(3);
+    expect(lines().slice(before)).toHaveLength(4);
   });
 });
 
@@ -15939,6 +15955,24 @@ describe('which extension build is running', () => {
       const later = await request('POST', '/commands/redeem', stale);
       expect(later.body.error, 'the up-to-date browser went quiet a minute ago').not.toBe('stale_extension_build');
     } finally { clock.mockRestore(); }
+  });
+
+  // Firefox updates its signed add-on itself, up to a day after the app: Chrome's copy is current
+  // within minutes. When Firefox is where ChatGPT runs, its add-on must keep working meanwhile;
+  // measured on the VM 2026-10-14, a new chat sat unclaimed in Firefox for 14 minutes.
+  it('never refuses the Firefox add-on as out of date while Firefox is the ChatGPT browser', async () => {
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    await request('GET', '/status', { extensionBuild: SHIPPED });
+    const gecko = { body: { id: 'x', client: 'firefox-client' }, extensionBuild: 'deadbeefcafe', engine: 'gecko' };
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    expect((await request('POST', '/commands/redeem', gecko)).body.error, 'Firefox not chosen: ordinary rule').toBe('stale_extension_build');
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    expect((await request('POST', '/commands/redeem', gecko)).body.error).not.toBe('stale_extension_build');
+    expect((await request('POST', '/repairs/claim', { body: {}, extensionBuild: 'deadbeefcafe', engine: 'gecko' })).body).not.toEqual({ allowed: false });
+    // An old Chromium copy is still refused while Firefox is chosen.
+    expect((await request('POST', '/commands/redeem', { ...gecko, engine: undefined })).body.error).toBe('stale_extension_build');
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
   });
 
   it('compares nothing in a checkout that was never packaged', async () => {

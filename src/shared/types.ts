@@ -128,7 +128,7 @@ export interface TunnelSettings {
 }
 
 /** `cos` is the built-in CoS browser (src/main/cos-browser), which needs no installed browser. */
-export const CHAT_BROWSERS = ['chrome', 'edge', 'brave', 'cos'] as const;
+export const CHAT_BROWSERS = ['chrome', 'edge', 'brave', 'firefox', 'cos'] as const;
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
@@ -598,6 +598,8 @@ export interface BridgeStatus {
     present: boolean; version: string | null; lastSeenAt: number | null; signedIn?: boolean | null;
     /** Kept across restarts: the version last seen there, and whether ChatGPT last answered signed in. */
     proof?: { version: string; signedIn: boolean | null } | null;
+    /** `gecko`: Firefox's signed add-on, which Firefox updates itself. */
+    engine?: 'gecko';
     /** false: that browser may not open chatgpt.com, so no content script can run there. */
     chatgptAccess?: boolean;
   } | null;
