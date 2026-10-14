@@ -122,6 +122,34 @@ it('recognizes cleared configuration values and additional JSON keys as reconnec
   expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', expect.objectContaining({ config: { REGION: 'eu', EXTRA: 'value' }, longestCallSeconds: 30 }));
 });
 
+it('sends the full patch for a new empty config key and changed longest-call limit', async () => {
+  state.plugins[0]!.config = { REGION: 'eu' };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const field = (label: string) => [...document.querySelectorAll<HTMLInputElement>('#pluginDialog .plugin-field input')]
+    .find(input => input.parentElement!.querySelector('span')!.textContent === label)!;
+  field('Additional configuration (JSON object)').value = '{"HTTP_PROXY":""}';
+  field('Longest call (seconds)').value = '45';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledExactlyOnceWith('one', expect.objectContaining({
+    config: { REGION: 'eu', HTTP_PROXY: '' },
+    longestCallSeconds: 45,
+  }));
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
+});
+
+it('keeps the limit-only path when an existing config key is already empty', async () => {
+  state.plugins[0]!.config = { HTTP_PROXY: '' };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  document.querySelector<HTMLInputElement>('#pluginDialog input[type=number]')!.value = '45';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledExactlyOnceWith('one', { longestCallSeconds: 45 });
+  expect(document.querySelector('.toast')).toBeNull();
+});
+
 it('routes exact plugin and tool identity for disabling a discovered tool', async () => {
   state.plugins[0]!.tools = [{ name: 'remember', exposedName: 'plugin_one_remember', enabled: true }];
   await refreshPlugins(); document.querySelector<HTMLButtonElement>('.plugin-entry')!.click();

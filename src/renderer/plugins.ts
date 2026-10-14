@@ -257,7 +257,8 @@ function showConfigure(plugin: PluginView): void {
     const configuredValues = { ...Object.fromEntries([...config].map(([key, input]) => [key, input.value])), ...additions as Record<string,string> };
     const sourceChanged = JSON.stringify(configuredSource) !== JSON.stringify(plugin.source);
     const otherChanges = name.value !== plugin.name || sourceChanged || Object.keys(credentials).length > 0 ||
-      Object.entries(configuredValues).some(([key, value]) => value !== (plugin.config[key] ?? ''));
+      Object.entries(configuredValues).some(([key, value]) => value !== (plugin.config[key] ?? '') ||
+        (Object.hasOwn(additions, key) && !Object.hasOwn(plugin.config, key)));
     const limitOnly = longestCallSeconds !== (plugin.longestCallSeconds ?? 120) && !otherChanges;
     if (await mutate(window.api.pluginsConfigure(plugin.id, limitOnly ? { longestCallSeconds } : { name: name.value,
       ...(sourceChanged ? { source: configuredSource } : {}),
