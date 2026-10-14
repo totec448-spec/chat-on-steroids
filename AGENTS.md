@@ -4284,6 +4284,17 @@ shutdown. Accept bounded validated schemas (up to 256 upstream tools and 250,000
 upstream names, and fail closed on collisions, including retained disabled-name claims. A
 cached unauthorized schema is not live exposure. External servers retain their own OS/account
 permissions; the app's approved-path wrapper is not an OS sandbox around a third-party process.
+Each installation owns a typed `longestCallSeconds` outside its MCP server `config`: default 120,
+integer range 1–1800 (30 minutes maximum). Old or malformed stored values normalize to 120
+without deleting the installation. Plugin install/configure IPC rejects invalid input. Changing
+only this limit durably saves it without reconnecting, interrupting in-flight calls or changing
+the published tool schema; calls already dispatched retain their original deadline.
+Every admitted `tools/call` uses that plugin's deadline for SDK `timeout` and `maxTotalTimeout`,
+with `onprogress` and `resetTimeoutOnProgress`. SDK 2.1.0 has a rolling timeout: it checks
+`maxTotalTimeout` only on progress, so an `AbortSignal.timeout` separately enforces the hard
+total bound. The SDK owns `notifications/cancelled`; CoS never retries ambiguous operations.
+Host-side ChatGPT connector wait limits are independent of this local setting, and a 30-minute
+local limit does not guarantee ChatGPT will wait that long.
 Refused calls classify the current admission fact: a name absent from every retained catalog is
 unknown/stale/wrong-connector; an exact exposure conflict or schema-limit issue is not exposed;
 only a uniquely known disabled integration/tool is disabled. Sign-in, authentication in progress,
