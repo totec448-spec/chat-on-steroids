@@ -184,6 +184,8 @@ export class CosBrowser {
     preloadDir: string; rendererUrl: () => string | null; rendererDir: string;
     /** The user closed or minimized a shown window: it hides to the tray and goes on running. */
     onUserHide?: () => void;
+    /** Where a window the user minimizes goes: the taskbar or Dock (default), or the tray. */
+    minimizeTo?: () => 'taskbar' | 'tray';
   }) {
     cosSignInTransfer.onChange(change => this.signInEnded(change));
   }
@@ -452,8 +454,8 @@ export class CosBrowser {
       event.preventDefault();
       this.userHide(id);
     });
-    // Minimizing is the ordinary kind: the window stays in the taskbar or Dock to be restored
-    // from there (#1464). Hiding it here left users with no visible way back.
+    // Minimizing is the ordinary kind by default: the window stays in the taskbar or Dock to be
+    // restored from there (#1464). People who prefer the tray choose that in Settings.
     base.on('minimize', () => this.userMinimize(id));
     base.on('restore', () => this.userRestore(id));
     this.layout(id);
@@ -494,9 +496,10 @@ export class CosBrowser {
     this.notify();
   }
 
-  /** The user minimized the window: the extension sees it minimized; it stays shown in the taskbar. */
+  /** The user minimized the window: the extension sees it minimized; it stays shown in the taskbar unless the tray is chosen. */
   private userMinimize(id: number): void {
     if (!this.frames.has(id)) return;
+    if (this.assets.minimizeTo?.() === 'tray') return this.userHide(id);
     this.model.setWindowState(id, 'minimized');
     this.notify();
   }

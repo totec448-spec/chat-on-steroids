@@ -2358,5 +2358,11 @@
   "Told when a chat finishes": "Уведомление, когда чат закончил",
   "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "Уведомление, когда чат закончил, пока приложение в фоне, а компьютер не засыпает, пока чат работает.",
   "Worker chats out of the way": "Чаты воркеров не мешают",
-  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Включите, и чаты воркеров архивируются в ChatGPT, как только они больше не нужны приложению."
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Включите, и чаты воркеров архивируются в ChatGPT, как только они больше не нужны приложению.",
+  "Minimize the built-in browser to": "Сворачивать встроенный браузер в",
+  "Where its window goes when you minimize it. Its chats go on either way.": "Куда уходит его окно при сворачивании. Чаты продолжаются в любом случае.",
+  "Taskbar": "Панель задач",
+  "Tray": "Область уведомлений",
+  "Dock": "Dock",
+  "Menu bar": "Строка меню"
 }

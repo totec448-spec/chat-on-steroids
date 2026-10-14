@@ -2017,7 +2017,10 @@ as soon as it loads), stops it when another browser is chosen, and the app stops
 - **Session.** One persistent partition (`persist:cos-browser`). Its windows are `BaseWindow`s
   with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing one
   hides it. Minimizing is an ordinary minimize: the window stays in the taskbar/Dock, and the
-  extension sees it `minimized` until it is restored (#1464). The first time the user closes one, one desktop notice (a `MAIN_TEXTS`
+  extension sees it `minimized` until it is restored (#1464). **Settings → Agents & automation →
+  Minimize the built-in browser to** (`ui.cosBrowserMinimize`, `taskbar` by default, shown only while
+  it is the ChatGPT browser; "Dock"/"Menu bar" on macOS) chooses `tray` instead: a minimize then hides
+  the window exactly like closing it, notice included. The first time the user closes one, one desktop notice (a `MAIN_TEXTS`
   pair, "menu bar" on macOS) says it is still running and how to bring it back; `ui.cosBrowserTrayHint`
   keeps it to once per install, and a hide the app makes itself never counts. `cosBrowser:show` (preload `showCosBrowser()`) brings its last window
   forward, or opens one on ChatGPT; opening a chat from the app reveals that chat's window.
