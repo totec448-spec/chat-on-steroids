@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chronological, projectTimeline } from '../src/shared/chronology.js';
+import { chronological, projectTimeline, residenceOf } from '../src/shared/chronology.js';
 
 interface Row {
   seq: number;
@@ -386,5 +386,18 @@ describe('a paragraph the page reported after a newer turn began', () => {
     ];
     const projected = projectTimeline(rows, { b: { origin: 975, time: at(42) } });
     expect((projected.find(entry => entry.label === 'paragraph') as { turnOrigin?: number | null }).turnOrigin).toBeNull();
+  });
+});
+
+describe('residenceOf', () => {
+  it("pages a turn's final answer beside where its final text was written, and everything else by position", () => {
+    const base = { kind: 'assistant_message', time: 1, seq: 387, origin: 180 };
+    expect(residenceOf({ ...base, final: true, contentSeq: 383 })).toBe(383);
+    // Interim prose, and a final answer without a content sequence, keep their first appearance.
+    expect(residenceOf({ ...base, final: false, contentSeq: 383 })).toBe(180);
+    expect(residenceOf({ ...base, final: true })).toBe(180);
+    // Never earlier than its position.
+    expect(residenceOf({ ...base, final: true, contentSeq: 100 })).toBe(180);
+    expect(residenceOf({ kind: 'tool_call', time: 1, seq: 9, origin: 4 })).toBe(4);
   });
 });

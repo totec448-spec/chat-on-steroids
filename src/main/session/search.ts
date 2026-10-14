@@ -14,6 +14,7 @@ import type { SessionSearchLocation, SessionSearchReply, SessionSearchResult, Se
 import { positionOf } from '../../shared/chronology.js';
 import { transcriptEntries } from '../../shared/markdown-export.js';
 import { indexedSessions, readEvents, readOverflowText, sessionSearchIndexPath } from './store.js';
+import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { logWarn } from '../logger.js';
 
 /** Plenty for a long chat's words; a runaway transcript is cut, not stored whole. */
@@ -72,9 +73,9 @@ async function transcriptText(id: string): Promise<string> {
   const parts: string[] = [];
   let size = 0;
   for (const entry of transcriptEntries(events)) {
-    const text = entry.stored.truncated && entry.stored.assetId
+    const text = providerEntitiesAsMarkdown(entry.stored.truncated && entry.stored.assetId
       ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
-      : entry.stored.text;
+      : entry.stored.text);
     const clean = text.replace(/\s+/g, ' ').trim();
     if (!clean) continue;
     parts.push(clean);
@@ -222,6 +223,36 @@ export function resetSessionSearchForTests(): void {
   cache.clear(); cachedChars = 0; current.clear(); indexingWanted = false;
 }
 
+/** Most matches one find returns; a chat with more is searched with a longer phrase. */
+const MAX_FIND_RESULTS = 500;
+
+/**
+ * Find in chat (Codex's ⌘F): every message of one chat holding the phrase, in the order they were
+ * said. Case and runs of white space do not matter. Read from the whole recording, so a match far
+ * above the page the window holds is found too.
+ */
+export async function findInSession(id: string, query: string): Promise<SessionSearchLocation[]> {
+  const phrase = foldCase(query.replace(/\s+/g, ' ').trim());
+  if (!phrase) return [];
+  const events = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
+  const found: SessionSearchLocation[] = [];
+  for (const entry of transcriptEntries(events)) {
+    const text = entry.stored.truncated && entry.stored.assetId
+      ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
+      : entry.stored.text;
+    if (!foldCase(text.replace(/\s+/g, ' ')).includes(phrase)) continue;
+    const event = events.find(candidate => candidate.seq === entry.seq);
+    if (!event || (event.kind !== 'user_message' && event.kind !== 'assistant_message')) continue;
+    const messageId = event.messageId ?? null;
+    const position = Math.min(...events
+      .filter(other => other === event || (messageId !== null && other.kind === event.kind && other.messageId === messageId))
+      .map(other => positionOf(other)));
+    found.push({ seq: event.seq, kind: event.kind, messageId, position });
+    if (found.length >= MAX_FIND_RESULTS) break;
+  }
+  return found;
+}
+
 /**
  * The first message of a chat holding any of the query's words: where its snippet came from, so the
  * chat can open there instead of at its end. Read only when a result is opened, from the recording.
@@ -231,9 +262,9 @@ export async function locateSearchMatch(id: string, query: string): Promise<Sess
   if (!terms.length) return null;
   const events = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
   for (const entry of transcriptEntries(events)) {
-    const text = entry.stored.truncated && entry.stored.assetId
+    const text = providerEntitiesAsMarkdown(entry.stored.truncated && entry.stored.assetId
       ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
-      : entry.stored.text;
+      : entry.stored.text);
     const lower = foldCase(text.replace(/\s+/g, ' '));
     if (!terms.some(term => lower.includes(term))) continue;
     const event = events.find(candidate => candidate.seq === entry.seq);
