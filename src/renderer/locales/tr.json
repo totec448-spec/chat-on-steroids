@@ -2343,6 +2343,8 @@
   "Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.": "Bu proje için bir AGENTS.md oluştur. Önce projeyi oku, sonra nasıl derlendiğini, test edildiğini ve çalıştırıldığını, nasıl düzenlendiğini ve bir kodlama ajanının uyması gereken kuralları anlat. Kısa ve doğru tut.",
   "Archive worker chats in ChatGPT when they are retired": "Emekliye ayrılan worker sohbetlerini ChatGPT'de arşivle",
   "Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Bir worker artık kullanılamadığında (yardımcı ajanları temizlediğinde ya da ana sohbet kapandığında) sohbeti ChatGPT'de arşivlenir ve sohbet listenden kalkar. ChatGPT ayarlarından geri yükleyebilirsin; bu uygulama dökümünü saklar. Hiçbir şey silinmez.",
+  "Goal paused": "Hedef duraklatıldı",
+  "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT art arda üç kez aynı yanıtı verdi, bu yüzden Hedef sormayı bıraktı. Devam etmek için sohbeti aç.",
   "Keep awake while a chat works": "Bir sohbet çalışırken uyanık tut",
   "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "Bilgisayarın uyku moduna geçmesini engeller, böylece uzun çalışmalar sürer. Bazı Windows dizüstü bilgisayarlar ekran kapanınca yine de uyur; bunlar için Bilgisayar ve ekran seçeneğini seç.",
   "The computer": "Bilgisayar",

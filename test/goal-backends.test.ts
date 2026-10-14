@@ -16,7 +16,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore, resetDurableForTests, flushDurable, readDurable } = await import('../src/main/durable.js');
-const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, initSessionStore, readEvents, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const goal = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 let directory: string;
@@ -517,4 +517,62 @@ it('publishes readable partial plan stages while final validation remains author
   await expect(goal.draftTaskPlan('Build it', 'chatgpt', progress)).rejects.toThrow();
   expect(progress).toHaveBeenCalledWith({ phase: 'generating', text: '1. Build the fea' });
   expect(progress.mock.calls.some(([update]) => update.phase === 'ready')).toBe(false);
+});
+
+/**
+ * 2026-10-14 release round: a Goal whose chat answered only "done" got thirteen near-identical
+ * "verify it" follow-ups in ten minutes. Goal sees ChatGPT's answers, not tool results, so it
+ * could never be satisfied; the guard stops asking once the same answer has come three times.
+ */
+describe('Goal repeating itself', () => {
+  async function chatWith(id: string, answers: string[]) {
+    const session = await createSession({ title: 'Repeating Goal', conversationId: id });
+    let time = 1;
+    const say = (kind: 'user_message' | 'assistant_message', text: string) => appendEvent(session.id, { source: 'extension', time: time++,
+      ...(kind === 'assistant_message' ? { kind, messageId: `a-${time}`, state: 'final' as const, final: true } : { kind }),
+      message: { text, chars: text.length, truncated: false } });
+    await say('user_message', 'Create goal-test.txt with the content ok, read it back, and reply with done.');
+    for (const [index, answer] of answers.entries()) {
+      if (index > 0) await say('user_message', `Verify that goal-test.txt exists and contains ok (round ${index}).`);
+      await say('assistant_message', answer);
+    }
+    await appendEvent(session.id, { source: 'extension', kind: 'turn_end', turnId: 'last-turn', outcome: 'completed', time: time++ });
+    return session;
+  }
+
+  it('pauses Goal instead of asking a third time after the same answer, and says why', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+    browser.request.mockResolvedValue('{"action":"continue","reply":"Independently verify the file and show its content."}');
+    const id = 'repeating-goal';
+    const session = await chatWith(id, ['done', 'Done.', 'done']);
+    await goal.setGoalSwitchNow(id, 'goal', true, true);
+    goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'last-turn' });
+    expect((await settled(id)).stage).toBe('no-reply');
+    expect(goal.goalSwitchFor(id).enabled).toBe(false);
+    const notes = (await readEvents(session.id, { kinds: ['note'] })).map(event => (event as { message: { text: string } }).message.text);
+    expect(notes.some(text => text.includes('same answer three times'))).toBe(true);
+  });
+
+  it('keeps asking while the answers change, and two equal answers are not a loop yet', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+    browser.request.mockResolvedValue('{"action":"continue","reply":"Now add the tests."}');
+    for (const [id, answers] of [['changing-goal', ['Created the file.', 'Read it back: ok.', 'Added a test.']], ['twice-goal', ['Created the file.', 'done', 'done']]] as const) {
+      const session = await chatWith(id, [...answers]);
+      await goal.setGoalSwitchNow(id, 'goal', true, true);
+      goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'last-turn' });
+      expect((await settled(id)).stage, id).toBe('ready');
+      expect(goal.goalSwitchFor(id).enabled, id).toBe(true);
+    }
+  });
+
+  it('leaves Loop alone: repeating is its job', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, loopBackend: 'chatgpt' } });
+    browser.request.mockResolvedValue('{"action":"continue","reply":"Run the next check."}');
+    const id = 'repeating-loop';
+    const session = await chatWith(id, ['done', 'done', 'done']);
+    await goal.setGoalSwitchNow(id, 'loop', true, true);
+    await recordLoopMcpProof(session.id, 'last-turn');
+    goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'last-turn' });
+    expect((await settled(id)).stage).toBe('ready');
+  });
 });
