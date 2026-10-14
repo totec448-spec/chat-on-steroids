@@ -46,7 +46,7 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
  *     that deliberately does and does not buy
  *   · every other route needs the bearer token issued by /pair, compared in
  *     constant time, and stored encrypted rather than in config.json
- *   · the Origin must be a chrome-extension:// origin, so a web page cannot drive it
+ *   · the Origin must be a chrome-extension:// (or Firefox's moz-extension://) origin, so a web page cannot drive it
  *   · bodies are capped and requests are rate limited
  *
  * It accepts ChatGPT observations and returns summaries/queued commands. Direct browser
@@ -1163,7 +1163,8 @@ function originOf(req: http.IncomingMessage): {
 } {
   const origin = req.headers.origin;
   if (typeof origin !== 'string' || origin === '') return { ok: true, origin: null };
-  if (origin.startsWith('chrome-extension://')) return { ok: true, origin };
+  // Firefox add-ons have their own extension scheme; a web page can no more forge it than Chrome's.
+  if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) return { ok: true, origin };
   return { ok: false, origin: null };
 }
 
