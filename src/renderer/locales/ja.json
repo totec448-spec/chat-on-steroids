@@ -2349,5 +2349,14 @@
   "The computer": "コンピューター",
   "The computer and screen": "コンピューターと画面",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "ワーカーが再び使えなくなると（ワーカーを消去した、メインのチャットが閉じられた、または終わったタスクが 1 週間そのままだった）、そのチャットは ChatGPT でアーカイブされ、チャット一覧から消えます。ChatGPT の設定から復元できます。このアプリは記録を保持します。何も削除されません。",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "実行中の回答の後に送るため保留しました: ChatGPT が回答に取り込めませんでした。"
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "実行中の回答の後に送るため保留しました: ChatGPT が回答に取り込めませんでした。",
+  "Find in chat, slash commands, and messages that go where you want.": "チャット内検索、スラッシュコマンド、思いどおりに届くメッセージ。",
+  "{0} searches the whole chat, older messages included.": "{0} で、古いメッセージも含めてチャット全体を検索します。",
+  "Slash commands": "スラッシュコマンド",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "メッセージ欄に / と入力すると、モデルの選択、チャットの名前変更やピン留め、状態の確認などができます。",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "待機中のメッセージをすぐに実行中の回答へ入れられます。Enter の動作も選べます。",
+  "Told when a chat finishes": "チャットが終わったら通知",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "アプリがバックグラウンドのときにチャットが終わると通知し、作業中はコンピューターをスリープさせません。",
+  "Worker chats out of the way": "ワーカーのチャットを片付け",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "オンにすると、アプリが使い終えたワーカーのチャットを ChatGPT でアーカイブします。"
 }

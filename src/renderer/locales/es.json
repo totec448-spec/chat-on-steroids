@@ -2349,5 +2349,14 @@
   "The computer": "El ordenador",
   "The computer and screen": "El ordenador y la pantalla",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Cuando un worker ya no puede volver a usarse (borraste los subagentes, se cerró el chat principal o su tarea terminada quedó una semana sin uso), su chat se archiva en ChatGPT y sale de tu lista de chats. Puedes restaurarlo desde la configuración de ChatGPT; esta app conserva su transcripción. No se elimina nada.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Guardado para después de la respuesta en curso: ChatGPT no pudo incluirlo en la respuesta."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Guardado para después de la respuesta en curso: ChatGPT no pudo incluirlo en la respuesta.",
+  "Find in chat, slash commands, and messages that go where you want.": "Buscar en el chat, comandos con barra y mensajes que van adonde quieres.",
+  "{0} searches the whole chat, older messages included.": "{0} busca en todo el chat, también en los mensajes anteriores.",
+  "Slash commands": "Comandos con barra",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "Escribe / en el cuadro de mensaje para elegir un modelo, renombrar o fijar el chat, ver su estado y más.",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "Un mensaje en cola puede unirse al instante a la respuesta en curso, y tú eliges qué hace Intro.",
+  "Told when a chat finishes": "Aviso cuando un chat termina",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "Una notificación cuando un chat termina mientras la app está en segundo plano, y el ordenador sigue activo mientras trabaja.",
+  "Worker chats out of the way": "Chats de workers fuera de la vista",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Actívalo y los chats de workers se archivan en ChatGPT cuando la app ya no los necesita."
 }

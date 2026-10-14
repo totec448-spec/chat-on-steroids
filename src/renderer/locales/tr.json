@@ -2349,5 +2349,14 @@
   "The computer": "Bilgisayar",
   "The computer and screen": "Bilgisayar ve ekran",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Bir worker artık kullanılamadığında (yardımcı ajanları temizlediğinde, ana sohbet kapandığında ya da bitmiş görevi bir hafta beklediğinde) sohbeti ChatGPT'de arşivlenir ve sohbet listenden kalkar. ChatGPT ayarlarından geri yükleyebilirsin; bu uygulama dökümünü saklar. Hiçbir şey silinmez.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Süren yanıttan sonrasına saklandı: ChatGPT bunu yanıta ekleyemedi."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Süren yanıttan sonrasına saklandı: ChatGPT bunu yanıta ekleyemedi.",
+  "Find in chat, slash commands, and messages that go where you want.": "Sohbette bul, eğik çizgi komutları ve istediğin yere giden mesajlar.",
+  "{0} searches the whole chat, older messages included.": "{0} eski mesajlar dahil tüm sohbette arar.",
+  "Slash commands": "Eğik çizgi komutları",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "Mesaj kutusuna / yazarak model seç, sohbeti yeniden adlandır veya sabitle, durumunu gör ve daha fazlası.",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "Sıradaki bir mesaj hemen süren yanıta katılabilir; Enter'ın ne yapacağını da sen seçersin.",
+  "Told when a chat finishes": "Sohbet bitince haber",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "Uygulama arka plandayken bir sohbet bitince bildirim gelir; sohbet çalışırken bilgisayar uyanık kalır.",
+  "Worker chats out of the way": "Worker sohbetleri ayak altından kalkar",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Açarsan, uygulamanın artık ihtiyaç duymadığı worker sohbetleri ChatGPT'de arşivlenir."
 }

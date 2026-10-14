@@ -2349,5 +2349,14 @@
   "The computer": "Máy tính",
   "The computer and screen": "Máy tính và màn hình",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Khi một worker không thể dùng lại nữa (bạn đã xóa worker, cuộc trò chuyện chính đã đóng, hoặc nhiệm vụ đã xong của nó để yên một tuần), cuộc trò chuyện của nó được lưu trữ trong ChatGPT và rời khỏi danh sách trò chuyện. Bạn có thể khôi phục trong phần cài đặt của ChatGPT; ứng dụng này giữ bản ghi của nó. Không có gì bị xóa.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Đã giữ lại để gửi sau câu trả lời đang chạy: ChatGPT không thể đưa tin nhắn vào câu trả lời."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Đã giữ lại để gửi sau câu trả lời đang chạy: ChatGPT không thể đưa tin nhắn vào câu trả lời.",
+  "Find in chat, slash commands, and messages that go where you want.": "Tìm trong cuộc trò chuyện, lệnh gạch chéo và tin nhắn đi đúng nơi bạn muốn.",
+  "{0} searches the whole chat, older messages included.": "{0} tìm trong toàn bộ cuộc trò chuyện, kể cả tin nhắn cũ.",
+  "Slash commands": "Lệnh gạch chéo",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "Gõ / trong ô tin nhắn để chọn mô hình, đổi tên hoặc ghim cuộc trò chuyện, xem trạng thái và hơn thế nữa.",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "Tin nhắn đang chờ có thể vào ngay câu trả lời đang chạy, và bạn chọn phím Enter làm gì.",
+  "Told when a chat finishes": "Báo khi cuộc trò chuyện xong",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "Một thông báo khi cuộc trò chuyện xong lúc ứng dụng chạy nền, và máy tính không ngủ khi nó đang làm việc.",
+  "Worker chats out of the way": "Dọn cuộc trò chuyện của worker",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Bật lên, cuộc trò chuyện của worker được lưu trữ trong ChatGPT khi ứng dụng không cần đến nữa."
 }

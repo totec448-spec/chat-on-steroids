@@ -2349,5 +2349,14 @@
   "The computer": "电脑",
   "The computer and screen": "电脑和屏幕",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "当某个 worker 不能再使用时（你清除了子智能体、主聊天已关闭，或其已完成的任务闲置了一周），它的聊天会在 ChatGPT 中归档，并从你的聊天列表中移除。你可以在 ChatGPT 的设置中恢复它；本应用会保留其记录。不会删除任何内容。",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "已保留到当前回答结束后发送：ChatGPT 无法将其加入回答。"
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "已保留到当前回答结束后发送：ChatGPT 无法将其加入回答。",
+  "Find in chat, slash commands, and messages that go where you want.": "在聊天中查找、斜杠命令，以及去向由你决定的消息。",
+  "{0} searches the whole chat, older messages included.": "{0} 可搜索整个聊天，包括较早的消息。",
+  "Slash commands": "斜杠命令",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "在消息框中输入 /，即可选择模型、重命名或置顶聊天、查看状态等。",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "排队的消息可以立即加入正在进行的回答，Enter 的作用也由你决定。",
+  "Told when a chat finishes": "聊天完成时通知",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "应用在后台时，聊天完成会发出通知；聊天工作时电脑保持唤醒。",
+  "Worker chats out of the way": "worker 聊天不再碍事",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "开启后，应用不再需要的 worker 聊天会在 ChatGPT 中归档。"
 }

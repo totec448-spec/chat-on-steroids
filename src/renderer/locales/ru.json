@@ -2349,5 +2349,14 @@
   "The computer": "Компьютер",
   "The computer and screen": "Компьютер и экран",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "Когда воркер больше нельзя использовать (вы очистили воркеров, основной чат закрыт или его завершённая задача пролежала неделю), его чат архивируется в ChatGPT и исчезает из списка чатов. Его можно восстановить в настройках ChatGPT; приложение сохраняет его запись. Ничего не удаляется.",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Отложено до конца текущего ответа: ChatGPT не смог включить сообщение в ответ."
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "Отложено до конца текущего ответа: ChatGPT не смог включить сообщение в ответ.",
+  "Find in chat, slash commands, and messages that go where you want.": "Поиск в чате, слэш-команды и сообщения, которые идут куда нужно.",
+  "{0} searches the whole chat, older messages included.": "{0} ищет по всему чату, включая старые сообщения.",
+  "Slash commands": "Слэш-команды",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "Введите / в поле сообщения, чтобы выбрать модель, переименовать или закрепить чат, посмотреть его состояние и многое другое.",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "Сообщение из очереди можно сразу добавить в текущий ответ, а что делает Enter, выбираете вы.",
+  "Told when a chat finishes": "Уведомление, когда чат закончил",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "Уведомление, когда чат закончил, пока приложение в фоне, а компьютер не засыпает, пока чат работает.",
+  "Worker chats out of the way": "Чаты воркеров не мешают",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "Включите, и чаты воркеров архивируются в ChatGPT, как только они больше не нужны приложению."
 }

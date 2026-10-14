@@ -2349,5 +2349,14 @@
   "The computer": "電腦",
   "The computer and screen": "電腦和螢幕",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "當某個 worker 無法再使用時（你清除了子代理、主聊天已關閉，或其已完成的任務閒置了一週），它的聊天會在 ChatGPT 中封存，並從你的聊天清單中移除。你可以在 ChatGPT 的設定中還原；本應用程式會保留其記錄。不會刪除任何內容。",
-  "Kept for after the running answer: ChatGPT could not take it into the answer.": "已保留到目前回答結束後傳送：ChatGPT 無法將其加入回答。"
+  "Kept for after the running answer: ChatGPT could not take it into the answer.": "已保留到目前回答結束後傳送：ChatGPT 無法將其加入回答。",
+  "Find in chat, slash commands, and messages that go where you want.": "在聊天中尋找、斜線指令，以及去向由你決定的訊息。",
+  "{0} searches the whole chat, older messages included.": "{0} 可搜尋整個聊天，包括較早的訊息。",
+  "Slash commands": "斜線指令",
+  "Type / in the message box to pick a model, rename or pin the chat, see its status and more.": "在訊息框輸入 /，即可選擇模型、重新命名或釘選聊天、查看狀態等。",
+  "A queued message can join the running answer right away, and you choose what Enter does.": "排隊中的訊息可以立即加入正在進行的回答，Enter 的作用也由你決定。",
+  "Told when a chat finishes": "聊天完成時通知",
+  "A notification when a chat is done while the app is in the background, and the computer stays awake while it works.": "應用程式在背景時，聊天完成會發出通知；聊天工作時電腦保持喚醒。",
+  "Worker chats out of the way": "worker 聊天不再礙事",
+  "Turn it on, and worker chats are archived in ChatGPT once the app is done with them.": "開啟後，應用程式不再需要的 worker 聊天會在 ChatGPT 中封存。"
 }
