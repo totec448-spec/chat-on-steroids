@@ -260,6 +260,28 @@ it('tells its owner when the user puts a shown window away, never when the app h
   expect(onUserHide).toHaveBeenCalledTimes(1);
 });
 
+it('keeps a window the user minimizes in the taskbar, and reports it minimized until restored (#1464)', () => {
+  const onUserHide = vi.fn();
+  const host = new CosBrowser({ preloadDir: 'unused', rendererUrl: () => null, rendererDir: 'unused', onUserHide }) as any;
+  const windowId = host.model.createWindow({ type: 'normal', state: 'normal' });
+  let maximized = false;
+  const base = { hide: vi.fn(), isVisible: () => true, isFocused: () => false, isMaximized: () => maximized,
+    isDestroyed: () => false, getContentBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }) };
+  host.frames.set(windowId, { id: windowId, base, toolbar: { setBounds: vi.fn() }, shown: true });
+  host.userMinimize(windowId);
+  // A minimized window stays where the user can restore it: not hidden, no "brought back from the tray" notice.
+  expect(base.hide).not.toHaveBeenCalled();
+  expect(onUserHide).not.toHaveBeenCalled();
+  expect(host.frames.get(windowId).shown).toBe(true);
+  expect(host.model.window(windowId)?.state).toBe('minimized');
+  host.userRestore(windowId);
+  expect(host.model.window(windowId)?.state).toBe('normal');
+  maximized = true;
+  host.userMinimize(windowId);
+  host.userRestore(windowId);
+  expect(host.model.window(windowId)?.state).toBe('maximized');
+});
+
 it('loads only web pages and the empty page into a tab, whatever the extension asks', () => {
   const { host, contents } = browserFixture('https://chatgpt.com/');
   for (const url of ['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'chrome://settings', 'not a url']) host.control.navigate(contents.id, url);
