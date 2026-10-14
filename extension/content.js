@@ -11917,10 +11917,12 @@
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
     step('composer');
     const readyComposer = await waitForComposer();
+    // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
+    // may be tried again without counting against the chat (#1086).
     if (!readyComposer) return void (await fail(t(
       'content_bootstrap_composer_unavailable',
       'ChatGPT never exposed a usable composer for bootstrap'
-    )));
+    ), 'transient'));
     if (await failIfRetargeted()) return;
 
     if (boot.model || boot.reasoningEffort) step('model');
@@ -11941,7 +11943,7 @@
       return void (await fail(t(
         'content_bootstrap_composer_unavailable',
         'ChatGPT never re-exposed a usable composer after model selection'
-      )));
+      ), 'transient'));
     }
     const selectionConfirmedAt = Date.now();
     const publishBootstrapSelection = async (id) => {
@@ -12134,7 +12136,9 @@
       // to send (#864). Clear only our own unchanged text; anything the user typed stays.
       await bootstrapDraft.clear();
       const notAccepted = t('content_bootstrap_send_not_accepted', 'ChatGPT did not accept the bootstrap send');
-      return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted));
+      // Refusals decided before the native Send click: nothing reached ChatGPT (#1086).
+      const beforeSend = ['draft-changed', 'page-busy', 'mention-changed', 'send-not-ready'].includes(sendRefusal);
+      return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted, beforeSend ? 'transient' : undefined));
     }
     agent = boot.agent || null;
     agentCommandId = agent && typeof boot.id === 'string' ? boot.id : null;

@@ -16006,6 +16006,8 @@ describe('the fresh chat the app opened', () => {
         error: expect.stringMatching(/page changed|fresh chat|navigation/i)
       })
     ]);
+    // A changed target is not a slow page: it is not offered as a transient failure.
+    expect(live.sent.find((message) => message.type === 'ack')?.detail).toBeUndefined();
   });
 
   it('abandons a redeemed bootstrap when recorder takeover supersedes its document owner', async () => {
@@ -17218,7 +17220,9 @@ describe('the fresh chat the app opened', () => {
         id: 'cmd-enter-noop',
         status: 'failed',
         // #882: the failure names the step Send reached, here a Send button that never enabled.
-        error: 'ChatGPT did not accept the bootstrap send (send-not-ready)'
+        error: 'ChatGPT did not accept the bootstrap send (send-not-ready)',
+        // #1086: refused before the native click, so nothing was sent and a wake may be retried.
+        detail: 'transient'
       })
     ]);
     expect(live.sent.some((message) => message.type === 'ack' && message.status === 'sent')).toBe(false);
