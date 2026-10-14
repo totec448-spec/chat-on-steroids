@@ -2013,8 +2013,6 @@
   "Copy this chat's ChatGPT link": "Bu sohbetin ChatGPT bağlantısını kopyala",
   "Link copied": "Bağlantı kopyalandı",
   "ChatGPT is waiting for your approval": "ChatGPT onayını bekliyor",
-  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "ChatGPT'de bir araç çağrısına izin verene veya reddedene kadar bir sohbet duraklatıldı. Açmak için tıkla.",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT bu sohbette bir araç çağrısına izin vermeni veya reddetmeni bekliyor. Orada yanıt verene kadar hiçbir şey devam etmez.",
   "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT'nin bu sohbette istediği araç onayı yanıtlandı.",
   "What's new": "Yenilikler",
   "Full release notes": "Tüm sürüm notları",
@@ -2364,5 +2362,14 @@
   "Taskbar": "Görev çubuğu",
   "Tray": "Sistem tepsisi",
   "Dock": "Dock",
-  "Menu bar": "Menü çubuğu"
+  "Menu bar": "Menü çubuğu",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.": "ChatGPT'de bir araç çağrısına izin verene veya reddedene kadar bir sohbet duraklatıldı. Uygulamada yanıtlamak için tıklayın.",
+  "Deny": "Reddet",
+  "Allow once": "Bir kez izin ver",
+  "Sending your answer to ChatGPT…": "Yanıtınız ChatGPT'ye gönderiliyor…",
+  "ChatGPT showed a different card by then. Nothing was pressed; answer the new one.": "ChatGPT o sırada başka bir kart gösteriyordu. Hiçbir şeye basılmadı; yenisini yanıtlayın.",
+  "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT artık bu seçeneği sunmuyordu. Hiçbir şeye basılmadı.",
+  "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "Sohbetin sayfası yanıtınızı zamanında almadı. Hiçbir şeye basılmadı; orada yanıtlamak için tarayıcıda açın.",
+  "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT buna bu sohbette izin vermiyor. Yalnızca reddedebilirsiniz.",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT bu sohbette bir araç çağrısına izin vermenizi veya reddetmenizi bekliyor. Burada ya da tarayıcıda yanıtlayana kadar hiçbir şey devam etmez."
 }

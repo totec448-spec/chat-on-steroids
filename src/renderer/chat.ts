@@ -89,7 +89,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
 
 const api = window.api;
@@ -2826,6 +2826,75 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
 }
 
 /**
+ * ChatGPT's tool approval card, answered in the app (2.1.38, the maintainer's request).
+ *
+ * Shows the card's own words as the page reported them (plain text, never markup) and offers Deny
+ * and Allow once for exactly that card; "always" is never offered. Where ChatGPT itself disabled
+ * Allow once ("External app access is unavailable in this conversation"), only Deny is offered.
+ * The click files one answer; the page presses the button only while it still shows that card, so
+ * the panel then follows the outcome until the row turns into "answered".
+ */
+function approvalCardPanel(sessionId: string): HTMLElement {
+  const panel = el('div', 'approval-card');
+  panel.hidden = true;
+  const words = el('div', 'approval-card-words');
+  const actions = el('div', 'approval-card-actions');
+  const status = el('p', 'approval-card-status');
+  status.hidden = true;
+  const deny = el('button', 'btn btn-solid', () => t('Deny')) as HTMLButtonElement;
+  const allow = el('button', 'btn btn-solid is-primary', () => t('Allow once')) as HTMLButtonElement;
+  deny.type = allow.type = 'button';
+  actions.append(deny, allow);
+  panel.append(words, actions, status);
+  let card: ApprovalCardView | null = null;
+  const say = (text: () => string): void => { status.hidden = false; ui(status, 'textContent', text); };
+  const show = (next: ApprovalCardView | null): void => {
+    card = next;
+    if (!next) { panel.hidden = true; return; }
+    panel.hidden = false;
+    words.replaceChildren(...next.lines.map((text, index) => el(index === 1 ? 'strong' : 'span', '', text)));
+    const pending = next.answer !== null && next.answer.outcome === null;
+    deny.disabled = pending;
+    allow.disabled = pending || !next.allow;
+    const outcome = next.answer?.outcome;
+    if (pending) say(() => t('Sending your answer to ChatGPT…'));
+    else if (outcome === 'card_changed') say(() => t('ChatGPT showed a different card by then. Nothing was pressed; answer the new one.'));
+    else if (outcome === 'unavailable') say(() => t('ChatGPT no longer offered that choice. Nothing was pressed.'));
+    else if (outcome === 'expired') say(() => t('The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.'));
+    else if (!next.allow) say(() => t('ChatGPT does not allow it in this chat. You can only deny it.'));
+    else status.hidden = true;
+  };
+  const refresh = async (): Promise<ApprovalCardView | null> => {
+    const reply = await api.approvalCard(sessionId);
+    const next = reply.ok ? reply.data : null;
+    if (panel.isConnected || next) show(next);
+    return next;
+  };
+  const answer = async (choice: 'allow' | 'deny'): Promise<void> => {
+    if (!card) return;
+    deny.disabled = allow.disabled = true;
+    const reply = await api.answerApproval(sessionId, card.id, choice);
+    if (!reply.ok || !reply.data.ok) {
+      await refresh();
+      if (!card || (reply.ok && !reply.data.ok && reply.data.error === 'card_changed'))
+        say(() => t('ChatGPT showed a different card by then. Nothing was pressed; answer the new one.'));
+      return;
+    }
+    say(() => t('Sending your answer to ChatGPT…'));
+    // The page takes the answer on its next poll (every 2 s while the card stands).
+    for (let attempt = 0; attempt < 40 && panel.isConnected; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const next = await refresh();
+      if (!next || (next.answer && next.answer.outcome !== null)) return;
+    }
+  };
+  deny.addEventListener('click', () => void answer('deny'));
+  allow.addEventListener('click', () => void answer('allow'));
+  void refresh();
+  return panel;
+}
+
+/**
  * Tool calls the user has opened, by their durable call id.
  *
  * The timeline is redrawn from scratch whenever anything is recorded, and a fresh
@@ -3328,7 +3397,8 @@ function paintMessageReaction(box: HTMLElement, value: unknown): void {
 
 /** The approval row in the interface language. Literal `t()` calls keep the catalog audit able to see each key. */
 function approvalRowText(text: string): string {
-  if (text === APPROVAL_WAITING_TEXT) return t('ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.');
+  // The recorded English stays as it was written; since 2.1.38 the row offers the answer itself.
+  if (text === APPROVAL_WAITING_TEXT) return t('ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.');
   if (text === APPROVAL_ANSWERED_TEXT) return t('The tool approval ChatGPT asked for in this chat was answered.');
   return text;
 }
@@ -3457,6 +3527,9 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         open.append(icon('i-out'), el('span', '', () => t('Open in browser')));
         open.addEventListener('click', () => void run(api.openSessionChat(owner)));
         line.append(open);
+        const box = el('div', 'approval-wait-box');
+        box.append(line, approvalCardPanel(owner));
+        return box;
       }
       return line;
     }

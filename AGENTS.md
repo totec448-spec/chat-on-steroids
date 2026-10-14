@@ -1402,7 +1402,24 @@ page reports it on every `/activity` poll as optional `approval=1|0` (older exte
 (before the no-recorded-call verdict), `recoveryHeldByCalls`, the worker sleep sweep and the page's
 ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
-stop-notice-style desktop notice whose click opens the chat's page. The app never answers the card.
+stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
+card on its own.
+
+Since 2.1.38 the person can answer it in the app. With `approval=1` the page also sends
+`approvalCard` (JSON `{ id, lines, allow }`: an id per card element, kept in a `WeakMap` while it
+stands; up to 8 lines of the card's text without its buttons and key hints, 300 characters each; and
+whether Allow once is enabled, which ChatGPT disables in a chat without external app access).
+`CLF_DOM.approvalCard()` reads it and `answerApprovalCard(node, 'deny'|'allow')` presses the button
+whose `<kbd>` hint is `Esc` (Deny) or `⏎` (Allow once), never the options menu beside Allow once
+(where "always" lives), and only while `node` is still the waiting card. The row's panel (renderer
+`approvalCardPanel`) shows the lines as text with Deny and Allow once (Allow disabled when ChatGPT
+disabled it) and calls `sessions:answerApproval { id, cardId, choice }`; `requestApprovalAnswer`
+refuses a missing or replaced card, a disabled Allow and a second answer while one is pending. The
+answer `{ token, cardId, choice }` rides the same chat's next `/activity` reply as `approvalAnswer`;
+the page carries each token out once and reports `approvalResult` (`clicked`, `card_changed` or
+`unavailable`) on its next poll. A new card drops an unsent answer; one nobody took within 30 s is
+`expired`. A standing card polls at the active cadence (2 s) even in a hidden tab.
+`sessions:approvalCard { id }` gives the panel the card and the last answer's outcome.
 
 At ordinary silence recovery, a never-offered immediate correction takes priority over generated
 Goal/Loop work and is sent as a normal native user message. Include at most the next eligible

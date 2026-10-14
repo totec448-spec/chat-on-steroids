@@ -120,7 +120,7 @@ import {
   type PageCallEvidence
 } from './session/recorder.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
-import { approvalCardWaiting, noteApprovalCard, resetApprovalWaits, type ApprovalWaitDeps } from './approval-wait.js';
+import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -3105,8 +3105,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const astraSession = await findSessionByConversation(id, { requireUnique: true });
     // ChatGPT's own tool approval card on this page: see approval-wait.ts. Older extensions omit it.
     const pageApproval = url.searchParams.get('approval');
+    // The page's word on an answer the person gave in the app, then the card it shows now.
+    const approvalResult = parseApprovalResult(url.searchParams.get('approvalResult'));
+    if (approvalResult && settleApprovalAnswer(id, approvalResult.token, approvalResult.outcome))
+      logInfo(`bridge: ${id} approval card answer ${approvalResult.outcome}`);
     if (pageApproval === '1' || pageApproval === '0')
-      void noteApprovalCard(id, pageApproval === '1', astraSession?.id ?? null, approvalWaitDeps).catch(() => undefined);
+      void noteApprovalCard(id, pageApproval === '1', astraSession?.id ?? null, approvalWaitDeps, Date.now(),
+        pageApproval === '1' ? parseApprovalCard(url.searchParams.get('approvalCard')) : null).catch(() => undefined);
+    // An answer waits here for this chat's page, which presses it only on the same card.
+    const approvalReply = (): { approvalAnswer?: NonNullable<ReturnType<typeof approvalAnswerFor>> } => {
+      const answer = approvalAnswerFor(id);
+      return answer ? { approvalAnswer: answer } : {};
+    };
     const finishOnly = !!astraSession && await astraFinishOnly(astraSession.id, id);
     const silenceSuppressed = finishOnly || await suppressProSilence(id);
     const goalView = async () => {
@@ -3197,6 +3207,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
                 context: contextView(false)
               }
             : {}),
+          ...approvalReply(),
           ...(retiredWorker ? { retiredWorker } : {})
         },
         origin
@@ -3464,6 +3475,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // How this chat's own Compact & Resume is going, so the page can say what is
         // happening instead of spinning.
         job: resumeJobFor(live.sessionId),
+        // An answer to ChatGPT's approval card the person gave in the app (approval-wait.ts).
+        ...approvalReply(),
         // The goal loop: whether it is on, whether it *can* be on, and whatever draft this
         // chat currently has in flight. The draft's text grows on this feed, which is what
         // the panel above the composer streams — there is no second connection to hold open.

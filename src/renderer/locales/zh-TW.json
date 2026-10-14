@@ -2013,8 +2013,6 @@
   "Copy this chat's ChatGPT link": "複製此對話的 ChatGPT 連結",
   "Link copied": "已複製連結",
   "ChatGPT is waiting for your approval": "ChatGPT 正在等待你的核准",
-  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to open it.": "一個聊天已暫停，直到你在 ChatGPT 中允許或拒絕一次工具呼叫。點一下即可開啟。",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it there.": "ChatGPT 正在等待你允許或拒絕此聊天中的一次工具呼叫。在你於該處回應之前，不會繼續。",
   "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT 在此聊天中要求的工具核准已獲得回應。",
   "What's new": "新功能",
   "Full release notes": "完整版本說明",
@@ -2364,5 +2362,14 @@
   "Taskbar": "工作列",
   "Tray": "系統匣",
   "Dock": "Dock",
-  "Menu bar": "選單列"
+  "Menu bar": "選單列",
+  "A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.": "在你允許或拒絕 ChatGPT 中的工具呼叫之前，聊天已暫停。按一下即可在應用程式中回答。",
+  "Deny": "拒絕",
+  "Allow once": "允許一次",
+  "Sending your answer to ChatGPT…": "正在將你的回答傳送給 ChatGPT…",
+  "ChatGPT showed a different card by then. Nothing was pressed; answer the new one.": "那時 ChatGPT 顯示的是另一張卡片。未按下任何按鈕；請回答新卡片。",
+  "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT 已不再提供該選項。未按下任何按鈕。",
+  "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "聊天頁面未能及時接收你的回答。未按下任何按鈕；請在瀏覽器中開啟並在那裡回答。",
+  "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT 不允許在此聊天中這樣做。你只能拒絕。",
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT 正在等待你允許或拒絕此聊天中的工具呼叫。在你於此處或瀏覽器中回答之前，什麼都不會繼續。"
 }
