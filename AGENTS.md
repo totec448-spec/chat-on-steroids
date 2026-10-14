@@ -3436,6 +3436,8 @@ completion boundary, and decide whether another useful instruction is owed. Goal
 when its finish line is met. Loop continues improving/checking within that task until Off;
 it must not invent an unrelated project just to keep generating.
 
+**Repeating Goal.** Goal sees answers, not tool results. When the last three rounds of a Goal chat end in the same visible answer (case, punctuation and spacing ignored), a `continue` decision is not sent: `pauseRepeatingGoal` switches Goal off for that chat, records a timeline note naming the answer, and shows the translated `Goal paused` desktop notice (`STOP_NOTICE_TEXTS`). Loop is exempt.
+
 `goal.ts` owns objectives, chat switches, reply obligations, helper roles and decision attempts.
 `shared/goal.ts` owns bounded prompt/contracts; `goal.ts` projects applicability and the outbox
 owns actual delivery. An objective, an enabled mode, an unfinished reply obligation,
