@@ -1949,6 +1949,33 @@ it('walks the extension install in each browser\'s own words and pictures', asyn
   setLanguage('en');
 });
 
+// Firefox (2.1.38) installs the signed add-on from this version's release, so its steps differ.
+it('walks the Firefox add-on install, without Developer mode or a folder', async () => {
+  const opened: Array<[string, string]> = [];
+  const mounted = await mountChat({}, [], { openSetupBrowser: (browser: string, page: string) => { opened.push([browser, page]); return Promise.resolve({ ok: true, data: true }); } });
+  const shown = (id: string) => !document.getElementById(id)!.closest('li')!.hidden;
+  const chrome = structuredClone(mounted.state);
+  chrome.config.ui = { ...chrome.config.ui, chatBrowser: 'chrome' };
+  mounted.push(chrome);
+  expect([shown('extensionStepOpen'), shown('extensionStepDev'), shown('extensionStepLoad'), shown('extensionStepAddon')]).toEqual([true, true, true, false]);
+  (document.querySelector('[data-external-browser="firefox"]') as HTMLButtonElement).click();
+  expect([shown('extensionStepOpen'), shown('extensionStepDev'), shown('extensionStepLoad'), shown('extensionStepAddon'), shown('extensionStepChatGpt')])
+    .toEqual([false, false, false, true, true]);
+  expect(document.getElementById('extensionStepAddon')!.textContent).toBe('Add the Chat On Steroids add-on to Firefox');
+  expect(document.getElementById('extensionStepChatGpt')!.textContent).toBe('Open ChatGPT in Firefox');
+  expect(document.querySelector<HTMLImageElement>('#setupExternalIcon')!.src).toContain('firefox');
+  // The unpacked folder and its ZIP are for Chromium browsers only.
+  expect(document.querySelector<HTMLElement>('#browserExtensionStage .extension-help')!.hidden).toBe(true);
+  (document.getElementById('openFirefoxAddon') as HTMLButtonElement).click();
+  await settle();
+  expect(opened).toEqual([['firefox', 'extensions']]);
+  // Back to Chrome, its steps return.
+  (document.querySelector('[data-external-browser="chrome"]') as HTMLButtonElement).click();
+  expect([shown('extensionStepOpen'), shown('extensionStepAddon')]).toEqual([true, false]);
+  expect(document.querySelector<HTMLElement>('#browserExtensionStage .extension-help')!.hidden).toBe(false);
+  expect(document.querySelector<HTMLOptionElement>('#chatBrowser option[value="firefox"]')?.textContent).toBe('Mozilla Firefox');
+});
+
 it('preserves optional Desktop disclosures and inline screenshots across status pushes', async () => {
   const mounted = await mountChat();
   const state = structuredClone(mounted.state) as any;

@@ -2374,5 +2374,9 @@
   "ChatGPT no longer offered that choice. Nothing was pressed.": "ChatGPT はその選択肢をもう提示していませんでした。何も押されていません。",
   "The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.": "チャットのページが時間内に回答を受け取りませんでした。何も押されていません。ブラウザで開いてそこで回答してください。",
   "ChatGPT does not allow it in this chat. You can only deny it.": "ChatGPT はこのチャットでそれを許可していません。拒否のみできます。",
-  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT はこのチャットでツール呼び出しを許可するか拒否するかを待っています。ここまたはブラウザで応答するまで何も進みません。"
+  "ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.": "ChatGPT はこのチャットでツール呼び出しを許可するか拒否するかを待っています。ここまたはブラウザで応答するまで何も進みません。",
+  "Add the Chat On Steroids add-on to Firefox": "Chat On Steroids アドオンを Firefox に追加",
+  "Get the add-on": "アドオンを入手",
+  "Firefox asks before it adds the add-on. Choose Add.": "Firefox はアドオンを追加する前に確認します。「追加」を選んでください。",
+  "Mozilla Firefox": "Mozilla Firefox"
 }

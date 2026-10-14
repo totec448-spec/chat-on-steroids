@@ -1115,7 +1115,9 @@ function versionHeaders() {
     ...(workerStampValue ? { 'x-extension-build': workerStampValue } : {}),
     ...(browserId ? { 'x-extension-browser': browserId } : {}),
     // The app tells the person's own browser apart from the CoS browser's copy of this extension.
-    'x-extension-host': globalThis.__cosBrowserWorker ? 'cos' : 'browser'
+    'x-extension-host': globalThis.__cosBrowserWorker ? 'cos' : 'browser',
+    // Firefox updates its add-on itself; the app neither offers its folder nor asks for a reload.
+    ...(typeof chrome.runtime.getBrowserInfo === 'function' ? { 'x-extension-engine': 'gecko' } : {})
   };
 }
 
@@ -3118,8 +3120,18 @@ let extensionReloadPending = false;
  * an idle browser kept the old build after the app updated, and nothing said which check held it.
  */
 let extensionUpdateHold = null;
+/**
+ * Firefox runs the signed add-on installed from its .xpi and updates it through its own update
+ * manifest; the folder the app keeps for Chromium is not what Firefox loads, so reloading would
+ * only reload the same build. `runtime.getBrowserInfo` exists only in Firefox.
+ */
+function updatedByBrowser() {
+  return typeof chrome.runtime.getBrowserInfo === 'function';
+}
+
 async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
   if (extensionReloadPending) return;
+  if (updatedByBrowser()) { extensionUpdateHold = offer ? 'browser-updates-itself' : null; return; }
   if (!offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) { extensionUpdateHold = null; return; }
   await workerStampReady;
   if (!workerStampValue || workerStampValue === offer.build) { extensionUpdateHold = null; return; }
