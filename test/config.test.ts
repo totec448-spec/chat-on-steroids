@@ -411,6 +411,13 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui.followUp).toBe('queue');
   });
 
+  it('sends with Enter by default and saves Cmd/Ctrl+Enter', async () => {
+    const config = defaultConfig();
+    expect(config.ui.enterSends).toBe(true);
+    await saveConfig({ ...config, ui: { ...config.ui, enterSends: false } });
+    expect((await loadConfig()).ui.enterSends).toBe(false);
+  });
+
   it('keeps the thorough handoff length for older and broken configs, and saves a choice', async () => {
     const config = defaultConfig();
     expect(config.compaction.handoffLength).toBe('thorough');
@@ -596,6 +603,7 @@ describe('shipped defaults', () => {
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
     expect(loaded.multiAgent.autoWorktrees).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
+    expect(loaded.multiAgent.archiveWorkerChats).toBe(false);
   });
 
   it.each(['win32', 'darwin', 'linux'] as const)(
@@ -615,6 +623,7 @@ describe('shipped defaults', () => {
       expect(config.multiAgent.waitForSubAgents).toBe(false);
       expect(config.multiAgent.autoWorktrees).toBe(false);
       expect(config.multiAgent.endSleepingWorkerProcesses).toBe(false);
+      expect(config.multiAgent.archiveWorkerChats).toBe(false);
     }
   );
 
@@ -638,7 +647,14 @@ describe('shipped defaults', () => {
     expect(loaded.multiAgent.waitForSubAgents).toBe(false);
     expect(loaded.multiAgent.autoWorktrees).toBe(false);
     expect(loaded.multiAgent.endSleepingWorkerProcesses).toBe(false);
+    expect(loaded.multiAgent.archiveWorkerChats).toBe(false);
     expect(loaded.readOnly).toBe(true);
+  });
+
+  it('keeps a saved choice to archive retired worker chats (#1460)', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, multiAgent: { ...config.multiAgent, archiveWorkerChats: true } });
+    expect((await loadConfig()).multiAgent.archiveWorkerChats).toBe(true);
   });
 
   it('does not turn config corruption into permission consent', async () => {

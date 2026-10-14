@@ -54,8 +54,25 @@ export function plainTextOfHtml(html: string): string {
     .trim();
 }
 
+/**
+ * ChatGPT's raw text marks link cards, citations and widgets with private-use characters:
+ * U+E200 name U+E202 field … U+E201. The page draws them; as plain text they read like
+ * "urlGitHub-Vergleich öffnen…https://…". A link becomes a Markdown link, anything else is dropped.
+ */
+export function providerEntitiesAsMarkdown(text: string): string {
+  if (!/[\uE200-\uE202]/.test(text)) return text;
+  return text
+    .replace(/\uE200url\uE202([^\uE200-\uE202]*)\uE202([^\uE200-\uE202]*)\uE201/g, (_match, label: string, href: string) =>
+      label.trim() ? `[${label.trim()}](${href.trim()})` : href.trim())
+    .replace(/\uE200[a-z][a-z0-9_]{0,40}\uE202[^\uE200\uE201]*\uE201/gi, '')
+    .replace(/[\uE200-\uE202]/g, '')
+    .replace(/[ \t]+([.,;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
 /** The reply as a model should read it: the page's resolved content when directives replaced it. */
 export function modelFacingText(text: string, capture?: { text: string; truncated?: boolean } | null): string {
+  text = providerEntitiesAsMarkdown(text);
   if (!hasProviderDirective(text)) return text;
   if (resolvedCapture(capture)) {
     const resolved = plainTextOfHtml(capture.text);

@@ -3157,6 +3157,18 @@ it('shows unreadable refresh state and allows one explicit reset, including fail
   button.click(); expect(reset).toHaveBeenCalledTimes(2);
 });
 
+// Codex's turn-completion notifications: on unless switched off in General.
+it('notifies when a chat finishes unless switched off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const notify = w.document.getElementById('turnNotifications') as HTMLInputElement;
+  expect(notify.checked).toBe(true);
+  notify.checked = false;
+  notify.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
+});
+
 // Codex's "Follow-up behavior", in General.
 it('offers the follow-up behavior, starting at joining the running turn, and saves waiting', async () => {
   const mounted = await mountChat({});
@@ -3180,4 +3192,28 @@ it('keeps the computer awake while a chat works unless switched off', async () =
   keepAwake.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.ui.keepAwake).toBe(false);
+});
+
+// Codex's "Enter key behavior", in General.
+it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const enter = w.document.getElementById('enterSends') as HTMLSelectElement;
+  expect(enter.value).toBe('enter');
+  enter.value = 'modifier';
+  enter.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.enterSends).toBe(false);
+});
+
+// #1460: worker chats leave ChatGPT's chat list once retired, only when switched on.
+it('offers archiving retired worker chats, off by default, and saves it', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const archive = w.document.getElementById('archiveWorkerChats') as HTMLInputElement;
+  expect(archive.checked).toBe(false);
+  archive.checked = true;
+  archive.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerChats).toBe(true);
 });

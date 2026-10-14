@@ -5984,3 +5984,47 @@ describe('this install\'s connector names', () => {
     expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(names);
   });
 });
+
+describe('archiving retired worker chats (#1460)', () => {
+  const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
+  function archiveWorker(outcome: unknown) {
+    const results: unknown[] = [];
+    let next: string | null = chat;
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/worker-archive/next') { const id = next; next = null; return response(200, { conversationId: id }); }
+        if (route === '/worker-archive/result') { results.push(JSON.parse(String(init.body))); return response(200, { ok: true }); }
+        return response(200, {});
+      },
+      tabsSendMessage: async (_tabId, message) => message.type === 'clf-archive-chat' ? outcome : { ok: true }
+    });
+    return { worker, results };
+  }
+
+  it('archives the next chat from a registered ChatGPT page and reports what it said', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'archived' });
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(results).toEqual([{ conversationId: chat, outcome: 'archived' }]);
+  });
+
+  it('defers when no ChatGPT page of this extension is open', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'archived' });
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'clf-archive-chat' }), expect.anything());
+    expect(results).toEqual([{ conversationId: chat, outcome: 'deferred' }]);
+  });
+
+  it('reports a failure the page could not explain as failed', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'deleted' });
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.fireAlarm();
+    expect(results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
+  });
+});
