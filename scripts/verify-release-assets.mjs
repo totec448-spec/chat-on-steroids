@@ -17,9 +17,13 @@ export const RELEASE_FILES = [
   'Chat-On-Steroids-Linux-arm64.AppImage',
   'Chat-On-Steroids-Linux-arm64.deb',
   'Chat-On-Steroids-Extension.zip',
-  'Chat-On-Steroids-Native-Sources.tar.gz'
+  'Chat-On-Steroids-Native-Sources.tar.gz',
+  'Chat-On-Steroids-Firefox.xpi',
+  'firefox-updates.json'
 ];
 const EXTENSION = 'Chat-On-Steroids-Extension.zip';
+const FIREFOX = 'Chat-On-Steroids-Firefox.xpi';
+const FIREFOX_UPDATES = 'firefox-updates.json';
 
 function sha256(file) {
   return new Promise((resolve, reject) => {
@@ -54,6 +58,20 @@ export async function verifyReleaseAssets({ dir, tag }) {
     const manifest = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])) : null;
     const version = manifest?.version ?? null;
     if (version !== wanted) problems.push(`The extension in ${EXTENSION} is version ${version ?? 'unknown'}, not ${wanted}.`);
+  }
+  // Firefox installs what firefox-updates.json names, after checking its hash: both must be this tag's.
+  const firefox = path.join(dir, FIREFOX);
+  const updates = path.join(dir, FIREFOX_UPDATES);
+  if (existsSync(firefox) && existsSync(updates)) {
+    const entries = unzipSync(readFileSync(firefox));
+    const version = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])).version ?? null : null;
+    if (version !== wanted) problems.push(`The add-on in ${FIREFOX} is version ${version ?? 'unknown'}, not ${wanted}.`);
+    let offered = [];
+    try { offered = Object.values(JSON.parse(readFileSync(updates, 'utf8')).addons ?? {}).flatMap(addon => addon.updates ?? []); } catch { /* reported below */ }
+    const hash = `sha256:${await sha256(firefox)}`;
+    if (!offered.some(update => update.version === wanted && update.update_hash === hash && String(update.update_link).endsWith(`/v${wanted}/${FIREFOX}`))) {
+      problems.push(`${FIREFOX_UPDATES} does not offer ${FIREFOX} of ${tag} with its checksum.`);
+    }
   }
   return problems;
 }

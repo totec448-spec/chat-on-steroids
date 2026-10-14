@@ -794,6 +794,34 @@ Load command 11
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
   });
 
+  // The Firefox add-on is signed by Mozilla only when a tag is published: AMO signs each version
+  // once, so canary builds cannot. Signing needs the AMO_JWT_* repository secrets.
+  it('signs the Firefox add-on once per published tag and attaches it with its update manifest', () => {
+    const publish = yamlFile('.github/workflows/publish.yml');
+    const sign = publish.jobs['firefox-addon'];
+    expect(sign?.needs).toBe('preflight');
+    const steps = sign.steps as Array<Record<string, any>>;
+    const script = steps.map(step => String(step.run ?? '')).join('\n');
+    const env = JSON.stringify(steps.map(step => step.env ?? {}));
+    expect(script).toContain('node scripts/write-extension-stamp.mjs');
+    expect(script).toContain('node scripts/stage-firefox-extension.mjs');
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint/);
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs');
+    expect(env).toContain('${{ secrets.AMO_JWT_ISSUER }}');
+    expect(env).toContain('${{ secrets.AMO_JWT_SECRET }}');
+    // Secrets reach web-ext through the environment, never the command line.
+    expect(script).not.toMatch(/--api-(key|secret)/);
+    expect(publish.jobs.publish.needs).toEqual(['candidate', 'firefox-addon']);
+    const publishSteps = publish.jobs.publish.steps as Array<Record<string, any>>;
+    const names = publishSteps.map(step => step.name);
+    expect(names.indexOf('Add the signed Firefox add-on')).toBeGreaterThan(names.indexOf('Re-verify the checksums'));
+    expect(names.indexOf('Add the signed Firefox add-on')).toBeLessThan(names.indexOf('Publish the release'));
+    const release = String(publishSteps.find(step => step.name === 'Publish the release')?.run);
+    expect(release).toContain('publish/Chat-On-Steroids-Firefox.xpi');
+    expect(release).toContain('publish/firefox-updates.json');
+  });
+
   it('keeps version metadata aligned and validates artifacts independently of editorial release notes', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string };
     const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
