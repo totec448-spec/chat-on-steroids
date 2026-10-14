@@ -2798,6 +2798,24 @@ input[readonly] {
   border-radius: 0;
 }
 
+/* ChatGPT's writing block (#1477): the code panel's frame and header; its text reads as text, not a quote. */
+.msg.rich .markdown-writing {
+  margin: 0.55em 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+/* A title or subject, not code: the reading font, a step larger than the code header. */
+.msg.rich .markdown-writing .tool-output-header { font-family: inherit; font-size: calc(11.5px * var(--text-scale, 1)); }
+
+.msg.rich .markdown-writing blockquote {
+  margin: 0;
+  padding: 0.6em 0.9em;
+  border-inline-start: 0;
+  color: inherit;
+}
+
 .msg.rich a {
   color: var(--blue);
   text-decoration: underline;
