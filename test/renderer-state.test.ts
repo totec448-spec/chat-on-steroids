@@ -2643,14 +2643,15 @@ it.each(['reply', 'transport', 'read-state'])('localizes and retains the update 
 });
 
 // #1490: a silently failed installer left the next start on the old version with nothing said.
-it('says when the last update did not install, ahead of the ready line', async () => {
+it('says when the last update did not install, in place of the ready line', async () => {
   const mounted = await mountChat();
   const state = structuredClone(mounted.state) as any;
   state.update = { current: '2.0.2', latest: '2.0.3', stage: 'ready', error: null, checkedAt: Date.now(), notInstalled: '2.0.3' };
   mounted.push(state);
   const line = mounted.window.document.getElementById('updateLine')!;
   expect(line.textContent).toContain('Chat On Steroids 2.0.3 did not install; this is still 2.0.2.');
-  expect(line.textContent).toContain('2.0.3 is downloaded and ready');
+  // The same version ready again: the notice already says to choose Install, once.
+  expect(line.textContent).not.toContain('is downloaded and ready');
   expect(line.className).toContain('bad');
   // Before the next check has found it again: never "Up to date" over a failed install.
   mounted.push({ ...structuredClone(state), update: { ...state.update, latest: null, stage: 'idle' } });

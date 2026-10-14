@@ -1195,7 +1195,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     lines.push(t("Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
     tone = 'bad';
   }
-  if (update.latest) {
+  if (update.latest && !(update.notInstalled === update.latest && update.stage === 'ready')) {
     // `latest` set with a stage of `idle` is the deliberate case: a new version exists and this
     // installation - a Linux .deb, macOS, a development tree, an architecture with no artifact -
     // is not one the app can update by itself. That is when the button matters.
