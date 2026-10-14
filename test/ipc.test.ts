@@ -35,6 +35,10 @@ vi.mock('electron', () => ({
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
 vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null, extensionUpdateOffer: () => null, prepareExtensionUpdate: () => null }));
 vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
+const surfacePaths = vi.hoisted(() => ({ forget: vi.fn(async () => undefined) }));
+vi.mock('../src/main/mcp/persistent-paths.js', () => ({
+  loadSurfaceTokens: vi.fn(async () => ({})), rememberSurfaceTokens: vi.fn(async () => true), forgetSurfaceTokens: surfacePaths.forget
+}));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
@@ -392,6 +396,17 @@ it('publishes the owning session when delivered input history is revised in plac
     await writeDurableNow('session-input', previous ?? []);
     input.resetInputForTests();
   }
+});
+
+// #924: turning stable connector URLs off forgets the stored tokens; turning it on keeps the running ones.
+it('forgets the stored connector URL tokens when the option is turned off', async () => {
+  surfacePaths.forget.mockClear();
+  expect(await save({ ...getConfig(), mcp: { instructions: getConfig().mcp.instructions, persistentUrls: true } })).toMatchObject({ ok: true });
+  expect(getConfig().mcp.persistentUrls).toBe(true);
+  expect(surfacePaths.forget).not.toHaveBeenCalled();
+  expect(await save({ ...getConfig(), mcp: { instructions: getConfig().mcp.instructions, persistentUrls: false } })).toMatchObject({ ok: true });
+  expect(getConfig().mcp.persistentUrls).toBe(false);
+  expect(surfacePaths.forget).toHaveBeenCalledTimes(1);
 });
 
 it('stages clipboard image bytes with a preview through the general attachment owner', async () => {
@@ -957,14 +972,14 @@ describe('settings writes from more than one UI', () => {
     const base = defaultConfig(); await saveConfig(base);
     const wanted = { ...base, mcp: { instructions: 'Use the approved project only.' }, ui: { ...base.ui, browserOnly: true } };
     expect((await save(wanted, base)).ok).toBe(true);
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual(wanted.mcp);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     expect((await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual(wanted.mcp);
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     const legacy = { ...base } as any; delete legacy.mcp;
     expect((await save(legacy, legacy)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual(wanted.mcp);
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
     const current = getConfig();
     expect((await save({ ...current, mcp: { instructions: '' } }, current)).ok).toBe(true);
     expect(getConfig().mcp.instructions).toBe('');

@@ -4455,6 +4455,15 @@ Separate local listener health, public tunnel reachability, ChatGPT connector co
 browser attachment in both status and diagnosis. Stale connect/disconnect results cannot replace
 a newer endpoint. Secret paths/tokens are not public diagnostics.
 
+Each surface's secret path token rotates on every start. `mcp.persistentUrls` (Settings → For
+developers, off by default, #924) keeps them for a tunnel of the user's own whose URL ChatGPT stores
+(a named Cloudflare tunnel; #1401): `mcp/persistent-paths.ts` stores one token per surface only
+in the OS-backed secret store (`mcp:path:<surface>`), `connection.ts` passes the stored ones to
+`startMcpServer` and remembers the running ones after each start. Turning it on keeps the URLs that
+are running, so nothing has to be re-entered in ChatGPT; turning it off forgets the tokens and the
+next start rotates again. Without secure storage they keep rotating and the switch is disabled
+(unless already on, so it can always be turned off).
+
 Each actual tunnel lifetime keeps one in-memory loss-notice budget in `connection.ts`: a connected
 report arms it; the first offline/auth-failed/tunnel-unavailable report starts a 30-second grace
 timer, and only an outage that still has not recovered when that timer fires consumes the budget.

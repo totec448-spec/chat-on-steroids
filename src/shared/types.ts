@@ -388,6 +388,12 @@ export interface MultiAgentSettings {
 export interface McpSettings {
   /** Appended to the Core and Desktop server instructions, or empty for none. */
   instructions: string;
+  /**
+   * Keep each connector's secret URL path across restarts, for a tunnel of the user's own whose
+   * URL ChatGPT stores (#924). Off by default: tokens rotate on every start. Stored only in the
+   * OS-backed secret store; turning it off forgets them.
+   */
+  persistentUrls?: boolean;
 }
 
 /** The opt-in local control API for an agent watching this app (`src/main/control-api.ts`). */

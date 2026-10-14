@@ -2381,5 +2381,7 @@
   "Mozilla Firefox": "Mozilla Firefox",
   "The extension may not open ChatGPT": "Tiện ích không được mở ChatGPT",
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "{0} đang chặn tiện ích truy cập chatgpt.com. Trong chi tiết tiện ích, hãy cho phép truy cập chatgpt.com (“Quyền truy cập trang web” trên Chrome, Edge và Brave, “Quyền” trên Firefox), rồi tải lại ChatGPT.",
-  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} chưa được cài đặt; đây vẫn là {1}. Chọn Cài đặt để thử lại; Windows có thể hỏi quyền."
+  "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "Chat On Steroids {0} chưa được cài đặt; đây vẫn là {1}. Chọn Cài đặt để thử lại; Windows có thể hỏi quyền.",
+  "Keep plugin URLs across restarts": "Giữ URL của plugin qua các lần khởi động lại",
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Dành cho đường hầm riêng của bạn, ví dụ đường hầm Cloudflare có tên, có URL được ChatGPT lưu. Ai có URL đó đều dùng được các plugin Chat On Steroids của bạn cho đến khi bạn tắt tùy chọn này. Cần bộ lưu trữ an toàn."
 }

@@ -260,9 +260,11 @@ export function forgetExposedSurface(): void {
   surfaceExposure.clear();
 }
 
-export async function startMcpServer(getContext: () => ToolContext): Promise<McpEndpoint> {
+export async function startMcpServer(getContext: () => ToolContext, kept: Partial<Record<SurfaceId, string>> = {}): Promise<McpEndpoint> {
   // A per-session token in the path is what authorises callers. It is regenerated on
-  // every app start, so a URL that leaks stops working when the app restarts.
+  // every app start, so a URL that leaks stops working when the app restarts, unless the
+  // user opted into keeping it (`mcp.persistentUrls`, see persistent-paths.ts): then the
+  // caller passes each surface's stored token, and only a well-formed one is used.
   requestSeenAt = null;
   surfaceRequestAt.clear();
   resetToolClock();
@@ -274,7 +276,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
   // Desktop" and "give me everything" the same act.
   const surfacePaths = SURFACE_IDS.map((id) => ({
     id,
-    basePath: `/mcp/${id}/${randomBytes(32).toString('base64url')}`
+    basePath: `/mcp/${id}/${kept[id] && /^[A-Za-z0-9_-]{43}$/.test(kept[id]!) ? kept[id] : randomBytes(32).toString('base64url')}`
   }));
 
   // ChatGPT can keep a cached tools/list snapshot for the lifetime of a connector
