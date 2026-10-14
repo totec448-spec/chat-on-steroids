@@ -1787,6 +1787,36 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools, versionId: 'asdk_app_v_synthetic' })).body.ok).toBe(true);
     resetPluginRefreshForTests();
   });
+  it.each([false, true])('migrates a legacy consumed refresh only through an exact read-only tunnel receipt (automatic=%s)', async automatic => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, ui: { ...base.ui, autoRefreshPlugins: automatic }, tunnel: { ...base.tunnel, tunnelId: 'tunnel_core00001' } });
+    const plugin = await import('../src/main/plugin-refresh.js');
+    const { readDurable } = await import('../src/main/durable.js');
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
+    try {
+      const tools = [{ name: 'read', description: 'Current', inputSchema: { type: 'object', properties: {} } }];
+      plugin.publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', tools);
+      const schemaId = plugin.pluginRefreshPublications()[0]!.schemaId;
+      await writeDurableNow('plugin-refresh', [{ surface: 'core', id: randomUUID(), schemaId,
+        appId: 'asdk_app_legacy_consumed', completedSchemaId: null, attempted: true, manual: false }]);
+      if (!automatic) await plugin.requestPluginRefreshes(APP_VERSION, ['core']);
+      const [request] = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
+      expect(request).toMatchObject({ observeOnly: true, appId: 'asdk_app_legacy_consumed' });
+      expect((await plugin.pluginRefreshStatuses()).core?.state).toBe('unknown');
+      const receipt = { id: request.id, appId: request.appId, connectorName: request.connectorName, tools };
+      expect((await post('/plugin-refresh', { ...receipt, action: 'claim', tools: [{ ...tools[0], description: 'Old' }], tunnelId: 'tunnel_core00001' })).body.ok).toBe(false);
+      for (const override of [{}, { tunnelId: 'tunnel_foreign01' },
+        { tunnelId: 'tunnel_core00001', appId: 'asdk_app_foreign' },
+        { tunnelId: 'tunnel_core00001', tools: [{ ...tools[0], description: 'Different schema' }] }]) {
+        expect((await post('/plugin-refresh', { ...receipt, action: 'current', ...override })).body.ok).toBe(false);
+      }
+      expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ attempted: true, appId: receipt.appId });
+      expect((await post('/plugin-refresh', { ...receipt, action: 'current', tunnelId: 'tunnel_core00001' })).body.ok).toBe(true);
+      expect((await plugin.pluginRefreshStatuses()).core?.state).toBe('current');
+      expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
+    } finally { plugin.resetPluginRefreshForTests(); }
+  });
+
   it('accepts a stale connector only by the tunnel id configured for its surface', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, ui: { ...base.ui, autoRefreshPlugins: true }, tunnel: { ...base.tunnel, tunnelId: 'tunnel_core00001', desktopTunnelId: 'tunnel_desk00001' } });
@@ -1826,6 +1856,27 @@ describe('IPC input delivery and Goal control integration', () => {
     await configure(false);
     // A click already accepted while enabled may still report its real result.
     expect((await post('/plugin-refresh', { ...claim, action: 'complete', tools })).body.ok).toBe(true);
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
+  });
+  it('delivers an explicit Update all refresh over the bridge while the automatic preference remains off', async () => {
+    const config = { ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } };
+    await saveConfig(config);
+    const plugin = await import('../src/main/plugin-refresh.js');
+    plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
+    await writeDurableNow('plugin-refresh', []);
+    const tools = [{ name: 'read', description: 'Current', inputSchema: { type: 'object', properties: {} } }];
+    plugin.publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', tools);
+    await plugin.requestPluginRefreshes(APP_VERSION);
+    const pending = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
+    expect(pending).toHaveLength(1);
+    expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toHaveLength(1);
+    const claim = { action: 'claim', id: pending[0].id, appId: 'asdk_app_explicit_update', connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0], description: 'Old' }] };
+    expect((await post('/plugin-refresh', claim)).body.ok).toBe(true);
+    expect((await post('/plugin-refresh', { ...claim, action: 'complete', tools })).body.ok).toBe(true);
+    expect(getConfig().ui.autoRefreshPlugins).toBe(false);
+    expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
+    plugin.publishPluginSurface('desktop', 'Desktop', 'test', '', tools);
+    expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests.map((row: any) => row.surface)).toEqual(['core']);
     plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
   });
   it('accepts a manual plugin-refresh terminal state and removes it from browser pickup', async () => {
