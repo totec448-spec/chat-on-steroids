@@ -206,6 +206,81 @@ describe('external plugin authority', () => {
     expect(manager.snapshot().plugins[0]?.status).toBe('ready');
   });
 
+  it('keeps per-plugin Longest call independent, durable and effective without reconnect', async () => {
+    const first = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    const secondEntry = path.join(dir, 'second.cjs');
+    await fs.writeFile(secondEntry, fixture.replaceAll('Echo.Mixed', 'Other.Echo'));
+    const second = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [secondEntry] }, longestCallSeconds: 900 })).plugins[1]!;
+    expect(first.longestCallSeconds).toBe(120);
+    expect(second.longestCallSeconds).toBe(900);
+    const dispatched = vi.spyOn(Client.prototype, 'callTool');
+    expect((await manager.call('Echo.Mixed', { value: 'before' })).isError).not.toBe(true);
+    const client = dispatched.mock.instances[0];
+    await manager.configure(first.id, { longestCallSeconds: 480 });
+    expect(manager.snapshot().plugins.find(p => p.id === first.id)?.status).toBe('ready');
+    expect((await manager.call('Echo.Mixed', { value: 'after' })).isError).not.toBe(true);
+    expect(dispatched.mock.instances[1]).toBe(client);
+    expect(dispatched.mock.calls[1]?.[1]).toMatchObject({ timeout: 480_000, maxTotalTimeout: 480_000, resetTimeoutOnProgress: true });
+    expect(dispatched.mock.calls[1]?.[1]?.onprogress).toBeTypeOf('function');
+    expect((await manager.call('Other.Echo', { value: 'peer' })).isError).not.toBe(true);
+    expect(dispatched.mock.calls[2]?.[1]).toMatchObject({ timeout: 900_000, maxTotalTimeout: 900_000, resetTimeoutOnProgress: true });
+    expect(manager.snapshot().plugins.find(p => p.id === second.id)?.longestCallSeconds).toBe(900);
+    await manager.close(); manager = new PluginManager(); await manager.initialize(dir);
+    await vi.waitFor(() => expect(manager.snapshot().plugins.every(p => p.status === 'ready')).toBe(true), { timeout: 10_000 });
+    expect(manager.snapshot().plugins.map(p => p.longestCallSeconds)).toEqual([480, 900]);
+  });
+
+  it('loads legacy plugin limits with 120 s fallback and sanitizes corrupt stored values', async () => {
+    const one = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    const otherEntry = path.join(dir, 'legacy.cjs');
+    await fs.writeFile(otherEntry, fixture.replaceAll('Echo.Mixed', 'Legacy.Echo'));
+    await manager.install({ source: { kind: 'command', command: process.execPath, args: [otherEntry] } });
+    await manager.close();
+    const file = path.join(dir, 'state', 'plugins.json');
+    const records = JSON.parse(await fs.readFile(file, 'utf8'));
+    delete records[0].longestCallSeconds;
+    records[1].longestCallSeconds = 'very long';
+    await fs.writeFile(file, JSON.stringify(records));
+    manager = new PluginManager(); await manager.initialize(dir);
+    await vi.waitFor(() => expect(manager.snapshot().plugins.every(p => p.status === 'ready')).toBe(true), { timeout: 10_000 });
+    expect(manager.snapshot().plugins.find(p => p.id === one.id)?.longestCallSeconds).toBe(120);
+    expect(manager.snapshot().plugins.map(p => p.longestCallSeconds)).toEqual([120, 120]);
+  });
+
+  it('validates Longest call seconds without changing plugin state on bad input', async () => {
+    const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    for (const invalid of [0, -1, 1801, 2.5, NaN, Infinity, '300', null]) {
+      await expect(manager.configure(row.id, { longestCallSeconds: invalid as number })).rejects.toThrow('Longest call');
+      expect(manager.snapshot().plugins[0]?.longestCallSeconds).toBe(120);
+      expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+    }
+    await manager.configure(row.id, { longestCallSeconds: 1800 });
+    expect(manager.snapshot().plugins[0]?.longestCallSeconds).toBe(1800);
+    await manager.configure(row.id, { longestCallSeconds: 1 });
+    expect(manager.snapshot().plugins[0]?.longestCallSeconds).toBe(1);
+  });
+
+  it('enforces the absolute Longest call limit even after progress extends the SDK idle timer', async () => {
+    const delayed = `if(m.method==='tools/call'&&m.params.arguments.value==='progress'){
+      setTimeout(()=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/progress',params:{progressToken:m.params._meta.progressToken,progress:1,total:2}})+'\\n'),800);
+      setTimeout(()=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{content:[{type:'text',text:'late'}],structuredContent:{value:'late'}}})+'\\n'),1400);
+      return;
+    }`;
+    await fs.writeFile(entry, fixture.replace("if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){", `${delayed}if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){`));
+    await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] }, longestCallSeconds: 1 });
+    const upstream = vi.spyOn(Client.prototype, 'callTool');
+    const outcome = vi.fn();
+    const timedOut = await manager.call('Echo.Mixed', { value: 'progress' }, outcome);
+    expect(timedOut.isError).toBe(true);
+    expect(JSON.stringify(timedOut)).toContain('PLUGIN_CALL_TIMEOUT');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_execution_error');
+    expect(upstream.mock.calls[0]?.[1]).toMatchObject({ timeout: 1000, maxTotalTimeout: 1000, resetTimeoutOnProgress: true });
+    expect(upstream.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+    expect((await manager.call('Echo.Mixed', { value: 'next call' })).structuredContent).toEqual({ value: 'next call' });
+    expect(upstream.mock.instances[0]).toBe(upstream.mock.instances[1]);
+  });
+
   it.each(['timeout', 'abort'] as const)('keeps a plugin ready after SDK %s and cancels only that request', async (failure) => {
     const callsLog = path.join(dir, 'calls.jsonl');
     const cancelsLog = path.join(dir, 'cancels.jsonl');
@@ -1010,6 +1085,19 @@ describe('enabled plugin process ownership', () => {
     await vi.advanceTimersByTimeAsync(600_000);
     expect(alive(active.pid)).toBe(true);
     expect(await h.pids()).toHaveLength(1);
+  });
+
+  it('changes Longest call during an in-flight tool without interrupting or restarting its server', async () => {
+    const h = await trackedFixture();
+    const original = (await h.pids())[0]!;
+    const call = manager.call('Echo.Mixed', { value: 'hold' });
+    await manager.configure(h.row.id, { longestCallSeconds: 480 });
+    expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+    expect(alive(original.pid)).toBe(true);
+    await fs.writeFile(h.releaseFile, 'finish');
+    expect((await call).isError).not.toBe(true);
+    expect(await h.pids()).toHaveLength(1);
+    expect(manager.snapshot().plugins[0]?.longestCallSeconds).toBe(480);
   });
 
   it.each(['disable', 'uninstall', 'close'] as const)('%s ends the owned process and refuses later calls', async action => {
