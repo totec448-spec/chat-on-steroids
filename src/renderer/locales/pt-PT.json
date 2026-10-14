@@ -2383,5 +2383,11 @@
   "{0} keeps the extension off chatgpt.com. In the extension’s details, allow it on chatgpt.com (“Site access” in Chrome, Edge and Brave, “Permissions” in Firefox), then reload ChatGPT.": "O {0} impede a extensão de aceder a chatgpt.com. Nos detalhes da extensão, permita o acesso a chatgpt.com (“Acesso a sites” no Chrome, Edge e Brave, “Permissões” no Firefox) e recarregue o ChatGPT.",
   "Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.": "O Chat On Steroids {0} não foi instalado; esta ainda é a {1}. Escolha Instalar para tentar novamente; o Windows pode pedir permissão.",
   "Keep plugin URLs across restarts": "Manter os URLs dos plugins após reinícios",
-  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Para o seu próprio túnel, como um túnel com nome do Cloudflare, cujo URL o ChatGPT guarda. Quem tiver esse URL pode usar os seus plugins do Chat On Steroids até desativar isto. Requer armazenamento seguro."
+  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Para o seu próprio túnel, como um túnel com nome do Cloudflare, cujo URL o ChatGPT guarda. Quem tiver esse URL pode usar os seus plugins do Chat On Steroids até desativar isto. Requer armazenamento seguro.",
+  "Start a fresh turn after": "Iniciar um novo turno após",
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.": "Um trabalho longo continua num novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Não é usado com modelos Pro, Goal, Loop nem subagentes.",
+  "20 minutes": "20 minutos",
+  "30 minutes": "30 minutos",
+  "45 minutes": "45 minutos",
+  "60 minutes": "60 minutos"
 }

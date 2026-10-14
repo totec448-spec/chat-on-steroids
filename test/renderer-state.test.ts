@@ -3426,6 +3426,21 @@ it('notifies when a chat finishes unless switched off', async () => {
   expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
 });
 
+// #1402: long turns continue in a fresh one, every 30 minutes unless changed or off.
+it('starts a fresh turn after 30 minutes unless changed, and saves Off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const rotate = w.document.getElementById('rotateTurnMinutes') as HTMLSelectElement;
+  expect(rotate.value).toBe('30');
+  expect([...rotate.options].map(option => option.value)).toEqual(['0', '20', '30', '45', '60']);
+  rotate.value = '0';
+  rotate.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.rotateTurnMinutes).toBe(0);
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, rotateTurnMinutes: 45 } } });
+  expect(rotate.value).toBe('45');
+});
+
 // Codex's "Follow-up behavior", in General.
 it('offers the follow-up behavior, starting at joining the running turn, and saves waiting', async () => {
   const mounted = await mountChat({});

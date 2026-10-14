@@ -873,6 +873,21 @@ it('identifies automatic Continue without user-task editing or reordering and ke
   expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
 });
 
+// #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
+// message it is; dropped, it raises no delivery notice, because the app tries again by itself.
+it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {
+  const { w, live, append } = await boot([]);
+  const rotation: InputEntry = { id: 'fresh-turn', sessionId: summary([]).id, text: 'Continue the task from where you are.', mode: 'auto',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b', purpose: 'rotation' };
+  live.inputs.push(rotation);
+  await append([]);
+  expect(w.document.querySelector('#inputQueue [data-input-id="fresh-turn"]')?.textContent).toContain('Continue the task');
+  live.inputs[0] = { ...rotation, state: 'cancelled', error: 'Not sent: browser preparation timed out. This attempt was cancelled.' };
+  await append([]);
+  expect(w.document.querySelector('#inputQueue [data-input-id="fresh-turn"]')).toBeNull();
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Not sent');
+});
+
 it('keeps a transport-deferred immediate upload visible with cancellation instead of an invalid task editor', async () => {
   const { w, live, append } = await boot([]);
   live.inputs.push({ id: 'native-correction', sessionId: summary([]).id, text: 'Waiting upload', mode: 'after-turn', requestedMode: 'auto',
