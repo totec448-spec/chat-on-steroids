@@ -48,6 +48,8 @@ beforeEach(async () => {
   await git(root, 'init');
   await git(root, 'config', 'user.email', 'test@example.com');
   await git(root, 'config', 'user.name', 'CoS Test');
+  // Exact bytes in the assertions below; line-ending conversion has its own test.
+  await git(root, 'config', 'core.autocrlf', 'false');
   await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 1;\n');
   await fs.writeFile(path.join(root, 'kept.txt'), 'kept\n');
   await git(root, 'add', '.');
@@ -160,6 +162,17 @@ it('never fails or blocks the patch when the capture fails', async () => {
   expect(await listCheckpoints(projectId)).toEqual([]);
 });
 
+it('takes no later checkpoint in a turn whose first capture failed, since its patch already ran', async () => {
+  vi.spyOn(projectGit, 'withTemporaryIndex').mockRejectedValueOnce(new Error('disk full'));
+  await applyPatch(editApp('export const value = 1;', 'export const value = 2;'));
+  await applyPatch(editApp('export const value = 2;', 'export const value = 3;'));
+  expect(await listCheckpoints(projectId)).toEqual([]);
+
+  session = { ...session, activeTurnId: 'turn-2' };
+  await applyPatch(editApp('export const value = 3;', 'export const value = 4;'));
+  expect((await listCheckpoints(projectId)).map(entry => entry.key)).toEqual(['turn:turn-2']);
+});
+
 async function checkpointNow(): Promise<string> {
   await runInCallContext(call(SESSION), () => checkpointBeforePatch([path.join(root, 'app.ts')]));
   const [entry] = await listCheckpoints(projectId);
@@ -208,6 +221,29 @@ it('restores all listed files: recreates deleted ones, removes created ones and 
   await expect(fs.stat(path.join(root, 'src', 'created.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(await fs.readFile(path.join(root, 'run.sh'), 'utf8')).toBe('#!/bin/sh\necho one\n');
   if (!IS_WINDOWS) expect((await fs.stat(path.join(root, 'run.sh'))).mode & 0o111).not.toBe(0);
+  expect((await compare(`${CHECKPOINT_REF_PREFIX}${id}`)).changes).toEqual([]);
+});
+
+it('recreates a file whose parent folders were removed since the checkpoint', async () => {
+  await fs.mkdir(path.join(root, 'src', 'deep'), { recursive: true });
+  await fs.writeFile(path.join(root, 'src', 'deep', 'a.ts'), 'deep\n');
+  const id = await checkpointNow();
+  await fs.rm(path.join(root, 'src'), { recursive: true });
+  const { revision } = await compare(`${CHECKPOINT_REF_PREFIX}${id}`);
+
+  const result = await restoreCheckpoint(projectId, id, ['src/deep/a.ts'], revision, async () => true);
+  expect(result).toMatchObject({ restored: ['src/deep/a.ts'], skipped: [] });
+  expect(await fs.readFile(path.join(root, 'src', 'deep', 'a.ts'), 'utf8')).toBe('deep\n');
+});
+
+it('writes line endings the way git checkout would for the repository settings', async () => {
+  await git(root, 'config', 'core.autocrlf', 'true');
+  const id = await checkpointNow();
+  await fs.writeFile(path.join(root, 'kept.txt'), 'edited\r\n');
+  const { revision } = await compare(`${CHECKPOINT_REF_PREFIX}${id}`);
+
+  await restoreCheckpoint(projectId, id, ['kept.txt'], revision, async () => true);
+  expect(await fs.readFile(path.join(root, 'kept.txt'), 'utf8')).toBe('kept\r\n');
   expect((await compare(`${CHECKPOINT_REF_PREFIX}${id}`)).changes).toEqual([]);
 });
 

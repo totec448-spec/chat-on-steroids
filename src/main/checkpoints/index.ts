@@ -20,8 +20,20 @@ const OID = /^[0-9a-f]{40,64}$/;
 const CAPTURE_BUDGET_MS = 10_000;
 const MAX_RESTORE_FILE_BYTES = 64 * 1024 * 1024;
 
+const MAX_FAILED_TURNS = 256;
+
 const captures = new Map<string, Promise<void>>();
+/** Turns whose capture failed; their patches already ran, so a later capture would not be "before". */
+const failedTurns = new Set<string>();
 const restores = new Map<string, Promise<unknown>>();
+
+function rememberFailedTurn(flight: string): void {
+  failedTurns.add(flight);
+  for (const oldest of failedTurns) {
+    if (failedTurns.size <= MAX_FAILED_TURNS) break;
+    failedTurns.delete(oldest);
+  }
+}
 
 async function captureTree(context: RepositoryContext): Promise<{ treeOid: string; headOid: string | null }> {
   return withTemporaryIndex(async indexFile => {
@@ -81,12 +93,17 @@ export async function checkpointBeforePatch(realPaths: readonly string[]): Promi
     const key = session.activeTurnId ? `turn:${responseTurnId(session.timelineTurns, session.activeTurnId)}`
       : caller.requestId ? `request:${caller.requestId}` : null;
     if (!key) return;
-    const context = await repositoryContext(session.projectId);
-    if (!context || !realPaths.some(real => isContained(context.projectReal, real))) return;
     const flight = `${session.projectId}\0${sessionId}\0${key}`;
+    if (failedTurns.has(flight)) return;
+    let context: RepositoryContext | null;
+    try { context = await repositoryContext(session.projectId); }
+    catch (error) { rememberFailedTurn(flight); throw error; }
+    if (!context || !realPaths.some(real => isContained(context.projectReal, real))) return;
     let work = captures.get(flight);
     if (!work) {
-      work = captureWithinBudget(context, sessionId, key).finally(() => captures.delete(flight));
+      work = captureWithinBudget(context, sessionId, key)
+        .catch(error => { rememberFailedTurn(flight); throw error; })
+        .finally(() => captures.delete(flight));
       captures.set(flight, work);
     }
     await work;
