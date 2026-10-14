@@ -22,6 +22,15 @@ describe('Firefox companion packaging groundwork', () => {
     expect(pkg.scripts['extension:firefox:stage']).toBe('node scripts/stage-firefox-extension.mjs');
   });
 
+  // Mozilla's add-on review flags markup assigned through innerHTML; the gear icon was the one case.
+  it('assigns no markup through innerHTML in the scripts the add-on ships', async () => {
+    for (const file of (await fs.readdir(extensionRoot)).filter(name => name.endsWith('.js'))) {
+      const source = await fs.readFile(path.join(extensionRoot, file), 'utf8');
+      expect(source, file).not.toMatch(/\.innerHTML\s*=(?!=)/);
+      expect(source, file).not.toMatch(/\.outerHTML\s*=(?!=)/);
+    }
+  });
+
   it('derives only the Gecko manifest delta from the canonical companion manifest', async () => {
     const source = JSON.parse(await fs.readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
     const manifest = firefoxManifest(source);
