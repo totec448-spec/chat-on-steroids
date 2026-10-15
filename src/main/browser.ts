@@ -10,10 +10,14 @@ type Exists = (candidate: string) => boolean;
 type Launch = typeof launchCommand;
 export type ExternalChatBrowser = Exclude<ChatBrowser, 'cos'>;
 export const EXTERNAL_BROWSER_LABELS: Record<ExternalChatBrowser, string> = {
-  chrome: 'Chrome', edge: 'Edge', brave: 'Brave'
+  chrome: 'Chrome', edge: 'Edge', brave: 'Brave', firefox: 'Firefox'
 };
 
-/** Sign-in uses the person's normal profile, including its installed companion extension. */
+/**
+ * Sign-in uses the person's normal profile, including its installed companion extension. Firefox
+ * is not offered: the session handoff reads Chromium's single cookie store, and Firefox keeps a
+ * store per container, so it is left out until that path is built and tested there.
+ */
 export function installedSignInBrowsers(): Array<{ browser: ExternalChatBrowser; executable: string }> {
   return (['chrome', 'edge', 'brave'] as const).flatMap(browser => {
     const executable = preferredBrowserCandidates(process.platform, process.env, undefined, browser)
@@ -30,8 +34,9 @@ export async function openBrowserSignIn(browser: ExternalChatBrowser,
     if (!usable(candidate)) continue;
     // No throwaway profile: it would have neither the person's extension nor their account.
     // Start a fresh ChatGPT login instead of transplanting an embedded OAuth URL/PKCE state.
+    // Firefox takes neither Chromium's window-size switch nor its spelling of one.
     await (options.launch ?? launchCommand)(candidate,
-      ['--new-window', '--window-size=520,760', 'https://chatgpt.com/auth/login'],
+      browser === 'firefox' ? ['--new-window', 'https://chatgpt.com/auth/login'] : ['--new-window', '--window-size=520,760', 'https://chatgpt.com/auth/login'],
       (platform === 'win32' ? path.win32 : path.posix).dirname(candidate));
     return candidate;
   }
@@ -52,7 +57,9 @@ export async function isPreferredBrowserRunning(
       // comm contains executable names, never arguments or browsing/profile data.
       const result = await command('ps', ['-A', '-o', 'comm='], os.tmpdir(), 5000);
       if (result.timedOut || result.truncated || result.exitCode !== 0 || !result.stdout.trim()) return null;
-      const family = browser === 'edge'
+      const family = browser === 'firefox'
+        ? /^(?:firefox(?:-bin|-esr|-developer-edition|-nightly)?|Firefox(?: Developer Edition| Nightly)?)$/i
+        : browser === 'edge'
         ? /^(?:msedge|microsoft-edge(?:-(?:stable|beta|dev))?|Microsoft Edge(?: Beta| Dev| Canary)?(?: Helper.*)?)$/i
         : browser === 'brave'
           ? /^(?:brave|brave-browser(?:-(?:stable|beta|dev|nightly))?|Brave Browser(?: Beta| Dev| Nightly)?(?: Helper.*)?)$/i
@@ -61,7 +68,7 @@ export async function isPreferredBrowserRunning(
     }
     // Probe only the selected family; another browser cannot prove its presence or absence.
     // Enumerate names only, never user command lines or profile data. Both names are constants.
-    const processName = browser === 'edge' ? 'msedge' : browser === 'brave' ? 'brave' : 'chrome';
+    const processName = browser === 'edge' ? 'msedge' : browser === 'brave' ? 'brave' : browser === 'firefox' ? 'firefox' : 'chrome';
     const result = await powershell(`$ErrorActionPreference='Stop'; if (@(Get-Process | Where-Object ProcessName -eq '${processName}').Count) { 'running' } else { 'absent' }`, os.tmpdir(), 5000);
     if (result.timedOut || result.truncated || result.exitCode !== 0) return null;
     return result.stdout.trim() === 'absent' ? false : result.stdout.trim() === 'running' ? true : null;
@@ -119,20 +126,28 @@ export function preferredBrowserCandidates(
 ): string[] {
   if (platform === 'win32') {
     const p = path.win32;
+    const roots = [env.LOCALAPPDATA, env.ProgramFiles, env['ProgramFiles(x86)']].filter((root): root is string => Boolean(root));
+    // Release first; Developer Edition and Nightly install to folders of their own.
+    if (browser === 'firefox') {
+      return ['Mozilla Firefox', 'Firefox Developer Edition', 'Firefox Nightly']
+        .flatMap(folder => roots.map(root => p.join(root, folder, 'firefox.exe')));
+    }
     const parts = browser === 'edge'
       ? ['Microsoft', 'Edge', 'Application', 'msedge.exe']
       : browser === 'brave'
         ? ['BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe']
         : ['Google', 'Chrome', 'Application', 'chrome.exe'];
-    return [env.LOCALAPPDATA, env.ProgramFiles, env['ProgramFiles(x86)']]
-      .filter((root): root is string => Boolean(root))
-      .map(root => p.join(root, ...parts));
+    return roots.map(root => p.join(root, ...parts));
   }
 
   if (platform === 'darwin') {
     // Release channels have separate bundles. Keep Beta/Dev/Canary-only installs usable
     // without crossing the user's chosen browser family.
-    const channels = browser === 'edge' ? [
+    const channels = browser === 'firefox' ? [
+      ['Firefox.app', 'firefox'],
+      ['Firefox Developer Edition.app', 'firefox'],
+      ['Firefox Nightly.app', 'firefox']
+    ] : browser === 'edge' ? [
       ['Microsoft Edge.app', 'Microsoft Edge'],
       ['Microsoft Edge Beta.app', 'Microsoft Edge Beta'],
       ['Microsoft Edge Dev.app', 'Microsoft Edge Dev'],
@@ -158,7 +173,7 @@ export function preferredBrowserCandidates(
   if (platform === 'linux') {
     const pathValue = env.PATH ?? '';
     // Search release-channel launchers too: the companion need not be installed in Stable.
-    const names = browser === 'edge' ? ['microsoft-edge', 'microsoft-edge-stable', 'microsoft-edge-beta', 'microsoft-edge-dev'] : browser === 'brave' ? [
+    const names = browser === 'firefox' ? ['firefox', 'firefox-esr', 'firefox-developer-edition', 'firefox-nightly'] : browser === 'edge' ? ['microsoft-edge', 'microsoft-edge-stable', 'microsoft-edge-beta', 'microsoft-edge-dev'] : browser === 'brave' ? [
       'brave-browser',
       'brave-browser-beta',
       'brave-browser-dev',
@@ -176,6 +191,14 @@ export function preferredBrowserCandidates(
       .split(':')
       .filter(Boolean)
       .flatMap((dir) => names.map((name) => path.posix.join(dir, name)));
+    if (browser === 'firefox') return [...new Set([
+      ...fromPath,
+      ...names.map(name => path.posix.join('/usr/bin', name)),
+      '/usr/lib/firefox/firefox',
+      '/snap/bin/firefox',
+      home ? path.posix.join(home, '.local', 'share', 'flatpak', 'exports', 'bin', 'org.mozilla.firefox') : '',
+      '/var/lib/flatpak/exports/bin/org.mozilla.firefox'
+    ].filter(Boolean))];
     if (browser === 'edge') return [...new Set([
       ...fromPath,
       ...names.map(name => path.posix.join('/usr/bin', name)),
@@ -257,12 +280,13 @@ export async function openInPreferredBrowser(
     await cosBrowser.open(url, { reveal: options.reveal === true });
     return 'cos';
   }
-  const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : 'Google Chrome / Chromium';
+  const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : selected === 'firefox' ? 'Firefox' : 'Google Chrome / Chromium';
   const bounds = browserWindowBounds();
   // These switches only affect a newly started Chrome process; handing a URL to an
   // existing instance cannot change its policy. Memory Saver exclusions alone do not
   // prevent background timer/renderer throttling of long-running orchestration tabs.
-  const args = [
+  // Firefox knows none of these Chromium switches; it gets the URL alone.
+  const args = selected === 'firefox' ? [url] : [
     ...(platform === 'win32' ? ['--disable-renderer-backgrounding', '--disable-background-timer-throttling'] : []),
     ...(options.backgroundStartup ? [`--window-size=${bounds.width},${bounds.height}`] : []),
     url

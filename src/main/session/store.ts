@@ -1898,6 +1898,20 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   if (entry.nextSeq !== revision || entry.summary.conversationId !== conversationId) return null;
   const sameTurn = (left: string | null | undefined, right: string | null | undefined) => !!left && !!right &&
     responseTurnId(entry.summary.timelineTurns, left) === responseTurnId(entry.summary.timelineTurns, right);
+  // A reload after the page's ten-minute check (`stalled`) opens a second document-local turn for
+  // the same unanswered question; ChatGPT's final can then arrive for the first one while the
+  // second completes (2026-10-14). That reopen is the same response. A new question gives the
+  // reopened turn a different `questionId`, and a second answer after a real end (Regenerate)
+  // follows a completed end, so neither is joined.
+  const reopenedAfterStall = (left: string | null | undefined, right: string | null | undefined): boolean => {
+    const turns = entry.summary.timelineTurns;
+    if (!left || !right || !turns) return false;
+    const a = turns[responseTurnId(turns, left)], b = turns[responseTurnId(turns, right)];
+    if (!a || !b || a === b || !a.questionId || a.questionId !== b.questionId) return false;
+    const [earlierId, earlier, later] = a.origin <= b.origin ? [left, a, b] : [right, b, a];
+    return earlier.endOrigin !== undefined && later.origin > earlier.endOrigin &&
+      recent.some(event => event.kind === 'turn_end' && event.outcome === 'stalled' && sameTurn(event.turnId, earlierId));
+  };
   // Pixels/media alone are not completion. Require the provider's exact terminal
   // message on a completed lifecycle boundary and its matching recorded image.
   // These facts may arrive in either batch; never manufacture assistant prose.
@@ -1907,7 +1921,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       image.providerStatus === 'finished_successfully' && sameTurn(image.turnId, event.turnId));
   const final = recent.findLast(event => imageEnd(event) || (event.kind === 'assistant_message' && event.final === true &&
     (!!event.message.text.trim() || !!event.providerMessageId) && !!event.messageId && (!turnId || event.turnId === turnId ||
-      (!!event.providerMessageId && sameTurn(event.turnId, turnId)) ||
+      (!!event.providerMessageId && (sameTurn(event.turnId, turnId) || reopenedAfterStall(event.turnId, turnId))) ||
       (turnId.startsWith('reply:') && event.messageId === turnId.slice(6)))));
   if (!final || (final.kind !== 'assistant_message' && final.kind !== 'turn_end')) return null;
   const messageId = final.kind === 'turn_end' ? final.providerMessageId : final.messageId;
@@ -1944,11 +1958,12 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     }
     // The page's ten-minute check ends a turn as `stalled` when it never saw the end. After
     // ChatGPT's own final for that turn, the turn did end; nothing new happened (#1099).
-    if (event.kind === 'turn_end') return !sameTurn(event.turnId, final.turnId) ||
+    const sameResponse = sameTurn(event.turnId, final.turnId) || (nativeFinal && reopenedAfterStall(event.turnId, final.turnId));
+    if (event.kind === 'turn_end') return !sameResponse ||
       (event.outcome !== 'completed' && !(event.outcome === 'stalled' && nativeFinal));
     // The first start of the final's own turn, recorded after that final: ChatGPT reported a fast
     // answer's end before the page opened the turn from the Send receipt (#1099). Not new work.
-    if (event.kind === 'turn_start') return !(nativeReopen && event === last) &&
+    if (event.kind === 'turn_start') return !(nativeReopen && event === last) && !(sameResponse && event.turnId !== final.turnId) &&
       !(event.source !== 'app' && !!final.turnId && event.turnId === final.turnId &&
         entry.summary.timelineTurns?.[final.turnId]?.origin === positionOf(event));
     if (event.kind === 'user_message') return !correction(event) && !(ownQuestion && event.messageId === ownQuestion);

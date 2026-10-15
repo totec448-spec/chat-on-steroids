@@ -98,9 +98,62 @@ jobs:
     needs: preflight
     uses: ./.github/workflows/release.yml
 
+  # Mozilla signs each add-on version once, so the Firefox add-on is signed here, for a tag, and
+  # never by canary builds. Self-hosted ("unlisted"): the release carries the signed package and
+  # firefox-updates.json, which the add-on's update_url reads from the latest release.
+  firefox-addon:
+    name: Sign the Firefox add-on
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # Same stamp as the packaged app, so app and add-on agree on the build they run.
+      - name: Stage the Firefox add-on
+        run: |
+          set -euo pipefail
+          node scripts/write-extension-stamp.mjs
+          node scripts/stage-firefox-extension.mjs release/firefox-extension
+          npx --yes web-ext@10.7.0 lint --source-dir release/firefox-extension --self-hosted
+
+      - name: Sign with Mozilla
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
+            echo "::error::Set the AMO_JWT_ISSUER and AMO_JWT_SECRET repository secrets (addons.mozilla.org → Manage API Keys)." >&2
+            exit 1
+          fi
+          npx --yes web-ext@10.7.0 sign --channel=unlisted --source-dir release/firefox-extension \
+            --artifacts-dir release/firefox-signed --approval-timeout 1500000
+          shopt -s nullglob
+          signed=(release/firefox-signed/*.xpi)
+          if [ "${#signed[@]}" -ne 1 ]; then echo "Expected one signed package, found ${#signed[@]}" >&2; exit 1; fi
+          mkdir -p release/firefox
+          cp "${signed[0]}" release/firefox/Chat-On-Steroids-Firefox.xpi
+          node scripts/firefox-update-manifest.mjs release/firefox/Chat-On-Steroids-Firefox.xpi "${TAG#v}" release/firefox/firefox-updates.json
+          cat release/firefox/firefox-updates.json
+
+      - name: Upload the signed add-on
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firefox-addon-${{ github.run_id }}
+          path: release/firefox/
+          if-no-files-found: error
+
   publish:
     name: Publish
-    needs: candidate
+    needs: [candidate, firefox-addon]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -151,6 +204,20 @@ jobs:
           cat SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
 
+      - name: Download the signed Firefox add-on
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: firefox-addon-${{ github.run_id }}
+          path: publish
+
+      # Signed after the candidate's checksums were made, so its lines are added here.
+      - name: Add the signed Firefox add-on
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          sha256sum Chat-On-Steroids-Firefox.xpi firefox-updates.json >> SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+
       - name: Publish the release
         run: |
           set -euo pipefail
@@ -171,6 +238,8 @@ jobs:
             publish/Chat-On-Steroids-Linux-arm64.deb \
             publish/Chat-On-Steroids-Extension.zip \
             publish/Chat-On-Steroids-Native-Sources.tar.gz \
+            publish/Chat-On-Steroids-Firefox.xpi \
+            publish/firefox-updates.json \
             publish/SHA256SUMS.txt \
             --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \
             --notes-file "docs/release-notes/$TAG.md"

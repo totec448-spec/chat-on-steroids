@@ -732,6 +732,26 @@ describe('Core app mention on app-owned sends (#861)', () => {
     expect(clicked.textContent!.trim().startsWith('Exact app prompt')).toBe(true);
     expect(api.messages().find(message => message.role === 'user')?.text).toBe('Exact app prompt');
   });
+  it('clicks Send once the editor drew the token while this page\'s timers are held back', async () => {
+    // 2026-10-15, Firefox: in the minimized window that holds app-opened chats, a 0 ms timer
+    // fired 25 s late. The editor had drawn the token at once; the wait for one task was the delay.
+    (dom.window as unknown as { MessageChannel: typeof MessageChannel }).MessageChannel = MessageChannel;
+    let clicked = false;
+    button.addEventListener('click', () => {
+      clicked = true;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    const result = api.send({ mention });
+    // Real tasks pass; no timer of this page fires.
+    for (let task = 0; task < 5 && !clicked; task++) await new Promise(resolve => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => { channel.port1.close(); resolve(null); };
+      channel.port2.postMessage(null);
+    });
+    expect(clicked).toBe(true);
+    expect(await result).toBe(true);
+  });
   it('removes its own token again when Send is not accepted', async () => {
     const result = api.send({ mention, acceptanceTimeoutMs: 1000 });
     await vi.advanceTimersByTimeAsync(1100);
@@ -1257,6 +1277,41 @@ describe('native image readiness', () => {
   });
 });
 
+
+describe('transport failures in German', () => {
+  // Measured 2026-10-14 on a German account: a long answer whose stream broke showed
+  // "Verbindung unterbrochen…" after every reload, and its end the delivery timeout alert with
+  // "Erneut versuchen". Neither was a failure, so each recovery reload claimed a phantom turn.
+  it('recognises the delivery timeout alert with its localized Retry', () => {
+    const alert = document.createElement('div');
+    alert.setAttribute('role', 'alert');
+    alert.innerHTML = '<p>Zeitüberschreitung bei der Übermittlung der Nachricht. Bitte versuche es erneut.</p><button>Erneut versuchen</button>';
+    document.body.append(alert);
+    expect(api.errors()).toEqual([expect.objectContaining({ recoverable: true })]);
+    alert.remove();
+  });
+
+  it('recognises the interrupted-connection notice', () => {
+    const card = document.createElement('div');
+    card.innerHTML = '<p>Verbindung unterbrochen. Warten auf die vollständige Antwort.</p><button>Erneut versuchen</button>';
+    document.body.append(card);
+    expect(api.errors()).toEqual([
+      expect.objectContaining({ text: 'Verbindung unterbrochen. Warten auf die vollständige Antwort.', recoverable: true })
+    ]);
+    card.remove();
+  });
+
+  it('still ignores other German announcements', () => {
+    for (const text of ['Einstellungen gespeichert', 'Die Verbindung wurde unterbrochen, als ich den Server neu startete.']) {
+      const alert = document.createElement('div');
+      alert.setAttribute('role', 'alert');
+      alert.textContent = text;
+      document.body.append(alert);
+      expect(api.errors(), text).toEqual([]);
+      alert.remove();
+    }
+  });
+});
 
 describe('transport failures in Portuguese', () => {
   // Measured 2026-10-12 on a pt-BR account: a send ChatGPT could not deliver showed this alert with

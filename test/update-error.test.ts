@@ -15,6 +15,7 @@ afterEach(() => { vi.unstubAllGlobals(); dom.window.close(); });
 // These reasons originate outside the renderer's literal t() scan. Exercise the public
 // strings from updater/read-state failures, including interpolated asset and HTTP reasons.
 const reasons = [
+  'GitHub could not be reached',
   'There is no downloaded update to install yet',
   'Could not read plugin-refresh state',
   'the latest release has no usable version tag',
@@ -29,7 +30,7 @@ const reasons = [
   'fixture.exe is not the published file: sha256 ' + 'a'.repeat(64) + ' instead of ' + 'b'.repeat(64)
 ];
 it('covers the authored fixed updater errors outside the renderer source scan', () => {
-  for (const file of ['src/main/update.ts']) {
+  for (const file of ['src/main/update.ts', 'src/main/update-all.ts']) {
     const source = readFileSync(file, 'utf8');
     const fixed = [...source.matchAll(/throw new Error\('([^']+)'\)/g)].map(match => match[1]!);
     expect(fixed.length).toBeGreaterThan(0);
@@ -65,5 +66,6 @@ it('keeps unknown external diagnostics intact and offers explicit retry', async 
   setLanguage('ja');
   const authored = 'fixture-provider: unexpected reply {0}';
   expect(updateErrorText(authored)).toBe(authored);
+  expect(updateErrorText('fetch failed')).toBe('fetch failed');
   expect(updateErrorNextStep(authored)).toBe(t('Choose Update all to retry.'));
 });

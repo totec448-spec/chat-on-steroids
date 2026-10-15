@@ -3,8 +3,8 @@ import { expect, it } from 'vitest';
 const keys = [
   "Choose Update all to retry.",
   "Choose Update all to retry. You can keep using the current app.",
-  "Let active chats finish, then reload the companion extension in your browser.",
-  "Open ChatGPT with the companion extension enabled, then choose Review setup.",
+  "Let active chats finish, then reload the browser extension in your browser.",
+  "Open ChatGPT with the browser extension enabled, then choose Review setup.",
   "Choose Review setup to check the connection, then choose Update all to retry.",
   "Could not inspect the installed plugin in ChatGPT.",
   "Open this plugin's settings in ChatGPT, then choose Update all to recheck. If the check still fails, save a Diagnostics report from Activity.",
@@ -14,6 +14,7 @@ const keys = [
   "The saved plugin update state could not be read.",
   "The release information has no valid version number.",
   "The downloaded update did not match the published checksum.",
+  "GitHub could not be reached. Check your connection",
   "Could not check for updates: HTTP {0}.",
   "Could not download {0}: HTTP {1}.",
   "Release {0} does not include {1}.",
