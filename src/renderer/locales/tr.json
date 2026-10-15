@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "ChatGPT'nin araç onay kartlarını uygulamada Reddet ya da Bir kez izin ver ile yanıtlayın.",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "Etkinlik; uygulamayı, eklentiyi ve her bir eklentiyi durumuyla gösterir ve tek düğmeyle günceller.",
   "Codex and Claude Code in Usage": "Kullanım'da Codex ve Claude Code",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex'in sınırlarını ve Codex ile Claude Code'un kullandığı token'ları görün, kullanımınızı sohbette sorun."
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex'in sınırlarını ve Codex ile Claude Code'un kullandığı token'ları görün, kullanımınızı sohbette sorun.",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "ChatGPT düşünürken de çalışan yeni turlar ve daha ayrıntılı bir tanılama raporu.",
+  "Fresh turns that hold": "Kopmayan yeni turlar",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "Uzun işler artık ChatGPT düşünürken veya bir araç çalıştırırken de yeni bir turda devam ediyor.",
+  "No chats in incognito": "Gizli pencerede sohbet yok",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "Uygulamanın açtığı sohbetler gizli pencereye değil, normal tarayıcı pencerenize gider.",
+  "A fuller diagnostics report": "Daha ayrıntılı bir tanılama raporu",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Uygulamanın nasıl kurulduğunu, tarayıcıyı, çökmeleri, sık uyarıları ve her sohbetin durumunu da gösterir; yine kişisel bir şey içermez."
 }
