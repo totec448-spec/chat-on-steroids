@@ -831,6 +831,11 @@ const STATUS_TEXT: Record<AppState['status']['state'], string> = {
   'tunnel-unavailable': "Tunnel unavailable"
 };
 
+/** The connection's one-line name; an outage of OpenAI's tunnel service is not "No internet". */
+function statusText(status: AppState['status']): string {
+  return status.state === 'offline' && status.offlineCause === 'service' ? "OpenAI outage" : STATUS_TEXT[status.state];
+}
+
 const METHOD_HINT: Record<string, string> = {
   openai:
     "ChatGPT reaches this computer through an OpenAI tunnel. Nothing is exposed to the open internet.",
@@ -1445,7 +1450,7 @@ function apply(next: AppState): void {
   const label = $('sidebarConnectionLabel');
   const capsuleWords = (): string => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…')
     // A failure says so in one short word; its reason is in the title and the details.
-    : offline ? t(STATUS_TEXT[status.state]) : failed ? t('Failed') : t('Connect');
+    : offline ? t(statusText(status)) : failed ? t('Failed') : t('Connect');
   // Connecting sends several updates with the same words: those change nothing, and a morph under way
   // keeps going. New words morph from what is on screen now, the width mid-way included.
   // Opening from the dot (Disconnecting…) morphs the same way, with no old words to fade.
@@ -1511,12 +1516,12 @@ function apply(next: AppState): void {
     ], { duration: 900, easing: 'ease-out' });
   }
   if (previousConnectionState !== null && previousConnectionState !== status.state) {
-    ui($('connectionAnnounce'), 'textContent', () => t(STATUS_TEXT[status.state]));
+    ui($('connectionAnnounce'), 'textContent', () => t(statusText(status)));
   }
   previousConnectionState = status.state;
   const connectionPopover = $('connectionPopover');
   connectionPopover.className = `connection-popover scroll${capsuleTone ? ` ${capsuleTone}` : ''}`;
-  ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui($('connectionPopoverTitle'), 'textContent', () => t(statusText(status)));
 
   const id = config.tunnel.tunnelId;
   ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
@@ -1743,7 +1748,7 @@ function apply(next: AppState): void {
   wizConnect.dataset.tone = tone;
   const pill = $('wizStatusPill');
   pill.dataset.tone = tone;
-  ui(pill, 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui(pill, 'textContent', () => t(statusText(status)));
   const detail = $('wizStatus');
   detail.hidden = !failed || !status.detail;
   ui(detail, 'textContent', () => failed ? status.detail : '');
@@ -2088,7 +2093,7 @@ function paintClock(): void {
       ? t("Reached")
       : connected
         ? t("waiting")
-        : t(STATUS_TEXT[status.state]));
+        : t(statusText(status)));
   ui($('connectionPopoverBrowser'), 'textContent', () => bridge.present
     ? t("Connected")
     : bridge.paired ? t("Paired · not active") : t("Not connected"));
@@ -2102,8 +2107,8 @@ function paintClock(): void {
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
 
   const triggerText = status.handshakeAt !== null && running
-    ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
-    : t(STATUS_TEXT[status.state]);
+    ? `${t(statusText(status))} · ${t("verified {0}", [ago(status.handshakeAt)])}`
+    : t(statusText(status));
   ui($('sidebarConnection'), 'aria-label', () => triggerText);
   ui($('sidebarConnection'), 'title', () => triggerText);
 }

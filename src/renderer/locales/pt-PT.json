@@ -2438,5 +2438,6 @@
   "No chats in incognito": "Sem chats em modo anónimo",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Os chats que a app abre vão para a janela normal do navegador, nunca para uma anónima.",
   "A fuller diagnostics report": "Um relatório de diagnóstico mais completo",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Também mostra como a app está instalada, o navegador, falhas, avisos frequentes e o estado de cada chat, continuando sem nada pessoal."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Também mostra como a app está instalada, o navegador, falhas, avisos frequentes e o estado de cada chat, continuando sem nada pessoal.",
+  "OpenAI outage": "Falha da OpenAI"
 }

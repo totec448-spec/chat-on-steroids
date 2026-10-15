@@ -664,6 +664,8 @@ code {
 .sidebar-sessions .foot { border: 0; padding: 12px 8px; font-size: calc(10px * var(--text-scale, 1)); }
 .sidebar-bottom { border-top: 1px solid var(--line); padding-top: 10px; display: flex; align-items: center; gap: 4px; }
 .sidebar-bottom > .btn { min-width: 0; min-height: 36px; flex: 1 1 auto; padding: 8px 10px; justify-content: flex-start; gap: 9px; border: 0; background: transparent; color: var(--soft); }
+/* Shrinks with an ellipsis when a long connection label needs the room (2026-10-15: German overlap). */
+.sidebar-bottom-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-bottom > .btn:hover,
 .sidebar-bottom > .btn.is-sel { background: var(--hover); color: var(--ink); }
 .connection-anchor { position: relative; flex: none; }
