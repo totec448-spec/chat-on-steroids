@@ -22,6 +22,7 @@ export function mainTexts(): Record<MainText, string> {
       t('Starting the installer. Chat On Steroids opens again by itself.'),
     'Connected': t('Connected'),
     'No internet': t('No internet'),
+    'Diagnostics report': t('Diagnostics report'),
     'Not connected': t('Not connected'),
     'Core connection lost': t('Core connection lost'),
     'Desktop connection lost': t('Desktop connection lost'),
