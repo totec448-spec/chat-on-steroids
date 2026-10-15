@@ -2417,5 +2417,9 @@
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "プラグインを使える人は、あなたが選んだ権限の範囲でこのコンピューターを使えます。ワークスペースで可能な場合は、プラグインをあなただけが使えるようにしてもらうよう管理者に依頼してください。",
   "Playful asides in automatic Continue": "自動続行に遊び心のある余談",
   "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "自動続行のたびに、ランダムな豆知識やミームのジョークを添えます。モデルが無視するよう印を付けます。",
-  "The workspace's Codex credits are used up": "ワークスペースの Codex クレジットを使い切りました"
+  "The workspace's Codex credits are used up": "ワークスペースの Codex クレジットを使い切りました",
+  "Updating Chat On Steroids": "Chat On Steroids を更新しています",
+  "Saving your work…": "作業内容を保存しています…",
+  "Waiting for your permission in Windows…": "Windows での許可を待っています…",
+  "Starting the installer. Chat On Steroids opens again by itself.": "インストーラーを起動しています。Chat On Steroids は自動的にもう一度開きます。"
 }

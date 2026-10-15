@@ -538,6 +538,27 @@ function startElevated(file: string, args: string[]): Promise<boolean> {
   });
 }
 
+/** The version this quit installs for a person waiting to get the app back, or null. */
+export function installingVersion(): string | null {
+  return staged && runAfterInstall ? staged.version : null;
+}
+
+/** What the handoff is doing now, for the app's "Installing" window (update-progress.ts). */
+export type UpdateHandoffStep = 'permission' | 'installer';
+let handoffStep: (step: UpdateHandoffStep) => void = () => undefined;
+export function onUpdateHandoffStep(listener: (step: UpdateHandoffStep) => void): void {
+  handoffStep = listener;
+}
+
+/**
+ * A shown installer takes over from the app's Installing window: the app waits for it, so nothing
+ * on screen goes blank in between (measured on Windows: seconds to minutes until it showed).
+ */
+let installerTakeover: () => Promise<void> = async () => undefined;
+export function onInstallerTakeover(wait: () => Promise<void>): void {
+  installerTakeover = wait;
+}
+
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
   const relaunch = runAfterInstall;
@@ -551,27 +572,37 @@ export async function applyStagedUpdate(): Promise<void> {
       // already owns, so it keeps the location and the shortcuts instead of asking about them.
       // `--force-run` is added only when the user pressed Install and is waiting for the app to
       // come back; an update applied on the way out of an ordinary quit must not reopen it.
-      const args = relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
+      // That person also sees the installer's progress window, which closes and starts the app
+      // by itself (scripts/windows-installer-acl.nsh); before 2.1.38 the app just vanished for
+      // about 100 s. An ordinary quit stays silent.
+      const args = relaunch ? ['--updated', '--force-run'] : ['/S', '--updated'];
       const elevate = process.platform === 'win32' && !(await installFolderAccess(path.dirname(process.execPath)));
       await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() })).catch(() => undefined);
       if (elevate) {
         logInfo(`update: the install folder needs an administrator; Windows asks for permission to install ${ready.version}`);
+        handoffStep('permission');
         if (!(await startElevated(ready.file, args))) {
           logWarn(`update: Windows did not give permission, so ${ready.version} was not installed; the next start says so`);
           return;
         }
+        handoffStep('installer');
+        if (relaunch) await installerTakeover();
       } else {
-        const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+        handoffStep('installer');
+        // windowsHide would hide the installer's own window as well (measured on Windows).
+        const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: !relaunch });
         // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
         // child process would take the quit down with it.
         installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
         installer.unref();
+        if (relaunch) await installerTakeover();
       }
     } else {
       const next = `${ready.target}.new`;
       await copyFile(ready.file, next);
       await chmod(next, 0o755);
       await rename(next, ready.target);
+      handoffStep('installer');
       // No installer to hand the "start it again" to, so this process arranges its own successor.
       // Electron spawns it as this one exits, which is the app.exit() that ends the shutdown.
       if (relaunch) app.relaunch({ execPath: ready.target });

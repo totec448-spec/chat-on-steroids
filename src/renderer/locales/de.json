@@ -2417,5 +2417,9 @@
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Wer das Plugin nutzen kann, kann diesen Computer im Rahmen der von dir gewählten Berechtigungen nutzen. Wo der Workspace es zulässt, bitte den Administrator, das Plugin nur für dich freizugeben.",
   "Playful asides in automatic Continue": "Verspielte Randnotizen im automatischen Weiter",
   "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Hängt an jedes automatische Weiter einen zufälligen Fun Fact oder Meme-Witz an, markiert, damit das Modell ihn ignoriert.",
-  "The workspace's Codex credits are used up": "Die Codex-Guthaben des Workspaces sind aufgebraucht"
+  "The workspace's Codex credits are used up": "Die Codex-Guthaben des Workspaces sind aufgebraucht",
+  "Updating Chat On Steroids": "Chat On Steroids wird aktualisiert",
+  "Saving your work…": "Deine Arbeit wird gesichert …",
+  "Waiting for your permission in Windows…": "Windows wartet auf deine Erlaubnis …",
+  "Starting the installer. Chat On Steroids opens again by itself.": "Das Installationsprogramm wird gestartet. Chat On Steroids öffnet sich von selbst wieder."
 }

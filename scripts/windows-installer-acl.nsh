@@ -28,3 +28,44 @@
   # Add one inheritable grant to the final directory without resetting other ACLs.
   !insertmacro grantSandboxReadAccess
 !macroend
+
+# 2.1.38: an update the person asked for ("Restart and install") runs visibly, so they can see
+# its progress instead of an app that vanished for a minute or two. Such an update already knows
+# whom it installs for and where; it never asks again.
+!macro customInstallMode
+  ${if} ${isUpdated}
+    ${if} $installMode == "all"
+      StrCpy $isForceMachineInstall "1"
+    ${else}
+      StrCpy $isForceCurrentInstall "1"
+    ${endif}
+  ${endif}
+!macroend
+
+# A fresh install keeps its "Run Chat On Steroids" box on the finish page. An update does not wait
+# for Finish: it starts the app again when the app asked for that (--force-run), then ends here.
+!macro customFinishPage
+  Function cosStartApp
+    ${if} ${isUpdated}
+      StrCpy $1 "--updated"
+    ${else}
+      StrCpy $1 ""
+    ${endif}
+    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+  FunctionEnd
+
+  Function cosFinishPre
+    ${if} ${isUpdated}
+      ${if} ${isForceRun}
+        HideWindow
+        ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"
+      ${endif}
+      Abort
+    ${endif}
+  FunctionEnd
+
+  !define MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN_FUNCTION "cosStartApp"
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE cosFinishPre
+  !insertmacro MUI_PAGE_FINISH
+!macroend
