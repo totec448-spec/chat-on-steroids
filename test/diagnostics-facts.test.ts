@@ -142,10 +142,21 @@ describe('chats', () => {
       { id: 's4', title: 'Ended', updatedAt: now - 60_000, endedAt: now - 60_000, toolCalls: 1, processExitNonzero: 0, toolRejected: 0, lastToolCallAt: null }
     ], [{ sessionId: 's1', state: 'queued' }, { sessionId: 's1', state: 'sending' }, { sessionId: null, state: 'queued' }], now);
     expect(lines).toEqual([
-      '#1 main chat, model gpt-6: active 5 min ago, 12 tool call(s), 1 failed command(s), 0 refused, inputs: queued 1, sending 1',
-      '#2 worker chat: active 1 min ago, 3 tool call(s), 0 failed command(s), 2 refused, inputs: none',
+      '#1 worker chat: active 1 min ago, 3 tool call(s), 0 failed command(s), 2 refused, inputs: none',
+      '#2 main chat, model gpt-6: active 5 min ago, 12 tool call(s), 1 failed command(s), 0 refused, inputs: queued 1, sending 1',
       'Older or ended chats: 2; inputs without a chat: 1'
     ]);
     expect(lines.join('\n')).not.toMatch(/Secret|s1|s2/);
+  });
+
+  // Seen on the 2.1.39 RC (Windows): the oldest of a day's chats came first and the list had no end.
+  it('lists the most recently active chats first, at most 15', () => {
+    const now = Date.UTC(2026, 9, 15, 12);
+    const many = Array.from({ length: 20 }, (_, index) => ({ id: `c${index}`, updatedAt: now - (index + 1) * 60_000, endedAt: null, toolCalls: index,
+      processExitNonzero: 0, toolRejected: 0, lastToolCallAt: null }));
+    const lines = facts.chatLines(many, [], now);
+    expect(lines[0]).toMatch(/^#1 main chat: active 1 min ago, 0 tool call/);
+    expect(lines.filter(line => line.startsWith('#'))).toHaveLength(15);
+    expect(lines.at(-1)).toBe('Older or ended chats: 0; inputs without a chat: 0; 5 more active chat(s) not listed');
   });
 });
