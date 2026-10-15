@@ -4764,6 +4764,10 @@ connection/document epochs fence delayed results. The bridge cache is presentati
 clears on disconnect/stop/reset. Request discovery, receipt, exact ownership and recorded tool
 activity remain distinct evidence. Optional embedded-host presentation does not enable or
 implement an embedded browser.
+The snapshot's optional `environment` (`CompanionEnvironment`) feeds the diagnostics report only:
+the browser's name and version, ChatGPT tabs counted by state, and `clf-page-checks` booleans plus
+the page language from the most recently used awake ChatGPT tab, read at most once a minute.
+`sanitiseCompanionDiagnostics` keeps names, versions, counts and booleans and drops everything else.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
 development discovery uses Electron's app root for `resources/tunnel`, independent of source

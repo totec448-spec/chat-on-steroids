@@ -1599,3 +1599,27 @@ describe('locale-independent provider composer evidence', () => {
     expect(action.closest('[data-clf-native-hidden]')).toBeNull();
   });
 });
+
+// 2026-10-15: the diagnostics report says which of ChatGPT's controls the extension still finds,
+// so a report after ChatGPT changed its page says what broke without a follow-up question.
+describe('page checks for the diagnostics report', () => {
+  type Checks = { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null };
+  const checks = () => (api as unknown as { pageChecks(): Checks }).pageChecks();
+
+  it('finds the composer, its send area and the model menu on a normal page, and names the page language', () => {
+    document.documentElement.lang = 'de-DE';
+    const plus = document.createElement('button'); plus.id = 'composer-plus-btn'; document.querySelector('form')!.prepend(plus);
+    expect(checks()).toEqual({ composer: true, sendArea: true, modelMenu: true, plusMenu: true, language: 'de-DE' });
+    // Measured 2026-10-15: the current composer's + button has no id, only its navigation target.
+    plus.removeAttribute('id'); plus.setAttribute('data-composer-navigation-target', 'add-context');
+    expect(checks().plusMenu).toBe(true);
+    plus.remove();
+    expect(checks().plusMenu).toBe(false);
+  });
+
+  it('says what is missing when ChatGPT moved things, and reports no text from the page', () => {
+    document.querySelector('form')!.remove();
+    document.documentElement.lang = 'en <script>';
+    expect(checks()).toEqual({ composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
+  });
+});

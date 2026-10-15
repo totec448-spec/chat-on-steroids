@@ -15,7 +15,7 @@ import { execFile } from 'node:child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { app, dialog, screen, shell, webContents, type BrowserWindow } from 'electron';
 import { chatLines, crashLines, errorSummaryLines, installKind, installLines, systemLines, toolCallLines, type ChatFactsSession } from './diagnostics-facts.js';
-import type { UpdateStatus } from '../shared/types.js';
+import type { CompanionEnvironment, UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
@@ -148,6 +148,21 @@ export async function collectReportFacts(sources: { update: UpdateStatus; sessio
   };
 }
 
+/** The companion's browser and ChatGPT page facts as sentences; empty for an older extension. */
+function environmentLines(extension: unknown): string[] {
+  const environment = (extension && typeof extension === 'object' ? (extension as { environment?: CompanionEnvironment | null }).environment : null) ?? null;
+  if (!environment) return [];
+  const { browser, tabs, page } = environment;
+  const found = (value: boolean) => value ? 'found' : 'NOT found';
+  return [
+    `Browser: ${browser.name}${browser.version ? ` ${browser.version}` : ''}`,
+    `ChatGPT tabs: ${tabs.open} open, ${tabs.discarded} discarded, ${tabs.frozen} frozen, ${tabs.loading} loading, ${tabs.grouped} in a tab group, ${tabs.inBackgroundWindow} in the app's background window`,
+    page
+      ? `Page checks (most recently used ChatGPT tab): composer ${found(page.composer)}, send area ${found(page.sendArea)}, model menu ${found(page.modelMenu)}, + menu ${found(page.plusMenu)}, page language ${page.language ?? 'unknown'}`
+      : 'Page checks: no awake ChatGPT tab answered'
+  ];
+}
+
 export function renderDiagnosticsReport(sources: DiagnosticsReportSources): string {
   const context: ScrubContext = {
     home: sources.home,
@@ -186,6 +201,7 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
       section('System', sources.facts.system.map(scrub)),
       section('Crashes and restarts', sources.facts.crashes)
     ] : []),
+    ...(environmentLines(sources.extension).length ? [section('Browser and ChatGPT page', environmentLines(sources.extension))] : []),
     section('Browser connection', [...json(scrubValue(sources.bridge)), ...json(scrubValue(sources.extension))]),
     section('Connection self-test', sources.selfTest
       ? [sources.selfTest.summary, ...sources.selfTest.checks.map(check => `- ${check.name}: ${check.status} — ${check.detail}`)].map(scrub)
