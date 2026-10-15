@@ -71,7 +71,9 @@
 .update-readiness.is-compact :is(#updateReadinessDetails, .update-readiness-actions) { display: none; }
 #updateAllError { white-space: pre-line; }
 #updateReadinessDetails[open] { display: grid; gap: 12px; min-height: 0; overflow: auto; align-content: start; }
-#updateReadinessDetails > summary { cursor: pointer; color: var(--soft); }
+#updateReadinessDetails > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--soft); list-style: none; }
+#updateReadinessDetails > summary::-webkit-details-marker { display: none; }
+#updateReadinessDetails[open] > summary .details-chevron { transform: rotate(90deg); }
 #updateReadinessDetails > p { margin: 0; }
 #updateReadinessSummary { margin: 0; color: var(--soft); }
 #updateReadinessSummary.is-ok { color: var(--green); }
