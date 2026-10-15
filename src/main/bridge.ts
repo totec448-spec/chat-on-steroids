@@ -1260,13 +1260,19 @@ const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
   'folder-not-ready': 'its folder does not hold the new build yet',
   'browser-updates-itself': 'Firefox updates the signed add-on itself (about:addons → Check for Updates)'
 };
-let extensionUpdateHoldLogged: string | null = null;
+/**
+ * The hold last logged per browser. With two browsers reporting in turn, one shared value made the
+ * browser without a hold reset the other's, and the same reason was logged every round (2.1.39).
+ */
+const extensionUpdateHoldLogged = new Map<string, string | null>();
 
-/** Logs once per change why an offered extension update is waiting; silence resets it. */
-export function noteExtensionUpdateHold(hold: unknown): void {
+/** Logs once per change and browser why an offered extension update is waiting; silence resets it. */
+export function noteExtensionUpdateHold(hold: unknown, browser: string | null = null): void {
   const reason = typeof hold === 'string' && Object.hasOwn(EXTENSION_UPDATE_HOLDS, hold) ? hold : null;
-  if (reason === extensionUpdateHoldLogged) return;
-  extensionUpdateHoldLogged = reason;
+  const key = browser ?? '';
+  if (reason === (extensionUpdateHoldLogged.get(key) ?? null)) return;
+  extensionUpdateHoldLogged.set(key, reason);
+  if (extensionUpdateHoldLogged.size > 16) extensionUpdateHoldLogged.delete(extensionUpdateHoldLogged.keys().next().value!);
   if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
 }
 
@@ -2563,7 +2569,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
       }
       stalledConversations = (body.stalledConversations ?? []) as string[];
-      noteExtensionUpdateHold(body.updateHold);
+      noteExtensionUpdateHold(body.updateHold, browserOf(req));
       revealRequested = body.canReveal === true;
       imageExportRequested = body.canExportImages === true;
       if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
