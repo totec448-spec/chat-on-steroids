@@ -547,6 +547,25 @@ describe('who is allowed to talk to it', () => {
     expect(await companionDiagnostics()).toBeNull();
   });
 
+  // 2026-10-15: browser, ChatGPT tab counts and page checks for the diagnostics report; only
+  // names, versions, counts and booleans pass.
+  it('keeps the browser and page facts the companion reports, bounded to names, counts and booleans', async () => {
+    await pair();
+    const pending = companionDiagnostics();
+    expect((await request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, tab: null, environment: {
+        browser: { name: 'Google Chrome', version: '154.0.7400.12', path: 'must not be forwarded' },
+        tabs: { open: 5, discarded: 1, frozen: 1, loading: -3, grouped: 2, inBackgroundWindow: 'x', titles: ['must not be forwarded'] },
+        page: { composer: true, sendArea: 'yes', modelMenu: true, plusMenu: false, language: 'must not be forwarded' } } } })).status).toBe(200);
+    const snapshot = await pending;
+    expect(snapshot?.environment).toEqual({
+      browser: { name: 'Google Chrome', version: '154.0.7400.12' },
+      tabs: { open: 5, discarded: 1, frozen: 1, loading: 0, grouped: 2, inBackgroundWindow: 0 },
+      page: { composer: true, sendArea: false, modelMenu: true, plusMenu: false, language: null }
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('must not be forwarded');
+  });
+
   it('keeps the extension preferences it stored and hands them and the app language back in /status', async () => {
     await pair();
     const diagnostics = (preferences: { overwrite: boolean; durations: boolean }, stored: boolean) => ({ capturedAt: Date.now(),

@@ -2961,6 +2961,25 @@ var CLF_DOM = (() => {
     });
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
+  /**
+   * Which of ChatGPT's controls this page still has, for the diagnostics report (2026-10-15):
+   * after ChatGPT changes its page, a report says what the extension no longer finds. Booleans
+   * and the page's language tag only, never text from the page.
+   */
+  function pageChecks() {
+    return safe(() => {
+      const language = document.documentElement.getAttribute('lang') || '';
+      return {
+        composer: Boolean(composer()),
+        sendArea: Boolean(composerActions()),
+        modelMenu: Boolean(modelPickerTrigger()),
+        // The October 2026 composer marks it only as its add-context navigation target.
+        plusMenu: Boolean(document.querySelector('[data-composer-navigation-target="add-context"],#composer-plus-btn,[data-testid="composer-plus-btn"]')),
+        language: /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language) ? language : null
+      };
+    }, { composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
+  }
+
   function modelPickerTrigger() {
     const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
     const candidates = [...new Set([...(composer()?.closest('form')?.querySelectorAll('button[aria-haspopup="menu"]') || []),
@@ -3476,6 +3495,7 @@ var CLF_DOM = (() => {
     turnIdOf,
     messageIdOf,
     composerAuthoredText,
+    pageChecks,
     userPromptText,
     userMessageReaction,
     presentUserPrompts,
