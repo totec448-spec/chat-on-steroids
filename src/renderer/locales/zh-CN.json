@@ -2421,5 +2421,15 @@
   "Updating Chat On Steroids": "正在更新 Chat On Steroids",
   "Saving your work…": "正在保存你的工作…",
   "Waiting for your permission in Windows…": "正在等待你在 Windows 中授权…",
-  "Starting the installer. Chat On Steroids opens again by itself.": "正在启动安装程序。Chat On Steroids 会自动重新打开。"
+  "Starting the installer. Chat On Steroids opens again by itself.": "正在启动安装程序。Chat On Steroids 会自动重新打开。",
+  "Firefox, fresh turns for long work, and approvals you answer in the app.": "Firefox、长时间工作的新轮次，以及在应用中审批。",
+  "Firefox": "Firefox",
+  "Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.": "选择 Firefox 作为 ChatGPT 浏览器。其附加组件由 Mozilla 签名并会自动更新。",
+  "Fresh turns for long work": "长时间工作的新轮次",
+  "Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.": "长时间的工作每 30 分钟在新轮次中继续，不再在约 40 分钟后中断。",
+  "Approvals in the app": "在应用中审批",
+  "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "直接在应用中用“拒绝”或“允许一次”回复 ChatGPT 的工具审批卡片。",
+  "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "活动页显示应用、扩展和每个插件的状态，一个按钮即可全部更新。",
+  "Codex and Claude Code in Usage": "用量中的 Codex 和 Claude Code",
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "查看 Codex 的限额以及 Codex 和 Claude Code 使用的 Token，还能在聊天中询问用量。"
 }

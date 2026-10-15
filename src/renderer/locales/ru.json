@@ -2421,5 +2421,15 @@
   "Updating Chat On Steroids": "Обновление Chat On Steroids",
   "Saving your work…": "Сохранение вашей работы…",
   "Waiting for your permission in Windows…": "Ожидание вашего разрешения в Windows…",
-  "Starting the installer. Chat On Steroids opens again by itself.": "Запуск установщика. Chat On Steroids откроется снова сам."
+  "Starting the installer. Chat On Steroids opens again by itself.": "Запуск установщика. Chat On Steroids откроется снова сам.",
+  "Firefox, fresh turns for long work, and approvals you answer in the app.": "Firefox, новые ходы для долгой работы и подтверждения в приложении.",
+  "Firefox": "Firefox",
+  "Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.": "Выберите Firefox браузером для ChatGPT. Его дополнение подписано Mozilla и обновляется само.",
+  "Fresh turns for long work": "Новые ходы для долгой работы",
+  "Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.": "Долгая работа каждые 30 минут продолжается в новом ходе и больше не обрывается примерно через 40 минут.",
+  "Approvals in the app": "Подтверждения в приложении",
+  "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "Отвечайте на карточки подтверждения инструментов ChatGPT кнопками «Отклонить» или «Разрешить один раз» прямо в приложении.",
+  "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "В разделе «Активность» видны приложение, расширение и каждый плагин со статусом, а одна кнопка обновляет всё.",
+  "Codex and Claude Code in Usage": "Codex и Claude Code в «Использовании»",
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Смотрите лимиты Codex и токены Codex и Claude Code и спрашивайте об использовании в чате."
 }

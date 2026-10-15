@@ -2421,5 +2421,15 @@
   "Updating Chat On Steroids": "Chat On Steroids を更新しています",
   "Saving your work…": "作業内容を保存しています…",
   "Waiting for your permission in Windows…": "Windows での許可を待っています…",
-  "Starting the installer. Chat On Steroids opens again by itself.": "インストーラーを起動しています。Chat On Steroids は自動的にもう一度開きます。"
+  "Starting the installer. Chat On Steroids opens again by itself.": "インストーラーを起動しています。Chat On Steroids は自動的にもう一度開きます。",
+  "Firefox, fresh turns for long work, and approvals you answer in the app.": "Firefox、長い作業の新しいターン、アプリでの承認。",
+  "Firefox": "Firefox",
+  "Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.": "ChatGPT のブラウザーとして Firefox を選べます。アドオンは Mozilla が署名し、自動で更新されます。",
+  "Fresh turns for long work": "長い作業の新しいターン",
+  "Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.": "長い作業は 30 分ごとに新しいターンで続くため、約 40 分で途切れなくなりました。",
+  "Approvals in the app": "アプリで承認",
+  "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "ChatGPT のツール承認カードに、アプリから「拒否」または「今回のみ許可」で答えられます。",
+  "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "アクティビティにアプリ、拡張機能、各プラグインの状態が表示され、ボタン 1 つで更新できます。",
+  "Codex and Claude Code in Usage": "使用状況に Codex と Claude Code",
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex の上限と、Codex と Claude Code が使ったトークンを確認でき、チャットでも使用状況を尋ねられます。"
 }

@@ -2421,5 +2421,15 @@
   "Updating Chat On Steroids": "Đang cập nhật Chat On Steroids",
   "Saving your work…": "Đang lưu công việc của bạn…",
   "Waiting for your permission in Windows…": "Đang chờ bạn cho phép trong Windows…",
-  "Starting the installer. Chat On Steroids opens again by itself.": "Đang khởi động trình cài đặt. Chat On Steroids sẽ tự mở lại."
+  "Starting the installer. Chat On Steroids opens again by itself.": "Đang khởi động trình cài đặt. Chat On Steroids sẽ tự mở lại.",
+  "Firefox, fresh turns for long work, and approvals you answer in the app.": "Firefox, lượt mới cho công việc dài và phê duyệt ngay trong ứng dụng.",
+  "Firefox": "Firefox",
+  "Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.": "Chọn Firefox làm trình duyệt ChatGPT. Tiện ích được Mozilla ký và tự cập nhật.",
+  "Fresh turns for long work": "Lượt mới cho công việc dài",
+  "Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.": "Công việc dài tiếp tục trong một lượt mới sau mỗi 30 phút, nên không còn bị ngắt sau khoảng 40 phút.",
+  "Approvals in the app": "Phê duyệt trong ứng dụng",
+  "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "Trả lời thẻ phê duyệt công cụ của ChatGPT bằng Từ chối hoặc Cho phép một lần ngay trong ứng dụng.",
+  "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "Hoạt động hiển thị ứng dụng, tiện ích và từng plugin cùng trạng thái, một nút cập nhật tất cả.",
+  "Codex and Claude Code in Usage": "Codex và Claude Code trong Mức sử dụng",
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Xem giới hạn của Codex và token mà Codex và Claude Code đã dùng, và hỏi mức sử dụng trong cuộc trò chuyện."
 }
