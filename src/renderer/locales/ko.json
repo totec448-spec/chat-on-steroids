@@ -2439,5 +2439,6 @@
   "Chats the app opens go to your regular browser window, never an incognito one.": "앱이 여는 채팅은 시크릿 창이 아닌 일반 브라우저 창으로 갑니다.",
   "A fuller diagnostics report": "더 자세한 진단 보고서",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "앱 설치 방식, 브라우저, 충돌, 자주 나오는 경고, 각 채팅의 상태도 보여 줍니다. 개인 정보는 여전히 포함하지 않습니다.",
-  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox가 부가 기능을 자동으로 업데이트합니다. 지금 하려면 Firefox에서 about:addons를 열고 업데이트 확인을 선택한 뒤 ChatGPT를 새로 고치세요."
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox가 부가 기능을 자동으로 업데이트합니다. 지금 하려면 Firefox에서 about:addons를 열고 업데이트 확인을 선택한 뒤 ChatGPT를 새로 고치세요.",
+  "{0} min": "{0}분"
 }
