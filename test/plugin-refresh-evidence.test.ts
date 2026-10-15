@@ -165,7 +165,7 @@ it('reobserves manual or already claimed refreshes without authorizing another c
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   await claim(request); await requestPluginRefreshes(APP_VERSION);
   const observation = (await pendingPluginRefreshes(false))[0]!;
-  expect(observation).toMatchObject({ appId: null, observeOnly: true });
+  expect(observation).toMatchObject({ appId, observeOnly: true });
   expect(observation.id).not.toBe(request.id);
   expect(await claim(request)).toBe(false);
   expect(await claim(observation)).toBe(false);
