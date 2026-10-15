@@ -25,6 +25,7 @@ import nodePath from 'node:path';
 import { z } from 'zod';
 import { DEFAULT_READ_BYTES, MAX_READ_BYTES, formatBytes } from '../fsops.js';
 import { BinaryReadError, listDirectoryLevel, readTextFile, statInfo, walkFiles } from '../codex/read-backend.js';
+import { fsForRoot, localFs, type ProjectFs } from '../remote/project-fs.js';
 import {
   VIEW_IMAGE_DESCRIPTION,
   VIEW_IMAGE_PATH_DESCRIPTION,
@@ -452,9 +453,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               'TOOL_DISABLED: view_image is disabled by the current Chat On Steroids permissions. Ask the user to enable reading in the app.'
             );
           }
-          const resolved = await resolveIn(ctx.roots, path, { access: 'read' });
+          const resolved = await resolveIn(ctx.roots, path, { access: 'read', remote: true });
           try {
-            const image = await viewImage(resolved.real, null, undefined, resolved.virtual);
+            const image = await viewImage(resolved.real, null, undefined, resolved.virtual, undefined, fsForRoot(resolved.root));
             logInfo(`tool view_image ${resolved.virtual} (${formatBytes(image.bytes)})`);
             return {
               content: [{ type: 'image' as const, data: image.base64, mimeType: image.mimeType }]
@@ -622,6 +623,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             scopes.push({ real: resolved.real, virtual: resolved.virtual });
           } else {
             for (const root of ctx.roots) {
+              // A server folder is searched over SFTP; until that lands it is left out here.
+              if (root.remote) continue;
               const resolved = await resolvePath(ctx.roots, `/${root.name}`);
               scopes.push({ real: resolved.real, virtual: resolved.virtual });
             }
@@ -720,7 +723,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           if (baseVirtual === null) {
             return fail('No folder is approved, so there is nowhere to apply the patch.');
           }
-          const base = await resolveIn(ctx.roots, baseVirtual);
+          const base = await resolveIn(ctx.roots, baseVirtual, { remote: true });
           await validatedWorkspace();
           return (await runParsedPatch(args, ctx.roots, base, caps)).result;
         })
@@ -1675,8 +1678,13 @@ interface PatchRollbackSnapshot {
 /** Keep the connector's atomicity promise bounded even when many large files are patched. */
 const MAX_PATCH_ROLLBACK_BYTES = 64 * 1024 * 1024;
 
-async function readOptionalPatchBytes(real: string): Promise<Buffer | null> {
+async function readOptionalPatchBytes(real: string, projectFs: ProjectFs): Promise<Buffer | null> {
   try {
+    if (projectFs !== localFs) {
+      const metadata = await projectFs.getMetadata(real);
+      if (metadata.isSymlink || !metadata.isFile) throw new Error('apply_patch target changed from a file before execution');
+      return await projectFs.readFile(real);
+    }
     const stat = await fs.lstat(real);
     if (!stat.isFile()) throw new Error('apply_patch target changed from a file before execution');
     return await fs.readFile(real);
@@ -1690,7 +1698,7 @@ async function capturePatchRollbackSnapshots(resolution: PatchResolution): Promi
   const snapshots = new Map<string, PatchRollbackSnapshot>();
   let total = 0;
   for (const [real, virtual] of resolution.virtualPaths) {
-    const bytes = await readOptionalPatchBytes(real);
+    const bytes = await readOptionalPatchBytes(real, resolution.fs);
     total += bytes?.length ?? 0;
     if (total > MAX_PATCH_ROLLBACK_BYTES) {
       throw new Error(
@@ -1737,7 +1745,8 @@ function expectedPatchStates(
  */
 async function rollbackFailedPatch(
   snapshots: Map<string, PatchRollbackSnapshot>,
-  delta: AppliedPatchDelta
+  delta: AppliedPatchDelta,
+  projectFs: ProjectFs
 ): Promise<{ complete: boolean; note: string }> {
   const expected = expectedPatchStates(snapshots, delta);
   const problems: string[] = [];
@@ -1745,7 +1754,7 @@ async function rollbackFailedPatch(
   for (const [real, snapshot] of snapshots) {
     let current: Buffer | null;
     try {
-      current = await readOptionalPatchBytes(real);
+      current = await readOptionalPatchBytes(real, projectFs);
     } catch {
       problems.push(`${snapshot.virtual}: could not inspect current state`);
       continue;
@@ -1757,7 +1766,10 @@ async function rollbackFailedPatch(
       continue;
     }
     try {
-      if (snapshot.bytes === null) await fs.rm(real, { force: true });
+      if (projectFs !== localFs) {
+        if (snapshot.bytes === null) await projectFs.remove(real, { recursive: false, force: true });
+        else await projectFs.writeFile(real, snapshot.bytes);
+      } else if (snapshot.bytes === null) await fs.rm(real, { force: true });
       else await fs.writeFile(real, snapshot.bytes);
     } catch {
       problems.push(`${snapshot.virtual}: restore failed`);
@@ -1767,7 +1779,7 @@ async function rollbackFailedPatch(
   // Prove the final state rather than assuming successful write/remove calls meant restoration.
   for (const [real, snapshot] of snapshots) {
     try {
-      if (!samePatchState(await readOptionalPatchBytes(real), snapshot.bytes)) {
+      if (!samePatchState(await readOptionalPatchBytes(real, projectFs), snapshot.bytes)) {
         if (!problems.some((problem) => problem.startsWith(`${snapshot.virtual}:`))) {
           problems.push(`${snapshot.virtual}: restore verification failed`);
         }
@@ -1813,9 +1825,12 @@ async function runParsedPatch(
       // Preserve the shell gate from `cd dir && apply_patch`: interception must not execute a
       // patch that the submitted shell command would never have reached. The cwd must already
       // exist and be a directory; patch-created parents apply only to paths *inside* it.
-      effectiveBase = await resolveIn(roots, args.workdir, { base: base.virtual });
-      const stat = await fs.stat(effectiveBase.real);
-      if (!stat.isDirectory()) {
+      const workdir = await resolveIn(roots, args.workdir, { base: base.virtual, remote: true });
+      effectiveBase = workdir;
+      const isDirectory = workdir.root.remote
+        ? (await fsForRoot(workdir.root).getMetadata(workdir.real)).isDirectory
+        : (await fs.stat(workdir.real)).isDirectory();
+      if (!isDirectory) {
         return { result: fail('apply_patch workdir must be an existing folder'), content: null, exitCode: null };
       }
     } catch (error) {
@@ -1834,7 +1849,7 @@ async function runParsedPatch(
   }
   if (caps !== undefined) {
     try {
-      const denial = await patchEffectCapabilityDenial(effectiveArgs.hunks, caps, resolution.resolve);
+      const denial = await patchEffectCapabilityDenial(effectiveArgs.hunks, caps, resolution.resolve, resolution.fs);
       if (denial !== null) return { result: fail(denial), content: null, exitCode: null };
     } catch (error) {
       return { result: fail(friendlyError(error)), content: null, exitCode: null };
@@ -1851,7 +1866,8 @@ async function runParsedPatch(
       effectiveArgs,
       effectiveBase.real,
       patchUpdateMode,
-      resolution.resolve
+      resolution.resolve,
+      resolution.fs
     );
   } catch (error) {
     return {
@@ -1874,11 +1890,12 @@ async function runParsedPatch(
     patch: effectiveArgs.patch,
     cwd: effectiveBase.real,
     updateFileMode: patchUpdateMode,
-    resolvePath: resolution.resolve
+    resolvePath: resolution.resolve,
+    fs: resolution.fs
   });
   let rollbackNote = '';
   if (execution.exitCode !== 0 && rollbackSnapshots !== null) {
-    const rollback = await rollbackFailedPatch(rollbackSnapshots, execution.delta);
+    const rollback = await rollbackFailedPatch(rollbackSnapshots, execution.delta, resolution.fs);
     rollbackNote = rollback.note;
   }
   const stdout = safePatchOutput(execution.stdout, resolution);
@@ -1950,11 +1967,14 @@ function patchCapabilityDenial(hunks: readonly Hunk[], caps: Capabilities): stri
 async function patchEffectCapabilityDenial(
   hunks: readonly Hunk[],
   caps: Capabilities,
-  resolve: PatchPathResolver
+  resolve: PatchPathResolver,
+  projectFs: ProjectFs
 ): Promise<string | null> {
   const exists = async (target: string): Promise<boolean> => {
     try {
-      await fs.lstat(target);
+      // A server folder never resolves a dangling link, so following links there loses nothing.
+      if (projectFs === localFs) await fs.lstat(target);
+      else await projectFs.getMetadata(target);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
@@ -1962,7 +1982,7 @@ async function patchEffectCapabilityDenial(
     }
   };
   const samePath = (left: string, right: string): boolean =>
-    process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+    projectFs === localFs && process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 
   for (const hunk of hunks) {
     if (hunk.kind === 'add_file') {
@@ -1987,6 +2007,8 @@ interface PatchResolution {
   virtualPaths: Map<string, string>;
   /** Exact model-visible/real spellings that must never be echoed back as native paths. */
   displayRewrites: Map<string, string>;
+  /** Where every path of the patch lives: this computer, or the one server folder (#1469). */
+  fs: ProjectFs;
 }
 
 function safePatchOutput(text: string, resolution: PatchResolution): string {
@@ -2019,17 +2041,19 @@ async function resolvePatchPaths(
   // resolution has to model that same presence state instead of consulting only pre-patch disk.
   const pendingPresence = new Map<string, boolean>();
   const pathKey = (real: string): string => (process.platform === 'win32' ? real.toLowerCase() : real);
+  const touchedRoots = new Map<string, Root>();
 
   const add = async (spelledPath: string, requireExisting: boolean): Promise<string> => {
     // First resolve the sandbox identity without requiring the leaf to exist. This gives later
     // hunks a stable real key even when the path exists only in the patch's simulated state.
-    let resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing: true });
+    let resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing: true, remote: true });
     const state = pendingPresence.get(pathKey(resolved.real));
     // An untouched initial Update/Delete keeps the old strict Not-found behaviour. Once an
     // earlier hunk has established presence/absence, the verifier owns the sequential verdict.
     if (requireExisting && state === undefined) {
-      resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing: false });
+      resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing: false, remote: true });
     }
+    touchedRoots.set(resolved.root.name, resolved.root);
     realBySpelling.set(spelledPath, resolved.real);
     virtualPaths.set(resolved.real, resolved.virtual);
     displayRewrites.set(resolved.real, resolved.virtual);
@@ -2059,6 +2083,16 @@ async function resolvePatchPaths(
     pendingPresence.set(pathKey(destination), true);
   }
 
+  // One patch is applied through one file system. A server folder's files are reached over its
+  // own SFTP session, so a patch there stays inside that folder; mixing it with any other folder
+  // would need two file systems and two rollbacks that could not succeed or fail together.
+  const remote = [...touchedRoots.values()].find(root => root.remote);
+  if (remote && touchedRoots.size > 1) {
+    throw new SandboxError(
+      `This patch changes files in /${remote.name}, a folder on a server, and in another folder. A patch can change files in one server folder at a time; split it into one patch per folder.`
+    );
+  }
+
   const resolve: PatchPathResolver = (spelledPath) => {
     const resolved = realBySpelling.get(spelledPath);
     if (resolved === undefined) {
@@ -2066,7 +2100,7 @@ async function resolvePatchPaths(
     }
     return resolved;
   };
-  return { resolve, virtualPaths, displayRewrites };
+  return { resolve, virtualPaths, displayRewrites, fs: remote ? fsForRoot(remote) : localFs };
 }
 
 function patchFileChanges(delta: AppliedPatchDelta, virtualPaths: ReadonlyMap<string, string>): Array<{ change: FileChange; before: string; after: string }> {
@@ -2132,8 +2166,9 @@ async function expandGlob(
   const rest = segments.slice(baseSegments.length).join('/');
   if (!rest) return { matches: [normalised], truncated: null };
 
-  const resolved = await resolveIn(roots, base, { access: 'read' });
-  const info = await statInfo(resolved.real, resolved.virtual, { scanContent: false });
+  const resolved = await resolveIn(roots, base, { access: 'read', remote: true });
+  const projectFs = fsForRoot(resolved.root);
+  const info = await statInfo(resolved.real, resolved.virtual, { scanContent: false, fs: projectFs });
   if (info.type !== 'directory') throw new SandboxError(`${resolved.virtual} is not a folder, so it cannot be globbed`);
 
   // `**` walks with Codex's bounded breadth-first walk; a single-level pattern needs one
@@ -2143,12 +2178,13 @@ async function expandGlob(
   if (rest.includes('**')) {
     const walked = await walkFiles(resolved.real, resolved.virtual, {
       maxEntries: GLOB_SCAN_LIMIT,
-      exclude: DEFAULT_EXCLUDES
+      exclude: DEFAULT_EXCLUDES,
+      fs: projectFs
     });
     candidates = walked.files;
     scanTruncated = walked.truncated;
   } else {
-    const listed = await listDirectoryLevel(resolved.real, resolved.virtual, GLOB_SCAN_LIMIT, false);
+    const listed = await listDirectoryLevel(resolved.real, resolved.virtual, GLOB_SCAN_LIMIT, false, projectFs);
     candidates = listed.entries.filter((entry) => entry.type === 'file').map((entry) => entry.virtualPath);
     scanTruncated = listed.truncated;
   }
@@ -2225,13 +2261,13 @@ async function nearestFolderListing(roots: Root[], requested: string, err: unkno
     candidate = parent;
     let resolved;
     try {
-      resolved = await resolveIn(roots, candidate, { access: 'read' });
+      resolved = await resolveIn(roots, candidate, { access: 'read', remote: true });
     } catch (error) {
       if (error instanceof SandboxError && error.message.startsWith('Not found:')) continue;
       return '';
     }
     try {
-      const { entries, truncated } = await listDirectoryLevel(resolved.real, resolved.virtual, MISSING_PATH_LISTING, false);
+      const { entries, truncated } = await listDirectoryLevel(resolved.real, resolved.virtual, MISSING_PATH_LISTING, false, fsForRoot(resolved.root));
       const names = entries.map((entry) => `${entry.type === 'directory' ? 'd' : 'f'} ${entry.name}`);
       const more = truncated ? `, …` : '';
       return `\nThe nearest existing folder is ${resolved.virtual}${
@@ -2259,7 +2295,7 @@ async function pathUnderNamedRoot(roots: Root[], requested: string): Promise<str
     if (!root) continue;
     const candidate = `/${[root.name, ...segments.slice(index + 1)].join('/')}`;
     try {
-      return (await resolveIn(roots, candidate, { access: 'read' })).virtual;
+      return (await resolveIn(roots, candidate, { access: 'read', remote: true })).virtual;
     } catch {
       continue;
     }
@@ -2290,14 +2326,15 @@ async function readOne(
       : `--- / — ${options.roots.length} entr${options.roots.length === 1 ? 'y' : 'ies'}, one level ---\n${options.roots.map(root => `d ${root.name}`).join('\n')}`;
     return { text, bytes: Buffer.byteLength(text, 'utf8') };
   }
-  const resolved = await resolveIn(options.roots, requested, { access: 'read' });
-  const info = await statInfo(resolved.real, resolved.virtual, { scanContent: !options.canRead });
+  const resolved = await resolveIn(options.roots, requested, { access: 'read', remote: true });
+  const projectFs = fsForRoot(resolved.root);
+  const info = await statInfo(resolved.real, resolved.virtual, { scanContent: !options.canRead, fs: projectFs });
 
   if (info.type === 'directory') {
     if (!options.canBrowse) {
       return { text: `--- ${resolved.virtual} ---\nTOOL_DISABLED: listing folders needs the Browse folders permission.`, bytes: 0 };
     }
-    const { entries, truncated } = await listDirectoryLevel(resolved.real, resolved.virtual, MAX_DIR_ENTRIES);
+    const { entries, truncated } = await listDirectoryLevel(resolved.real, resolved.virtual, MAX_DIR_ENTRIES, true, projectFs);
     const prefixLength = resolved.virtual.length + 1;
     const body = entries
       .map((entry) => {
@@ -2338,7 +2375,7 @@ async function readOne(
     // must not fail solely because it is larger than the text budget. Still charge base64,
     // not just compressed file bytes, and refuse an exhausted image batch before decoding.
     if (options.imageBytes <= 0) throw new Error('Read image output cap reached; read remaining images in another call or use view_image.');
-    const image = await viewImage(resolved.real, null, undefined, resolved.virtual);
+    const image = await viewImage(resolved.real, null, undefined, resolved.virtual, undefined, projectFs);
     logInfo(`tool read image ${resolved.virtual} (${formatBytes(image.bytes)})`);
     const text = `--- ${resolved.virtual} — ${formatBytes(image.bytes)} ${image.mimeType} ---`;
     if (image.base64.length > options.imageBytes) {
@@ -2367,7 +2404,8 @@ async function readOne(
     result = await readTextFile(resolved.real, {
       startLine: options.startLine,
       endLine: options.endLine,
-      maxBytes: options.maxBytes
+      maxBytes: options.maxBytes,
+      fs: projectFs
     });
   } catch (error) {
     if (!(error instanceof BinaryReadError)) throw error;

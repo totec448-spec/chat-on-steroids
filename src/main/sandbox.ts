@@ -236,6 +236,12 @@ export interface ResolveOptions {
    * of the root, because there is no point at which a traversal is normalised away first.
    */
   base?: string | null;
+  /**
+   * The caller works on a server folder (#1469) through its `ProjectFs`. Every other caller acts
+   * on this computer's disk, where a server path would name some unrelated local file, so a
+   * server folder is refused to it rather than handed over.
+   */
+  remote?: boolean;
 }
 
 /** True for a path that names its root, rather than starting from somewhere already known. */
@@ -383,6 +389,9 @@ export async function resolvePath(
   }
 
   const rest = segments.slice(1);
+  if (root.remote && options.remote !== true) {
+    throw new SandboxError(`/${root.name} is a folder on a server; this works only in folders on this computer.`);
+  }
   if (root.remote) return resolveRemote(root as Root & { remote: RemoteFolder }, rest, options);
   const rootReal = await realRoot(root);
   const candidate = rest.length === 0 ? rootReal : path.join(rootReal, ...rest);

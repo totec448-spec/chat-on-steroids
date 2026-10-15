@@ -234,7 +234,11 @@ export async function* readFileStream(path: string): AsyncGenerator<Buffer, void
  * script with non-ASCII text is then read as ANSI by Windows PowerShell 5.1.
  */
 export async function readFileText(path: string): Promise<string> {
-  const bytes = await readFile(path);
+  return decodeFileText(await readFile(path));
+}
+
+/** `readFileText`'s strict decode, for bytes read by another backend (#1469). */
+export function decodeFileText(bytes: Buffer): string {
   try {
     return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {

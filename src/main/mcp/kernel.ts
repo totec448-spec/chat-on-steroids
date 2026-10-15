@@ -1310,7 +1310,7 @@ async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: st
 export async function resolveIn(
   roots: Parameters<typeof resolvePath>[0],
   requested: string,
-  options: { allowMissing?: boolean; base?: string | null; access?: 'read' } = {}
+  options: { allowMissing?: boolean; base?: string | null; access?: 'read'; remote?: boolean } = {}
 ): Promise<Resolved> {
   // The user's own Skill folders are served only to read tools, and never become a workspace.
   if (isUserSkillVirtualPath(requested)) {
@@ -1327,6 +1327,7 @@ export async function resolveIn(
   const base = options.base !== undefined ? options.base : (workspace?.virtual ?? null);
   const resolveOptions = {
     ...(options.allowMissing === undefined ? {} : { allowMissing: options.allowMissing }),
+    ...(options.remote === undefined ? {} : { remote: options.remote }),
     base
   };
   const resolved = await resolveLinkedSkillAlias(roots, requested, resolveOptions) ??
