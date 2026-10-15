@@ -321,6 +321,9 @@ describe('cross-platform packaging targets', () => {
     expect(String(firstInteraction?.with?.pr_message ?? '').trim()).not.toBe('');
     expect(welcome.on).toHaveProperty('issues');
     expect(welcome.on).not.toHaveProperty('pull_request_target');
+    // The bug form requires versions, OS and the diagnostics report, and the intake check names
+    // anything missing (#1527); the welcome asking again read as a second, different list (#1534, #1540).
+    expect(String(firstInteraction?.with?.issue_message)).not.toMatch(/versions|steps that lead/i);
   });
 
   it('assembles every platform artifact in the reusable release workflow', () => {
