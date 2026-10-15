@@ -44,7 +44,7 @@
 
 import { requestBrowserDecision, authorizeBrowserHelperRetry } from './session/input.js';
 import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
-import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
+import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
 import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
@@ -55,6 +55,8 @@ import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './durable.js';
+import { goalHelperPromptLimit, noteGoalHelperUnanswered, resetGoalHelperSizeForTests } from './goal-helper-size.js';
+export { GOAL_HELPER_SIZE_STATE, restoreGoalHelperSize } from './goal-helper-size.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
@@ -1533,6 +1535,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
+  resetGoalHelperSizeForTests();
   invalidateGoalControlWrites(pendingGoalObjectives);
   invalidateGoalControlWrites(pendingGoalSwitches);
   pendingGoalObjectives.clear();
@@ -1734,7 +1737,8 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     const reference = request.messages.map(message => ({ ...message }));
     let omitted = false;
     const incomplete = replacement + ' Some older reference rows or text were omitted to fit the browser; absence is not completion.';
-    while (render(reference, omitted ? incomplete : replacement).length > MAX_CHATGPT_MESSAGE_CHARS) {
+    const limit = goalHelperPromptLimit();
+    while (render(reference, omitted ? incomplete : replacement).length > limit) {
       const firstUser = reference.findIndex(message => message.role === 'user');
       const last = reference.length - 1;
       const newestResult = reference.findLastIndex(message => message.role === 'assistant');
@@ -1753,10 +1757,13 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     const direction = omitted ? incomplete : replacement;
     // Each decision owns one Temporary Chat and the complete bounded reference.
     // Historical helper identities remain fenced, but never receive new requests.
-    const decision = normalizeGoalDecision(await requestBrowserDecision(render(reference, direction), request.signal, {
+    const prompt = render(reference, direction);
+    const decision = normalizeGoalDecision(await requestBrowserDecision(prompt, request.signal, {
       sourceSessionId: request.sourceSessionId, conversationId: null,
       lifetime: 'temporary-planner',
       publish: request.publish,
+      // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
+      onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
       ...goalHelperSelection()
     }), false);
     request.signal.throwIfAborted();
@@ -1932,7 +1939,7 @@ async function run(draft: GoalDraft): Promise<void> {
 
   const abort = new AbortController();
   draft.abort = abort;
-  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
   try {
     const decision = draft.backend === 'templates' ? templateGoalDecision(messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
       backend: draft.backend,
@@ -1992,6 +1999,11 @@ async function run(draft: GoalDraft): Promise<void> {
       draft.reply = '';
       return settle(draft, 'no-reply');
     }
+    // A Goal whose chat keeps giving the same visible answer cannot be satisfied by asking again:
+    // it sees answers, not tool results. On 2026-10-14 one got thirteen "verify it" follow-ups to
+    // "done" in ten minutes. Loop is exempt; repeating is its job.
+    const repeated = draft.mode === 'goal' ? goalRepeatsItself(messages) : null;
+    if (repeated !== null) return pauseRepeatingGoal(draft, repeated);
     // Typed rather than written. See humanReply: the em dashes go, and a couple of the
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
     draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
@@ -2467,6 +2479,42 @@ function deltaOf(parsed: unknown): string {
   const choice = choices[0] as { delta?: { content?: unknown }; message?: { content?: unknown } };
   const content = choice?.delta?.content ?? choice?.message?.content;
   return typeof content === 'string' ? content : '';
+}
+
+/** Answers that differ only in case, punctuation or spacing count as the same answer. */
+const REPEAT_ROUNDS = 3;
+function answerKey(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * The answer a Goal chat has given at the end of each of its last three rounds, when it is the
+ * same every time; otherwise null. A round is everything after one user message. Exported for tests.
+ */
+export function goalRepeatsItself(messages: readonly ChatMessage[], rounds = REPEAT_ROUNDS): string | null {
+  const finals: string[] = [];
+  let inRound = false;
+  for (const message of messages) {
+    if (message.role === 'user') { inRound = true; finals.push(''); continue; }
+    if (inRound) finals[finals.length - 1] = message.content;
+  }
+  const last = finals.slice(-rounds);
+  if (last.length < rounds) return null;
+  const key = answerKey(last[0]!);
+  return key && last.every(answer => answerKey(answer) === key) ? last.at(-1)!.trim() : null;
+}
+
+async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<void> {
+  logInfo(`goal: ${draft.conversationId} gave the same answer ${REPEAT_ROUNDS} times in a row; pausing Goal instead of asking again`);
+  await setGoalSwitchNow(draft.conversationId, 'goal', false).catch(() => undefined);
+  const shown = answer.length > 80 ? `${answer.slice(0, 77)}...` : answer;
+  const { recordNote } = await import('./session/recorder.js');
+  await recordNote(draft.sessionId, `Goal paused: ChatGPT gave the same answer three times in a row ("${shown}"). ` +
+    'Goal sees answers, not tool results, so asking again would only repeat itself. Check the chat, then send a message or switch Goal back on.').catch(() => undefined);
+  const { noticeChatStopped } = await import('./stuck-notice.js');
+  noticeChatStopped('Goal paused', 'ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.', draft.sessionId);
+  draft.reply = '';
+  settle(draft, 'no-reply');
 }
 
 interface ChatMessage {

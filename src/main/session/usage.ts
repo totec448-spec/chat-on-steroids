@@ -20,6 +20,10 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
   latestObservedAt = capturedAt;
   limits = parsed.map((entry) => ({ ...entry, observedAt: capturedAt }));
 }
+/** ChatGPT's latest reported limits, as the page last showed them. */
+export function reportedUsageLimits(): ModelUsage[] {
+  return limits.map(row => ({ ...row }));
+}
 // One derived cache owns token totals and verified sends. Display preferences project
 // this baseline; only changed canonical session revisions reread transcripts.
 const CACHE_VERSION = 9;

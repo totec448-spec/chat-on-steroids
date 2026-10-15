@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SessionControlsView } from '../src/main/bridge.js';
 import type { ToolCallRecord } from '../src/shared/session.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -227,6 +228,7 @@ describe('with actions switched off', () => {
         await post('/v1/inputs/00000000-0000-4000-8000-000000000001/cancel'),
         await post('/v1/inputs/ffffffff-ffff-4fff-8fff-ffffffffffff/cancel', { anything: 1 }),
         await post('/v1/inputs/not-even-an-id/cancel'),
+        await post('/v1/sessions/' + chatSession + '/stop', { turnId: 'turn-1' }),
         // Announces far more body than it sends, and names no content type.
         await call('POST', '/v1/inputs', { body: '{}', headers: { 'content-length': '5000000', 'content-type': '' } }),
         await call('POST', '/v1/inputs', { body: 'not json', headers: { 'content-type': 'text/plain' } })
@@ -252,7 +254,7 @@ describe('with actions switched off', () => {
     expect(refused.status).toBe(403);
     expect(refused.continued).toBe(false);
     expect((await call('GET', '/v1/inputs')).status).toBe(200);
-    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel'] });
+    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel', 'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack', 'POST /v1/sessions/{id}/stop'] });
   });
 
   it('follows the switch on the next request without restarting the listener', async () => {
@@ -1072,6 +1074,52 @@ describe('what a message row proves', () => {
     const listed = new Map((await call('GET', '/v1/inputs')).body.inputs.map((entry: { id: string }) => [entry.id, entry]));
     expect(listed.get(recovery.id)).toMatchObject({ automatic: true, state: 'failed', delivery: 'not_sent' });
     expect(listed.get(typed.id)).toMatchObject({ automatic: false });
+  });
+});
+
+describe('stopping an answer', () => {
+  const controls = (over: Partial<SessionControlsView> = {}): SessionControlsView => ({
+    sessionId: chatSession, conversationId: CHAT, plan: null, automation: 'off', objective: '',
+    activeTurnId: 'turn-1', finishHeld: false, blocked: '', job: null, ...over
+  });
+
+  it("asks the app's own Stop to end exactly the named answer, and reports it as requested", async () => {
+    const stops = vi.spyOn(bridge, 'stopSessionTurn').mockResolvedValue(controls({ stopPending: true }));
+    try {
+      const reply = await post('/v1/sessions/' + chatSession + '/stop', { turnId: 'turn-1' });
+      expect(reply.status).toBe(202);
+      expect(stops).toHaveBeenCalledWith(chatSession, 'turn-1');
+      expect(reply.body.live).toMatchObject({ activeTurnId: 'turn-1', stopPending: true });
+    } finally {
+      stops.mockRestore();
+    }
+  });
+
+  it('refuses an answer that is not running, by the same check as the Stop button', async () => {
+    // Recorded as started, but no browser reports it running, so the app's Stop refuses it too.
+    const answering = await answeringSession('Stopped already', 'chat-stop-1', 'turn-old');
+    const reply = await post('/v1/sessions/' + answering + '/stop', { turnId: 'turn-old' });
+    expect(reply.status).toBe(409);
+    expect(reply.body.error).toBe('turn_not_running');
+  });
+
+  it('refuses a bad body, an unknown chat, a chat without ChatGPT and a worker chat before stopping anything', async () => {
+    const stops = vi.spyOn(bridge, 'stopSessionTurn');
+    try {
+      expect((await post('/v1/sessions/' + chatSession + '/stop', {})).body.error).toBe('invalid_body');
+      expect((await post('/v1/sessions/' + chatSession + '/stop', { turnId: 't', now: true })).body.detail).toBe('unknown field');
+      expect((await post('/v1/sessions/nosuchsession/stop', { turnId: 't' })).body.error).toBe('session_not_found');
+      const unattached = await makeSession('Nothing to stop', null);
+      expect((await post('/v1/sessions/' + unattached + '/stop', { turnId: 't' })).body.error).toBe('no_chat');
+      const worker = await makeSession('Worker', 'chat-worker-stop', { kind: 'worker', fromSessionId: chatSession, agentId: 'worker-1', task: 't' });
+      expect((await post('/v1/sessions/' + worker + '/stop', { turnId: 't' })).body.error).toBe('session_not_controllable');
+      const get = await call('GET', '/v1/sessions/' + chatSession + '/stop');
+      expect(get.status).toBe(405);
+      expect(get.headers.allow).toBe('POST');
+      expect(stops).not.toHaveBeenCalled();
+    } finally {
+      stops.mockRestore();
+    }
   });
 });
 

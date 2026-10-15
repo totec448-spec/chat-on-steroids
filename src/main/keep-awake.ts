@@ -22,23 +22,28 @@ export function keepAwakeState(sessions: readonly SessionSummary[], now: number)
   return { awake: nextAt !== null, nextAt };
 }
 
+/** `screen` also keeps the display on: some Windows laptops (Modern Standby) sleep once it turns off. */
+export type KeepAwakeKind = 'computer' | 'screen';
 export interface SleepBlocker {
-  start(): number;
+  start(kind: KeepAwakeKind): number;
   stop(id: number): void;
 }
 
-export function createKeepAwake(options: { sessions: () => Promise<readonly SessionSummary[]>; enabled: () => boolean; blocker: SleepBlocker }) {
+export function createKeepAwake(options: { sessions: () => Promise<readonly SessionSummary[]>; enabled: () => boolean; screen?: () => boolean; blocker: SleepBlocker }) {
   let hold: number | null = null;
+  let holdKind: KeepAwakeKind | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running: Promise<void> | null = null;
   let again = false;
   let disposed = false;
-  const release = () => { if (hold !== null) { options.blocker.stop(hold); hold = null; } };
+  const release = () => { if (hold !== null) { options.blocker.stop(hold); hold = null; holdKind = null; } };
   const once = async (): Promise<void> => {
     if (timer) { clearTimeout(timer); timer = null; }
     const { awake, nextAt } = options.enabled() ? keepAwakeState(await options.sessions(), Date.now()) : { awake: false, nextAt: null };
     if (disposed) return;
-    if (awake && hold === null) hold = options.blocker.start();
+    const kind: KeepAwakeKind = options.screen?.() === true ? 'screen' : 'computer';
+    if (awake && hold !== null && holdKind !== kind) release();
+    if (awake && hold === null) { hold = options.blocker.start(kind); holdKind = kind; }
     else if (!awake) release();
     if (nextAt !== null) {
       timer = setTimeout(() => { void refresh(); }, Math.max(1_000, nextAt - Date.now() + 100));

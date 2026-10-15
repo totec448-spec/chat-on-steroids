@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new dom.window.Event('close')); };
-  state = { schemaRevision: 1, catalog: [{ id: 'memory', icon: 'memory', color: '#aaa', name: 'Memory', description: 'Knowledge graph', source: { kind: 'npm', package: 'memory' }, homepage: 'https://example.org', license: 'MIT', instructions: ['Install Node.js.'], fields: [{ key: 'TOKEN', label: 'API token', secret: true, required: true }] }], plugins: [{ id: 'one', name: '<img src=x onerror=alert(1)>', source: { kind: 'command', command: 'node' }, config: {}, credentialKeys: ['TOKEN'], version: '1', license: 'MIT', enabled: true, status: 'ready', installedAt: 1, tools: [] }] };
+  state = { schemaRevision: 1, catalog: [{ id: 'memory', icon: 'memory', color: '#aaa', name: 'Memory', description: 'Knowledge graph', source: { kind: 'npm', package: 'memory' }, homepage: 'https://example.org', license: 'MIT', instructions: ['Install Node.js.'], fields: [{ key: 'TOKEN', label: 'API token', secret: true, required: true }] }], plugins: [{ id: 'one', name: '<img src=x onerror=alert(1)>', source: { kind: 'command', command: 'node' }, config: {}, credentialKeys: ['TOKEN'], longestCallSeconds: 120, version: '1', license: 'MIT', enabled: true, status: 'ready', installedAt: 1, tools: [] }] };
   api = Object.fromEntries(['pluginsSnapshot', 'pluginsInstall', 'pluginsConfigure', 'pluginsRestart', 'pluginsUpdate', 'pluginsUninstall', 'pluginsSetEnabled', 'pluginsSetToolEnabled', 'pluginsImportBundle', 'pluginsAuthenticate', 'pluginsCancelAuthentication', 'onPluginsChanged', 'saveSettings', 'setApiKey', 'connect', 'openLink', 'writeClipboard'].map((key) => [key, vi.fn().mockResolvedValue({ ok: true, data: state })]));
   api.pluginsSnapshot!.mockImplementation(async () => ({ ok: true, data: state }));
   Object.assign(dom.window, { api });
@@ -40,9 +40,114 @@ it('keeps credential edits private and stable while status updates arrive', asyn
   await refreshPlugins();
   expect(document.querySelector('#pluginDialog input[type=password]')).toBe(password);
   expect(password.value).toBe('never-show-this');
-  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find((node) => node.textContent === 'Save and reconnect')!.click(); await tick();
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find((node) => node.textContent === 'Save')!.click(); await tick();
   expect(api.pluginsConfigure).toHaveBeenCalledWith('one', expect.objectContaining({ credentials: { TOKEN: 'never-show-this' } }));
   expect(document.body.textContent).not.toContain('never-show-this');
+});
+
+it('saves a changed longest-call limit alone without a reconnect or connector-refresh reminder', async () => {
+  state.plugins[0]!.longestCallSeconds = 120;
+  state.plugins[0]!.fields = [{ key: 'REGION', label: 'Region' }];
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const limit = [...document.querySelectorAll<HTMLInputElement>('#pluginDialog .plugin-field input')]
+    .find(input => input.parentElement!.querySelector('span')!.textContent === 'Longest call (seconds)')!;
+  expect([limit.type, limit.min, limit.max, limit.step, limit.value]).toEqual(['number', '1', '1800', '1', '120']);
+  limit.value = '45';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledExactlyOnceWith('one', { longestCallSeconds: 45 });
+  expect(api.pluginsRestart).not.toHaveBeenCalled();
+  expect(document.querySelector('.toast')).toBeNull();
+});
+
+it('validates integer longest-call limits from 1 to 1800 seconds', async () => {
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const limit = document.querySelector<HTMLInputElement>('#pluginDialog input[type=number]')!;
+  const save = [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!;
+  for (const invalid of ['0', '1801', '1.5', '']) {
+    limit.value = invalid; save.click(); await tick();
+    expect(api.pluginsConfigure).not.toHaveBeenCalled();
+    expect(document.querySelector('.toast')!.textContent).toContain('Enter a whole number from 1 to 1800 seconds.');
+  }
+  limit.value = '1'; save.click(); await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledExactlyOnceWith('one', { longestCallSeconds: 1 });
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  document.querySelector<HTMLInputElement>('#pluginDialog input[type=number]')!.value = '1800';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', { longestCallSeconds: 1800 });
+});
+
+it('keeps the longest-call limit independent per plugin and reconnects when other settings change', async () => {
+  state.plugins[0]!.longestCallSeconds = 30;
+  state.plugins.push({ ...structuredClone(state.plugins[0]!), id: 'two', name: 'Second plugin', longestCallSeconds: 300 });
+  await refreshPlugins();
+  const openConfigure = (index: number) => {
+    document.querySelectorAll<HTMLButtonElement>('.plugin-entry')[index]!.click();
+    document.querySelector<HTMLButtonElement>('.plugin-detail-intro .plugin-configure')!.click();
+    return document.querySelector<HTMLInputElement>('#pluginDialog input[type=number]')!;
+  };
+  const first = openConfigure(0); expect(first.value).toBe('30');
+  first.value = '60';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click(); await tick();
+  expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', { longestCallSeconds: 60 });
+  const second = openConfigure(1); expect(second.value).toBe('300');
+  second.value = '90';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click(); await tick();
+  expect(api.pluginsConfigure).toHaveBeenLastCalledWith('two', { longestCallSeconds: 90 });
+  const withSettings = openConfigure(0);
+  withSettings.value = '40';
+  document.querySelector<HTMLInputElement>('#pluginDialog .plugin-field input')!.value = 'Renamed plugin';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click(); await tick();
+  expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', expect.objectContaining({ name: 'Renamed plugin', longestCallSeconds: 40 }));
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
+});
+
+it('recognizes cleared configuration values and additional JSON keys as reconnecting changes', async () => {
+  state.plugins[0]!.config = { REGION: 'eu' };
+  await refreshPlugins();
+  const configure = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const save = () => [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  const byLabel = (label: string) => [...document.querySelectorAll<HTMLInputElement>('#pluginDialog .plugin-field input')]
+    .find(input => input.parentElement!.querySelector('span')!.textContent === label)!;
+  configure(); byLabel('REGION').value = '';
+  byLabel('Longest call (seconds)').value = '45'; save(); await tick();
+  expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', expect.objectContaining({ config: { REGION: '' }, longestCallSeconds: 45 }));
+  await refreshPlugins();
+  configure(); byLabel('Additional configuration (JSON object)').value = '{"EXTRA":"value"}';
+  byLabel('Longest call (seconds)').value = '30'; save(); await tick();
+  expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', expect.objectContaining({ config: { REGION: 'eu', EXTRA: 'value' }, longestCallSeconds: 30 }));
+});
+
+it('sends the full patch for a new empty config key and changed longest-call limit', async () => {
+  state.plugins[0]!.config = { REGION: 'eu' };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const field = (label: string) => [...document.querySelectorAll<HTMLInputElement>('#pluginDialog .plugin-field input')]
+    .find(input => input.parentElement!.querySelector('span')!.textContent === label)!;
+  field('Additional configuration (JSON object)').value = '{"HTTP_PROXY":""}';
+  field('Longest call (seconds)').value = '45';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledExactlyOnceWith('one', expect.objectContaining({
+    config: { REGION: 'eu', HTTP_PROXY: '' },
+    longestCallSeconds: 45,
+  }));
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
+});
+
+it('keeps the limit-only path when an existing config key is already empty', async () => {
+  state.plugins[0]!.config = { HTTP_PROXY: '' };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  document.querySelector<HTMLInputElement>('#pluginDialog input[type=number]')!.value = '45';
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledExactlyOnceWith('one', { longestCallSeconds: 45 });
+  expect(document.querySelector('.toast')).toBeNull();
 });
 
 it('routes exact plugin and tool identity for disabling a discovered tool', async () => {

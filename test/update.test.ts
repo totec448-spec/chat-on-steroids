@@ -14,16 +14,23 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawned: Array<{ file: string; args: string[] }> = [];
+/** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
+const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
 vi.mock('node:child_process', () => ({
   spawn: (file: string, args: string[]) => {
     spawned.push({ file, args });
     return { on: () => undefined, unref: () => undefined };
+  },
+  execFile: (file: string, args: string[], _options: unknown, done: (err: (Error & { code?: number | string }) | null) => void) => {
+    icacls.calls.push({ file, args });
+    const result = icacls.result;
+    queueMicrotask(() => done(result === null ? null : Object.assign(new Error('icacls failed'), { code: result })));
   }
 }));
 
@@ -52,6 +59,8 @@ const {
   markInstallOnQuit,
   releaseVersion,
   resetUpdateForTests,
+  restoreUpdateHandoff,
+  setInstallFolderAccessForTests,
   stagedArtifact,
   startUpdateChecks,
   updateStatus
@@ -275,6 +284,91 @@ describe('staging the new version', () => {
   });
 
   /**
+   * #1490: the installer re-grants the Chromium sandbox read access on the install folder, which
+   * needs the right to change its permissions. In a folder an administrator created (a custom
+   * D:\\ path, C:\\Program Files) a user may write files but not that, so the silent installer
+   * stopped and nothing said so. Windows now asks for permission; a per-user install stays silent.
+   */
+  it('asks Windows for permission when the install folder needs an administrator', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    const staged = path.join(userData, 'updates', NEXT, WINDOWS_ASSET);
+    setInstallFolderAccessForTests(async () => false);
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.file).toBe('powershell.exe');
+    const script = spawned[0]!.args.at(-1)!;
+    expect(script).toContain(`Start-Process -FilePath '${staged.replaceAll("'", "''")}'`);
+    expect(script).toContain("-ArgumentList '/S','--updated','--force-run'");
+    expect(script).toContain('-Verb RunAs');
+  });
+
+  it('keeps the silent per-user install when the folder is the user’s own', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(spawned).toEqual([{ file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated'] }]);
+  });
+
+  it('decides by repeating the installer’s own access grant on the app folder', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    for (const [result, elevated] of [[5, true], [null, false], ['ENOENT', false]] as const) {
+      spawned.length = 0; icacls.calls.length = 0; icacls.result = result;
+      await asPlatform('win32', undefined, () => applyStagedUpdate());
+      expect(icacls.calls).toEqual([{ file: expect.stringMatching(/icacls\.exe$/i),
+        args: [path.dirname(process.execPath), '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q'] }]);
+      expect(spawned[0]?.file === 'powershell.exe', String(result)).toBe(elevated);
+      await asPlatform('win32', undefined, () => checkForUpdates());
+    }
+    icacls.result = null;
+  });
+
+  /**
+   * #1490: the installer failed silently and the next start was simply the old version again, with
+   * nothing said. The handover leaves a note; a start that is still older than it says so once.
+   */
+  it('says at the next start when the handed-over version did not install', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    const note = path.join(userData, 'updates', 'handoff.json');
+    expect(JSON.parse(readFileSync(note, 'utf8'))).toMatchObject({ version: NEXT });
+    resetUpdateForTests();
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled).toBe(NEXT);
+    expect(existsSync(note)).toBe(false);
+    // Said once: the next start no longer repeats it.
+    resetUpdateForTests();
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled ?? null).toBeNull();
+  });
+
+  it('forgets the note quietly when the handed-over version is the one running', async () => {
+    const note = path.join(userData, 'updates', 'handoff.json');
+    mkdirSync(path.dirname(note), { recursive: true });
+    writeFileSync(note, JSON.stringify({ version: APP_VERSION, at: Date.now() }));
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled ?? null).toBeNull();
+    expect(existsSync(note)).toBe(false);
+  });
+
+  it('clears the notice once the update is installed again', async () => {
+    const note = path.join(userData, 'updates', 'handoff.json');
+    mkdirSync(path.dirname(note), { recursive: true });
+    writeFileSync(note, JSON.stringify({ version: NEXT, at: Date.now() }));
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled).toBe(NEXT);
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    expect(updateStatus().notInstalled ?? null).toBeNull();
+  });
+
+  /**
    * The one that a length check would wave through, and the reason the digest is the bar: the
    * artifact that arrives is the wrong build at exactly the right size. Nothing may be staged,
    * and nothing may be left on disk for a later quit to find.
@@ -470,6 +564,12 @@ describe('a download that survives the process that fetched it', () => {
  * the one the user can see - the app comes back.
  */
 describe('installing on request', () => {
+  it('refuses an Update all handoff for a different release than the verified staged artifact', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit('98.0.0')).toBe(false);
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+  });
   it('asks the installer to start the app again', async () => {
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());

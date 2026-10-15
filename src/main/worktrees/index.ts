@@ -182,6 +182,21 @@ function cleanGitEnvironment(): NodeJS.ProcessEnv {
   return environment;
 }
 
+/**
+ * One repository's worktrees change one Git process at a time. `git worktree add` reads every
+ * other worktree's admin folder, and one being created at that moment has no `commondir` yet:
+ * concurrent worker allocations failed with "failed to read .git/worktrees/…/commondir"
+ * (2026-10-14). Keyed by the repository's common Git directory; only add and remove wait here.
+ */
+const worktreeChanges = new Map<string, Promise<unknown>>();
+function oneWorktreeChangeAtATime<T>(commonDir: string, change: () => Promise<T>): Promise<T> {
+  const run = (worktreeChanges.get(commonDir) ?? Promise.resolve()).then(change);
+  const tail = run.catch(() => undefined);
+  worktreeChanges.set(commonDir, tail);
+  void tail.then(() => { if (worktreeChanges.get(commonDir) === tail) worktreeChanges.delete(commonDir); });
+  return run;
+}
+
 async function runGit(cwd: string, args: readonly string[], maxBytes = MAX_GIT_BYTES): Promise<GitResult> {
   const executable = gitExecutable();
   return new Promise((resolve, reject) => {
@@ -756,7 +771,8 @@ async function allocate(input: {
       );
     }
   }
-  const add = await runGit(source.cwd, safeGitArgs(hooksPath, ['worktree', 'add', '--no-track', '-b', branch, worktreePath, baseOid]));
+  const add = await oneWorktreeChangeAtATime(source.commonDir,
+    () => runGit(source.cwd, safeGitArgs(hooksPath, ['worktree', 'add', '--no-track', '-b', branch, worktreePath, baseOid])));
   if (add.code !== 0) {
     const raced = await readMarker(markerPath);
     if (raced) {
@@ -782,7 +798,8 @@ async function allocate(input: {
     // this tree. Never force-remove a slot bearing another owner's marker.
     const currentMarker = await readMarker(markerPath).catch(() => undefined);
     if (currentMarker === null || (currentMarker && markerMatchesLease(currentMarker, lease))) {
-      const removed = await runGit(source.cwd, safeGitArgs(hooksPath, ['worktree', 'remove', '--force', worktreePath])).catch(() => null);
+      const removed = await oneWorktreeChangeAtATime(source.commonDir,
+        () => runGit(source.cwd, safeGitArgs(hooksPath, ['worktree', 'remove', '--force', worktreePath]))).catch(() => null);
       if (removed?.code === 0) {
         await runGit(source.cwd, ['update-ref', '-d', branchRef, baseOid], 256).catch(() => undefined);
         if (currentMarker) await fs.unlink(markerPath).catch(() => undefined);
@@ -1307,7 +1324,7 @@ export function finalizeWorkerWorkspace(input: {
     if (worktreeExists) {
       await assertOwnedWorktree(input.lease);
       const args = ['worktree', 'remove', ...(input.discardChanges === true ? ['--force'] : []), marker.worktreePath];
-      const removed = await runGit(marker.sourceRepoRoot, safeGitArgs(marker.hooksPath, args));
+      const removed = await oneWorktreeChangeAtATime(input.lease.commonDir, () => runGit(marker.sourceRepoRoot, safeGitArgs(marker.hooksPath, args)));
       if (removed.code !== 0) throw new WorkerWorktreeError('WORKTREE_REMOVE_FAILED', removed.stderr || 'owned worker worktree could not be removed');
     }
     const branchRemoved = await deleteOwnedBranch(marker, disposition);

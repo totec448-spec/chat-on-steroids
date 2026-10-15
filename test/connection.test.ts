@@ -23,7 +23,8 @@ const mocks = vi.hoisted(() => {
     tunnel: { kind: 'cloudflared', tunnelId: '', desktopTunnelId: '', pluginsTunnelId: '', binaryPath: '' },
     ui: { privacyScreenshots: false },
     sessions: { record: false },
-    multiAgent: { enabled: false }
+    multiAgent: { enabled: false },
+    mcp: { instructions: '', persistentUrls: false }
   };
   return {
     caps,
@@ -79,6 +80,12 @@ vi.mock('../src/main/mcp/server.js', () => ({
 }));
 
 vi.mock('../src/main/mcp/tools.js', () => ({ lastToolCallAt: () => null }));
+const paths = vi.hoisted(() => ({ kept: {} as Record<string, string>, remembered: [] as unknown[] }));
+vi.mock('../src/main/mcp/persistent-paths.js', () => ({
+  loadSurfaceTokens: vi.fn(async () => paths.kept),
+  rememberSurfaceTokens: vi.fn(async (urls: unknown) => { paths.remembered.push(urls); return true; }),
+  forgetSurfaceTokens: vi.fn(async () => undefined)
+}));
 vi.mock('../src/main/secrets.js', () => ({
   getSecret: vi.fn(async () => {
     mocks.secretReached();
@@ -1011,3 +1018,26 @@ describe('connection surface state', () => {
     expect(mocks.starts).toBe(2);
   });
 });
+
+// #924 / #1401: with the option on, a restart serves the same connector URLs.
+describe('persistent connector URLs', () => {
+  it('starts on the kept tokens and remembers the running ones only when the option is on', async () => {
+    // A fresh connection module: earlier tests in this file end in a final shutdown.
+    vi.resetModules();
+    const connection = await import('../src/main/connection.js');
+    const { startMcpServer } = await import('../src/main/mcp/server.js');
+    const start = vi.mocked(startMcpServer);
+    paths.kept = { core: 'k'.repeat(43) }; paths.remembered.length = 0;
+    mocks.config.mcp.persistentUrls = true;
+    await connection.connect();
+    expect(start.mock.calls.at(-1)![1]).toEqual({ core: 'k'.repeat(43) });
+    expect(paths.remembered.at(-1)).toMatchObject({ core: 'http://127.0.0.1:45678/mcp/core/core-token' });
+    await connection.disconnect();
+    mocks.config.mcp.persistentUrls = false; paths.remembered.length = 0;
+    await connection.connect();
+    expect(start.mock.calls.at(-1)![1]).toEqual({});
+    expect(paths.remembered).toEqual([]);
+    await connection.disconnect();
+  });
+});
+

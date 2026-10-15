@@ -192,7 +192,7 @@
                 <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em>What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.</em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em>Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.</em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier">⌘Enter / Ctrl+Enter</option></select></label>
-                <label class="setting"><span class="setting-text"><b>Keep the computer awake</b><em>While a chat is working, the computer doesn't go to sleep, so long runs keep going. The screen can still turn off.</em></span><input id="keepAwake" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
               </div>
@@ -207,6 +207,7 @@
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Keep plugin URLs across restarts</b><em>For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.</em></span><input id="mcpPersistentUrls" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
@@ -351,6 +352,15 @@
                   <select class="usage-week-start" id="usageWeekStart" title="Change start day" aria-label="Change start day" aria-describedby="usageMessagePeriod"></select>
                   <span class="sr-only" id="usageMessagePeriod"></span>
                   <div id="modelUsage"><div class="usage-limits" id="usageLimits"></div></div>
+                </div>
+              </section>
+              <section class="settings-section usage-section usage-other-apps" aria-labelledby="usageOtherAppsTitle">
+                <header class="settings-section-head">
+                  <div><h2 id="usageOtherAppsTitle">Other apps on this computer</h2><p>Codex and Claude Code, read from their own logs here. Limits are as the app last reported them; tokens are counted from the logs.</p></div>
+                </header>
+                <div class="settings-surface usage-message-surface">
+                  <label class="setting"><span class="setting-text"><b>Read Codex and Claude Code usage</b><em>Only numbers, never what you wrote. Nothing leaves this computer unless you ask for your usage in a chat.</em></span><input id="localAppUsage" type="checkbox" /></label>
+                  <div class="usage-limits" id="otherAppsUsage" aria-live="polite"></div>
                 </div>
               </section>
               <section class="settings-section usage-section">
@@ -573,6 +583,7 @@
                         <button type="button" role="radio" data-external-browser="chrome" aria-checked="true"><img src="./browser-icons/chrome.svg" alt="" /><span translate="no">Chrome</span></button>
                         <button type="button" role="radio" data-external-browser="edge" aria-checked="false" tabindex="-1"><img src="./browser-icons/edge.svg" alt="" /><span translate="no">Edge</span></button>
                         <button type="button" role="radio" data-external-browser="brave" aria-checked="false" tabindex="-1"><img src="./browser-icons/brave.svg" alt="" /><span translate="no">Brave</span></button>
+                        <button type="button" role="radio" data-external-browser="firefox" aria-checked="false" tabindex="-1"><img src="./browser-icons/firefox.svg" alt="" /><span translate="no">Firefox</span></button>
                       </div>
                       </div>
                     <h3 id="browserExtensionTitle" tabindex="-1">Connect your browser</h3>
@@ -580,11 +591,13 @@
                   <section id="browserExtensionStage" class="browser-stage" aria-labelledby="browserExtensionTitle">
                     <div class="browser-stage-copy">
                       <ol class="browser-install-steps">
-                        <li><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
+                        <li data-install-engine="gecko" hidden><div><b id="extensionStepAddon">Add the Chat On Steroids add-on to Firefox</b><button type="button" class="btn btn-solid" id="openFirefoxAddon"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i><span>Get the add-on</span></button>
+                          <p>Firefox asks before it adds the add-on. Choose Add.</p></div></li>
+                        <li data-install-engine="chromium"><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
                           <p id="extensionStepOpenHint">Click the address to copy it, then paste it into the address bar and press Enter.</p></div></li>
-                        <li><div><b id="extensionStepDev">Turn on Developer mode</b><p id="extensionStepDevWhere" hidden></p>
+                        <li data-install-engine="chromium"><div><b id="extensionStepDev">Turn on Developer mode</b><p id="extensionStepDevWhere" hidden></p>
                           <figure class="ext-figure" id="extensionPictureDev"></figure></div></li>
-                        <li><div><b id="extensionStepLoad">Click Load unpacked and choose the extension folder</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
+                        <li data-install-engine="chromium"><div><b id="extensionStepLoad">Click Load unpacked and choose the extension folder</b><button class="btn btn-solid setup-tunnel-open" id="bridgeFolder" type="button"><i class="ico ph ph-folder" aria-hidden="true"></i><span>Open extension folder</span></button>
                           <figure class="ext-figure" id="extensionPictureLoad"></figure></div></li>
                         <li><div><b id="extensionStepChatGpt">Open ChatGPT in your browser</b><button class="btn btn-quiet" id="openChatGptBrowser" type="button"><span>Open ChatGPT</span><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i></button></div></li>
                       </ol>
@@ -813,6 +826,17 @@
                       <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.</p>
                     </div>
                   </details>
+                  <!-- #1495: a workspace member without admin rights can neither add a custom app nor
+                       see the workspace's Platform organization; say whom to ask and for what. -->
+                  <details class="setup-optional step-wide" id="workspaceMemberHelp">
+                    <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>ChatGPT workspace without admin rights <span class="tag is-optional">optional</span></summary>
+                    <div class="field workspace-member-help">
+                      <p class="hint">In Business, Enterprise and Edu workspaces, admins decide who may add custom apps. If Plugins offers no way to add a custom MCP server, ask a workspace admin to add the Core plugin with the name, description and tunnel ID shown here.</p>
+                      <p class="hint">The tunnel must belong to your workspace's organization on platform.openai.com. If Platform only shows your Personal organization, ask an admin to invite you to that organization, or to create the tunnel and a restricted key (Tunnels: Read and Use) for you.</p>
+                      <p class="hint">A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).</p>
+                      <p class="hint">Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.</p>
+                    </div>
+                  </details>
                   <div class="connectors step-wide" id="connectorCards"></div>
                 </div>
               </li>
@@ -970,6 +994,7 @@
                     <input id="autoContinue" type="checkbox" />
                   </label>
                   <details class="setting-timing"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Recovery timing details</summary><p>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.</p></details>
+                  <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
@@ -1058,7 +1083,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Archive worker chats in ChatGPT when they are retired</b>
-                      <em>Once a worker can't be used again (you cleared the workers, or the main chat closed), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                      <em>Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
                     </span>
                     <input id="archiveWorkerChats" type="checkbox" />
                   </label>
@@ -1091,7 +1116,8 @@
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="firefox">Mozilla Firefox</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <label class="setting" id="cosBrowserMinimizeRow" hidden><span class="setting-text"><b>Minimize the built-in browser to</b><em>Where its window goes when you minimize it. Its chats go on either way.</em></span><select id="cosBrowserMinimize"><option value="taskbar" id="cosBrowserMinimizeTaskbar">Taskbar</option><option value="tray" id="cosBrowserMinimizeTray">Tray</option></select></label>
                   <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the browser extension from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
@@ -1393,6 +1419,33 @@
             <h1>Activity</h1>
             <p>Recent local events and failures.</p>
           </header>
+          <section class="card update-readiness" id="updateReadinessCard" aria-labelledby="updateReadinessTitle">
+            <h2 id="updateReadinessTitle">Update status</h2>
+            <div class="update-readiness-status">
+              <div class="update-readiness-header">
+                <button class="btn update-readiness-toggle" id="updateReadinessToggle" type="button" aria-controls="updateReadinessDetails" aria-expanded="true">
+                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary">Not checked yet</span>
+                </button>
+                <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="You will be asked before the app restarts. Finish active work before installing.">Update all</button>
+              </div>
+              <span class="sr-only" id="updateReadinessAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <p id="updateAllError" class="is-warn" role="alert" hidden></p>
+            </div>
+            <details id="updateReadinessDetails" open>
+              <summary>Component details</summary>
+              <p class="muted">App, browser extension and plugins in ChatGPT.</p>
+              <ul id="updateReadinessRows"></ul>
+              <p class="muted">Your settings are kept. Manual steps appear in the status list.</p>
+              <p class="muted" id="updateConnectionNotice">After updating, the app connects once to finish plugin checks, even if automatic connection is off.</p>
+              <button class="btn" id="updateReviewSetup" type="button">Review setup</button>
+            </details>
+            <div class="update-readiness-actions">
+              <p class="sr-only" id="updateAllNotice">You will be asked before the app restarts. Finish active work before installing.</p>
+              <div class="update-readiness-buttons">
+                <button class="btn" id="updateDiagnosticsReport" type="button" hidden>Diagnostics report</button>
+              </div>
+            </div>
+          </section>
           <section class="card">
             <h2>
               <span class="sr-only">Activity</span>

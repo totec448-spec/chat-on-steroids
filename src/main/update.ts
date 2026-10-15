@@ -37,9 +37,9 @@
  * wrong.
  */
 
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, rename, rm } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -175,7 +175,28 @@ function set(next: Partial<UpdateStatus>): void {
  * The timer is unreferenced: it is a background courtesy, never a reason for the process to stay
  * alive, and the shutdown sequence does not have to know it exists.
  */
+/** The note the handover leaves: which version was given to the installer. */
+const handoffNote = () => path.join(app.getPath('userData'), 'updates', 'handoff.json');
+
+/**
+ * Says once when the last handover did not install (#1490). An installer that stops silently
+ * (a folder that needs an administrator, a blocked unsigned file) left the next start on the old
+ * version with nothing said. A start that is still older than the noted version reports it; a
+ * start that is that version, or newer, just forgets the note.
+ */
+export async function restoreUpdateHandoff(): Promise<void> {
+  let note: { version?: unknown } | null = null;
+  try { note = JSON.parse(await readFile(handoffNote(), 'utf8')); } catch { return; }
+  await rm(handoffNote(), { force: true }).catch(() => undefined);
+  const version = typeof note?.version === 'string' && /^\d+\.\d+\.\d+$/.test(note.version) ? note.version : null;
+  if (version && isNewer(version, APP_VERSION)) {
+    set({ notInstalled: version });
+    logWarn(`update: ${version} was handed to its installer, but this is still ${APP_VERSION}; it did not install`);
+  }
+}
+
 export function startUpdateChecks(): void {
+  void restoreUpdateHandoff();
   if (recheck) clearInterval(recheck);
   recheck = setInterval(() => void checkForUpdates(), RECHECK_MS);
   recheck.unref();
@@ -443,9 +464,10 @@ async function download(version: string, name: string, expected: string): Promis
  *
  * The caller quits. This module still never does.
  */
-export function markInstallOnQuit(): boolean {
-  if (!staged) return false;
+export function markInstallOnQuit(expectedVersion?: string): boolean {
+  if (!staged || (expectedVersion !== undefined && staged.version !== expectedVersion)) return false;
   runAfterInstall = true;
+  if (status.notInstalled) set({ notInstalled: null });
   return true;
 }
 
@@ -456,15 +478,40 @@ export function markInstallOnQuit(): boolean {
  * sequence — after the bridge, the child processes and every durable flush — so the version the
  * user next starts is the new one and nothing was interrupted to achieve that.
  *
- * Windows gets the NSIS installer in silent mode. It is a per-user install (electron-builder.yml
- * sets `perMachine: false`), so `/S` needs no elevation and shows no prompt. Detached, because
- * this process is about to stop existing.
+ * Windows gets the NSIS installer in silent mode. It is a per-user install by default
+ * (electron-builder.yml sets `perMachine: false`), so `/S` needs no elevation and shows no prompt.
+ * But the installer lets people choose the folder, and in one an administrator created (a custom
+ * D:\\ path, C:\\Program Files) the silent installer stops on its access step for lack of rights,
+ * with nothing said (#1490). There it is started through Windows' own permission prompt instead.
+ * Detached, because this process is about to stop existing.
  *
  * An AppImage has no installer: the file that is running is the whole application, so the update
  * is a rename over it. A rename rather than a copy, because the running AppImage is mounted from
  * that path — writing through it would corrupt the process that is still shutting down, while a
  * rename gives the new build a new inode and leaves the old one alive until it exits.
  */
+/**
+ * Whether the installer's own first step will succeed without an administrator.
+ *
+ * Every install and update re-grants the Chromium sandbox read access on the app folder
+ * (scripts/windows-installer-acl.nsh). Changing a folder's permissions needs more than writing
+ * files into it: in a folder an administrator created, a user may write but not re-grant, and the
+ * silent installer then stops on that step with nothing said (#1490). So the app repeats exactly
+ * that idempotent grant first. An icacls exit code means the installer would fail the same way;
+ * an icacls that cannot start at all says nothing, and the update keeps the silent path.
+ */
+const probeInstallFolder = (folder: string): Promise<boolean> => new Promise(resolve => {
+  const icacls = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe');
+  execFile(icacls, [folder, '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q'], { windowsHide: true, timeout: 15_000 },
+    err => resolve(!err || typeof (err as NodeJS.ErrnoException & { code?: unknown }).code !== 'number'));
+});
+let installFolderAccess = probeInstallFolder;
+
+/** Test seam: answers whether the installer could re-grant the app folder's access by itself. */
+export function setInstallFolderAccessForTests(probe: (folder: string) => Promise<boolean>): void {
+  installFolderAccess = probe;
+}
+
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
   const relaunch = runAfterInstall;
@@ -479,7 +526,15 @@ export async function applyStagedUpdate(): Promise<void> {
       // `--force-run` is added only when the user pressed Install and is waiting for the app to
       // come back; an update applied on the way out of an ordinary quit must not reopen it.
       const args = relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
-      const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+      const elevate = process.platform === 'win32' && !(await installFolderAccess(path.dirname(process.execPath)));
+      const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
+      const installer = elevate
+        ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+          `Start-Process -FilePath ${quoted(ready.file)} -ArgumentList ${args.map(quoted).join(',')} -Verb RunAs`],
+          { detached: true, stdio: 'ignore', windowsHide: true })
+        : spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() })).catch(() => undefined);
+      if (elevate) logInfo(`update: the install folder needs an administrator; Windows asks for permission to install ${ready.version}`);
       // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
       // child process would take the quit down with it.
       installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
@@ -506,6 +561,7 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
+  installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;
   pass = null;

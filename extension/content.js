@@ -6925,6 +6925,30 @@
     }
   }
 
+  /**
+   * ChatGPT's tool approval card, answered from the app (2.1.38). Each card element gets one id for
+   * as long as it stands; the app files an answer for that id, and this document presses Deny or
+   * Allow once only while it still shows that very card. Each answer token is carried out once, and
+   * its outcome travels back on the next poll.
+   */
+  const approvalCardIds = new WeakMap();
+  const approvalTokensDone = new Set();
+  let approvalResult = null;
+  function currentApprovalCard() {
+    const card = CLF_DOM.approvalCard();
+    if (!card) return null;
+    if (!approvalCardIds.has(card.node)) approvalCardIds.set(card.node, crypto.randomUUID());
+    return { id: approvalCardIds.get(card.node), lines: card.lines, allow: card.allow, node: card.node };
+  }
+  function answerApproval(answer) {
+    if (!answer || typeof answer.token !== 'string' || approvalTokensDone.has(answer.token)) return;
+    approvalTokensDone.add(answer.token);
+    const card = currentApprovalCard();
+    const outcome = card && card.id === answer.cardId ? CLF_DOM.answerApprovalCard(card.node, answer.choice) : 'card_changed';
+    approvalResult = { token: answer.token, outcome };
+    setTimeout(() => void pullActivity(), 400);
+  }
+
   async function pullActivity() {
     if (!CLF_DOM.conversationId()) {
       // A New Chat has no feed: /activity is addressed by conversation, and this composer is
@@ -6940,6 +6964,8 @@
     const forId = conversationId;
     const forEpoch = epoch;
     const current = () => alive && conversationId === forId && epoch === forEpoch;
+    const approvalCard = currentApprovalCard();
+    const sentResult = approvalResult;
     try {
       const reply = await ask({
         type: 'activity',
@@ -6950,9 +6976,13 @@
         // This document's own open turn, which it closes itself on end_turn or after ten
         // minutes without progress. Keeps a long-thinking worker from being slept as silent.
         generating,
-        // ChatGPT's own approval card: the turn waits for a person, so the app tells them.
-        approval: CLF_DOM.approvalWaiting()
+        // ChatGPT's own approval card: the turn waits for a person, so the app tells them and
+        // shows its words, and an answer given in the app comes back on this same feed.
+        approval: Boolean(approvalCard),
+        ...(approvalCard ? { approvalCard: { id: approvalCard.id, lines: approvalCard.lines, allow: approvalCard.allow } } : {}),
+        ...(sentResult ? { approvalResult: sentResult } : {})
       });
+      if (sentResult && reply && reply.ok === true && approvalResult === sentResult) approvalResult = null;
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -6963,6 +6993,7 @@
       }
       if (!current()) return;
       const data = reply.data;
+      if (data.approvalAnswer) answerApproval(data.approvalAnswer);
       // Popup-only. `sessionId` is the app saying it has a session for this exact chat,
       // which is the difference between "delivered" and "the app is actually recording it".
       observed.session = typeof data.sessionId === 'string' ? data.sessionId : null;
@@ -7826,17 +7857,23 @@
    * outlines in `currentColor`, and this has to sit in a row of them without announcing that
    * it came from somewhere else.
    */
-  const ICON =
-    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
-    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<circle cx="12" cy="12" r="3.1"/>' +
-    '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 ' +
-    '1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8.6 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 ' +
-    '0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 ' +
-    '0 4.6 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 ' +
-    '0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 ' +
-    '2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' +
-    '</svg>';
+  /**
+   * The gear on the compact button, built from DOM nodes rather than markup: Mozilla's add-on
+   * review flags any `innerHTML` assignment, and the Firefox package shares this file.
+   */
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const ICON_PATH = 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8.6 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z';
+  function gearIcon() {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    for (const [name, value] of [['width', '20'], ['height', '20'], ['viewBox', '0 0 24 24'], ['fill', 'none'], ['stroke', 'currentColor'],
+      ['stroke-width', '1.7'], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round'], ['aria-hidden', 'true']]) svg.setAttribute(name, value);
+    const circle = document.createElementNS(SVG_NS, 'circle');
+    circle.setAttribute('cx', '12'); circle.setAttribute('cy', '12'); circle.setAttribute('r', '3.1');
+    const gear = document.createElementNS(SVG_NS, 'path');
+    gear.setAttribute('d', ICON_PATH);
+    svg.append(circle, gear);
+    return svg;
+  }
 
   /** The switch itself, one per settings row. Two nodes so the knob can slide. */
   function buildSwitch() {
@@ -7892,7 +7929,7 @@
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'clf-compact-btn';
-    button.innerHTML = ICON;
+    button.append(gearIcon());
 
     /**
      * The context meter: a bar around the button that fills as the conversation does.
@@ -11886,10 +11923,12 @@
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
     step('composer');
     const readyComposer = await waitForComposer();
+    // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
+    // may be tried again without counting against the chat (#1086).
     if (!readyComposer) return void (await fail(t(
       'content_bootstrap_composer_unavailable',
       'ChatGPT never exposed a usable composer for bootstrap'
-    )));
+    ), 'transient'));
     if (await failIfRetargeted()) return;
 
     if (boot.model || boot.reasoningEffort) step('model');
@@ -11910,7 +11949,7 @@
       return void (await fail(t(
         'content_bootstrap_composer_unavailable',
         'ChatGPT never re-exposed a usable composer after model selection'
-      )));
+      ), 'transient'));
     }
     const selectionConfirmedAt = Date.now();
     const publishBootstrapSelection = async (id) => {
@@ -12103,7 +12142,9 @@
       // to send (#864). Clear only our own unchanged text; anything the user typed stays.
       await bootstrapDraft.clear();
       const notAccepted = t('content_bootstrap_send_not_accepted', 'ChatGPT did not accept the bootstrap send');
-      return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted));
+      // Refusals decided before the native Send click: nothing reached ChatGPT (#1086).
+      const beforeSend = ['draft-changed', 'page-busy', 'mention-changed', 'send-not-ready'].includes(sendRefusal);
+      return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted, beforeSend ? 'transient' : undefined));
     }
     agent = boot.agent || null;
     agentCommandId = agent && typeof boot.id === 'string' ? boot.id : null;
@@ -12271,7 +12312,9 @@
 
   function currentActivityPullDelay() {
     const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-    const active = nativeBusy || Boolean(job && job.busy) || pendingTools > 0;
+    // A standing approval card polls at the active cadence even hidden: an answer given in the app
+    // waits for this document's next poll.
+    const active = nativeBusy || Boolean(job && job.busy) || pendingTools > 0 || CLF_DOM.approvalWaiting();
     // A goal draft lives entirely on this feed — its streamed text is what the stage panel
     // shows, and the finished message only arrives here — so it polls at the live cadence
     // even in a hidden tab, which is exactly the tab this feature runs in.

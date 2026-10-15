@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ToolSchema } from '@modelcontextprotocol/core';
-import { Client, ProtocolError, StreamableHTTPClientTransport, UnauthorizedError, type Tool, type CallToolResult } from '@modelcontextprotocol/client';
+import { Client, ProtocolError, SdkError, SdkErrorCode, StreamableHTTPClientTransport, UnauthorizedError, type Tool, type CallToolResult } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { getMcpConfigForManifest, vAny } from '@anthropic-ai/mcpb/browser';
 import { getSecret, setSecret, clearSecret } from '../secrets.js';
@@ -10,6 +10,7 @@ import { readDurable, writeDurableNow } from '../durable.js';
 import { setEnvValue } from '../env.js';
 import { redactCredentialText } from '../redaction.js';
 import type { PluginConfigPatch, PluginInstallRequest, PluginSnapshot, PluginView } from '../../shared/plugins.js';
+import { DEFAULT_PLUGIN_LONGEST_CALL_SECONDS, MAX_PLUGIN_LONGEST_CALL_SECONDS } from '../../shared/plugins.js';
 import { installSource, pluginEnvironment, resolveGithub, stopInstallers, type InstalledLaunch } from './installer.js';
 import { terminateProcessTree } from '../exec.js';
 import { pluginCatalog, reviewedPluginLicense } from './catalog.js';
@@ -51,6 +52,14 @@ interface Live {
   transport?: StdioClientTransport;
   users: number;
   oauth?: PluginOAuth;
+}
+
+function validLongestCallSeconds(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_PLUGIN_LONGEST_CALL_SECONDS;
+}
+function longestCallSeconds(value: unknown): number {
+  if (!validLongestCallSeconds(value)) throw new Error(`Longest call must be an integer from 1 to ${MAX_PLUGIN_LONGEST_CALL_SECONDS} seconds.`);
+  return value;
 }
 
 /** Protocol errors created locally after a successful tool response still mean the server broke its declared contract. */
@@ -126,7 +135,7 @@ export class PluginManager {
       ? stored.filter(p => this.validRecord(p)).map(p => {
         const { tools: _legacyTools, ...record } = p as RecordEntry & { tools?: unknown };
         const catalog = this.validCatalog(record.catalog);
-        return { ...record, catalog, status: record.enabled ? 'connecting' : 'disabled' };
+        return { ...record, catalog, longestCallSeconds: validLongestCallSeconds(record.longestCallSeconds) ? record.longestCallSeconds : DEFAULT_PLUGIN_LONGEST_CALL_SECONDS, status: record.enabled ? 'connecting' : 'disabled' };
       })
       : [];
     this.changed();
@@ -305,6 +314,7 @@ export class PluginManager {
       if (source.kind === 'github') source = resolveGithub(source);
       if (source.kind === 'remote') this.remoteUrl(source.url);
       this.validateConfig(request.config ?? {});
+      const callLimit = request.longestCallSeconds === undefined ? DEFAULT_PLUGIN_LONGEST_CALL_SECONDS : longestCallSeconds(request.longestCallSeconds);
       const id = randomUUID(),
         directory = await this.createGeneration(id);
       let row: RecordEntry | undefined;
@@ -317,6 +327,7 @@ export class PluginManager {
           catalogId: catalog?.id,
           source,
           config: request.config ?? {},
+          longestCallSeconds: callLimit,
           credentialKeys: [],
           version: launch.version,
           license: launch.license,
@@ -358,23 +369,34 @@ export class PluginManager {
     });
   }
   configure(id: string, patch: PluginConfigPatch): Promise<PluginSnapshot> {
-    this.authenticating.get(id)?.controller.abort();
+    const limitOnly = patch.longestCallSeconds !== undefined && patch.source === undefined && patch.config === undefined && patch.credentials === undefined && patch.name === undefined;
+    if (!limitOnly) this.authenticating.get(id)?.controller.abort();
     return this.serial(id, async () => {
       const row = this.row(id);
+      const callLimit = patch.longestCallSeconds === undefined ? undefined : longestCallSeconds(patch.longestCallSeconds);
+      if (limitOnly) {
+        const previous = row.longestCallSeconds;
+        row.longestCallSeconds = callLimit!;
+        try { await this.save(); } catch (error) { row.longestCallSeconds = previous; throw error; }
+        this.changed();
+        return this.snapshot();
+      }
       this.validateConfig(patch.config ?? row.config);
       if (row.fields?.some((f) => f.secret && f.key in (patch.config ?? row.config)))
         throw new Error('Store sensitive bundle fields in secure credentials');
       const oldKeys = [...row.credentialKeys],
         oldConfig = row.config,
-        oldName = row.name;
+        oldName = row.name,
+        oldCallLimit = row.longestCallSeconds;
       const oldSecrets = await this.credentials(row);
       try {
         await this.storeCredentials(row, patch.credentials);
         if (patch.source) {
-          await this.replace(row, patch.source, patch.config ?? row.config);
+          await this.replace(row, patch.source, patch.config ?? row.config, callLimit ?? row.longestCallSeconds);
         } else {
           await this.disconnect(row);
           row.config = patch.config ?? row.config;
+          if (callLimit !== undefined) row.longestCallSeconds = callLimit;
           if (patch.name) row.name = patch.name.slice(0, 100);
           await this.save();
           if (row.enabled) await this.connect(row);
@@ -385,6 +407,7 @@ export class PluginManager {
         row.credentialKeys = oldKeys;
         row.config = oldConfig;
         row.name = oldName;
+        row.longestCallSeconds = oldCallLimit;
         await this.disconnect(row);
         if (row.enabled) await this.connect(row);
         throw e;
@@ -417,6 +440,7 @@ export class PluginManager {
     row: RecordEntry,
     source: RecordEntry['source'],
     config: Record<string, string>,
+    longestCallSeconds = row.longestCallSeconds,
   ): Promise<void> {
     if (this.closing) throw new Error('Plugins are shutting down');
     if (source.auth && source.kind !== 'remote') throw new Error('OAuth requires a remote source.');
@@ -432,7 +456,7 @@ export class PluginManager {
       if (metadata.fields?.some((f) => f.secret && f.key in config))
         throw new Error('Store sensitive bundle fields in secure credentials');
       await this.disconnect(row);
-      Object.assign(row, { source, directory, launch, version: launch.version, license: launch.license, config, catalogId, ...metadata });
+      Object.assign(row, { source, directory, launch, version: launch.version, license: launch.license, config, longestCallSeconds, catalogId, ...metadata });
       if (row.enabled) {
         await this.connect(row);
         if (row.status !== 'ready' && row.status !== 'needs-auth') throw new Error(row.error ?? 'New server did not become ready');
@@ -884,7 +908,13 @@ export class PluginManager {
     try {
       // Supply our bounded discovery result: SDK validates output against it without
       // rediscovery or the modern header-mismatch retry path for ambiguous mutations.
-      const result = await live.client.callTool({ name: tool.name, arguments: args }, { timeout: 120000, toolDefinition: tool });
+      const callTimeout = row.longestCallSeconds * 1000;
+      const result = await live.client.callTool({ name: tool.name, arguments: args }, {
+        timeout: callTimeout, maxTotalTimeout: callTimeout, resetTimeoutOnProgress: true,
+        // SDK 2.1.0 resets its sole timer on progress; maxTotalTimeout is checked
+        // only on progress. An independent signal enforces the absolute deadline.
+        signal: AbortSignal.timeout(callTimeout), onprogress: () => {}, toolDefinition: tool,
+      });
       if (Buffer.byteLength(JSON.stringify(result)) > 16 * 1024 * 1024)
         return errorResult('PLUGIN_RESULT_TOO_LARGE: Result exceeds 16 MiB. Request a smaller result.');
       for (const block of result.content)
@@ -905,6 +935,10 @@ export class PluginManager {
       // a successful response that violated the contract CoS discovered for the tool.
       if (error instanceof ProtocolError && !isLocalToolOutputValidationError(error))
         return errorResult(`PLUGIN_TOOL_ERROR: ${error.message}`);
+      // An SDK request deadline/abort cancels only this call. The transport
+      // remains usable; actual disconnects are handled by client.onclose.
+      if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout)
+        return errorResult('PLUGIN_CALL_TIMEOUT: The call timed out or was cancelled. The operation may have completed; inspect its state before retrying. CoS did not retry.');
       // A failed/ambiguous call must not leave a broken process running idle.
       if (this.live.get(row.id) === live && this.records.includes(row)) {
         const needsAuth = error instanceof PluginNeedsAuth || error instanceof UnauthorizedError;
