@@ -12865,7 +12865,8 @@
       (!message.recovery || sendAttempted || !stopRequestedAt) &&
       (!sourceQuiet || sendAttempted || (turnProgressRevision === sourceActivity && turnId === sourceTurn &&
         CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser)) &&
-      (!message.directTurn || sendAttempted || (CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser &&
+      // A first turn's question can be missing from the page (#942); its turn id alone names it.
+      (!message.directTurn || sendAttempted || ((sourceUser === undefined || CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser) &&
         (!turnId || turnId === sourceTurn)));
     // Which onTarget condition failed, in its order, for the release report (#820). A pickup that
     // kept being withdrawn for 17 minutes could not say whether its page moved or its chat changed (#882).
@@ -12873,7 +12874,8 @@
       if (!alive) return 'page-closed';
       if (epoch !== forEpoch || CLF_DOM.conversationId() !== target) return 'left-chat';
       if (message.recovery && !sendAttempted && stopRequestedAt) return 'stop-requested';
-      const newUser = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
+      const newUser = !(message.directTurn && sourceUser === undefined) &&
+        CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
       if ((sourceQuiet || message.directTurn) && !sendAttempted && newUser) return 'new-user-message';
       if ((sourceQuiet || message.directTurn) && !sendAttempted && turnId && turnId !== sourceTurn) return 'turn-changed';
       if (sourceQuiet && !sendAttempted && turnProgressRevision !== sourceActivity) return 'turn-progressed';
@@ -12929,8 +12931,11 @@
         return false;
       }
     }
+    // The running turn is named by the page's own turn id. Its question is usually shown too, but
+    // not in the first turn of a chat the app opened (#942, live 2026-10-15), and refusing there
+    // left every automatic continue of a new chat unsent.
     if (message.directTurn && (!target || ((generating || CLF_DOM.generating()) &&
-        (!sourceUser || sourceTurn !== message.directTurn.id)))) return false;
+        (!sourceTurn || sourceTurn !== message.directTurn.id)))) return false;
     // A new chat of a project with a native ChatGPT Project is typed only on that Project's own
     // page, never at the root; ChatGPT may rewrite that route, so its marker can be in the hash.
     const project = typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : null;
