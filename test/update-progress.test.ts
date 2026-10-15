@@ -6,7 +6,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
  * says what is happening, from the quit until the installer takes over.
  */
 const windows = vi.hoisted(() => [] as Array<{ options: Record<string, any>; loaded: { file: string; query: Record<string, string> } | null;
-  scripts: string[]; shown: boolean; top?: boolean; handlers: Record<string, () => void> }>);
+  scripts: string[]; shown: boolean; top?: boolean; onTop?: boolean; handlers: Record<string, () => void> }>);
 vi.mock('electron', () => ({
   BrowserWindow: class {
     record: (typeof windows)[number];
@@ -27,6 +27,7 @@ vi.mock('electron', () => ({
     on() { return this; }
     show() { this.record.shown = true; }
     moveTop() { this.record.top = true; }
+    setAlwaysOnTop(value: boolean) { this.record.onTop = value; }
     isDestroyed() { return false; }
   }
 }));
@@ -64,7 +65,11 @@ it('says each step of the handoff in the open window', async () => {
   expect(windows).toHaveLength(0);
   showUpdateProgress('2.1.39');
   setUpdateProgressStep('permission');
+  expect(windows[0]!.onTop).toBeUndefined();
   setUpdateProgressStep('installer');
+  // Once the installer runs, its own pages and messages come first (live: its first page sat
+  // behind this window for 90 s).
+  expect(windows[0]!.onTop).toBe(false);
   await Promise.resolve();
   expect(windows[0]!.scripts).toEqual([
     `window.cosUpdateStep?.(${JSON.stringify('[Waiting for your permission in Windows…]')})`,
