@@ -29,6 +29,11 @@ let root: string;
 let projectId: string;
 let session: { projectId?: string; activeTurnId?: string; timelineTurns?: Record<string, unknown> } | null;
 
+/** The setting is Off in a fresh config; most tests here exercise capture, so they turn it on. */
+async function setCodeCheckpoints(codeCheckpoints: boolean): Promise<void> {
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: approved }], projects: { codeCheckpoints } });
+}
+
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await exec('git', args, { cwd, windowsHide: true })).stdout;
 }
@@ -42,7 +47,7 @@ beforeEach(async () => {
   initSessionStore(directory);
   resetCheckpointsForTests();
   resetWorkspaces();
-  await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: approved }] });
+  await setCodeCheckpoints(true);
   root = path.join(approved, 'project');
   await fs.mkdir(root);
   await git(root, 'init');
@@ -135,6 +140,61 @@ it('checkpoints the project once per turn, before the first patch, without touch
   expect((await listCheckpoints(projectId)).map(entry => entry.key)).toEqual(['turn:turn-2', 'turn:turn-1']);
   // Working tree view and branch picker keep working, and list the checkpoints too.
   expect((await readProjectGitSnapshot(projectId)).checkpoints).toHaveLength(2);
+});
+
+it('is Off in a fresh config', () => {
+  expect(defaultConfig().projects).toEqual({ codeCheckpoints: false });
+});
+
+it('takes no checkpoint and creates no ref or index while the setting is Off, and reads it at capture time', async () => {
+  await setCodeCheckpoints(false);
+  const before = await repositoryState();
+  const runGit = projectGit.runGit;
+  const temporaryIndexUsed = vi.fn();
+  vi.spyOn(projectGit, 'runGit').mockImplementation(async (cwd, args, maxBytes, options) => {
+    if (options?.indexFile) temporaryIndexUsed(args);
+    return runGit(cwd, args, maxBytes, options);
+  });
+
+  expect((await applyPatch(editApp('export const value = 1;', 'export const value = 2;'))).isError).not.toBe(true);
+  session = { ...session, activeTurnId: 'turn-2' };
+  expect((await applyPatch(editApp('export const value = 2;', 'export const value = 3;'))).isError).not.toBe(true);
+
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 3;\n');
+  expect(await listCheckpoints(projectId)).toEqual([]);
+  expect(temporaryIndexUsed).not.toHaveBeenCalled();
+  expect((await repositoryState()).slice(0, 3)).toEqual([before[0], before[1], before[2]]);
+  expect((await git(root, 'for-each-ref')).trim()).toBe(before[1]!.trim());
+
+  // The next patch sees the changed setting without any restart: a new turn takes its checkpoint.
+  await setCodeCheckpoints(true);
+  session = { ...session, activeTurnId: 'turn-3' };
+  await applyPatch(editApp('export const value = 3;', 'export const value = 4;'));
+  expect((await listCheckpoints(projectId)).map(entry => entry.key)).toEqual(['turn:turn-3']);
+});
+
+it('keeps listing existing checkpoints and restoring from them while the setting is Off', async () => {
+  const id = await checkpointNow();
+  await setCodeCheckpoints(false);
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 2;\n');
+  session = { ...session, activeTurnId: 'turn-2' };
+  await applyPatch(editApp('export const value = 2;', 'export const value = 3;'));
+  expect((await listCheckpoints(projectId)).map(entry => entry.key)).toEqual(['turn:turn-1']);
+
+  const ref = `${CHECKPOINT_REF_PREFIX}${id}`;
+  const snapshot = await compare(ref);
+  expect(snapshot.checkpoints).toEqual([{ ref, createdAt: expect.any(Number), reason: 'turn' }]);
+  expect((await readProjectGitSnapshot(projectId)).checkpoints).toHaveLength(1);
+
+  const result = await restoreCheckpoint(projectId, id, ['app.ts'], snapshot.revision, async () => true);
+  expect(result).toMatchObject({ confirmed: true, restored: ['app.ts'], skipped: [] });
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 1;\n');
+  // The "Before restore" undo entry is part of Restore itself, not a new turn capture.
+  expect((await listCheckpoints(projectId)).map(entry => entry.reason)).toEqual(['restore', 'turn']);
+  const undo = await compare(result.undoRef!);
+  expect((await restoreCheckpoint(projectId, result.undoRef!.slice(CHECKPOINT_REF_PREFIX.length), null, undo.revision, async () => true)).restored)
+    .toEqual(['app.ts']);
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 3;\n');
 });
 
 it('takes no checkpoint for an unproven caller, a chat without a project or a patch outside the project', async () => {
