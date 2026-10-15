@@ -2421,5 +2421,15 @@
   "Updating Chat On Steroids": "Chat On Steroids güncelleniyor",
   "Saving your work…": "Çalışmanız kaydediliyor…",
   "Waiting for your permission in Windows…": "Windows'ta izninizi bekliyor…",
-  "Starting the installer. Chat On Steroids opens again by itself.": "Yükleyici başlatılıyor. Chat On Steroids kendiliğinden yeniden açılacak."
+  "Starting the installer. Chat On Steroids opens again by itself.": "Yükleyici başlatılıyor. Chat On Steroids kendiliğinden yeniden açılacak.",
+  "Firefox, fresh turns for long work, and approvals you answer in the app.": "Firefox, uzun işler için yeni turlar ve uygulamada verilen onaylar.",
+  "Firefox": "Firefox",
+  "Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.": "ChatGPT tarayıcısı olarak Firefox'u seçin. Eklentisi Mozilla tarafından imzalı ve kendini günceller.",
+  "Fresh turns for long work": "Uzun işler için yeni turlar",
+  "Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.": "Uzun işler her 30 dakikada yeni bir turda sürer, böylece yaklaşık 40 dakika sonra kesilmez.",
+  "Approvals in the app": "Uygulamada onaylar",
+  "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "ChatGPT'nin araç onay kartlarını uygulamada Reddet ya da Bir kez izin ver ile yanıtlayın.",
+  "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "Etkinlik; uygulamayı, eklentiyi ve her bir eklentiyi durumuyla gösterir ve tek düğmeyle günceller.",
+  "Codex and Claude Code in Usage": "Kullanım'da Codex ve Claude Code",
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex'in sınırlarını ve Codex ile Claude Code'un kullandığı token'ları görün, kullanımınızı sohbette sorun."
 }
