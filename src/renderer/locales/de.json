@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "Beantworte ChatGPTs Freigabekarten für Tools mit „Ablehnen“ oder „Einmal zulassen“ direkt in der App.",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "Aktivität zeigt App, Erweiterung und jedes Plugin mit Status, und ein Knopf bringt alles auf den neuesten Stand.",
   "Codex and Claude Code in Usage": "Codex und Claude Code in der Nutzung",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Sieh die Limits von Codex und die Tokens von Codex und Claude Code, und frag im Chat nach deiner Nutzung."
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Sieh die Limits von Codex und die Tokens von Codex und Claude Code, und frag im Chat nach deiner Nutzung.",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "Neue Durchläufe, die auch beim Nachdenken von ChatGPT klappen, und ein vollständigerer Diagnosebericht.",
+  "Fresh turns that hold": "Neue Durchläufe, die halten",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "Lange Arbeit geht jetzt auch in einem neuen Durchlauf weiter, während ChatGPT nachdenkt oder ein Tool ausführt.",
+  "No chats in incognito": "Keine Chats im Inkognito-Fenster",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "Chats, die die App öffnet, kommen in dein normales Browserfenster, nie in ein Inkognito-Fenster.",
+  "A fuller diagnostics report": "Ein vollständigerer Diagnosebericht",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Er zeigt jetzt auch, wie die App installiert ist, den Browser, Abstürze, häufige Warnungen und den Stand jedes Chats, weiterhin ohne Persönliches."
 }
