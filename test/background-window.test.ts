@@ -58,6 +58,13 @@ it('selects a recovery tab inside the owned window without focusing or restoring
   expect(app.windowUpdate).not.toHaveBeenCalled();
 });
 
+it('opens a foreground chat in the current window where the browser has no window list (Firefox for Android)', async () => {
+  const app = harness([{ id: 1, windowId: 9, url: 'https://example.com/' }]);
+  await app.createChatTab('https://chatgpt.com/c/shown', false, true);
+  expect(app.create).toHaveBeenCalledExactlyOnceWith({ url: 'https://chatgpt.com/c/shown', active: true });
+  expect(app.windowCreate).not.toHaveBeenCalled();
+});
+
 it('adopts an existing app main window after cache loss and puts planner and worker tabs beside it', async () => {
   const app = harness([{ id: 1, windowId: 9, url: 'https://chatgpt.com/c/main' }]);
   await Promise.all([
@@ -344,8 +351,24 @@ it('4.8 follows the group to the window the user dragged it to', async () => {
 it('4.9 leaves foreground tabs alone in group mode', async () => {
   const app = groupHarness();
   await app.createChatTab('https://chatgpt.com/?cos-input=a', false, true);
-  expect(app.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/?cos-input=a', active: true });
+  expect(app.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/?cos-input=a', windowId: 1, active: true });
   expect(app.group).not.toHaveBeenCalled();
+});
+
+// #1524: with the extension allowed in incognito, a chat opened while an incognito window was in
+// front landed there, where ChatGPT is signed out, and failed over and over.
+it.each([['group', undefined], ['window', 'window']])('4.10 never opens a foreground chat in an incognito window (%s mode)', async (_mode, placement) => {
+  const app = groupHarness({ windows: [{ id: 6, incognito: true }, { id: 7 }], lastFocused: 6, placement });
+  await app.createChatTab('https://chatgpt.com/?clf=successor', false, true);
+  expect(app.create).toHaveBeenCalledExactlyOnceWith({ url: 'https://chatgpt.com/?clf=successor', windowId: 7, active: true });
+  expect(app.windowCreate).not.toHaveBeenCalled();
+});
+
+it('4.11 opens a regular window for a foreground chat when only incognito windows are open', async () => {
+  const app = groupHarness({ windows: [{ id: 6, incognito: true }], lastFocused: 6 });
+  const tab = await app.createChatTab('https://chatgpt.com/?clf=successor', false, true);
+  expect(app.windowCreate).toHaveBeenCalledExactlyOnceWith({ url: 'https://chatgpt.com/?clf=successor', type: 'normal', incognito: false, focused: true });
+  expect(app.windows.get(tab.windowId)?.incognito).not.toBe(true);
 });
 
 it('5.1 starts a fresh group once when the stored group vanished mid-placement', async () => {

@@ -1990,7 +1990,7 @@ async function storedBackgroundGroup() {
   } catch { await forgetBackgroundGroup(); return null; }
 }
 /**
- * Where a new group goes: the user's last-focused normal window, never the app's own background
+ * Where a new group or a chat for the user goes: the user's last-focused normal window, never the app's own background
  * window and never an incognito one. Chrome can name the app's own window as last-focused
  * (measured on macOS), so the fallback is the eligible window whose tab was used most recently,
  * then the lowest id; with none, window mode.
@@ -2010,6 +2010,22 @@ async function groupTargetWindow() {
     .filter(tab => tab.windowId === id && Number.isFinite(tab.lastAccessed)).map(tab => tab.lastAccessed));
   const [first] = candidates.sort((a, b) => used(b.id) - used(a.id) || a.id - b.id);
   return first.id;
+}
+/**
+ * A chat the user should see goes into their own window, never an incognito one (#1524): with the
+ * extension allowed in incognito, Chrome put it in whichever window was last focused, and ChatGPT
+ * is signed out there. Without a regular window it opens one.
+ */
+async function createUserWindowTab(url, active) {
+  // Firefox for Android has no windows to choose from (and no incognito window beside them).
+  if (typeof chrome.windows?.getLastFocused !== 'function' || typeof chrome.windows?.getAll !== 'function') {
+    return chrome.tabs.create({ url, active });
+  }
+  const windowId = await groupTargetWindow();
+  if (Number.isInteger(windowId)) return chrome.tabs.create({ url, windowId, active });
+  const window = await chrome.windows.create({ url, type: 'normal', incognito: false, focused: active });
+  if (!Number.isInteger(window?.id) || !window.tabs?.[0]) throw new Error('chat_window_not_ready');
+  return window.tabs[0];
 }
 /**
  * One inactive tab in the app's group, creating the group collapsed the first time. Only a group
@@ -2132,7 +2148,7 @@ async function inAppGroup(tab) {
 }
 /** Only app-owned windows are sized; no tab placement changes window focus/state. */
 async function createChatTab(url, background = false, active = !background) {
-  if (!background) return chrome.tabs.create({ url, active });
+  if (!background) return createUserWindowTab(url, active);
   return inBackgroundWindow(async () => {
     if (groupsAvailable()) {
       // A grouped tab is always inactive: selecting it would switch the user's own window.
@@ -3086,7 +3102,7 @@ async function revealChats(ids) {
     const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
     const shown = tab
       ? await chrome.tabs.update(tab.id, { active: true })
-      : await chrome.tabs.create({ url: `https://chatgpt.com/c/${conversationId}`, active: true });
+      : await createUserWindowTab(`https://chatgpt.com/c/${conversationId}`, true);
     const windowId = shown?.windowId ?? tab?.windowId;
     if (!Number.isInteger(windowId)) continue;
     // A worker tab can sit in the app's minimized background window; the user asked to see it.
@@ -5331,7 +5347,7 @@ function recoverDeferredRevivals() {
       try {
         // A worker revival is background work; do not select its tab in the user's window. In
         // tab-group mode it joins the app's group like every other background tab (#128).
-        const created = groupsAvailable() ? await createChatTab(url, true) : await chrome.tabs.create({ url, active: false });
+        const created = groupsAvailable() ? await createChatTab(url, true) : await createUserWindowTab(url, false);
         if (created && typeof created.id === 'number') tabs.push({ ...created, url });
       } catch {
         // Opening authority stays spent even if Chrome rejects creation. The app's command
