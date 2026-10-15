@@ -2417,5 +2417,9 @@
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Bất kỳ ai dùng được plugin đều có thể dùng máy tính này trong phạm vi quyền bạn đã chọn. Nếu không gian làm việc cho phép, hãy nhờ quản trị viên chỉ cho riêng bạn dùng plugin.",
   "Playful asides in automatic Continue": "Lời bên lề vui nhộn trong Continue tự động",
   "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Thêm một sự thật thú vị hoặc câu đùa meme ngẫu nhiên vào mỗi Continue tự động, được đánh dấu để mô hình bỏ qua.",
-  "The workspace's Codex credits are used up": "Không gian làm việc đã dùng hết tín dụng Codex"
+  "The workspace's Codex credits are used up": "Không gian làm việc đã dùng hết tín dụng Codex",
+  "Updating Chat On Steroids": "Đang cập nhật Chat On Steroids",
+  "Saving your work…": "Đang lưu công việc của bạn…",
+  "Waiting for your permission in Windows…": "Đang chờ bạn cho phép trong Windows…",
+  "Starting the new version. Chat On Steroids opens again by itself.": "Đang khởi động phiên bản mới. Chat On Steroids sẽ tự mở lại."
 }

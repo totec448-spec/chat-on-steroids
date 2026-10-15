@@ -2417,5 +2417,9 @@
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "能使用此外掛的人，都能在你選擇的權限範圍內使用這台電腦。如果工作區允許，請管理員將外掛設為僅限你使用。",
   "Playful asides in automatic Continue": "自動繼續中的趣味題外話",
   "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "在每次自動繼續時附上一則隨機趣聞或迷因笑話，並標註讓模型忽略。",
-  "The workspace's Codex credits are used up": "工作區的 Codex 額度已用完"
+  "The workspace's Codex credits are used up": "工作區的 Codex 額度已用完",
+  "Updating Chat On Steroids": "正在更新 Chat On Steroids",
+  "Saving your work…": "正在儲存你的工作…",
+  "Waiting for your permission in Windows…": "正在等待你在 Windows 中授權…",
+  "Starting the new version. Chat On Steroids opens again by itself.": "正在啟動新版本。Chat On Steroids 會自動重新開啟。"
 }

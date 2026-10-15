@@ -15,6 +15,11 @@ export function mainTexts(): Record<MainText, string> {
     'Connect': t('Connect'),
     'Disconnect': t('Disconnect'),
     'Quit': t('Quit'),
+    'Updating Chat On Steroids': t('Updating Chat On Steroids'),
+    'Saving your work…': t('Saving your work…'),
+    'Waiting for your permission in Windows…': t('Waiting for your permission in Windows…'),
+    'Starting the new version. Chat On Steroids opens again by itself.':
+      t('Starting the new version. Chat On Steroids opens again by itself.'),
     'Restart to install the update?': t('Restart to install the update?'),
     'Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.':
       t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'),

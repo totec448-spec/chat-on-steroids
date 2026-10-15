@@ -2417,5 +2417,9 @@
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Любой, кто может пользоваться плагином, может пользоваться этим компьютером в пределах выбранных вами разрешений. Если рабочее пространство это позволяет, попросите администратора сделать плагин доступным только вам.",
   "Playful asides in automatic Continue": "Шутливые отступления в автоматическом Continue",
   "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Добавляет к каждому автоматическому Continue случайный забавный факт или мем-шутку с пометкой, чтобы модель их игнорировала.",
-  "The workspace's Codex credits are used up": "Кредиты Codex рабочего пространства израсходованы"
+  "The workspace's Codex credits are used up": "Кредиты Codex рабочего пространства израсходованы",
+  "Updating Chat On Steroids": "Обновление Chat On Steroids",
+  "Saving your work…": "Сохранение вашей работы…",
+  "Waiting for your permission in Windows…": "Ожидание вашего разрешения в Windows…",
+  "Starting the new version. Chat On Steroids opens again by itself.": "Запуск новой версии. Chat On Steroids откроется снова сам."
 }

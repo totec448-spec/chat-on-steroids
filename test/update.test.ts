@@ -65,9 +65,11 @@ const {
   applyStagedUpdate,
   checkForUpdates,
   checkForUpdatesIfStale,
+  installingVersion,
   manualDownloadName,
   manualDownloadUrl,
   markInstallOnQuit,
+  onUpdateHandoffStep,
   releaseVersion,
   resetUpdateForTests,
   restoreUpdateHandoff,
@@ -315,7 +317,8 @@ describe('staging the new version', () => {
     expect(spawned[0]!.file).toBe('powershell.exe');
     const script = spawned[0]!.args.at(-1)!;
     expect(script).toContain(`Start-Process -FilePath '${staged.replaceAll("'", "''")}'`);
-    expect(script).toContain("-ArgumentList '/S','--updated','--force-run'");
+    // Asked to install now: the installer is shown, not silent (2026-10-15).
+    expect(script).toContain("-ArgumentList '--updated','--force-run'");
     expect(script).toContain('-Verb RunAs');
   });
 
@@ -346,6 +349,28 @@ describe('staging the new version', () => {
     expect(warnings).toEqual([expect.stringContaining(`Windows did not give permission, so ${NEXT} was not installed`)]);
     // The next start still says the version did not install.
     expect(JSON.parse(readFileSync(path.join(userData, 'updates', 'handoff.json'), 'utf8'))).toMatchObject({ version: NEXT });
+  });
+
+  it('names the version a quit installs for a person waiting on it, and reports each handoff step', async () => {
+    // The app shows its own "Installing" window from the quit until the installer takes over.
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(installingVersion()).toBeNull();
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    expect(installingVersion()).toBe(NEXT);
+    const steps: string[] = [];
+    onUpdateHandoffStep(step => steps.push(step));
+    setInstallFolderAccessForTests(async () => false);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(steps).toEqual(['permission', 'installer']);
+    expect(installingVersion()).toBeNull();
+    // A refused prompt reaches no installer.
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    steps.length = 0; elevation.exitCode = 1;
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(steps).toEqual(['permission']);
+    onUpdateHandoffStep(() => undefined);
   });
 
   it('keeps the silent per-user install when the folder is the user’s own', async () => {
@@ -614,14 +639,16 @@ describe('installing on request', () => {
     expect(markInstallOnQuit('98.0.0')).toBe(false);
     expect(markInstallOnQuit(NEXT)).toBe(true);
   });
-  it('asks the installer to start the app again', async () => {
+  it('shows the installer to a person waiting for it and asks it to start the app again', async () => {
+    // 2026-10-15: silent, the app vanished for about 100 s with nothing on screen. The installer's
+    // own progress window now shows and closes itself (scripts/windows-installer-acl.nsh).
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());
 
     expect(markInstallOnQuit()).toBe(true);
     await applyStagedUpdate();
     expect(spawned).toEqual([
-      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated', '--force-run'] }
+      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['--updated', '--force-run'] }
     ]);
   });
 
