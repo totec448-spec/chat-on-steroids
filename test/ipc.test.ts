@@ -1382,34 +1382,22 @@ describe('installing a downloaded update on request', () => {
       expect(quitToInstallCalls).toBe(quits); expect(getConfig()).toEqual(before);
     } finally { checked.mockRestore(); status.mockRestore(); connected.mockRestore(); requested.mockRestore(); }
   });
-  it.each(['cancel', 'approve', 'changed-installer', 'no-window'] as const)('acquires native restart approval before update intent: %s', async outcome => {
+  it.each([
+    ['unapproved', undefined], ['other-version', '98.0.0'], ['approve', '99.0.0'], ['changed-installer', '99.0.0']
+  ] as const)('restarts only for the version the app approved: %s', async (outcome, approved) => {
+    // The question is asked in the app's own dialog; the window calls again with that version.
     const updater = await import('../src/main/update.js');
     const refresh = await import('../src/main/plugin-refresh.js');
     const checked = vi.spyOn(updater, 'checkForUpdates').mockResolvedValue(undefined);
     const status = vi.spyOn(updater, 'updateStatus').mockReturnValue({ current: '2.1.35', latest: '99.0.0', stage: 'ready', checkedAt: 1, error: null });
     const marked = vi.spyOn(updater, 'markInstallOnQuit').mockReturnValue(outcome !== 'changed-installer');
     const requested = vi.spyOn(refresh, 'requestPluginRefreshes').mockResolvedValue(undefined);
-    const oldWindow = currentWindow, quits = quitToInstallCalls;
-    currentWindow = outcome === 'no-window' ? null : {
-      setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() }
-    };
-    const approval = faultGate();
-    if (outcome !== 'no-window') vi.mocked(dialog.showMessageBox).mockImplementationOnce(async () => {
-      await approval.hold(); return { response: outcome === 'cancel' ? 0 : 1, checkboxChecked: false };
-    });
+    const quits = quitToInstallCalls;
     try {
-      const pending = handlers.get('update:all')!(null, undefined);
-      if (outcome !== 'no-window') {
-        await approval.entered;
-        expect(requested).not.toHaveBeenCalled(); expect(marked).not.toHaveBeenCalled(); expect(quitToInstallCalls).toBe(quits);
-        expect(dialog.showMessageBox).toHaveBeenLastCalledWith(currentWindow, expect.objectContaining({
-          message: 'Restart to install the update?', buttons: ['Keep working', 'Restart and install'], defaultId: 0, cancelId: 0
-        }));
-        approval.release();
-      }
-      const reply = await pending;
-      if (outcome === 'cancel' || outcome === 'no-window') {
-        expect(reply).toEqual({ ok: true, data: 'cancelled' });
+      const reply = await handlers.get('update:all')!(null, approved);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      if (outcome === 'unapproved' || outcome === 'other-version') {
+        expect(reply).toEqual({ ok: true, data: 'confirm' });
         expect(requested).not.toHaveBeenCalled(); expect(marked).not.toHaveBeenCalled(); expect(quitToInstallCalls).toBe(quits);
       } else {
         expect(marked).toHaveBeenCalledExactlyOnceWith('99.0.0');
@@ -1420,7 +1408,7 @@ describe('installing a downloaded update on request', () => {
         }
       }
     } finally {
-      currentWindow = oldWindow; checked.mockRestore(); status.mockRestore(); marked.mockRestore(); requested.mockRestore();
+      checked.mockRestore(); status.mockRestore(); marked.mockRestore(); requested.mockRestore();
     }
   });
   it('refuses, and does not quit, when nothing has been downloaded', async () => {
