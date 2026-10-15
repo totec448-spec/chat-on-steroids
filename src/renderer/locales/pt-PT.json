@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "Não foi possível ler o estado guardado de atualização dos plugins.",
   "The release information has no valid version number.": "As informações da versão não contêm um número de versão válido.",
   "The downloaded update did not match the published checksum.": "A soma de verificação da atualização transferida não corresponde à publicada.",
+  "GitHub could not be reached. Check your connection": "Não foi possível contactar o GitHub. Verifique a sua ligação",
   "Could not check for updates: HTTP {0}.": "Não foi possível procurar atualizações: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "Não foi possível transferir {0}: HTTP {1}.",
   "Release {0} does not include {1}.": "A versão {0} não inclui {1}.",
