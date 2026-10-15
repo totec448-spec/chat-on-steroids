@@ -598,7 +598,7 @@ function paintGroups(): void {
     ui(root.querySelector<HTMLElement>('.group-count')!, 'textContent', () => usable.length === 0
         ? t("off in read-only mode")
         : on.length === 0
-          ? 'off'
+          ? t('off')
           : on.length === group.caps.length
             ? t(on.length === 1 ? '{0} permission' : '{0} permissions', [on.length])
             : t("{0} of {1} permissions", [on.length, group.caps.length]));
