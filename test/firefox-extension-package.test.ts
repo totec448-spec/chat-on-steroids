@@ -46,7 +46,10 @@ describe('Firefox companion packaging groundwork', () => {
         strict_min_version: '140.0',
         update_url: 'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/firefox-updates.json',
         data_collection_permissions: { required: ['personalCommunications', 'websiteContent'] }
-      }
+      },
+      // Mozilla's validator (2026-10-15): data_collection_permissions arrived in Firefox for
+      // Android only with 142, so a 140 minimum warned there.
+      gecko_android: { strict_min_version: '142.0' }
     });
 
     // Runtime code and permissions stay shared; this is package compatibility only. Firefox has no
