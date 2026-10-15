@@ -2440,5 +2440,6 @@
   "A fuller diagnostics report": "Um relatório de diagnóstico mais completo",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Também mostra como a app está instalada, o navegador, falhas, avisos frequentes e o estado de cada chat, continuando sem nada pessoal.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "O Firefox atualiza o extra sozinho. Para o fazer agora, abra about:addons no Firefox, escolha Procurar atualizações e depois recarregue o ChatGPT.",
-  "{0} min": "{0} min"
+  "{0} min": "{0} min",
+  "OpenAI outage": "Falha da OpenAI"
 }
