@@ -515,6 +515,29 @@ export function setInstallFolderAccessForTests(probe: (folder: string) => Promis
   installFolderAccess = probe;
 }
 
+/**
+ * Starts the installer through Windows' permission prompt and resolves once Windows has an answer:
+ * true when the elevated installer started. Detached, PowerShell gets no console and runs nothing;
+ * attached, it ends with this app, so the handoff waits here. The installer Windows starts is not
+ * this app's child and outlives it (#1492, measured on the Windows VM 2026-10-15). Unanswered after
+ * ten minutes, the prompt is withdrawn so a hidden, quitting app cannot hold the next start.
+ */
+/** How long the quitting app waits for an answer to Windows' permission prompt. */
+export const ELEVATION_ANSWER_MS = 10 * 60_000;
+
+function startElevated(file: string, args: string[]): Promise<boolean> {
+  const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  return new Promise(resolve => {
+    const prompt = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+      `Start-Process -FilePath ${quoted(file)} -ArgumentList ${args.map(quoted).join(',')} -Verb RunAs`],
+      { stdio: 'ignore', windowsHide: true });
+    const timer = setTimeout(() => { prompt.kill(); resolve(false); }, ELEVATION_ANSWER_MS);
+    const settle = (started: boolean) => { clearTimeout(timer); resolve(started); };
+    prompt.on('error', (err: Error) => { logWarn(`update: the permission prompt did not start: ${err.message}`); settle(false); });
+    prompt.on('exit', (code: number | null) => settle(code === 0));
+  });
+}
+
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
   const relaunch = runAfterInstall;
@@ -530,18 +553,20 @@ export async function applyStagedUpdate(): Promise<void> {
       // come back; an update applied on the way out of an ordinary quit must not reopen it.
       const args = relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
       const elevate = process.platform === 'win32' && !(await installFolderAccess(path.dirname(process.execPath)));
-      const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
-      const installer = elevate
-        ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
-          `Start-Process -FilePath ${quoted(ready.file)} -ArgumentList ${args.map(quoted).join(',')} -Verb RunAs`],
-          { detached: true, stdio: 'ignore', windowsHide: true })
-        : spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
       await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() })).catch(() => undefined);
-      if (elevate) logInfo(`update: the install folder needs an administrator; Windows asks for permission to install ${ready.version}`);
-      // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
-      // child process would take the quit down with it.
-      installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
-      installer.unref();
+      if (elevate) {
+        logInfo(`update: the install folder needs an administrator; Windows asks for permission to install ${ready.version}`);
+        if (!(await startElevated(ready.file, args))) {
+          logWarn(`update: Windows did not give permission, so ${ready.version} was not installed; the next start says so`);
+          return;
+        }
+      } else {
+        const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+        // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
+        // child process would take the quit down with it.
+        installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
+        installer.unref();
+      }
     } else {
       const next = `${ready.target}.new`;
       await copyFile(ready.file, next);

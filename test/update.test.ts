@@ -20,12 +20,22 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawned: Array<{ file: string; args: string[] }> = [];
+const spawnOptions: Array<Record<string, unknown> | undefined> = [];
+/** How the elevation step ends: Windows' answer as PowerShell's exit code, or a held answer. */
+const elevation: { exitCode: number | 'held'; finish: ((code: number) => void) | null } = { exitCode: 0, finish: null };
 /** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
 const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
 vi.mock('node:child_process', () => ({
-  spawn: (file: string, args: string[]) => {
+  spawn: (file: string, args: string[], options?: Record<string, unknown>) => {
     spawned.push({ file, args });
-    return { on: () => undefined, unref: () => undefined };
+    spawnOptions.push(options);
+    const listeners: Record<string, (value: unknown) => void> = {};
+    if (file === 'powershell.exe') {
+      const finish = (code: number) => queueMicrotask(() => listeners.exit?.(code));
+      if (elevation.exitCode === 'held') elevation.finish = finish;
+      else finish(elevation.exitCode);
+    }
+    return { on: (event: string, listener: (value: unknown) => void) => { listeners[event] = listener; }, unref: () => undefined, kill: () => true };
   },
   execFile: (file: string, args: string[], _options: unknown, done: (err: (Error & { code?: number | string }) | null) => void) => {
     icacls.calls.push({ file, args });
@@ -139,6 +149,9 @@ beforeEach(() => {
   userData = mkdtempSync(path.join(tmpdir(), 'cos-update-'));
   packaged = true;
   spawned.length = 0;
+  spawnOptions.length = 0;
+  elevation.exitCode = 0;
+  elevation.finish = null;
   relaunched.length = 0;
   warnings.length = 0;
   resetUpdateForTests();
@@ -304,6 +317,35 @@ describe('staging the new version', () => {
     expect(script).toContain(`Start-Process -FilePath '${staged.replaceAll("'", "''")}'`);
     expect(script).toContain("-ArgumentList '/S','--updated','--force-run'");
     expect(script).toContain('-Verb RunAs');
+  });
+
+  it('waits for Windows to answer, with the permission step attached to this app', async () => {
+    // 2026-10-15, Windows VM: started detached, PowerShell had no console and ran nothing, so no
+    // prompt ever showed. Attached, it ends with this app unless the handoff waits for the answer.
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => false);
+    elevation.exitCode = 'held';
+    let handedOver = false;
+    const handoff = asPlatform('win32', undefined, () => applyStagedUpdate()).then(() => { handedOver = true; });
+    await vi.waitFor(() => expect(elevation.finish).not.toBeNull());
+    expect(spawnOptions[0]?.detached).not.toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(handedOver).toBe(false);
+    elevation.finish!(0);
+    await handoff;
+    expect(warnings).toEqual([]);
+  });
+
+  it('says so when Windows does not give permission', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => false);
+    elevation.exitCode = 1;
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(warnings).toEqual([expect.stringContaining(`Windows did not give permission, so ${NEXT} was not installed`)]);
+    // The next start still says the version did not install.
+    expect(JSON.parse(readFileSync(path.join(userData, 'updates', 'handoff.json'), 'utf8'))).toMatchObject({ version: NEXT });
   });
 
   it('keeps the silent per-user install when the folder is the user’s own', async () => {
