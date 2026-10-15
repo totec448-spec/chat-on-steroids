@@ -6115,10 +6115,12 @@ function scheduleReload(change?: SessionChange): void {
 
 /**
  * Retired automatic drafts belong to their creation time, never the live composer queue. A dropped
- * fresh-turn continue (#1402) is one too: the app files it again by itself.
+ * fresh-turn continue (#1402) is one too, cancelled or failed: the app files it again by itself, and
+ * failed ones kept at the end of the chat read as its newest messages long after (2026-10-15).
  */
 function historicalAutomaticInput(entry: InputEntry): boolean {
-  return (!!entry.recovery || (!!entry.finishOwner && !entry.finishOwner.userRequested) || entry.purpose === 'rotation') &&
+  if (entry.purpose === 'rotation') return (entry.state === 'cancelled' || entry.state === 'failed') && !!entry.error;
+  return (!!entry.recovery || (!!entry.finishOwner && !entry.finishOwner.userRequested)) &&
     entry.state === 'cancelled' && !!entry.error;
 }
 
