@@ -1527,6 +1527,51 @@ it('pages project tasks as complete parent/worker groups and keeps the selected 
   await append([]);
   expect(section().querySelectorAll(':scope > .sess')).toHaveLength(8);
 });
+it('does not allocate hidden project chat rows on each activity refresh', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Busy project', path: '/project', createdAt: 1 };
+  const tasks = Array.from({ length: 240 }, (_, index): SessionSummary => ({
+    ...summary([]), id: `task-${index}`, conversationId: `chat-${index}`,
+    title: `Task ${index}`, projectId: project.id
+  }));
+  const { w, append } = await boot([], false, [], [project], { sessions: tasks });
+  expect(w.document.querySelectorAll('.project-group .sess')).toHaveLength(5);
+
+  // Count even detached nodes: simply inspecting the live sidebar misses the hundreds of
+  // rows allocated and discarded before the five visible project tasks are appended.
+  const created: Element[] = [];
+  const create = w.document.createElement.bind(w.document);
+  const spy = vi.spyOn(w.document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+    const node = create(tag, options);
+    created.push(node);
+    return node;
+  }) as typeof w.document.createElement);
+  try { await append([]); }
+  finally { spy.mockRestore(); }
+
+  const sessionRows = created.filter(node => node.classList.contains('sess'));
+  expect(w.document.querySelectorAll('.project-group .sess')).toHaveLength(5);
+  expect(sessionRows).toHaveLength(5);
+});
+it('groups many projects without scanning the whole session list for each project', async () => {
+  let projectIdReads = 0;
+  const ids = Array.from({ length: 24 }, (_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`);
+  const projects: LocalProject[] = ids.map((id, index) => {
+    const project = { id, name: `Project ${index}`, path: `/project-${index}`, createdAt: 1 };
+    Object.defineProperty(project, 'id', { enumerable: true, get: () => { projectIdReads++; return id; } });
+    return project;
+  });
+  const tasks = Array.from({ length: 240 }, (_, index): SessionSummary => ({
+    ...summary([]), id: `session-${index}`, conversationId: `chat-${index}`,
+    projectId: ids[index % ids.length]!
+  }));
+  const { w, append } = await boot([], false, [], projects, { sessions: tasks });
+  expect(w.document.querySelectorAll('.project-group')).toHaveLength(24);
+  projectIdReads = 0;
+  await append([]);
+  // One lookup table per paint is fine; P complete scans of N rows followed by
+  // projects.find() for every comparison multiplies CPU work while the UI is busy.
+  expect(projectIdReads).toBeLessThan(tasks.length * 12);
+});
 it('shows five project chats initially and reveals eight more per click', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Paged', path: '/paged', createdAt: 1 };
   const tasks = Array.from({ length: 22 }, (_, index) => ({ ...summary([]), id: `page-task-${index}`, conversationId: `chat-${index}`, projectId: project.id }));
