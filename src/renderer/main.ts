@@ -747,6 +747,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       appearance: over.appearance ?? previous.ui.appearance
     },
     controlApi: { enabled: $<HTMLInputElement>('controlApiEnabled').checked, allowActions: $<HTMLInputElement>('controlApiAllowActions').checked },
+    projects: { codeCheckpoints: $<HTMLInputElement>('codeCheckpoints').checked },
     ...chatPatch,
     // After the chat patch, which still carries the stored mcp settings it no longer edits.
     mcp: { instructions: previous.mcp?.instructions ?? '', persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked }
@@ -783,6 +784,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     compaction: previous.compaction,
     mcp: previous.mcp ?? { instructions: '', persistentUrls: false },
     controlApi: previous.controlApi ?? { enabled: false, allowActions: false },
+    projects: previous.projects ?? { codeCheckpoints: false },
     multiAgent: previous.multiAgent,
     goal: previous.goal
   };
@@ -813,6 +815,9 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     }
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
+    }
+    if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
+      $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
     }
   }
 }
@@ -1661,6 +1666,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
+  applyChecked($<HTMLInputElement>('codeCheckpoints'), config.projects?.codeCheckpoints === true, previousState?.config.projects?.codeCheckpoints);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
@@ -2681,6 +2687,7 @@ for (const id of [
   'mentionCore',
   'controlApiEnabled',
   'controlApiAllowActions',
+  'codeCheckpoints',
   'mcpPersistentUrls',
   'privacyScreenshots',
   'tunnelKind',

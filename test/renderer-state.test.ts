@@ -1425,6 +1425,26 @@ it('saves Auto-select Skills from Settings and restores it on state push', async
   expect(toggle.checked).toBe(false);
 });
 
+it('saves and restores the Code checkpoints switch on the Workspace page, and finds it in Settings search', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const toggle = doc.getElementById('codeCheckpoints') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="home"]')!.contains(toggle)).toBe(true);
+  expect(toggle.checked).toBe(false);
+  toggle.checked = true;
+  toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].projects).toEqual({ codeCheckpoints: true });
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, projects: { codeCheckpoints: false } } });
+  expect(toggle.checked).toBe(false);
+
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  const found = searchSettings(collectSettings(doc), 'checkpoint');
+  expect(found.map(entry => entry.title)).toContain("Save a checkpoint before each turn's first edit");
+  expect(found.find(entry => entry.target.contains(toggle))?.tab).toBe('home');
+});
+
 it('saves and restores the global worker admission cap from Settings', async () => {
   const mounted = await mountChat();
   const w = mounted.window;

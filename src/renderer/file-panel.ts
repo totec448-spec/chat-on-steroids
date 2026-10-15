@@ -2,7 +2,7 @@ import type { InputAttachment } from '../shared/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { ToolEditReview } from '../shared/session.js';
 import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, ProjectFilePreview, ProjectFilesChanged } from '../shared/project-files.js';
-import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
+import { CHECKPOINT_REF_PREFIX, type ProjectGitChange, type ProjectGitChanged, type ProjectGitDiff, type ProjectGitSnapshot, type ProjectGitStatus } from '../shared/project-git.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
 import { currentLanguage, t, ui } from './i18n.js';
@@ -309,6 +309,7 @@ export function createFilePanel(options: FilePanelOptions) {
   let reviewGeneration = 0;
   let gitSnapshot: ProjectGitSnapshot | null = null;
   let selectedBaseRef: string | null = null;
+  let restoring = false;
   let branchMenu: HTMLElement | null = null;
   let gitLoading = false;
   let gitGeneration = 0;
@@ -1021,6 +1022,27 @@ export function createFilePanel(options: FilePanelOptions) {
     changes.setAttribute('aria-label', label);
   }
 
+  function checkpointLabel(ref: string): string {
+    const entry = gitSnapshot?.checkpoints?.find(choice => choice.ref === ref);
+    if (!entry) return t('Checkpoint');
+    const when = new Date(entry.createdAt).toLocaleString(currentLanguage(), { dateStyle: 'short', timeStyle: 'short' });
+    const beforeRestore = entry.reason === 'restore';
+    return t(beforeRestore ? 'Before restore · {0}' : 'Before turn · {0}', [when]);
+  }
+
+  async function restoreFromCheckpoint(paths: string[] | null): Promise<void> {
+    const current = project, snapshot = gitSnapshot, ref = selectedBaseRef;
+    if (!current || !ref || snapshot?.state !== 'ready' || !snapshot.comparison?.checkpoint || restoring) return;
+    restoring = true;
+    try {
+      const result = await run(window.api.restoreCheckpoint(current.id, ref.slice(CHECKPOINT_REF_PREFIX.length), paths, snapshot.revision));
+      if (result?.confirmed) toast(t('Restored {0} of {1} files', [result.restored.length, result.restored.length + result.skipped.length]));
+    } finally {
+      restoring = false;
+      if (project?.id === current.id) void reconcileGitChanges(true);
+    }
+  }
+
   function changeStats(change: ProjectGitChange): HTMLElement {
     const stats = el('span', 'file-change-stats');
     if (change.status === 'U') {
@@ -1064,9 +1086,15 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     if (!gitSnapshot.changes.length) {
       const clean = el('div', 'file-changes-clean');
-      clean.append(icon('i-check'), el('span', '', () => t(gitSnapshot?.comparison ? 'No changes between branches' : 'Working tree is clean')));
+      clean.append(icon('i-check'), el('span', '', () => gitSnapshot?.comparison?.checkpoint ? t('No changes since this checkpoint')
+        : t(gitSnapshot?.comparison ? 'No changes between branches' : 'Working tree is clean')));
       changesList.append(clean);
       return;
+    }
+    if (gitSnapshot.comparison?.checkpoint && !gitSnapshot.truncated) {
+      const bar = el('div', 'file-checkpoint-bar');
+      bar.append(actionButton(() => t('Restore all'), 'i-retry', () => restoreFromCheckpoint(null)));
+      changesList.append(bar);
     }
     const groups: Array<[ProjectGitStatus, string]> = [
       ['M', t('Modified')], ['A', t('Added')], ['D', t('Deleted')],
@@ -1188,6 +1216,9 @@ export function createFilePanel(options: FilePanelOptions) {
       const next = actionButton(() => t('Next edited file'), 'i-arrow-right', () => void selectReview(reviewSource!.cursor + 1));
       next.disabled = reviewSource.cursor === reviewSource.indices.length - 1;
       actions.append(previous, el('span', 'file-review-counter', `${reviewSource.cursor + 1}/${reviewSource.indices.length}`), next);
+    }
+    if (!historical && gitSnapshot?.comparison?.checkpoint) {
+      actions.append(actionButton(() => t('Restore file'), 'i-retry', () => restoreFromCheckpoint([path])));
     }
     actions.append(actionButton(() => t('Close preview'), 'i-x', historical ? leaveReview : closeGitDiff));
     head.append(title, actions);
@@ -1338,9 +1369,11 @@ export function createFilePanel(options: FilePanelOptions) {
     branchArrow.hidden = !options.reviewOnly || showingDiff || !project ||
       (gitSnapshot?.state !== 'ready' && !selectedBaseRef);
     branchTrigger.hidden = branchArrow.hidden;
-    branchTrigger.querySelector('.file-branch-trigger-label')!.textContent = selectedBaseRef
-      ? gitSnapshot?.comparison?.label ?? selectedBaseRef.replace(/^refs\/(heads|remotes)\//, '')
-      : t('Working tree');
+    branchTrigger.querySelector('.file-branch-trigger-label')!.textContent = selectedBaseRef?.startsWith(CHECKPOINT_REF_PREFIX)
+      ? checkpointLabel(selectedBaseRef)
+      : selectedBaseRef
+        ? gitSnapshot?.comparison?.label ?? selectedBaseRef.replace(/^refs\/(heads|remotes)\//, '')
+        : t('Working tree');
     branchStats.hidden = branchTrigger.hidden || !gitSnapshot?.comparison || gitSnapshot.truncated;
     branchStats.replaceChildren();
     if (!branchStats.hidden && gitSnapshot?.state === 'ready') {
@@ -1349,7 +1382,8 @@ export function createFilePanel(options: FilePanelOptions) {
       branchStats.append(el('span', 'is-added', `+${additions.toLocaleString(currentLanguage())}`),
         el('span', 'is-deleted', `−${deletions.toLocaleString(currentLanguage())}`));
       branchStats.title = gitSnapshot.truncated ? t('More changes exist than can be shown at once.') :
-        t('Committed changes only; local work is excluded');
+        gitSnapshot.comparison?.checkpoint ? t('Changes since this checkpoint, local work included') :
+          t('Committed changes only; local work is excluded');
     }
     const backToChanges = showingReview ? reviewReturnMode === 'changes' : showingChanges && gitDiffPath !== null;
     backToFiles.hidden = !!options.reviewOnly && showingChanges && !showingDiff;
@@ -1615,8 +1649,11 @@ export function createFilePanel(options: FilePanelOptions) {
     const renderItems = (): void => {
       items.replaceChildren();
       const query = search.value.trim().toLocaleLowerCase();
-      const choices = [{ ref: '', label: t('Working tree') }, ...(gitSnapshot?.branches ?? [])];
-      for (const choice of choices.filter(entry => entry.label.toLocaleLowerCase().includes(query))) {
+      const matches = (entry: { label: string }) => entry.label.toLocaleLowerCase().includes(query);
+      const choices = [{ ref: '', label: t('Working tree') }, ...(gitSnapshot?.branches ?? [])].filter(matches);
+      const checkpoints = (gitSnapshot?.checkpoints ?? []).map(entry => ({ ref: entry.ref, label: checkpointLabel(entry.ref) })).filter(matches);
+      for (const choice of [...choices, ...checkpoints]) {
+        if (choice === checkpoints[0]) items.append(el('p', 'file-branch-section', () => t('Checkpoints')));
         const option = el('button', 'file-branch-option') as HTMLButtonElement;
         option.type = 'button';
         if (choice.ref.startsWith('refs/remotes/')) option.title = t('Locally cached remote branch; no automatic fetch');
@@ -1633,7 +1670,7 @@ export function createFilePanel(options: FilePanelOptions) {
         });
         items.append(option);
       }
-      if (!items.childElementCount) items.append(el('p', 'file-branch-empty', () => t('No branches found')));
+      if (!choices.length && !checkpoints.length) items.append(el('p', 'file-branch-empty', () => t('No branches found')));
       if (gitSnapshot?.branchesTruncated) items.append(el('p', 'file-branch-empty', () => t('More branches exist than can be shown.')));
     };
     search.addEventListener('input', renderItems);
