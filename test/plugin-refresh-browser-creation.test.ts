@@ -5,9 +5,11 @@ import { expect, it, vi } from 'vitest';
 const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const workflow = source.slice(source.indexOf('let pluginRefreshFlight = null;'), source.indexOf('async function catalogProbe('));
 
-it.each(['asdk_app_core', 'asdk_app_plugins'])('opens %s directly on its native settings route and keeps the elected tab', async appId => {
-  const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId, observeOnly: false };
-  const settingsUrl = `https://chatgpt.com/settings/plugins-settings/plugin_${appId}`;
+it.each([
+  ['asdk_app_core', false], ['asdk_app_plugins', false], ['asdk_app_core', true], ['asdk_app_plugins', true]
+] as const)('opens %s on its native settings route, or the installed list for an observation, and keeps the elected tab (observeOnly=%s)', async (appId, observeOnly) => {
+  const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId, observeOnly };
+  const settingsUrl = `https://chatgpt.com/settings/plugins-settings${observeOnly ? '' : `/plugin_${appId}`}`;
   const markedUrl = `${settingsUrl}?cos-plugin-refresh=${request.id}`;
   const saved: Record<string, unknown> = {};
   let tab: { id: number; url: string } | null = null;

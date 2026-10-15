@@ -2618,10 +2618,11 @@ function inspectRequestedPluginRefresh(publications, background, browserOnly = f
     if (!held) {
       if (browserOnly) return;
       try {
-        const tab = await createChatTab(request.appId
+        const tab = await createChatTab(request.appId && request.observeOnly !== true
           // Open the native route directly: the retired hash can land on ChatGPT's home page
           // instead of this app's settings, leaving the elected helper unable to inspect it.
           ? `https://chatgpt.com/settings/plugins-settings/plugin_${request.appId}?cos-plugin-refresh=${request.id}`
+          // An observation first proves that its enrolled App Id is still visibly installed.
           : `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${request.id}`, background);
         await chrome.storage.session.set({ pluginRefreshOwner: { id: request.id, tab: tab.id } });
       }
