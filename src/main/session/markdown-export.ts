@@ -7,6 +7,7 @@ import {
 } from '../../shared/markdown-export.js';
 import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
+import { completedDilText } from '../../shared/dil-tables.js';
 
 export type MarkdownExportRequest = {
   id: string;
@@ -19,10 +20,11 @@ export type MarkdownExportRequest = {
 export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' };
 
 /** The whole text: an answer cut in the log is read back from the overflow copy beside it. */
-async function fullText(sessionId: string, stored: StoredText): Promise<string> {
-  // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links.
-  if (!stored.truncated || !stored.assetId) return providerEntitiesAsMarkdown(stored.text);
-  return providerEntitiesAsMarkdown((await readOverflowText(sessionId, stored.assetId)) ?? stored.text);
+async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
+  // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links. A table
+  // it drew in full but wrote with only its header gets its recorded rows (#1477).
+  const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
+  return providerEntitiesAsMarkdown(completedDilText(text, html));
 }
 
 /** Builds a completed turn's answer or the session transcript and copies or saves it. */
@@ -37,12 +39,12 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     if (!request.turnId || !completedTurnIds(events).has(request.turnId)) throw new Error('This turn has not completed');
     const entries = turnAnswerEntries(events, request.turnId);
     if (!entries.length) throw new Error('This turn has no answer to export');
-    markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored))));
+    markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored, entry.html))));
     name = markdownFileName(summary.title, ' - answer');
   } else {
     const entries = transcriptEntries(events);
     markdown = sessionMarkdown(summary.title, await Promise.all(entries.map(async entry =>
-      ({ role: entry.role, text: await fullText(request.id, entry.stored) }))));
+      ({ role: entry.role, text: await fullText(request.id, entry.stored, entry.html) }))));
     name = markdownFileName(summary.title);
   }
   if (request.target === 'clipboard') {
