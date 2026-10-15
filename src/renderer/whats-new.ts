@@ -14,6 +14,14 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.39': {
+    lead: () => t('Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.'),
+    highlights: [
+      { icon: 'i-retry', title: () => t('Fresh turns that hold'), text: () => t('Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.') },
+      { icon: 'i-browser', title: () => t('No chats in incognito'), text: () => t('Chats the app opens go to your regular browser window, never an incognito one.') },
+      { icon: 'i-check-circle', title: () => t('A fuller diagnostics report'), text: () => t('It also shows how the app is installed, the browser, crashes, frequent warnings and each chat\'s state, still without anything personal.') }
+    ]
+  },
   '2.1.38': {
     lead: () => t('Firefox, fresh turns for long work, and approvals you answer in the app.'),
     highlights: [

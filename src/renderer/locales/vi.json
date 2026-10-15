@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "Trả lời thẻ phê duyệt công cụ của ChatGPT bằng Từ chối hoặc Cho phép một lần ngay trong ứng dụng.",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "Hoạt động hiển thị ứng dụng, tiện ích và từng plugin cùng trạng thái, một nút cập nhật tất cả.",
   "Codex and Claude Code in Usage": "Codex và Claude Code trong Mức sử dụng",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Xem giới hạn của Codex và token mà Codex và Claude Code đã dùng, và hỏi mức sử dụng trong cuộc trò chuyện."
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Xem giới hạn của Codex và token mà Codex và Claude Code đã dùng, và hỏi mức sử dụng trong cuộc trò chuyện.",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "Lượt mới hoạt động cả khi ChatGPT đang suy nghĩ, và báo cáo chẩn đoán đầy đủ hơn.",
+  "Fresh turns that hold": "Lượt mới bền vững",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "Công việc dài giờ cũng tiếp tục trong một lượt mới khi ChatGPT đang suy nghĩ hoặc chạy công cụ.",
+  "No chats in incognito": "Không mở chat trong cửa sổ ẩn danh",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "Các chat do ứng dụng mở sẽ vào cửa sổ trình duyệt thường, không bao giờ vào cửa sổ ẩn danh.",
+  "A fuller diagnostics report": "Báo cáo chẩn đoán đầy đủ hơn",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Báo cáo còn cho biết cách cài ứng dụng, trình duyệt, sự cố, cảnh báo thường gặp và trạng thái của từng chat, vẫn không có thông tin cá nhân."
 }

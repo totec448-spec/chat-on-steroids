@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "Отвечайте на карточки подтверждения инструментов ChatGPT кнопками «Отклонить» или «Разрешить один раз» прямо в приложении.",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "В разделе «Активность» видны приложение, расширение и каждый плагин со статусом, а одна кнопка обновляет всё.",
   "Codex and Claude Code in Usage": "Codex и Claude Code в «Использовании»",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Смотрите лимиты Codex и токены Codex и Claude Code и спрашивайте об использовании в чате."
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Смотрите лимиты Codex и токены Codex и Claude Code и спрашивайте об использовании в чате.",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "Новые ходы, которые работают, пока ChatGPT думает, и более подробный диагностический отчёт.",
+  "Fresh turns that hold": "Новые ходы, которые держатся",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "Долгая работа теперь продолжается в новом ходе и тогда, когда ChatGPT думает или запускает инструмент.",
+  "No chats in incognito": "Никаких чатов в режиме инкогнито",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "Чаты, которые открывает приложение, попадают в обычное окно браузера, а не в окно инкогнито.",
+  "A fuller diagnostics report": "Более подробный диагностический отчёт",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Он также показывает, как установлено приложение, браузер, сбои, частые предупреждения и состояние каждого чата — по-прежнему без личных данных."
 }

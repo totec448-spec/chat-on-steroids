@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "ChatGPT의 도구 승인 카드에 앱에서 바로 거부 또는 한 번 허용으로 답하세요.",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "활동에서 앱, 확장 프로그램, 각 플러그인의 상태를 보고 버튼 하나로 업데이트하세요.",
   "Codex and Claude Code in Usage": "사용량에 Codex와 Claude Code",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex 한도와 Codex 및 Claude Code가 사용한 토큰을 보고, 채팅에서 사용량을 물어보세요."
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex 한도와 Codex 및 Claude Code가 사용한 토큰을 보고, 채팅에서 사용량을 물어보세요.",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "ChatGPT가 생각하는 동안에도 작동하는 새 턴과 더 자세한 진단 보고서.",
+  "Fresh turns that hold": "유지되는 새 턴",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "긴 작업이 이제 ChatGPT가 생각하거나 도구를 실행하는 동안에도 새 턴에서 계속됩니다.",
+  "No chats in incognito": "시크릿 창에는 채팅 없음",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "앱이 여는 채팅은 시크릿 창이 아닌 일반 브라우저 창으로 갑니다.",
+  "A fuller diagnostics report": "더 자세한 진단 보고서",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "앱 설치 방식, 브라우저, 충돌, 자주 나오는 경고, 각 채팅의 상태도 보여 줍니다. 개인 정보는 여전히 포함하지 않습니다."
 }
