@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "保存されたプラグインの更新状態を読み取れませんでした。",
   "The release information has no valid version number.": "リリース情報に有効なバージョン番号がありません。",
   "The downloaded update did not match the published checksum.": "ダウンロードした更新ファイルのチェックサムが、公開された値と一致しませんでした。",
+  "GitHub could not be reached. Check your connection": "GitHub に接続できませんでした。接続を確認してください",
   "Could not check for updates: HTTP {0}.": "更新を確認できませんでした（HTTP {0}）。",
   "Could not download {0}: HTTP {1}.": "{0}をダウンロードできませんでした（HTTP {1}）。",
   "Release {0} does not include {1}.": "リリース{0}に{1}が含まれていません。",

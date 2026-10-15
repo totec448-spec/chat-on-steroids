@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "Eklenti güncellemelerinin kayıtlı durumu okunamadı.",
   "The release information has no valid version number.": "Sürüm bilgileri geçerli bir sürüm numarası içermiyor.",
   "The downloaded update did not match the published checksum.": "İndirilen güncellemenin sağlama toplamı yayımlanan değerle eşleşmedi.",
+  "GitHub could not be reached. Check your connection": "GitHub'a ulaşılamadı. Bağlantınızı kontrol edin",
   "Could not check for updates: HTTP {0}.": "Güncellemeler kontrol edilemedi: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "{0} indirilemedi: HTTP {1}.",
   "Release {0} does not include {1}.": "{0} sürümü {1} dosyasını içermiyor.",
