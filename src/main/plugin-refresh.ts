@@ -417,7 +417,9 @@ export function pendingPluginRefreshes(automatic = true): Promise<PluginRefreshR
       if (legacyIdentity(row)) return legacyCheckCurrent(row) && (row.observe || refreshableLegacy(row, publication) || (!row.error && !row.parked))
         ? [{ ...structuredClone(publication), id: row.id, appId: row.appId, ...(!refreshableLegacy(row, publication) ? { observeOnly: true } : {}) }] : [];
       return row.tunnelKey === scope(row.surface) && publication.schemaId === row.schemaId && (row.observe || (!row.attempted && !row.manual && !row.parked && row.completedSchemaId !== row.schemaId))
-        ? [{ ...structuredClone(publication), id: row.id, appId: row.observe ? null : row.appId, ...(row.observe ? { observeOnly: true } : {}) }] : [];
+        // An observation must rediscover this enrolled app in the installed list; dropping its
+        // identity makes other proven aliases on the same surface look like competing targets.
+        ? [{ ...structuredClone(publication), id: row.id, appId: row.appId, ...(row.observe ? { observeOnly: true } : {}) }] : [];
     });
   });
 }
