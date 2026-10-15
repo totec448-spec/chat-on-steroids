@@ -579,7 +579,8 @@ export async function applyStagedUpdate(): Promise<void> {
         handoffStep('installer');
       } else {
         handoffStep('installer');
-        const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+        // windowsHide would hide the installer's own window as well (measured on Windows).
+        const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: !relaunch });
         // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
         // child process would take the quit down with it.
         installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));

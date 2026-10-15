@@ -298,6 +298,7 @@ describe('staging the new version', () => {
     // and without starting the app again behind a user who quit for their own reasons.
     await applyStagedUpdate();
     expect(spawned).toEqual([{ file: staged, args: ['/S', '--updated'] }]);
+    expect(spawnOptions[0]?.windowsHide).toBe(true);
   });
 
   /**
@@ -650,6 +651,8 @@ describe('installing on request', () => {
     expect(spawned).toEqual([
       { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['--updated', '--force-run'] }
     ]);
+    // Measured on Windows: started with windowsHide, the installer's window stayed hidden too.
+    expect(spawnOptions[0]?.windowsHide).not.toBe(true);
   });
 
   it('relaunches an AppImage install itself, having no installer to ask', async () => {
