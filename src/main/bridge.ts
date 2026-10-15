@@ -2617,6 +2617,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const follow = canReveal ? takeFollow(browser) : null;
     if (req.method === 'POST' && imageExportRequested) imageExportBrowsers.set(browser ?? '', Date.now());
     const otherBrowser = notChosenBrowser(req), chosenBuiltIn = chosenBuiltInBrowser(req);
+    // A companion the claim route would refuse as out of date is not offered inputs either: being
+    // offered one first made it the owner of a new chat it could never claim, and the current
+    // browser was never offered it (2.1.39 release round, Windows VM).
+    const refusedAsStale = staleCompanion(req);
     const pendingInputs = otherBrowser ? [] : await pendingBrowserInputs();
     const pendingIds = new Set((await pendingBrowserInputs()).map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
@@ -2639,7 +2643,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         // A message for the running turn goes in while a call runs: ChatGPT keeps that call's result (#1231).
         // An existing chat waits out a new tunnel-client's takeover, or its next call waits ~2 min (#1220).
-        inputs: [...pendingInputs.filter(input => (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
+        inputs: [...pendingInputs.filter(input => !refusedAsStale && (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
             (!input.conversationId || !tunnelRouteSettling()) &&
             !inputHeldElsewhere(input, browser, chosenBuiltIn)),
           ...inputRows.filter(row => row.lifetime === 'temporary-planner' && ['sent', 'cancelled', 'failed'].includes(row.state))
