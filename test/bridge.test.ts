@@ -3712,6 +3712,21 @@ describe('releasing a handoff click ChatGPT never received', () => {
   const undelivered = (conversationId: string, token: string, newestUserMessage: string, documentSince: number) =>
     request('POST', '/compact', { body: { conversationId, token, sourceUndelivered: true, newestUserMessage, documentSince } });
 
+  it('never releases uncertain source delivery because a later page omits its handoff', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ad04';
+      const token = await armed(conversationId, 'm-before');
+      const checkpoint = { ...continuationByToken(token)!.sourceSend };
+      await vi.advanceTimersByTimeAsync(60_000);
+      const result = await undelivered(conversationId, token, 'm-before', checkpoint.dispatchedAt! + 10_000);
+      expect(result.status).toBe(409);
+      expect(continuationByToken(token)?.sourceSend).toEqual(checkpoint);
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(false);
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('hands the click back once a later idle document still shows the pre-click newest message, and allows one new Send', async () => {
     vi.useFakeTimers();
     try {
@@ -3766,6 +3781,26 @@ describe('releasing a handoff click ChatGPT never received', () => {
  * mounted Fiber shape the page reads may never show the terminal the recorder already holds.
  */
 describe('capturing a sent handoff from the recorder', () => {
+  it('retains an automatic pre-Send readiness failure on the same durable ticket', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    await request('POST', '/events', { body: { conversationId,
+      events: [{ kind: 'user_message', time: Date.now(), text: 'synthetic task', messageId: 'readiness-question' }] } });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    const token = filed.body.token as string;
+    await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } });
+    const checkpoint = { ...continuationByToken(token)!.sourceSend };
+    const failure = { conversationId, token, sourceLost: true, sourceError: '页面尚未就绪' };
+    for (let repeat = 0; repeat < 2; repeat++) {
+      expect((await request('POST', '/compact', { body: failure })).body).toMatchObject({ deferred: true });
+      expect(continuationForSession(filed.body.sessionId as string)).toMatchObject({ token, state: 'awaiting-summary',
+        sourceSend: checkpoint, error: '页面尚未就绪' });
+    }
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).body.armed).toBe(true);
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
+  });
+
   async function sentHandoff(conversationId: string): Promise<{ token: string; sessionId: string; anchor: string }> {
     await request('POST', '/events', {
       body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'build the site', messageId: `m-${conversationId}` }] }
@@ -3789,6 +3824,47 @@ describe('capturing a sent handoff from the recorder', () => {
     { kind: 'assistant_message', time: Date.now(), turnId, messageId: finalId, text, state: 'final', final: true },
     { kind: 'turn_end', time: Date.now(), turnId, outcome: 'completed' }
   ];
+
+  it('captures recorder completion without another browser checkpoint', async () => {
+    await pair();
+    const conversationId = 'c0c0c0c0-7870-4000-8000-000000000006';
+    const { token, sessionId, anchor } = await sentHandoff(conversationId);
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceMessageId: anchor } })).body.stored).toBeUndefined();
+    await request('POST', '/events', { body: { conversationId,
+      events: generation('handoff-late-turn', 'handoff-late-final', SAMPLE_BRIEF) } });
+    await sweepStaleSwarm();
+    expect(continuationByToken(token)?.state).not.toBe('awaiting-summary');
+    expect(continuationByToken(token)?.handoffId).toBeTruthy();
+    expect((await getSession(sessionId))?.conversationId).toBe(conversationId);
+    expect(pendingCommands().filter(command => command.what.startsWith('resume:'))).toHaveLength(1);
+  });
+
+  it('collects late recorder evidence after three exhausted writing pickups without a fourth reload', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'c0c0c0c0-7870-4000-8000-000000000007';
+      const { token, anchor } = await sentHandoff(conversationId);
+      await request('POST', '/compact', { body: { conversationId, token, sourceMessageId: anchor } });
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm();
+        const repair = (await request('GET', '/status')).body.repairs?.[0];
+        expect(repair).toMatchObject({ conversationId, reason: 'compaction' });
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await sweepStaleSwarm();
+      expect((await request('GET', '/status')).body.repairs ?? []).toHaveLength(0);
+      // Recorder restoration/late journal publication need not send another /compact checkpoint.
+      await recordChatObservations(conversationId, generation('handoff-exhausted-turn', 'handoff-exhausted-final', SAMPLE_BRIEF));
+      await sweepStaleSwarm();
+      expect(continuationByToken(token)?.handoffId).toBeTruthy();
+      expect(continuationByToken(token)?.sourceSend).toMatchObject({ state: 'sent', messageId: anchor });
+      expect((await request('GET', '/status')).body.repairs ?? []).toHaveLength(0);
+      expect(pendingCommands().filter(command => command.what.startsWith('resume:'))).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
 
   it('captures a completed handoff whose streaming and final assistant ids differ after remount', async () => {
     await pair();

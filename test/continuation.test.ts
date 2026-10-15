@@ -1234,6 +1234,80 @@ describe('the swarm handover', () => {
 });
 
 describe('restart lifetime recovery', () => {
+  it.each([false, true].flatMap(automatic =>
+    [undefined, 'not-attempted', 'attempted-unresolved'].map(checkpoint => ({ automatic, checkpoint }))
+  ))('preserves prior source dispatch evidence over a legacy $checkpoint checkpoint (automatic $automatic)', async ({ automatic, checkpoint }) => {
+    vi.useFakeTimers();
+    const summary = await createSession({ title: 'historical dispatch reset', conversationId: CHAT_A });
+    const ticket = await openContinuationNow(summary.id, CHAT_A, automatic);
+    await beginContinuationSourceSendNow(ticket.token);
+    await dispatchContinuationSourceSendNow(ticket.token);
+    const saved = snapshotContinuations();
+    const raw = saved.entries[0]!;
+    const askedAt = raw.askedAt;
+    expect(askedAt).toBeGreaterThan(0);
+    // The retired DOM-absence release actually wrote attempted-unresolved without
+    // clearing askedAt. Missing/contradictory older checkpoints cannot erase it either.
+    if (checkpoint === undefined) delete raw.sourceSend;
+    else raw.sourceSend = { state: checkpoint as 'not-attempted' | 'attempted-unresolved', messageId: null };
+    raw.armed = false;
+    for (const age of [0, 7 * 60 * 60_000]) {
+      vi.setSystemTime(Number(askedAt) + age);
+      resetContinuationsForTests();
+      await restoreContinuations(saved);
+      expect(continuationByToken(ticket.token)).toMatchObject({ state: 'awaiting-summary', askedAt,
+        sourceSend: { state: 'dispatched-unresolved' }, destinationSend: { state: 'not-attempted' } });
+      expect((await beginContinuationSourceSendNow(ticket.token))?.allowed).toBe(false);
+      expect(await dispatchContinuationSourceSendNow(ticket.token)).toBe(false);
+      expect(snapshotContinuations().entries[0]?.askedAt).toBe(askedAt);
+      expect((await getSession(summary.id))?.conversationId).toBe(CHAT_A);
+    }
+  });
+
+  it.each([undefined, 'not-attempted', 'attempted-unresolved'])('keeps genuinely predispatch legacy %s intent claimable', async checkpoint => {
+    const summary = await createSession({ title: 'legacy unsent intent', conversationId: CHAT_A });
+    const ticket = await openContinuationNow(summary.id, CHAT_A);
+    const saved = snapshotContinuations();
+    const raw = saved.entries[0]!;
+    if (checkpoint === undefined) delete raw.sourceSend;
+    else raw.sourceSend = { state: checkpoint as 'not-attempted' | 'attempted-unresolved', messageId: null };
+    raw.armed = false;
+    expect(raw.askedAt).toBeNull();
+    resetContinuationsForTests();
+    await restoreContinuations(saved);
+    expect((await beginContinuationSourceSendNow(ticket.token))?.allowed).toBe(true);
+  });
+
+  it('does not infer source dispatch from a pre-Send cancellation timestamp', async () => {
+    const summary = await createSession({ title: 'unsent cancellation', conversationId: CHAT_A });
+    const ticket = await openContinuationNow(summary.id, CHAT_A);
+    await abortContinuationSourceBeforeSendNow(ticket.token, 'handoff_never_sent');
+    const saved = snapshotContinuations();
+    expect(saved.entries[0]?.askedAt).toBeGreaterThan(0);
+    resetContinuationsForTests();
+    await restoreContinuations(saved);
+    expect(continuationByToken(ticket.token)).toMatchObject({ state: 'aborted', sourceSend: { state: 'not-attempted' } });
+  });
+
+  it.each([false, true])('retains an uncertain source send after its deadline and restart (automatic %s)', async automatic => {
+    vi.useFakeTimers();
+    const summary = await createSession({ title: 'uncertain handoff custody', conversationId: CHAT_A });
+    const ticket = await openContinuationNow(summary.id, CHAT_A, automatic);
+    await beginContinuationSourceSendNow(ticket.token);
+    await dispatchContinuationSourceSendNow(ticket.token, 'source-before');
+    const checkpoint = { ...continuationByToken(ticket.token)!.sourceSend };
+    const saved = snapshotContinuations();
+    vi.setSystemTime(Date.now() + 7 * 60 * 60_000);
+    expect(continuationForSession(summary.id)).toMatchObject({ token: ticket.token, state: 'awaiting-summary',
+      sourceSend: checkpoint, captureIssue: 'deadline-exceeded' });
+    resetContinuationsForTests();
+    await restoreContinuations(saved);
+    expect(continuationForSession(summary.id)).toMatchObject({ token: ticket.token, state: 'awaiting-summary',
+      sourceSend: checkpoint, captureIssue: 'deadline-exceeded' });
+    expect((await beginContinuationSourceSendNow(ticket.token))?.allowed).toBe(false);
+    expect((await getSession(summary.id))?.conversationId).toBe(CHAT_A);
+  });
+
   it('gives up an automatic handover that never lands, so the source chat gets its tools back', async () => {
     vi.useFakeTimers();
     const summary = await createSession({ title: 'stuck auto handover', conversationId: CHAT_A });
