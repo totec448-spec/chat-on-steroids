@@ -2573,6 +2573,37 @@ it('shows update failure causes and next steps without using stale connector dia
   setLanguage('en');
 });
 
+it('asks in the app\'s own dialog before Update all restarts, with Keep working first', async () => {
+  // 2026-10-15: the question was a bare system message box, unlike anything else in the app.
+  const updateAll = vi.fn()
+    .mockResolvedValueOnce({ ok: true, data: 'confirm' })
+    .mockResolvedValueOnce({ ok: true, data: 'confirm' })
+    .mockResolvedValueOnce({ ok: true, data: 'restarting' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const next = structuredClone(state) as any;
+  next.update = { ...next.update, latest: '2.1.99', stage: 'ready' };
+  push(next);
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const dialog = () => w.document.getElementById('updateRestartDialog') as HTMLDialogElement | null;
+  button.click();
+  await vi.waitFor(() => expect(dialog()?.open).toBe(true));
+  expect(updateAll).toHaveBeenNthCalledWith(1);
+  expect(dialog()!.classList.contains('plugin-dialog')).toBe(true);
+  expect(dialog()!.textContent).toContain('2.1.99');
+  expect(w.document.activeElement?.textContent).toBe('Keep working');
+  (w.document.activeElement as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  button.click();
+  await vi.waitFor(() => expect(dialog()?.open).toBe(true));
+  const restart = [...dialog()!.querySelectorAll('button')].find(item => item.textContent === 'Restart and install')!;
+  restart.click();
+  await vi.waitFor(() => expect(updateAll).toHaveBeenCalledTimes(3));
+  expect(updateAll).toHaveBeenLastCalledWith('2.1.99');
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+});
+
 it.each(['reply', 'transport'])('keeps an Update all %s failure visible across pushes until explicit retry', async kind => {
   let resolve!: (reply: any) => void;
   const updateAll = vi.fn().mockImplementationOnce(() => kind === 'reply'
