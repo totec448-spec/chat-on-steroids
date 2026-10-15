@@ -593,11 +593,20 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
         reg.guarded('search', 'find', async () => {
           const limit = Math.min(500, Math.max(1, Math.floor(max_results ?? 50)));
           const deadline = Date.now() + 10_000;
-          const scopes: Array<{ real: string; virtual: string }> = [];
+          const scopes: Array<{ real: string; virtual: string; server?: ProjectFs }> = [];
+          /** Server folders a search over every folder could not reach; the rest is still searched. */
+          const unreachable: string[] = [];
           if (p) {
-            const resolved = await resolveIn(ctx.roots, p, { access: 'read' });
-            const stat = await fs.stat(resolved.real);
-            if (stat.isFile()) {
+            const resolved = await resolveIn(ctx.roots, p, { access: 'read', remote: true });
+            const server = resolved.root.remote ? fsForRoot(resolved.root) : undefined;
+            let isFile: boolean, isDirectory: boolean;
+            if (server) ({ isFile, isDirectory } = await server.getMetadata(resolved.real));
+            else {
+              const stat = await fs.stat(resolved.real);
+              isFile = stat.isFile();
+              isDirectory = stat.isDirectory();
+            }
+            if (isFile) {
               const outcome = await searchOneFile(resolved.real, resolved.virtual, {
                 query,
                 mode: mode ?? 'name',
@@ -605,7 +614,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                 caseSensitive: case_sensitive === true,
                 regex: regex === true,
                 maxResults: limit,
-                deadline
+                deadline,
+                ...(server ? { server } : {})
               });
               const hits = outcome.hits.map((hit) =>
                 hit.line === undefined ? hit.path : `${hit.path}:${hit.line}: ${hit.text}`
@@ -619,12 +629,19 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               }
               return ok(hits.length === 0 ? 'No matches' : `${hits.length} matches\n${hits.join('\n')}`);
             }
-            if (!stat.isDirectory()) return fail(`${resolved.virtual} is not a regular file or folder`);
-            scopes.push({ real: resolved.real, virtual: resolved.virtual });
+            if (!isDirectory) return fail(`${resolved.virtual} is not a regular file or folder`);
+            scopes.push({ real: resolved.real, virtual: resolved.virtual, ...(server ? { server } : {}) });
           } else {
             for (const root of ctx.roots) {
-              // A server folder is searched over SFTP; until that lands it is left out here.
-              if (root.remote) continue;
+              if (root.remote) {
+                try {
+                  const resolved = await resolvePath(ctx.roots, `/${root.name}`, { remote: true });
+                  scopes.push({ real: resolved.real, virtual: resolved.virtual, server: fsForRoot(root) });
+                } catch (error) {
+                  unreachable.push(`/${root.name} (${friendlyError(error)})`);
+                }
+                continue;
+              }
               const resolved = await resolvePath(ctx.roots, `/${root.name}`);
               scopes.push({ real: resolved.real, virtual: resolved.virtual });
             }
@@ -641,7 +658,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               break;
             }
             if (hits.length >= limit) break;
-            const outcome = await search({
+            const request = {
               realDir: scope.real,
               virtualDir: scope.virtual,
               query,
@@ -651,8 +668,18 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               caseSensitive: case_sensitive === true,
               regex: regex === true,
               maxResults: limit - hits.length,
-              deadline
-            });
+              deadline,
+              ...(scope.server ? { server: scope.server } : {})
+            };
+            let outcome;
+            try {
+              outcome = await search(request);
+            } catch (error) {
+              // A server that drops away mid-search costs its own folder, not the whole answer.
+              if (!scope.server || p) throw error;
+              unreachable.push(`${scope.virtual} (${friendlyError(error)})`);
+              continue;
+            }
             scanned += outcome.filesScanned;
             elapsedMs += outcome.elapsedMs;
             if (outcome.stoppedBecause) stopReasons.add(outcome.stoppedBecause);
@@ -663,7 +690,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           noteCount(hits.length);
           const reason = stopReasons.size > 0 ? `\ntruncated: ${[...stopReasons].join(',')}` : '';
           const contentLimit = (mode ?? 'name') === 'content' ? `\ncontent_file_limit: ${formatBytes(MAX_CONTENT_FILE_BYTES)}` : '';
-          const meta = `\n\nfiles_scanned: ${scanned}\nelapsed_ms: ${elapsedMs}\nresults_returned: ${hits.length}${contentLimit}${reason}`;
+          const skipped = unreachable.length > 0 ? `\nnot_searched: ${unreachable.join('; ')}` : '';
+          const meta = `\n\nfiles_scanned: ${scanned}\nelapsed_ms: ${elapsedMs}\nresults_returned: ${hits.length}${contentLimit}${reason}${skipped}`;
           if (hits.length === 0) return ok(`No matches${meta}`);
           return ok(`${hits.length} matches\n${hits.join('\n')}${meta}`);
         })
