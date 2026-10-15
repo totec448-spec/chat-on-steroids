@@ -2635,34 +2635,36 @@ it.each(['reply', 'transport'])('keeps an Update all %s failure visible across p
   expect(error.hidden).toBe(true);
 });
 
-it('localizes updater network failures in the card, both banner paths and retained errors in all languages', async () => {
+// One test per language: all 13 in one test took 6 s here and ran past the 30 s limit on the
+// slower macOS x64 release runner (2.1.38 publish, 2026-10-15).
+it.each(['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'] as const)(
+  'localizes updater network failures in the card, both banner paths and retained errors (%s)', async locale => {
   const updateAll = vi.fn().mockResolvedValue({ ok: false, error: 'GitHub could not be reached' });
   const { window: w, state, push } = await mountChat({}, [], { updateAll });
   const { setLanguage, t } = await import('../src/renderer/i18n.js');
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
   const error = w.document.getElementById('updateAllError')!;
-  for (const locale of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'] as const) {
-    setLanguage(locale);
+  setLanguage(locale);
+  try {
     const next = structuredClone(state);
     next.update.stage = 'failed'; next.update.error = 'GitHub could not be reached';
     const reason = t('GitHub could not be reached. Check your connection');
     for (const latest of [null, '99.0.0']) {
       next.update.latest = latest; push(structuredClone(next));
-      expect(w.document.querySelector('[data-update-part="app"]')!.textContent, locale).toContain(reason);
-      for (const id of ['updateText', 'updateLine']) expect(w.document.getElementById(id)!.textContent, locale).toContain(reason);
+      expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(reason);
+      for (const id of ['updateText', 'updateLine']) expect(w.document.getElementById(id)!.textContent).toContain(reason);
     }
     button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
     expect(error.hidden).toBe(false);
-    expect(error.textContent, locale).toContain(reason);
-    expect(error.textContent, locale).toContain(t('Choose Update all to retry.'));
+    expect(error.textContent).toContain(reason);
+    expect(error.textContent).toContain(t('Choose Update all to retry.'));
     push(structuredClone(next));
     expect(error.hidden).toBe(false);
-  }
-  expect(updateAll).toHaveBeenCalledTimes(13);
-  updateAll.mockResolvedValueOnce({ ok: true, data: 'checking-connectors' });
-  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
-  expect(error.hidden).toBe(true);
-  setLanguage('en');
+    expect(updateAll).toHaveBeenCalledTimes(1);
+    updateAll.mockResolvedValueOnce({ ok: true, data: 'checking-connectors' });
+    button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+    expect(error.hidden).toBe(true);
+  } finally { setLanguage('en'); }
 });
 
 it('translates updater reasons and retained recovery guidance when the language changes', async () => {
