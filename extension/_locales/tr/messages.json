@@ -335,6 +335,9 @@
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT metni kabul etmedi$1"
   },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT devam eden yanıtta Gönder sunmadı ve otomatik devam için durdurma tamamlanmadı."
+  },
   "content_delivery_turn_changed": {
     "message": "Doğrudan iletimden önce tur değişti."
   },

@@ -335,6 +335,9 @@
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT n’a pas accepté le texte$1"
   },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT n'a proposé aucun Envoyer dans la réponse en cours, et son arrêt pour la reprise automatique n'a pas abouti."
+  },
   "content_delivery_turn_changed": {
     "message": "Le tour a changé avant l’envoi direct."
   },

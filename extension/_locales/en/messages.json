@@ -335,6 +335,9 @@
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT did not accept the text$1"
   },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT offered no Send in the running answer, and stopping it for the automatic continue did not finish."
+  },
   "content_delivery_turn_changed": {
     "message": "The turn changed before direct delivery."
   },
