@@ -2417,5 +2417,9 @@
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Eklentiyi kullanabilen herkes, seçtiğiniz izinler dahilinde bu bilgisayarı kullanabilir. Çalışma alanı izin veriyorsa yöneticiden eklentiyi yalnızca sizin kullanımınıza açmasını isteyin.",
   "Playful asides in automatic Continue": "Otomatik devamda eğlenceli ara notlar",
   "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Her otomatik devama rastgele bir ilginç bilgi ya da mizahi bir meme ekler; modelin yok sayması için işaretlenir.",
-  "The workspace's Codex credits are used up": "Çalışma alanının Codex kredileri tükendi"
+  "The workspace's Codex credits are used up": "Çalışma alanının Codex kredileri tükendi",
+  "Updating Chat On Steroids": "Chat On Steroids güncelleniyor",
+  "Saving your work…": "Çalışmanız kaydediliyor…",
+  "Waiting for your permission in Windows…": "Windows'ta izninizi bekliyor…",
+  "Starting the installer. Chat On Steroids opens again by itself.": "Yükleyici başlatılıyor. Chat On Steroids kendiliğinden yeniden açılacak."
 }
