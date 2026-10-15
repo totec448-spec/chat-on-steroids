@@ -1282,6 +1282,21 @@ describe('extension update holds', () => {
     await status('made-up'); await status(); await status('chat-busy');
     expect(lines().slice(before)).toHaveLength(4);
   });
+
+  // 2.1.39 release round: Chrome (updated) and Firefox (waiting for its signed add-on) both report
+  // every 30 seconds; one shared memory of the last hold logged Firefox's reason on every round.
+  it('logs a hold once per browser while another browser reports no hold', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (browser: string, updateHold?: string) => request('POST', '/status', { browser,
+      body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    for (let round = 0; round < 4; round += 1) {
+      await status('chromebrowser00000001');
+      await status('firefoxbrowser0000001', 'browser-updates-itself');
+    }
+    expect(lines().slice(before)).toHaveLength(1);
+  });
 });
 
 describe('authorisation', () => {

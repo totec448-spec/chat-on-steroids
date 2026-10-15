@@ -1232,9 +1232,13 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     tone = 'ok';
   }
   if (stale) {
+    // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
+    const firefox = bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale;
     lines.push(
       t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
-        t("Reload the extension from this app’s folder, then refresh ChatGPT.")
+        (firefox
+          ? t("Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.")
+          : t("Reload the extension from this app’s folder, then refresh ChatGPT."))
     );
     tone = 'bad';
   }
@@ -1637,7 +1641,17 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
-  applyValue($<HTMLSelectElement>('rotateTurnMinutes'), String(config.ui.rotateTurnMinutes ?? 30), previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
+  // A value the list does not offer (set in the config) gets its own option; without one the select
+  // reads empty and the next save of any setting turned fresh turns Off (2.1.39 release round).
+  const rotate = $<HTMLSelectElement>('rotateTurnMinutes');
+  const rotateMinutes = String(config.ui.rotateTurnMinutes ?? 30);
+  if (![...rotate.options].some(option => option.value === rotateMinutes)) {
+    rotate.querySelector('option[data-configured]')?.remove();
+    const option = document.createElement('option');
+    option.value = rotateMinutes; option.textContent = t("{0} min", [rotateMinutes]); option.dataset.configured = '';
+    rotate.add(option);
+  }
+  applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
   applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');

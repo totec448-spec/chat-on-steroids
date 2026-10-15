@@ -2439,5 +2439,7 @@
   "Chats the app opens go to your regular browser window, never an incognito one.": "Chats, die die App öffnet, kommen in dein normales Browserfenster, nie in ein Inkognito-Fenster.",
   "A fuller diagnostics report": "Ein vollständigerer Diagnosebericht",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Er zeigt jetzt auch, wie die App installiert ist, den Browser, Abstürze, häufige Warnungen und den Stand jedes Chats, weiterhin ohne Persönliches.",
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox aktualisiert das Add-on selbst. Für sofort öffne about:addons in Firefox, wähle „Nach Updates suchen“ und aktualisiere dann ChatGPT.",
+  "{0} min": "{0} Min.",
   "OpenAI outage": "OpenAI-Störung"
 }

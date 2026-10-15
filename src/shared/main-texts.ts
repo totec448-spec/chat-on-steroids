@@ -21,6 +21,7 @@ export const MAIN_TEXTS = [
   'Connected',
   'No internet',
   'OpenAI outage',
+  'Diagnostics report',
   'Not connected',
   'Core connection lost',
   'Desktop connection lost',

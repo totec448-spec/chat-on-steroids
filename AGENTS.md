@@ -4480,6 +4480,10 @@ Plugins catalog limit use proven ids first.
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
 A unique surface with account-proven App IDs accepts only its proven IDs, permitting
 renames before learned names catch up; a same-named foreign ID never falls back.
+An explicit observation retains its scoped enrolled App ID and first rediscovers that
+exact native installed link, rather than treating other proven aliases as competing targets.
+Its existing requested surface validates the ID through cross-surface name collisions;
+another surface, absent ID, name-only row or duplicate native link cannot substitute it.
 First enrollment and legacy buttons use the unique configured/learned name leaf.
 Unknown, catalog, external, transcript, hidden or ambiguous rows grant no authority.
 After awaits, the same unique connected visible link must retain its exact href;
