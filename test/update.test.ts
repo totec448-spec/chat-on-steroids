@@ -676,11 +676,11 @@ describe('a check or download that goes wrong on a bad connection', () => {
   it.each(['API', 'public release page', 'artifact'] as const)('explains a rejected %s request, keeps its diagnostic and can retry', async request => {
     const { fetch } = github({ apiStatus: request === 'public release page' ? 403 : undefined });
     const answer = fetch.getMockImplementation()!;
+    const target = request === 'API' ? 'https://api.github.com/repos/totec448-spec/chat-on-steroids/releases/latest'
+      : request === 'public release page' ? 'https://github.com/totec448-spec/chat-on-steroids/releases/latest'
+      : `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${WINDOWS_ASSET}`;
     fetch.mockImplementation(async input => {
-      const url = String(input);
-      if (request === 'API' ? url.includes('api.github.com')
-        : request === 'public release page' ? url === 'https://github.com/totec448-spec/chat-on-steroids/releases/latest'
-        : url.endsWith(WINDOWS_ASSET)) {
+      if (String(input) === target) {
         throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') });
       }
       return answer(input);

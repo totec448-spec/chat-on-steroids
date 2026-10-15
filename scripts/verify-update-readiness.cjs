@@ -118,9 +118,10 @@ app.whenReady().then(async () => {
     assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Compact Update all is not covered by the event card');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
     win.setContentSize(700,460);
-    await js(`document.getElementById('updateReviewSetup').scrollIntoView({block:'nearest'})`);
-    const short = await js(`(()=>{const a=document.getElementById('updateReviewSetup').getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight}})()`);
+    await until(`innerWidth===700&&innerHeight===460`);
+    const short = await js(`(()=>{const b=document.getElementById('updateReviewSetup');b.scrollIntoView({block:'nearest'});const a=b.getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight,reachable:b.contains(document.elementFromPoint(a.left+a.width/2,a.top+a.height/2))}})()`);
     assert.ok(short.top>=0 && short.bottom<=short.viewport+1,'Short window action is reachable (subpixel scroll rounding): '+JSON.stringify(short));
+    assert.equal(short.reachable,true,'Short window action receives pointer input');
     assert.equal(await js(`(()=>{const children=[...document.querySelector('.update-readiness').children].map(e=>e.getBoundingClientRect());return children.some((r,i)=>i>0&&r.top<children[i-1].bottom-1)})()`),false,'Short window does not compress text rows into each other');
     await pause(200);
     await shot('short-ja.png');
