@@ -247,6 +247,9 @@ function limitRow(name: () => string, note: (() => string) | null, value: () => 
 }
 
 const codexWindowName = (minutes: number) => minutes === 10080 ? t("Weekly limit") : minutes % 60 === 0 ? t("{0}-hour limit", [minutes / 60]) : t("{0}-minute limit", [minutes]);
+/** Codex's reason codes for a reached limit, as a sentence; an unknown code stays readable as it is. */
+const codexReason = (code: string): string =>
+  code === 'workspace_owner_credits_depleted' ? t("The workspace's Codex credits are used up") : code.replace(/_/g, ' ');
 const when = (time: number) => new Date(time).toLocaleString(currentLanguage(), { dateStyle: 'short', timeStyle: 'short' });
 
 /**
@@ -277,7 +280,7 @@ export async function refreshOtherApps(fresh = false): Promise<void> {
           () => window.resetsAt === null ? t("Reset not reported") : reset ? t("Codex reports again with its next answer") : t("Resets {0}", [when(window.resetsAt)]),
           reset ? null : remaining));
       }
-      if (limit.reached && !limit.windows.length) host.append(limitRow(() => `Codex · ${limit.id}`, as, () => t("Limit reached"), () => limit.reached!.replace(/_/g, ' '), null));
+      if (limit.reached && !limit.windows.length) host.append(limitRow(() => `Codex · ${limit.id}`, as, () => t("Limit reached"), () => codexReason(limit.reached!), null));
     }
     const days = value.codex.days;
     const today = days.at(-1);

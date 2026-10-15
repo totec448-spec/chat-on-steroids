@@ -309,6 +309,10 @@ it('shows other apps’ reported limits apart from tokens counted here, and says
   expect(text).toContain('Reset since this reading');
   expect(text).not.toContain('35% remaining');
   expect(text).toContain('Limit reached');
+  // Codex's own reason code reads as a sentence in the app's language, not as raw text.
+  expect(text).toContain("The workspace's Codex credits are used up");
+  expect(text).not.toContain('workspace_owner_credits_depleted');
+  expect(text).not.toContain('workspace owner credits depleted');
   expect(text).toContain('Claude Code');
   expect(text).toContain('Plan limits not reported');
   expect(text).toContain('3M');

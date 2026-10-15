@@ -2415,5 +2415,6 @@
   "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Cloudflare 快速通道每次啟動都會取得新的 URL，因此管理員每次都得更新外掛。通道 ID 不會改變；開啟「重新啟動後保留外掛程式 URL」（設定 → 一般 → 開發者選項）的自有 HTTPS 通道也不會。",
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "能使用此外掛的人，都能在你選擇的權限範圍內使用這台電腦。如果工作區允許，請管理員將外掛設為僅限你使用。",
   "Playful asides in automatic Continue": "自動繼續中的趣味題外話",
-  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "在每次自動繼續時附上一則隨機趣聞或迷因笑話，並標註讓模型忽略。"
+  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "在每次自動繼續時附上一則隨機趣聞或迷因笑話，並標註讓模型忽略。",
+  "The workspace's Codex credits are used up": "工作區的 Codex 額度已用完"
 }
