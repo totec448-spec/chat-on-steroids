@@ -2051,7 +2051,12 @@ preselected) or that browser, preserving the saved setting, and waits for ChatGP
 where it runs. The browser chosen for installation is a local choice until one place is picked;
 installation links use the fixed `browser:setupOpen` IPC without changing the setting.
 The bridge projects that browser apart using the explicit `x-extension-host: browser` header and
-its browser id. `browser-proof.ts` keeps, across restarts, the version last seen there and
+its browser id. While the CoS browser is chosen and its companion present, any other companion
+takes no new work (#1516): `/status` offers it no inputs, revivals, Project creations, plugin
+refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it and
+`/commands/redeem` answers 409 `not_chosen_browser`. It still records and stops what the person
+opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
+new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
 a live answer always wins. The extension reports presence and that answer on its own
 (`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
