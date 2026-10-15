@@ -2027,7 +2027,7 @@ Refresh passes `fresh`. IPC `usage:providers` / preload `getProviderUsage(fresh)
 `ProviderUsage` (`src/shared/provider-usage.ts`). The Core tool `usage` (read-only, offered while a
 reading permission is on, like `read`) answers with ChatGPT's reported limits
 (`session/usage.ts` `reportedUsageLimits`), Codex's reported limits and both apps' counted tokens,
-each with its source and age; `src/main/usage-tool.ts` writes that text. Tests:
+each with its source and age; `src/main/usage-tool.ts` writes that text. Its answer depends on no chat, so the kernel never appends the Unattributed identity notice to it (`IDENTITY_FREE_TOOLS`): it answers before the page's evidence for its request arrives. Tests:
 `provider-usage-parse`, `provider-usage`, `usage-tool`, `renderer-usage`.
 
 ## 13. Extension, account models and browser preferences
