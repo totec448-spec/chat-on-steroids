@@ -1,0 +1,65 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync, promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { addRemoteProject, listProjects } from '../src/main/projects.js';
+import { SftpClient } from '../src/main/remote/sftp.js';
+
+/**
+ * #1469 part 2: a folder on a server becomes a project and an approved root, by its real path on
+ * that server. OpenSSH's own sftp-server stands in for the server: its working directory plays
+ * the remote home, so `~/app` resolves the way `ssh -s sftp` resolves it there.
+ */
+const SERVER = ['/usr/libexec/sftp-server', '/usr/lib/openssh/sftp-server', '/usr/lib/sftp-server'].find(existsSync);
+const real = describe.skipIf(!SERVER);
+
+let directory: string, home: string;
+const servers: ChildProcessWithoutNullStreams[] = [];
+const clients: SftpClient[] = [];
+const connect = async (): Promise<SftpClient> => {
+  const server = spawn(SERVER!, [], { cwd: home, stdio: ['pipe', 'pipe', 'pipe'] });
+  servers.push(server);
+  const client = await SftpClient.start(server.stdout, server.stdin);
+  clients.push(client);
+  return client;
+};
+
+beforeEach(async () => {
+  directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cos-remote-projects-')));
+  home = path.join(directory, 'home');
+  await fs.mkdir(path.join(home, 'app', 'src'), { recursive: true });
+  await fs.writeFile(path.join(home, 'notes.txt'), 'x');
+  initConfigPath(directory); initDurableStore(directory);
+  await saveConfig({ ...defaultConfig(), roots: [] });
+});
+afterEach(async () => {
+  for (const client of clients.splice(0)) client.close();
+  for (const server of servers.splice(0)) server.kill();
+  resetDurableForTests();
+  await fs.rm(directory, { recursive: true, force: true });
+});
+
+real('projects on a server', () => {
+  it('adds a server folder as a project and an approved root, by its real path', async () => {
+    const project = await addRemoteProject('me@devbox', '~/app', { connect });
+    const realPath = path.join(home, 'app');
+    expect(project).toMatchObject({ name: 'app', remote: { host: 'me@devbox', path: realPath } });
+    expect(getConfig().roots).toEqual([{ name: 'app', path: `me@devbox:${realPath}`, remote: { host: 'me@devbox', path: realPath } }]);
+    expect(await listProjects()).toEqual([project]);
+    // The same folder again, spelled differently, is the same project.
+    expect((await addRemoteProject('me@devbox', `${realPath}/`, { connect })).id).toBe(project.id);
+    expect(getConfig().roots).toHaveLength(1);
+  });
+
+  it('keeps the port and refuses a file, a missing folder and an address that is not one', async () => {
+    const project = await addRemoteProject('me@devbox:2222', '~/app/src', { connect });
+    expect(project.remote).toEqual({ host: 'me@devbox', port: 2222, path: path.join(home, 'app', 'src') });
+    await expect(addRemoteProject('me@devbox', '~/notes.txt', { connect })).rejects.toThrow(/not a folder/);
+    await expect(addRemoteProject('me@devbox', '~/missing', { connect })).rejects.toThrow(/not found/i);
+    await expect(addRemoteProject('-oProxyCommand=x', '/srv', { connect })).rejects.toThrow(/SSH address/);
+    await expect(addRemoteProject('me@devbox', 'relative/app', { connect })).rejects.toThrow(/absolute path/);
+  });
+});

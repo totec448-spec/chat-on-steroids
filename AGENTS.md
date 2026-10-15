@@ -977,6 +977,18 @@ chats receive no project file. Missing AGENTS is fine; an unsafe/unreadable/bina
 preparation visibly. Full prompt budgeting and
 hidden framing are described in §6.
 
+### Projects on a server (SSH, #1469)
+
+A `Root` and a `LocalProject` may carry `remote: RemoteFolder` (`src/shared/types.ts`): `host` as
+the person typed it (an ssh-config alias or `user@host`, never starting with `-`), optional `port`,
+and the absolute folder on the server. Their `path` is then the identity `host[:port]:/path`
+(`remoteIdentity`), never a local path. `addRemoteProject(address, folder)` (IPC
+`projects:addRemote`, preload `addRemoteProject`) parses with `parseRemote`, asks the server once
+over SFTP (`realpath`, then `stat`: a folder), and adds the root and the project; the same server
+folder again is the same project. Connections only through the system `ssh`
+(`src/main/remote/ssh.ts`) with `BatchMode=yes`: key or agent login only. Files go over one SFTP
+session per address (`sftpFor`), commands over `ssh host remoteCommand(folder, command)`.
+
 ### Native ChatGPT Project for a new CoS project (#1176)
 
 One-way, CoS-owned and only for projects created after this existed: `addProject` gives a new row

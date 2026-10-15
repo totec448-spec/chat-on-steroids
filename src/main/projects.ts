@@ -3,8 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { rawPromises as fs } from './rawfs.js';
 import { readDurable, writeDurableNow } from './durable.js';
-import { getConfig } from './config.js';
-import { nativePathIdentity, resolvePath } from './sandbox.js';
+import { getConfig, updateConfig } from './config.js';
+import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
+import { parseRemote, sftpFor } from './remote/ssh.js';
+import { SftpError, type SftpClient } from './remote/sftp.js';
+import type { RemoteFolder } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
 
@@ -22,7 +25,8 @@ const projectSchema = z.object({
   id: z.string().uuid(), name: z.string().min(1).max(160), path: z.string().min(1).max(32768),
   color: z.enum(PROJECT_COLORS).optional(),
   createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional(),
-  chatgpt: chatgptSchema.optional()
+  chatgpt: chatgptSchema.optional(),
+  remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional()
 });
 const catalogSchema = z.array(projectSchema).max(200);
 let mutations: Promise<unknown> = Promise.resolve();
@@ -57,6 +61,57 @@ export function addProject(folderPath: string): Promise<LocalProject> {
     // above keeps exactly what it had.
     const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real, createdAt: Date.now(),
       chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
+    await writeDurableNow('projects', [...projects, project]);
+    return project;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/** The identity a server folder is stored under, in its root and project: `host[:port]:/path`. */
+export function remoteIdentity(remote: RemoteFolder): string {
+  return `${remote.host}${remote.port ? `:${remote.port}` : ''}:${remote.path}`;
+}
+
+/**
+ * Adds a folder on a server as a project and an approved root (#1469), by its real path there.
+ * The server is asked once, over SFTP: the folder must exist and be a folder. `~/app` resolves
+ * against the server's home, the way `ssh -s sftp` resolves a relative path.
+ */
+export function addRemoteProject(address: string, folder: string, deps: { connect?: (remote: RemoteFolder) => Promise<SftpClient> } = {}): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    const asked = parseRemote(address, folder);
+    const client = await (deps.connect ?? sftpFor)(asked);
+    const query = asked.path === '~' ? '.' : asked.path.startsWith('~/') ? asked.path.slice(2) : asked.path;
+    let realPath: string;
+    try { realPath = await client.realpath(query); }
+    catch (error) {
+      if (error instanceof SftpError && error.code === 'ENOENT') throw new Error(`Folder not found on the server: ${asked.path}`);
+      throw error;
+    }
+    const stats = await client.stat(realPath).catch(error => {
+      if (error instanceof SftpError && error.code === 'ENOENT') throw new Error(`Folder not found on the server: ${asked.path}`);
+      throw error;
+    });
+    if (!stats.isDirectory) throw new Error(`${asked.path} on the server is not a folder`);
+    const remote: RemoteFolder = { host: asked.host, ...(asked.port ? { port: asked.port } : {}), path: realPath };
+    const identity = remoteIdentity(remote);
+    const projects = await listProjects();
+    const existing = projects.find(project => project.remote && remoteIdentity(project.remote) === identity);
+    await updateConfig(config => {
+      if (config.roots.some(root => root.remote && remoteIdentity(root.remote) === identity)) return config;
+      if (config.roots.length >= 32) throw new Error('Folder limit reached');
+      return { ...config, roots: [...config.roots, { name: uniqueRootName(path.posix.basename(realPath) || 'server', config.roots), path: identity, remote }] };
+    });
+    if (existing) {
+      if (!existing.ungrouped) return existing;
+      const { ungrouped: _, ...restored } = existing;
+      await writeDurableNow('projects', projects.map(project => project.id === existing.id ? restored : project));
+      return restored;
+    }
+    if (projects.length >= 200) throw new Error('Project catalog limit reached');
+    const project: LocalProject = { id: randomUUID(), name: (path.posix.basename(realPath) || identity).slice(0, 160), path: identity, remote,
+      createdAt: Date.now(), chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
     await writeDurableNow('projects', [...projects, project]);
     return project;
   });

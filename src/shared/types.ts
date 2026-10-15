@@ -89,11 +89,22 @@ export interface SecureStorageInfo {
   detail: string | null;
 }
 
+/** A folder on a server, reached with the system's own `ssh` (#1469). */
+export interface RemoteFolder {
+  /** As the person typed it: an ssh config alias or `user@host`; never starts with "-". */
+  host: string;
+  port?: number;
+  /** Absolute (`/srv/app`) or home-relative (`~/app`) folder on the server; absolute once resolved. */
+  path: string;
+}
+
 export interface Root {
   /** Virtual name exposed to the model, e.g. "project" for /project. */
   name: string;
-  /** Absolute host path. Never sent to the model. */
+  /** Absolute host path. Never sent to the model. For a server folder, `host[:port]:/path`, its identity. */
   path: string;
+  /** Set for a folder on a server: where it is. Its files go over SFTP and its commands over ssh. */
+  remote?: RemoteFolder;
 }
 
 export type TunnelKind = 'openai' | 'cloudflared' | 'manual';
