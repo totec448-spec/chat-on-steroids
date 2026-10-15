@@ -2438,5 +2438,6 @@
   "No chats in incognito": "Pas de chats en navigation privée",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Les chats ouverts par l'app vont dans votre fenêtre de navigateur normale, jamais dans une fenêtre privée.",
   "A fuller diagnostics report": "Un rapport de diagnostic plus complet",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Il indique aussi comment l'app est installée, le navigateur, les plantages, les avertissements fréquents et l'état de chaque chat, toujours sans rien de personnel."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Il indique aussi comment l'app est installée, le navigateur, les plantages, les avertissements fréquents et l'état de chaque chat, toujours sans rien de personnel.",
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox met à jour le module tout seul. Pour le faire maintenant, ouvrez about:addons dans Firefox, choisissez Rechercher des mises à jour, puis actualisez ChatGPT."
 }
