@@ -77,6 +77,20 @@ describe('the diagnostics report', () => {
     for (const value of personal) expect(report.toLowerCase(), value).not.toContain(value.toLowerCase());
   });
 
+  it('says which browser runs ChatGPT, its tabs by state and which page controls were found', () => {
+    const report = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: {
+      browser: { name: 'Google Chrome', version: '154.0.7400.12' },
+      tabs: { open: 5, discarded: 1, frozen: 1, loading: 0, grouped: 2, inBackgroundWindow: 0 },
+      page: { composer: true, sendArea: true, modelMenu: false, plusMenu: true, language: 'de-DE' } } } });
+    expect(report).toContain('## Browser and ChatGPT page');
+    expect(report).toContain('Browser: Google Chrome 154.0.7400.12');
+    expect(report).toContain('ChatGPT tabs: 5 open, 1 discarded, 1 frozen, 0 loading, 2 in a tab group, 0 in the app\'s background window');
+    expect(report).toContain('Page checks (most recently used ChatGPT tab): composer found, send area found, model menu NOT found, + menu found, page language de-DE');
+    const none = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: { browser: { name: 'Firefox', version: '144.0' },
+      tabs: { open: 0, discarded: 0, frozen: 0, loading: 0, grouped: 0, inBackgroundWindow: 0 }, page: null } } });
+    expect(none).toContain('Page checks: no awake ChatGPT tab answered');
+  });
+
   it('scrubs Windows paths inside JSON sections, where backslashes are doubled', () => {
     const report = renderDiagnosticsReport({ ...sources, home: 'C:\\Users\\Jane',
       commands: [{ command: 'c2', what: 'worker:run-1:worker-3', lastError: 'spawn C:\\Users\\Jane\\bin\\codex.exe ENOENT' }],

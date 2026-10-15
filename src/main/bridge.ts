@@ -57,7 +57,7 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import type { BridgeStatus, CompanionDiagnostics, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
+import type { BridgeStatus, CompanionDiagnostics, CompanionEnvironment, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
 import { BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, recoveryBusyMs } from '../shared/recovery.js';
 import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffort, normalizedToolOutcome, toolCallSummary, unescapeMarkdown,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
@@ -935,7 +935,25 @@ function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | nu
       overwrite: preferences.overwrite !== false,
       durations: preferences.durations === true
     },
-    tab: diagnosticTab(root.tab)
+    tab: diagnosticTab(root.tab),
+    environment: diagnosticEnvironment(root.environment)
+  };
+}
+
+function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
+  const root = diagnosticObject(value);
+  const browser = diagnosticObject(root?.browser), tabs = diagnosticObject(root?.tabs), page = diagnosticObject(root?.page);
+  if (!root || !browser || !tabs) return null;
+  const name = diagnosticString(browser.name, 40), version = diagnosticString(browser.version, 32);
+  const count = (key: string) => Math.round(diagnosticNumber(tabs[key], 100_000));
+  return {
+    browser: { name: name && /^[A-Za-z0-9 ._-]{1,40}$/.test(name) ? name : 'unknown', version: version && /^[0-9][0-9.]*$/.test(version) ? version : null },
+    tabs: { open: count('open'), discarded: count('discarded'), frozen: count('frozen'), loading: count('loading'), grouped: count('grouped'),
+      inBackgroundWindow: count('inBackgroundWindow') },
+    page: page ? {
+      composer: page.composer === true, sendArea: page.sendArea === true, modelMenu: page.modelMenu === true, plusMenu: page.plusMenu === true,
+      language: typeof page.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(page.language) ? page.language : null
+    } : null
   };
 }
 

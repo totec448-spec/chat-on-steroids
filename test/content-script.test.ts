@@ -3431,6 +3431,18 @@ function resumeSignal(h: Harness, type: 'cos-resume-request' | 'cos-resume-respo
     origin: h.window.location.origin, data: { type, id, conversationId, status, streamOpened } }));
 }
 
+describe('page checks for the diagnostics report', () => {
+  // 2026-10-15: the background asks the most recently used ChatGPT tab which controls it still has.
+  it('answers with booleans and the page language only', async () => {
+    live = await harness();
+    live.document.documentElement.lang = 'es';
+    const answer = await live.runtimeMessage({ type: 'clf-page-checks' }) as Record<string, unknown>;
+    expect(Object.keys(answer).sort()).toEqual(['composer', 'language', 'modelMenu', 'plusMenu', 'sendArea']);
+    expect(answer.language).toBe('es');
+    for (const key of ['composer', 'sendArea', 'modelMenu', 'plusMenu']) expect(typeof answer[key]).toBe('boolean');
+  });
+});
+
 describe('H2 resume transport evidence', () => {
   it('H2 records stream_gone immediately in a non-English page without ending a live generation', async () => {
     live = await harness();
