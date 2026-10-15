@@ -2415,5 +2415,6 @@
   "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Um túnel rápido do Cloudflare recebe uma URL nova a cada inicialização, então um administrador teria que atualizar o plugin toda vez. Um ID de túnel não muda, assim como seu próprio túnel HTTPS com \"Manter as URLs dos plugins após reinícios\" (Configurações → Geral → Para desenvolvedores).",
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Quem puder usar o plugin poderá usar este computador dentro das permissões que você escolheu. Se o espaço de trabalho permitir, peça ao administrador que deixe o plugin disponível só para você.",
   "Playful asides in automatic Continue": "Comentários divertidos na continuação automática",
-  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Adiciona uma curiosidade ou piada de meme aleatória a cada continuação automática, marcada para o modelo ignorar."
+  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Adiciona uma curiosidade ou piada de meme aleatória a cada continuação automática, marcada para o modelo ignorar.",
+  "The workspace's Codex credits are used up": "Os créditos do Codex do espaço de trabalho acabaram"
 }

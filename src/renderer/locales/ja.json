@@ -2415,5 +2415,6 @@
   "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Cloudflare クイックトンネルは起動のたびに新しい URL になるため、管理者が毎回プラグインを更新する必要があります。トンネル ID は変わりません。「再起動後もプラグインの URL を保持」（設定 → 一般 → 開発者向け）を有効にした独自の HTTPS トンネルも同様です。",
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "プラグインを使える人は、あなたが選んだ権限の範囲でこのコンピューターを使えます。ワークスペースで可能な場合は、プラグインをあなただけが使えるようにしてもらうよう管理者に依頼してください。",
   "Playful asides in automatic Continue": "自動続行に遊び心のある余談",
-  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "自動続行のたびに、ランダムな豆知識やミームのジョークを添えます。モデルが無視するよう印を付けます。"
+  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "自動続行のたびに、ランダムな豆知識やミームのジョークを添えます。モデルが無視するよう印を付けます。",
+  "The workspace's Codex credits are used up": "ワークスペースの Codex クレジットを使い切りました"
 }

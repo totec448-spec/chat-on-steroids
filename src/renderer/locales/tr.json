@@ -2415,5 +2415,6 @@
   "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Cloudflare hızlı tüneli her başlatmada yeni bir URL alır; bu yüzden bir yöneticinin eklentiyi her seferinde güncellemesi gerekir. Tünel kimliği değişmez; \"Eklenti URL’lerini yeniden başlatmalarda koru\" (Ayarlar → Genel → Geliştiriciler için) açık olan kendi HTTPS tüneliniz de öyle.",
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Eklentiyi kullanabilen herkes, seçtiğiniz izinler dahilinde bu bilgisayarı kullanabilir. Çalışma alanı izin veriyorsa yöneticiden eklentiyi yalnızca sizin kullanımınıza açmasını isteyin.",
   "Playful asides in automatic Continue": "Otomatik devamda eğlenceli ara notlar",
-  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Her otomatik devama rastgele bir ilginç bilgi ya da mizahi bir meme ekler; modelin yok sayması için işaretlenir."
+  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Her otomatik devama rastgele bir ilginç bilgi ya da mizahi bir meme ekler; modelin yok sayması için işaretlenir.",
+  "The workspace's Codex credits are used up": "Çalışma alanının Codex kredileri tükendi"
 }

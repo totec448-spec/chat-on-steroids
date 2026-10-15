@@ -2415,5 +2415,6 @@
   "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Đường hầm nhanh của Cloudflare có URL mới mỗi lần khởi động, nên quản trị viên sẽ phải cập nhật plugin mỗi lần. ID đường hầm thì không đổi, đường hầm HTTPS của riêng bạn khi bật \"Giữ URL của plugin qua các lần khởi động lại\" (Cài đặt → Chung → Dành cho nhà phát triển) cũng vậy.",
   "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "Bất kỳ ai dùng được plugin đều có thể dùng máy tính này trong phạm vi quyền bạn đã chọn. Nếu không gian làm việc cho phép, hãy nhờ quản trị viên chỉ cho riêng bạn dùng plugin.",
   "Playful asides in automatic Continue": "Lời bên lề vui nhộn trong Continue tự động",
-  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Thêm một sự thật thú vị hoặc câu đùa meme ngẫu nhiên vào mỗi Continue tự động, được đánh dấu để mô hình bỏ qua."
+  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "Thêm một sự thật thú vị hoặc câu đùa meme ngẫu nhiên vào mỗi Continue tự động, được đánh dấu để mô hình bỏ qua.",
+  "The workspace's Codex credits are used up": "Không gian làm việc đã dùng hết tín dụng Codex"
 }
