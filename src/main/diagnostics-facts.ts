@@ -163,7 +163,10 @@ export function installLines(facts: InstallFacts): string[] {
     `Installed as: ${facts.kind} (${facts.packaged ? 'packaged' : 'development build'})`,
     `App folder writable by the app: ${facts.folderWritable === null ? 'unknown' : yesNo(facts.folderWritable)}`,
     ...(facts.quarantined === null ? [] : [`macOS download quarantine still set: ${yesNo(facts.quarantined)}`]),
-    `Update: ${update.stage}, latest ${update.latest ?? 'unknown'}, ${checked}`,
+    // After a check, no `latest` means nothing newer was published.
+    update.checkedAt !== null && update.latest === null && update.stage === 'idle'
+      ? `Update: up to date (${update.current}), ${checked}`
+      : `Update: ${update.stage}, latest ${update.latest ?? 'unknown'}, ${checked}`,
     ...(update.error ? [`Last update error: ${update.error.slice(0, 300)}`] : []),
     ...(update.notInstalled ? [`Handed to the installer but not installed: ${update.notInstalled}`] : [])
   ];
