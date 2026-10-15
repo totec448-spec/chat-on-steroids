@@ -43,7 +43,7 @@ import {
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
-import { logError } from './logger.js';
+import { logError, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
@@ -681,12 +681,47 @@ async function keepUnreadable(raw: string): Promise<void> {
   }
 }
 
+/**
+ * Drops the preferences this version cannot read and parses again (2.1.39). A newer app may save a
+ * value an older one does not know — 2.1.38's Firefox as the ChatGPT browser made 2.1.37 throw the
+ * whole file away, folders and tunnel included (VM, 2026-10-15). Only keys under `ui` are dropped,
+ * each falling back to its default; anything about folders, permissions or the tunnel still sends
+ * the file to the conservative recovery below.
+ */
+function withoutUnreadablePreferences(value: unknown): { config: Config; dropped: string[] } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const draft = structuredClone(value) as Record<string, unknown>;
+  const dropped: string[] = [];
+  for (let pass = 0; pass < 8; pass++) {
+    const parsed = configSchema.safeParse(draft);
+    if (parsed.success) return dropped.length ? { config: parsed.data, dropped } : null;
+    let progressed = false;
+    for (const issue of parsed.error.issues) {
+      const [section, key] = issue.path;
+      const ui = draft.ui;
+      if (section !== 'ui' || typeof key !== 'string' || !ui || typeof ui !== 'object' || Array.isArray(ui) || !(key in ui)) return null;
+      delete (ui as Record<string, unknown>)[key];
+      dropped.push(`ui.${key}`);
+      progressed = true;
+    }
+    if (!progressed) return null;
+  }
+  return null;
+}
+
 export async function loadConfig(): Promise<Config> {
   let raw: string | null = null;
   try {
     raw = await fs.readFile(configPath, 'utf8');
     // Windows PowerShell 5.1 and older Notepad start UTF-8 files with a byte-order mark; it is not JSON.
-    const parsed = configSchema.safeParse(JSON.parse(raw.replace(/^\uFEFF/, '')));
+    const value: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    let parsed = configSchema.safeParse(value);
+    const salvaged = parsed.success ? null : withoutUnreadablePreferences(value);
+    if (salvaged) {
+      logWarn(`Settings kept; these preferences held values this version does not know and use their defaults: ${salvaged.dropped.join(', ')}`);
+      await keepUnreadable(raw);
+      parsed = { success: true, data: salvaged.config } as typeof parsed;
+    }
     if (!parsed.success) {
       logError('Settings file was invalid and has been reset to defaults');
       await keepUnreadable(raw);
