@@ -10,7 +10,7 @@ import { plainTextOfHtml } from './content-reference.js';
 const cellText = (value: string): string => value.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
 const markdownCells = (line: string): string[] =>
   line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(value => cellText(value.replace(/\\\|/g, '|')));
-const escapeCell = (value: string): string => value.replace(/\|/g, '\\|');
+const escapeCell = (value: string): string => value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 const SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
 
 /** The rows of each table ChatGPT drew, as cell texts. */

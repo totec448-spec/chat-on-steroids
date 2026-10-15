@@ -24,7 +24,7 @@ afterAll(() => dom.window.close());
 
 const cell = (text: string, strong = false) => `<td data-d-component="table-cell"><p data-d-component="text">${strong ? `<span data-d-default-strong="">${text}</span>` : text}</p></td>`;
 const row = (cells: string[], strong = false) => `<tr data-d-component="table-row">${cells.map(value => cell(value, strong)).join('')}</tr>`;
-const items = [['🍎 Fruta y verdura', 'Plátanos', '6 uds.'], ['🥛 Lácteos', 'Leche | entera', '2 litros'], ['🧻 Limpieza', 'Papel higiénico', '1 paquete']];
+const items = [['🍎 Fruta y verdura', 'Plátanos', '6 uds.'], ['🥛 Lácteos', 'Leche | entera', '2 litros'], ['📁 Oficina', 'Carpeta C:\\docs', '1'], ['🧻 Limpieza', 'Papel higiénico', '1 paquete']];
 const html = '<div data-dil-message-id="m"><p data-d-component="text">Te dejo una lista.</p>' +
   '<div data-d-component="table"><table><tbody>' + row(['Categoría', 'Producto', 'Cantidad'], true) + items.map(item => row(item)).join('') +
   '</tbody></table></div><button type="button" data-d-component="button"><span><svg></svg><span> Copiar lista completa</span></span></button>' +
@@ -37,11 +37,14 @@ it('fills a table ChatGPT wrote with only its header from the rows it drew, and 
   expect(text).toContain('| 🍎 Fruta y verdura | Plátanos | 6 uds. |');
   expect(text).toContain('| 🥛 Lácteos | Leche \\| entera | 2 litros |');
   expect(text).toContain('| 🧻 Limpieza | Papel higiénico | 1 paquete |');
+  // A backslash in a cell stays a backslash once Markdown reads it.
+  expect(text).toContain('| 📁 Oficina | Carpeta C:\\\\docs | 1 |');
   expect(text).not.toMatch(/^\[Copiar lista completa\]$/m);
   // The sentence that names the button stays as ChatGPT wrote it.
   expect(text).toContain('Puedes pulsar **«Copiar lista completa»**.');
   const drawn = renderedMarkdown(markdown, capture);
-  expect(drawn.querySelectorAll('tbody tr')).toHaveLength(3);
+  expect(drawn.querySelectorAll('tbody tr')).toHaveLength(4);
+  expect(drawn.textContent).toContain('Carpeta C:\\docs');
   expect(drawn.textContent).not.toContain('[Copiar lista completa]');
 });
 
