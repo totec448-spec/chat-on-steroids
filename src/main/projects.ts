@@ -164,6 +164,18 @@ export async function projectWorkspace(projectId: string): Promise<{ virtual: st
   return resolveProject(project);
 }
 async function resolveProject(project: LocalProject): Promise<{ virtual: string; real: string }> {
+  if (project.remote) {
+    // A server project is its root: the same folder, checked on the server (#1469).
+    const identity = remoteIdentity(project.remote);
+    const root = getConfig().roots.find(entry => entry.remote && remoteIdentity(entry.remote) === identity);
+    if (!root) throw new Error('Project folder changed or is unavailable');
+    try {
+      const resolved = await resolvePath(getConfig().roots, `/${root.name}`, { remote: true });
+      return { virtual: resolved.virtual, real: resolved.real };
+    } catch (error) {
+      throw new Error(`The project's server folder is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const resolved = await resolvePath(getConfig().roots, project.path);
   if (!samePath(resolved.real, project.path) || !(await fs.stat(resolved.real)).isDirectory()) throw new Error('Project folder changed or is unavailable');
   return { virtual: resolved.virtual, real: resolved.real };

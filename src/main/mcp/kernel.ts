@@ -29,7 +29,8 @@ import { randomUUID } from 'node:crypto';
 import { beginToolTiming, inboundRequestId, inboundPublication, inboundProviderRequest } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import type { Capabilities, Root } from '../../shared/types.js';
+import type { Capabilities, RemoteFolder, Root } from '../../shared/types.js';
+import { fsForRoot } from '../remote/project-fs.js';
 import { CAPABILITY_LABELS, WRITE_CAPABILITIES } from '../../shared/types.js';
 import { FsOpError, formatBytes, type FileInfo } from '../fsops.js';
 import { logInfo, logWarn } from '../logger.js';
@@ -1343,6 +1344,8 @@ export interface ResolvedCwd {
   virtual: string;
   /** True when the caller named no folder, so the workspace or first root was used instead. */
   defaulted: boolean;
+  /** Set when the folder is on a server (#1469): commands then run there over ssh. */
+  remote?: RemoteFolder;
 }
 
 /**
@@ -1370,7 +1373,12 @@ export async function resolveCwd(ctx: ToolContext, virtualPath: string | undefin
   const fallback = firstTaskRoot(ctx.roots);
   const target = provided ? virtualPath : (workspace?.virtual ?? (fallback ? `/${fallback.name}` : ''));
   if (!target) throw new SandboxError('No folder is approved, so there is nowhere to run');
-  const resolved = await resolveIn(ctx.roots, target);
+  const resolved = await resolveIn(ctx.roots, target, { remote: true });
+  const { remote } = resolved.root;
+  if (remote) {
+    if (!(await fsForRoot(resolved.root).getMetadata(resolved.real)).isDirectory) throw new SandboxError('workdir must be a folder');
+    return { real: resolved.real, virtual: resolved.virtual, defaulted: !provided, remote };
+  }
   const stat = await fs.stat(resolved.real);
   if (!stat.isDirectory()) throw new SandboxError('workdir must be a folder');
   return { real: resolved.real, virtual: resolved.virtual, defaulted: !provided };
