@@ -2073,6 +2073,21 @@ it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's langu
   setLanguage('en');
 });
 
+it('says a switched-off permission group is off in the app\'s language', async () => {
+  const mounted = await mountChat();
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, capabilities: {
+    ...mounted.state.config.capabilities, screen: false, control: false, clipboardRead: false, clipboardWrite: false
+  } } });
+  const doc = mounted.window.document;
+  const count = (group: string) => doc.querySelector(`[data-group="${group}"] .group-count`)?.textContent;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // The summary of a group with nothing on was the bare English word "off" in every language.
+  expect(count('desktop')).toBe('aus');
+  setLanguage('en');
+  expect(count('desktop')).toBe('off');
+});
+
 it("keeps a worker's delivery line in the app's language when the language changes", async () => {
   const worker = { id: 'worker-1', role: 'worker', label: 'Docs', task: 'Update the docs', jobTitle: 'Docs', runId: 'run-1', reasoningEffort: null, model: null, state: 'active',
     createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
