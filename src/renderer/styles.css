@@ -610,6 +610,11 @@ code {
 .whats-new-done:active { transform: translateY(0) scale(.98); }
 .whats-new-link:focus-visible, .whats-new-done:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* The question before an update restart (2.1.38): What's New's card, narrower, one question. */
+.update-restart-dialog { width: min(400px, calc(100vw - 40px)); }
+.update-restart-dialog .whats-new-head { padding-bottom: 0; }
+.update-restart-dialog .whats-new-actions { padding-top: 22px; padding-bottom: 22px; }
+.update-restart-dialog .update-restart-keep { color: var(--soft); }
 @keyframes whats-new-rise { from { opacity: 0; transform: translateY(18px) scale(.96); } }
 @keyframes whats-new-leave { to { opacity: 0; transform: translateY(8px) scale(.97); } }
 @keyframes whats-new-pop { from { opacity: 0; transform: scale(.6); } }
