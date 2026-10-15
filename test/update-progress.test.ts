@@ -35,7 +35,7 @@ vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { theme: 'dark
     dark: { background: '#101418', sidebar: '#1a2129', accent: '#c0d0ee', contrast: 60 }, font: 'system', fontSize: 14, translucentSidebar: true } } }) }));
 vi.mock('../src/main/main-texts.js', () => ({ mainText: (text: string) => `[${text}]` }));
 
-const { showUpdateProgress, setUpdateProgressStep, resetUpdateProgressForTests } = await import('../src/main/update-progress.js');
+const { showUpdateProgress, setUpdateProgressStep, resetUpdateProgressForTests, untilInstallerTakesOver } = await import('../src/main/update-progress.js');
 
 beforeEach(() => { windows.length = 0; resetUpdateProgressForTests(); });
 
@@ -68,6 +68,25 @@ it('says each step of the handoff in the open window', async () => {
   await Promise.resolve();
   expect(windows[0]!.scripts).toEqual([
     `window.cosUpdateStep?.(${JSON.stringify('[Waiting for your permission in Windows…]')})`,
-    `window.cosUpdateStep?.(${JSON.stringify('[Starting the new version. Chat On Steroids opens again by itself.]')})`
+    `window.cosUpdateStep?.(${JSON.stringify('[Starting the installer. Chat On Steroids opens again by itself.]')})`
   ]);
+});
+
+it('stays until the installer closes it, so its own progress window follows without a gap', async () => {
+  // Measured on the VM: the app was gone four seconds after Restart and install, and the
+  // installer's window came up seconds to minutes later. The installer closes a running app
+  // (taskkill) once its progress page shows; that close is the handover.
+  await untilInstallerTakesOver(10);
+  showUpdateProgress('2.1.39');
+  let over = false;
+  const waiting = untilInstallerTakesOver(60_000).then(() => { over = true; });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  expect(over).toBe(false);
+  windows[0]!.handlers.close!();
+  await waiting;
+  expect(over).toBe(true);
+  // A silent installer never closes it: the wait is bounded.
+  resetUpdateProgressForTests(); windows.length = 0;
+  showUpdateProgress('2.1.39');
+  await untilInstallerTakesOver(10);
 });

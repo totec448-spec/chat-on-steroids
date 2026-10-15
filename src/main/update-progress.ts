@@ -17,7 +17,7 @@ let progress: BrowserWindow | null = null;
 
 const stepText = (step: UpdateHandoffStep): string => step === 'permission'
   ? mainText('Waiting for your permission in Windows…')
-  : mainText('Starting the new version. Chat On Steroids opens again by itself.');
+  : mainText('Starting the installer. Chat On Steroids opens again by itself.');
 
 export function showUpdateProgress(version: string): void {
   if (progress && !progress.isDestroyed()) return;
@@ -46,6 +46,20 @@ export function showUpdateProgress(version: string): void {
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
     void win.loadURL(url.toString()).catch(() => undefined);
   } else void win.loadFile(path.join(__dirname, '../renderer/update-progress.html'), { query }).catch(() => undefined);
+}
+
+/**
+ * Resolves once the installer has taken over. In update mode it closes the running app (taskkill)
+ * when its own progress page shows, which closes this window; a silent or failed installer never
+ * does, so the wait is bounded.
+ */
+export function untilInstallerTakesOver(timeoutMs = 90_000): Promise<void> {
+  const win = progress;
+  if (!win || win.isDestroyed()) return Promise.resolve();
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, timeoutMs);
+    win.once('close', () => { clearTimeout(timer); resolve(); });
+  });
 }
 
 /** Says the handoff's current step in the open window; without one there is nothing to say. */

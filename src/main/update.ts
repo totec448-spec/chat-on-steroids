@@ -550,6 +550,15 @@ export function onUpdateHandoffStep(listener: (step: UpdateHandoffStep) => void)
   handoffStep = listener;
 }
 
+/**
+ * A shown installer takes over from the app's Installing window: the app waits for it, so nothing
+ * on screen goes blank in between (measured on Windows: seconds to minutes until it showed).
+ */
+let installerTakeover: () => Promise<void> = async () => undefined;
+export function onInstallerTakeover(wait: () => Promise<void>): void {
+  installerTakeover = wait;
+}
+
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
   const relaunch = runAfterInstall;
@@ -577,6 +586,7 @@ export async function applyStagedUpdate(): Promise<void> {
           return;
         }
         handoffStep('installer');
+        if (relaunch) await installerTakeover();
       } else {
         handoffStep('installer');
         // windowsHide would hide the installer's own window as well (measured on Windows).
@@ -585,6 +595,7 @@ export async function applyStagedUpdate(): Promise<void> {
         // child process would take the quit down with it.
         installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
         installer.unref();
+        if (relaunch) await installerTakeover();
       }
     } else {
       const next = `${ready.target}.new`;
