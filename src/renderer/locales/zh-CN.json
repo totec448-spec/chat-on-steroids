@@ -2413,5 +2413,7 @@
   "In Business, Enterprise and Edu workspaces, admins decide who may add custom apps. If Plugins offers no way to add a custom MCP server, ask a workspace admin to add the Core plugin with the name, description and tunnel ID shown here.": "在 Business、Enterprise 和 Edu 工作区中，由管理员决定谁可以添加自定义应用。如果“插件”中没有添加自定义 MCP 服务器的选项，请让工作区管理员使用此处显示的名称、描述和隧道 ID 添加 Core 插件。",
   "The tunnel must belong to your workspace's organization on platform.openai.com. If Platform only shows your Personal organization, ask an admin to invite you to that organization, or to create the tunnel and a restricted key (Tunnels: Read and Use) for you.": "隧道必须属于你的工作区在 platform.openai.com 上的组织。如果 Platform 只显示你的个人组织，请让管理员邀请你加入该组织，或为你创建隧道和受限密钥（Tunnels: Read 和 Use）。",
   "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Cloudflare 快速隧道每次启动都会得到新的 URL，因此管理员每次都得更新插件。隧道 ID 不会改变；开启“重启后保留插件 URL”（设置 → 通用 → 开发者选项）的自有 HTTPS 隧道也不会。",
-  "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "能使用该插件的人，都能在你选择的权限范围内使用这台电脑。如果工作区允许，请让管理员把插件设为仅你可用。"
+  "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "能使用该插件的人，都能在你选择的权限范围内使用这台电脑。如果工作区允许，请让管理员把插件设为仅你可用。",
+  "Playful asides in automatic Continue": "自动继续中的趣味题外话",
+  "Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.": "在每次自动继续时附上一条随机趣闻或梗笑话，并标注让模型忽略。"
 }
