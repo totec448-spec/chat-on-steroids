@@ -100,6 +100,13 @@ export async function openSftp(remote: RemoteFolder, options: SshOptions = {}): 
 }
 
 const sessions = new Map<string, Promise<SftpClient>>();
+let opener: (remote: RemoteFolder, options: SshOptions) => Promise<SftpClient> = openSftp;
+
+/** Test seam: opens sessions with this instead of ssh; null restores ssh. */
+export function setSftpOpenerForTests(open: ((remote: RemoteFolder) => Promise<SftpClient>) | null): void {
+  opener = open ?? openSftp;
+  sessions.clear();
+}
 const sessionKey = (remote: RemoteFolder) => `${remote.host}\u0000${remote.port ?? ''}`;
 
 /** The shared SFTP session for this address, opened on first use and again after it closed. */
@@ -107,7 +114,7 @@ export function sftpFor(remote: RemoteFolder, options: SshOptions = {}): Promise
   const key = sessionKey(remote);
   const known = sessions.get(key);
   if (known) return known.then(client => client.closed ? (sessions.delete(key), sftpFor(remote, options)) : client);
-  const opening = openSftp(remote, options);
+  const opening = opener(remote, options);
   sessions.set(key, opening);
   opening.catch(() => { if (sessions.get(key) === opening) sessions.delete(key); });
   return opening;

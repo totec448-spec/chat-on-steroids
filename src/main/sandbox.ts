@@ -14,7 +14,9 @@
 
 import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import path from 'node:path';
-import type { Root } from '../shared/types.js';
+import type { RemoteFolder, Root } from '../shared/types.js';
+import { sftpFor } from './remote/ssh.js';
+import { SftpError } from './remote/sftp.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -380,8 +382,9 @@ export async function resolvePath(
     );
   }
 
-  const rootReal = await realRoot(root);
   const rest = segments.slice(1);
+  if (root.remote) return resolveRemote(root as Root & { remote: RemoteFolder }, rest, options);
+  const rootReal = await realRoot(root);
   const candidate = rest.length === 0 ? rootReal : path.join(rootReal, ...rest);
 
   // Cheap structural check before touching the disk.
@@ -411,6 +414,49 @@ export async function resolvePath(
     virtual: toVirtualPath(root, rootReal, finalReal),
     root
   };
+}
+
+/** POSIX containment for a path on a server; the server's paths are case-sensitive. */
+function containedOnServer(parent: string, child: string): boolean {
+  return child === parent || child.startsWith(parent.endsWith('/') ? parent : `${parent}/`);
+}
+
+/**
+ * The same rules for a folder on a server (#1469): segments were checked above; containment is
+ * POSIX, and where a link really goes is what the server's own realpath says.
+ */
+async function resolveRemote(root: Root & { remote: RemoteFolder }, rest: string[], options: ResolveOptions): Promise<Resolved> {
+  const rootReal = root.remote.path;
+  const unavailable = () => new SandboxError(`Root "/${root.name}" is not available on the server or changed there. Remove it and add the folder again.`);
+  let client;
+  try { client = await sftpFor(root.remote); }
+  catch (error) { throw new SandboxError(`Root "/${root.name}" could not be reached: ${error instanceof Error ? error.message : String(error)}`); }
+  // OpenSSH's realpath answers for a path whose last part does not exist, so existence is a stat.
+  try { if (!(await client.stat(rootReal)).isDirectory || await client.realpath(rootReal) !== rootReal) throw unavailable(); }
+  catch (error) { throw error instanceof SandboxError ? error : unavailable(); }
+  const candidate = rest.length ? path.posix.join(rootReal, ...rest) : rootReal;
+  if (!containedOnServer(rootReal, candidate)) throw new SandboxError('Path escapes its approved folder');
+  let current = candidate;
+  const missing: string[] = [];
+  let real: string;
+  for (;;) {
+    try { await client.stat(current); real = await client.realpath(current); break; }
+    catch (error) {
+      if (!(error instanceof SftpError) || error.code !== 'ENOENT') throw error;
+      // A link whose target is missing is not a new file: writing through it would create the
+      // target wherever the link points.
+      if (await client.lstat(current).then(() => true, () => false)) throw new SandboxError('Path contains a link that could not be resolved');
+      if (current === rootReal) throw unavailable();
+      missing.unshift(path.posix.basename(current));
+      current = path.posix.dirname(current);
+    }
+  }
+  if (!containedOnServer(rootReal, real)) throw new SandboxError('Path escapes its approved folder via a link');
+  const virtualOf = (target: string) => `/${root.name}${target === rootReal ? '' : target.slice(rootReal.length)}`;
+  if (missing.length > 0 && !options.allowMissing) throw new SandboxError(`Not found: ${virtualOf(candidate)}`);
+  const finalReal = missing.length === 0 ? real : path.posix.join(real, ...missing);
+  if (!containedOnServer(rootReal, finalReal)) throw new SandboxError('Path escapes its approved folder');
+  return { real: finalReal, virtual: virtualOf(finalReal), root };
 }
 
 /** Converts a real path back into the virtual path the model sees. */
