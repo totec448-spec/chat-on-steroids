@@ -2440,5 +2440,6 @@
   "A fuller diagnostics report": "Báo cáo chẩn đoán đầy đủ hơn",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Báo cáo còn cho biết cách cài ứng dụng, trình duyệt, sự cố, cảnh báo thường gặp và trạng thái của từng chat, vẫn không có thông tin cá nhân.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox tự cập nhật tiện ích. Để cập nhật ngay, mở about:addons trong Firefox, chọn Kiểm tra cập nhật, rồi tải lại ChatGPT.",
-  "{0} min": "{0} phút"
+  "{0} min": "{0} phút",
+  "OpenAI outage": "OpenAI gặp sự cố"
 }
