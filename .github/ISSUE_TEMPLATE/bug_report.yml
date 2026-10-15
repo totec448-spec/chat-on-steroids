@@ -20,6 +20,15 @@ body:
     validations:
       required: true
 
+  - type: checkboxes
+    id: latest
+    attributes:
+      label: Latest release
+      description: Many problems are already fixed in a newer version. Update under Settings → Activity first, then check whether it still happens.
+      options:
+        - label: I reproduced this on the latest release
+          required: true
+
   - type: input
     id: operating_system
     attributes:
@@ -87,19 +96,40 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
+      description: Recommended. The exact steps let us reproduce it without asking.
       placeholder: |
         1.
         2.
         3.
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      description: Recommended.
+      options:
+        - "Every time"
+        - "Sometimes"
+        - "It happened once"
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or screen recording
+      description: Recommended when the problem shows in the app or the browser. Drag the image or video here. Hide chat text and names you don't want to share.
 
   - type: textarea
     id: diagnostics
     attributes:
       label: Diagnostics report
       description: >
-        In the app, open Activity and click Diagnostics report, then drag the saved file into this box.
+        Required. In the app, open Activity and click Diagnostics report, then drag the saved file into this box.
         Your user name, folder and file names, chat titles, tasks, email addresses and keys are already
-        replaced in it. Please read it before you attach it.
+        replaced in it. Please read it before you attach it. If the app does not open at all, attach its app.log
+        instead (macOS: ~/Library/Application Support/chat-on-steroids, Windows: %APPDATA%\chat-on-steroids,
+        Linux: ~/.config/chat-on-steroids). Reports without either are closed until one is added.
+    validations:
+      required: true
 
   - type: textarea
     id: extra

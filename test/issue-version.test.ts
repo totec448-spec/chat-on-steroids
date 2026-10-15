@@ -54,3 +54,70 @@ it('tells the reporter where the number is and that an edit reopens the issue', 
   expect(workflow).toContain('types: [opened, edited]');
   expect(workflow).toContain('node scripts/issue-version.mjs');
 });
+
+// 2026-10-15, user: reports opened from now on need the diagnostics report and a check on the
+// latest release, so a first answer needs no follow-up questions. Older reports keep the old rule.
+// @ts-expect-error The check is a plain Node script without type declarations.
+import { INTAKE_LABEL, INTAKE_SINCE, intakeDecision as intake, missingComment as missingText } from '../scripts/issue-version.mjs';
+
+type Intake = Issue & { created_at: string };
+const intakeDecision = intake as (issue: Intake, context: { latest: string | null; opened: boolean }) => { decision: 'close' | 'reopen' | 'none'; missing: string[] };
+const missingComment = missingText as (missing: string[]) => string;
+const attached = '[chat-on-steroids-diagnostics-2026-10-15.txt](https://github.com/user-attachments/files/23456789/chat-on-steroids-diagnostics-2026-10-15.txt)';
+const fullReport = ({ version = '2.1.38', diagnostics = attached, latest = '- [X] I reproduced this on the latest release' } = {}) =>
+  `### App version\n\n${version}\n\n### Operating system and version\n\nWindows 11 24H2\n\n### Latest release\n\n${latest}\n\n` +
+  `### What happened\n\nIt broke.\n\n### Diagnostics report\n\n${diagnostics}\n\n### Anything else\n\n_No response_`;
+const fresh = (body: string, extra: Partial<Intake> = {}): Intake =>
+  ({ body, state: 'open', author_association: 'NONE', labels: [{ name: 'bug' }], created_at: '2026-10-16T09:00:00Z', ...extra });
+const opened = { latest: '2.1.38', opened: true };
+
+it('accepts a new report with the version, the attached diagnostics file and the latest-release check', () => {
+  expect(Date.parse(INTAKE_SINCE)).toBeLessThan(Date.parse('2026-10-16T09:00:00Z'));
+  expect(intakeDecision(fresh(fullReport()), opened)).toEqual({ decision: 'none', missing: [] });
+  // Pasted instead of attached still carries the whole report.
+  const pasted = '```\n# Chat On Steroids diagnostics report\n\nCreated 2026-10-15T10:00:00.000Z.\n```';
+  expect(intakeDecision(fresh(fullReport({ diagnostics: pasted })), opened).missing).toEqual([]);
+});
+
+it('closes a new report that lacks the diagnostics file, the check or a current version, and names each', () => {
+  expect(intakeDecision(fresh(fullReport({ diagnostics: '_No response_' })), opened)).toEqual({ decision: 'close', missing: ['diagnostics'] });
+  // A screenshot is not the report.
+  expect(intakeDecision(fresh(fullReport({ diagnostics: '![shot](https://github.com/user-attachments/assets/8f596a5e-deb4-47aa-90a4-a52b0419d347)' })), opened).missing).toEqual(['diagnostics']);
+  expect(intakeDecision(fresh(fullReport({ latest: '- [ ] I reproduced this on the latest release' })), opened).missing).toEqual(['latest']);
+  expect(intakeDecision(fresh(fullReport({ version: '2.1.32' })), opened).missing).toEqual(['latest']);
+  expect(intakeDecision(fresh(fullReport({ version: 'latest', diagnostics: '' })), opened).missing).toEqual(['version', 'diagnostics']);
+});
+
+it('does not close an open report on a later edit only because a newer release came out', () => {
+  expect(intakeDecision(fresh(fullReport()), { latest: '2.1.39', opened: false }).decision).toBe('none');
+  // Still checked while the bot holds it closed: the reporter has to retry on the newest one.
+  const held = fresh(fullReport(), { state: 'closed', labels: [{ name: INTAKE_LABEL }] });
+  expect(intakeDecision(held, { latest: '2.1.39', opened: false })).toEqual({ decision: 'none', missing: ['latest'] });
+});
+
+it('reopens a held report once everything is there, and never fights a maintainer', () => {
+  const held = fresh(fullReport(), { state: 'closed', labels: [{ name: 'bug' }, { name: INTAKE_LABEL }] });
+  expect(intakeDecision(held, { latest: '2.1.38', opened: false }).decision).toBe('reopen');
+  expect(intakeDecision(fresh(fullReport({ diagnostics: '' }), { labels: [{ name: INTAKE_LABEL }] }), opened).decision).toBe('none');
+  expect(intakeDecision(fresh(fullReport({ diagnostics: '' }), { author_association: 'OWNER' }), opened).decision).toBe('none');
+  // Without a known latest release only the release check is skipped.
+  expect(intakeDecision(fresh(fullReport({ version: '2.1.30' })), { latest: null, opened: true }).missing).toEqual([]);
+});
+
+it('keeps the old version-only rule for reports opened before the change', () => {
+  const old = fresh(fullReport({ version: 'latest', diagnostics: '' }), { created_at: '2026-10-14T09:00:00Z' });
+  expect(intakeDecision(old, opened)).toEqual({ decision: 'close', missing: ['version'] });
+  expect(intakeDecision(fresh(fullReport({ diagnostics: '' }), { created_at: '2026-10-14T09:00:00Z' }), opened).decision).toBe('none');
+  expect(intakeDecision({ ...fresh('### Problem or workflow\n\nIdea'), created_at: '2026-10-16T09:00:00Z' }, opened).decision).toBe('none');
+});
+
+it('tells the reporter exactly where each missing part comes from', () => {
+  const text = missingComment(['version', 'diagnostics', 'latest']);
+  expect(text).toContain('Settings → Activity');
+  expect(text).toContain('Diagnostics report');
+  expect(text).toContain('latest release');
+  expect(text).toContain('reopens by itself');
+  const form = readFileSync('.github/ISSUE_TEMPLATE/bug_report.yml', 'utf8');
+  expect(form).toMatch(/id: diagnostics[\s\S]*?required: true/);
+  expect(form).toMatch(/id: latest[\s\S]*?I reproduced this on the latest release[\s\S]*?required: true/);
+});
