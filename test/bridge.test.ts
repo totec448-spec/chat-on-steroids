@@ -1635,6 +1635,42 @@ describe('activity feed', () => {
     }
   });
 
+  it('gives new work only to the built-in browser while it is the chosen one and present (#1516)', async () => {
+    // 2026-10-15: with the built-in browser chosen and Chrome with the extension still open, every
+    // new chat opened a tab in Chrome. Chrome keeps recording what the person opens there.
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const id = randomUUID();
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const before = getConfig().ui.chatBrowser;
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      await input.enqueueInput({ id, sessionId: null, text: 'Open one chat', mode: 'auto', dueAt: now, model: null, reasoningEffort: null });
+      const offered = async (browser: string, host: string) => ((await request('POST', '/status', { body: { openConversations: [] }, browser, host })).body.inputs as Array<{ id: string }>)
+        .some(row => row.id === id);
+      // The built-in browser has not shown up: Chrome keeps working rather than nobody.
+      expect(await offered(chrome, 'browser')).toBe(true);
+      expect(await offered(builtIn, 'cos')).toBe(true);
+      expect(await offered(chrome, 'browser')).toBe(false);
+      const other = (await request('POST', '/status', { body: { openConversations: [] }, browser: chrome, host: 'browser' })).body;
+      expect(other).toMatchObject({ revival: null, revivals: [], projectCreateRequests: [], pluginRefreshRequests: [], modelCatalogRequest: null });
+      expect((await request('POST', '/input/claim', { body: { id, owner: '9:chrome-document:0', conversationId: null }, browser: chrome, host: 'browser' })).body.input).toBeNull();
+      expect((await request('POST', '/commands/redeem', { body: { id: 'x', client: 'chrome-client' }, browser: chrome, host: 'browser' })).body.error).toBe('not_chosen_browser');
+      expect((await request('POST', '/repairs/claim', { body: {}, browser: chrome, host: 'browser' })).body).toEqual({ allowed: false });
+      // Chrome chosen again: the rule is gone.
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+      expect((await request('POST', '/commands/redeem', { body: { id: 'x', client: 'chrome-client' }, browser: chrome, host: 'browser' })).body.error).not.toBe('not_chosen_browser');
+    } finally {
+      clock.mockRestore();
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+      input.resetInputForTests();
+      await writeDurableNow('session-input', []);
+    }
+  });
+
   it('keeps bind, first correlation and ACK on the reserved opening session', async () => {
     await pair();
     const input = await import('../src/main/session/input.js');
