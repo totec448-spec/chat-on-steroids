@@ -65,6 +65,8 @@ export function untilInstallerTakesOver(timeoutMs = 90_000): Promise<void> {
 /** Says the handoff's current step in the open window; without one there is nothing to say. */
 export function setUpdateProgressStep(step: UpdateHandoffStep): void {
   if (!progress || progress.isDestroyed()) return;
+  // Once the installer runs, its own pages and messages must not sit behind this window.
+  if (step === 'installer') progress.setAlwaysOnTop(false);
   void progress.webContents.executeJavaScript(`window.cosUpdateStep?.(${JSON.stringify(stepText(step))})`).catch(() => undefined);
 }
 
