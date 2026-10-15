@@ -25,14 +25,16 @@ export function showUpdateProgress(version: string): void {
   const theme = ui.theme === 'dark' ? 'dark' : 'light';
   const palette = (ui.appearance ?? defaultAppearance())[theme];
   const win = new BrowserWindow({
-    width: 420, height: 176, frame: false, resizable: false, minimizable: false, maximizable: false,
+    // On top: the main window is already gone, and on Windows another app has the foreground by
+    // then, so a plain window opened behind it (measured on the VM, 2026-10-15).
+    width: 420, height: 176, frame: false, resizable: false, minimizable: false, maximizable: false, alwaysOnTop: true,
     fullscreenable: false, show: false, center: true, title: 'Chat On Steroids', backgroundColor: palette.background,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true }
   });
   progress = win;
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
-  win.once('ready-to-show', () => { if (progress === win && !win.isDestroyed()) win.show(); });
+  win.once('ready-to-show', () => { if (progress === win && !win.isDestroyed()) { win.show(); win.moveTop(); } });
   win.on('closed', () => { if (progress === win) progress = null; });
   const query = {
     version, title: mainText('Updating Chat On Steroids'), step: mainText('Saving your work…'),

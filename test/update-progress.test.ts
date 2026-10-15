@@ -6,7 +6,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
  * says what is happening, from the quit until the installer takes over.
  */
 const windows = vi.hoisted(() => [] as Array<{ options: Record<string, any>; loaded: { file: string; query: Record<string, string> } | null;
-  scripts: string[]; shown: boolean; handlers: Record<string, () => void> }>);
+  scripts: string[]; shown: boolean; top?: boolean; handlers: Record<string, () => void> }>);
 vi.mock('electron', () => ({
   BrowserWindow: class {
     record: (typeof windows)[number];
@@ -26,6 +26,7 @@ vi.mock('electron', () => ({
     once(event: string, handler: () => void) { this.record.handlers[event] = handler; }
     on() { return this; }
     show() { this.record.shown = true; }
+    moveTop() { this.record.top = true; }
     isDestroyed() { return false; }
   }
 }));
@@ -42,7 +43,9 @@ it('opens a small window in the app\'s own colors and language, isolated like ev
   showUpdateProgress('2.1.39');
   expect(windows).toHaveLength(1);
   const { options, loaded } = windows[0]!;
-  expect(options).toMatchObject({ frame: false, resizable: false, show: false, backgroundColor: '#101418', title: 'Chat On Steroids' });
+  // Above other windows: the main window is gone, and on Windows another app has the foreground
+  // by then, so a plain window opened behind it (measured on the VM).
+  expect(options).toMatchObject({ frame: false, resizable: false, show: false, alwaysOnTop: true, backgroundColor: '#101418', title: 'Chat On Steroids' });
   expect(options.webPreferences).toMatchObject({ contextIsolation: true, nodeIntegration: false, sandbox: true });
   expect(options.webPreferences.preload).toBeUndefined();
   expect(loaded!.file).toMatch(/renderer[\\/]update-progress\.html$/);
@@ -50,6 +53,7 @@ it('opens a small window in the app\'s own colors and language, isolated like ev
     theme: 'dark', background: '#101418', accent: '#c0d0ee', lang: 'de' });
   windows[0]!.handlers['ready-to-show']!();
   expect(windows[0]!.shown).toBe(true);
+  expect(windows[0]!.top).toBe(true);
   // A second quit request keeps the one window.
   showUpdateProgress('2.1.39');
   expect(windows).toHaveLength(1);
