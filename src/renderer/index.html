@@ -1425,7 +1425,7 @@
             <div class="update-readiness-status">
               <div class="update-readiness-header">
                 <button class="btn update-readiness-toggle" id="updateReadinessToggle" type="button" aria-controls="updateReadinessDetails" aria-expanded="true">
-                  <span class="update-readiness-caret" aria-hidden="true">▸</span><span id="updateReadinessSummary">Not checked yet</span>
+                  <svg class="disclosure-chevron update-readiness-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg><span id="updateReadinessSummary">Not checked yet</span>
                 </button>
                 <button class="btn btn-solid" id="updateAll" type="button" aria-describedby="updateAllNotice" title="You will be asked before the app restarts. Finish active work before installing.">Update all</button>
               </div>
@@ -1433,7 +1433,7 @@
               <p id="updateAllError" class="is-warn" role="alert" hidden></p>
             </div>
             <details id="updateReadinessDetails" open>
-              <summary>Component details</summary>
+              <summary><svg class="disclosure-chevron details-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Component details</summary>
               <p class="muted">App, browser extension and plugins in ChatGPT.</p>
               <ul id="updateReadinessRows"></ul>
               <p class="muted">Your settings are kept. Manual steps appear in the status list.</p>

@@ -2509,6 +2509,16 @@ it('keeps update readiness actions stable and does not start update or connectio
   expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
 });
 
+it('draws the Update status disclosures with the app\'s own chevron', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  // Every other disclosure in the app uses the chevron icon; these used a text "▸" and the
+  // browser's own ▼ marker.
+  expect(doc.querySelector('#updateReadinessToggle .disclosure-chevron')).not.toBeNull();
+  expect(doc.querySelector('#updateReadinessDetails > summary .disclosure-chevron.details-chevron')).not.toBeNull();
+  expect(doc.getElementById('updateReadinessToggle')!.textContent).not.toContain('▸');
+});
+
 it('shows update failure causes and next steps without using stale connector diagnostics', async () => {
   const { window: w, state, push } = await mountChat();
   const next = structuredClone(state) as any;
