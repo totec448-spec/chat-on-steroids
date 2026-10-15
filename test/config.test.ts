@@ -1107,6 +1107,27 @@ describe('a settings file the app cannot read as is', () => {
     expect(await backups()).toEqual([]);
   });
 
+  it('keeps every other setting when a preference holds a value this version does not know', async () => {
+    // VM, 2026-10-15: 2.1.37 read settings 2.1.38 had saved with Firefox as the ChatGPT browser.
+    // The one unknown value made the whole file unusable, and the app started without its folders
+    // and tunnel. A preference this version cannot read now falls back to its default alone.
+    await clearBackups();
+    const config = { ...defaultConfig(), roots: [{ name: 'project', path: dir }],
+      ui: { ...defaultConfig().ui, chatBrowser: 'netscape', theme: 'light', backgroundPlacement: 'shelf' } };
+    const content = JSON.stringify(config);
+    await fs.writeFile(file(), content, 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.roots.map(root => root.name)).toEqual(['project']);
+    expect(loaded.readOnly).toBe(config.readOnly);
+    expect(loaded.ui.theme).toBe('light');
+    expect(loaded.ui.chatBrowser).toBe('chrome');
+    expect(loaded.ui.backgroundPlacement).toBe('window');
+    // The original stays beside it, as for any file the app could not take as is.
+    const saved = await backups();
+    expect(saved).toHaveLength(1);
+    expect(await fs.readFile(path.join(dir, saved[0]!), 'utf8')).toBe(content);
+  });
+
   it.each([
     ['broken JSON', '{"roots": ['],
     ['the wrong shape', JSON.stringify({ roots: 'not a list' })]
