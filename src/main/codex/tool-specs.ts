@@ -98,7 +98,9 @@ export const EXEC_COMMAND_LOGIN_DESCRIPTION =
     : 'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
 
 export const WRITE_STDIN_DESCRIPTION =
-  'Polls or writes to the returned session ID. Empty chars reread retained output after completion, including automatic delivery; never reruns work. Completed processes reject input. Retains the latest 64 results in this app, 256 KiB each.';
+  // Plain function only. ChatGPT's safety check flagged "including automatic delivery; never reruns
+  // work" as a Suspicious Instruction (2026-10-15) and held a long run on an approval card.
+  'Polls or writes to the returned session ID. Empty chars read the session output, also after the command finished. Completed processes reject input. Keeps the latest 64 results in this app, 256 KiB each.';
 
 export const WRITE_STDIN_SESSION_ID_DESCRIPTION = 'Returned running or completed session ID.';
 

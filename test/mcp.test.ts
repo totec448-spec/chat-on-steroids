@@ -945,6 +945,15 @@ describe('surface boundaries', () => {
     expect(read).toContain('Identity notice');
   });
 
+  it('describes write_stdin by what it does, never by how its output should be treated', async () => {
+    everything();
+    // ChatGPT's safety check flagged "including automatic delivery; never reruns work" as a
+    // "Suspicious Instruction" and held a long run on an approval card (VM, 2026-10-15).
+    const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'write_stdin');
+    expect(tool?.description).toBeTruthy();
+    expect(tool!.description).not.toMatch(/automatic(ally)? deliver|never reruns|delivered automatically/i);
+  });
+
   it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
     everything();
     const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
@@ -3787,6 +3796,9 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(later)).toContain(`Exit code: ${exitCode}`);
     expect(textOf(later)).toContain('background-e2e-once');
     expect(textOf(later)).not.toContain(`write_stdin(session_id=${sessionId}`);
+    // ChatGPT's safety check read "Delivered automatically" as the tool steering how its output
+    // is treated, and stopped a long run on an approval card (VM, 2026-10-15).
+    expect(textOf(later)).not.toMatch(/delivered automatically/i);
 
     // Publication receipts require a strictly later timestamp; loopback calls can
     // otherwise share one millisecond even though this response was already read.
