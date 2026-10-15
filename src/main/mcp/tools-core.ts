@@ -26,6 +26,8 @@ import { z } from 'zod';
 import { DEFAULT_READ_BYTES, MAX_READ_BYTES, formatBytes } from '../fsops.js';
 import { BinaryReadError, listDirectoryLevel, readTextFile, statInfo, walkFiles } from '../codex/read-backend.js';
 import { fsForRoot, localFs, type ProjectFs } from '../remote/project-fs.js';
+import { remoteCommand, sshArgs, sshProgram } from '../remote/ssh.js';
+import os from 'node:os';
 import {
   VIEW_IMAGE_DESCRIPTION,
   VIEW_IMAGE_PATH_DESCRIPTION,
@@ -246,6 +248,12 @@ function execPrincipal(): string | null {
   const caller = currentCaller();
   return executionPrincipal(caller.requestId, caller.sessionId ?? null);
 }
+
+/**
+ * How a command for a server folder is read here: as POSIX shell text, which is what the server
+ * account's login shell receives (`remoteCommand`). It shapes the allowlist check and batches.
+ */
+const SERVER_SHELL = { shellType: 'sh', shellPath: 'sh' } as const;
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
   const { ctx, caps, exposedCaps } = reg;
@@ -803,7 +811,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               );
             }
           }
-          const shell = input.shell === undefined ? defaultUserShell() : getShellByModelProvidedPath(input.shell, dir.real);
+          const server = dir.remote;
+          const shell = server
+            ? SERVER_SHELL
+            : input.shell === undefined ? defaultUserShell() : getShellByModelProvidedPath(input.shell, dir.real);
           if (!shell) {
             return fail(
               `SHELL_NOT_FOUND: the explicitly requested shell ${JSON.stringify(input.shell)} could not be resolved. ` +
@@ -847,8 +858,17 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // line PowerShell can actually parse, and a line it cannot repair is left exactly
           // as written for the shell to refuse and the hint to explain.
           const commandNotes: string[] = [];
+          if (server && input.shell !== undefined) {
+            commandNotes.push('shell was ignored: in a server folder commands run in the server account\'s login shell.');
+          }
           const normalizedCommands: string[] = [];
           const boundCommands = rawCommands.map((rawCommand, index) => {
+            // These repairs answer this computer's shells and its bundled ripgrep. A server's
+            // login shell gets the command exactly as written.
+            if (server) {
+              normalizedCommands.push(rawCommand);
+              return rawCommand;
+            }
             const repaired = repairPowerShellQuoting(rawCommand, shell.shellType);
             const normalized = normalizeShellCommand(repaired.cmd, shell.shellType, (relativeDirectory = '.') =>
               nodeFs.readdirSync(nodePath.resolve(dir.real, relativeDirectory))
@@ -959,9 +979,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // id cannot briefly authorize its previous chat before this call publishes the new owner.
             forgetExecOwner(processId);
 
-            const ripgrep = locateRipgrep();
-            const executionCommand = deriveExecArgs(shell,
-              withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
+            const ripgrep = server ? null : locateRipgrep();
+            // A server command is one ssh connection of its own; the folder and login shell are
+            // set up on the server by `remoteCommand`, so the local side only needs somewhere to run.
+            const executionCommand = server
+              ? [sshProgram(), ...sshArgs(server, [(input.tty ?? DEFAULT_TTY) ? '-tt' : '-T'], [remoteCommand(dir.real, boundCommand)])]
+              : deriveExecArgs(shell,
+                withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
             await validatedWorkspace();
             const output = await unifiedExecManager.execCommand({
               classifyExit: (exitCode, rawOutput) => {
@@ -979,7 +1003,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
               maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
-              cwd: dir.real,
+              cwd: server ? os.tmpdir() : dir.real,
               displayCwd: dir.virtual,
               env: execChildEnvironment(),
               tty: input.tty ?? DEFAULT_TTY

@@ -66,8 +66,13 @@ export function sshFailure(stderr: string): string {
   return text.split('\n').filter(Boolean).at(-1)?.slice(0, 300) || 'SSH could not connect.';
 }
 
+let programOverride: string | null = null;
+/** Test seam: runs this program instead of the system's ssh; null restores it. */
+export function setSshProgramForTests(program: string | null): void { programOverride = program; }
+
 /** The system's own OpenSSH client. */
 export function sshProgram(): string {
+  if (programOverride) return programOverride;
   if (process.platform === 'win32') {
     const builtin = path.join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
     if (existsSync(builtin)) return builtin;

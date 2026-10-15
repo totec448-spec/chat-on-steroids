@@ -5,7 +5,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { addRemoteProject, listProjects } from '../src/main/projects.js';
+import { addRemoteProject, listProjects, projectWorkspace } from '../src/main/projects.js';
+import { closeRemoteSessions, setSftpOpenerForTests } from '../src/main/remote/ssh.js';
 import { SftpClient } from '../src/main/remote/sftp.js';
 
 /**
@@ -36,6 +37,8 @@ beforeEach(async () => {
   await saveConfig({ ...defaultConfig(), roots: [] });
 });
 afterEach(async () => {
+  closeRemoteSessions();
+  setSftpOpenerForTests(null);
   for (const client of clients.splice(0)) client.close();
   for (const server of servers.splice(0)) server.kill();
   resetDurableForTests();
@@ -61,5 +64,14 @@ real('projects on a server', () => {
     await expect(addRemoteProject('me@devbox', '~/missing', { connect })).rejects.toThrow(/not found/i);
     await expect(addRemoteProject('-oProxyCommand=x', '/srv', { connect })).rejects.toThrow(/SSH address/);
     await expect(addRemoteProject('me@devbox', 'relative/app', { connect })).rejects.toThrow(/absolute path/);
+  });
+
+  // A chat bound to a server project works in that folder: its workspace is the server root.
+  it('gives a server project its workspace, and says why when the folder is gone', async () => {
+    setSftpOpenerForTests(connect);
+    const project = await addRemoteProject('me@devbox', '~/app', { connect });
+    expect(await projectWorkspace(project.id)).toEqual({ virtual: '/app', real: path.join(home, 'app') });
+    await fs.rm(path.join(home, 'app'), { recursive: true });
+    await expect(projectWorkspace(project.id)).rejects.toThrow(/server folder is unavailable: .*not available on the server/);
   });
 });
