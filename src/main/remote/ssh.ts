@@ -10,13 +10,8 @@ import { SftpClient, SftpError } from './sftp.js';
  * makes ssh fail instead of asking for a password or a new host key the app could not answer.
  */
 
-export interface RemoteFolder {
-  /** As the person typed it: an ssh config alias or `user@host`; never starts with "-". */
-  host: string;
-  port?: number;
-  /** Absolute (`/srv/app`) or home-relative (`~/app`) folder on the server. */
-  path: string;
-}
+import type { RemoteFolder } from '../../shared/types.js';
+export type { RemoteFolder };
 
 /** An alias, a hostname or IPv4, optionally `user@`; IPv6 only in brackets. */
 const HOST = /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9_][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])$/;
