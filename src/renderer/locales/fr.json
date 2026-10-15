@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "Répondez aux cartes de validation d'outils de ChatGPT par Refuser ou Autoriser une fois, dans l'app.",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "Activité affiche l'app, l'extension et chaque plugin avec leur état, et un bouton les met à jour.",
   "Codex and Claude Code in Usage": "Codex et Claude Code dans Utilisation",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Voyez les limites de Codex et les jetons utilisés par Codex et Claude Code, et demandez votre utilisation dans un chat."
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Voyez les limites de Codex et les jetons utilisés par Codex et Claude Code, et demandez votre utilisation dans un chat.",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "De nouveaux tours qui marchent pendant que ChatGPT réfléchit, et un rapport de diagnostic plus complet.",
+  "Fresh turns that hold": "De nouveaux tours qui tiennent",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "Un long travail continue désormais aussi dans un nouveau tour pendant que ChatGPT réfléchit ou exécute un outil.",
+  "No chats in incognito": "Pas de chats en navigation privée",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "Les chats ouverts par l'app vont dans votre fenêtre de navigateur normale, jamais dans une fenêtre privée.",
+  "A fuller diagnostics report": "Un rapport de diagnostic plus complet",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Il indique aussi comment l'app est installée, le navigateur, les plantages, les avertissements fréquents et l'état de chaque chat, toujours sans rien de personnel."
 }

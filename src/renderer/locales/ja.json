@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "ChatGPT のツール承認カードに、アプリから「拒否」または「今回のみ許可」で答えられます。",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "アクティビティにアプリ、拡張機能、各プラグインの状態が表示され、ボタン 1 つで更新できます。",
   "Codex and Claude Code in Usage": "使用状況に Codex と Claude Code",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex の上限と、Codex と Claude Code が使ったトークンを確認でき、チャットでも使用状況を尋ねられます。"
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "Codex の上限と、Codex と Claude Code が使ったトークンを確認でき、チャットでも使用状況を尋ねられます。",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "ChatGPT の思考中にも機能する新しいターンと、より充実した診断レポート。",
+  "Fresh turns that hold": "途切れない新しいターン",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "長い作業は、ChatGPT が考えている間やツールを実行している間も新しいターンで続くようになりました。",
+  "No chats in incognito": "シークレットウィンドウにチャットを開かない",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "アプリが開くチャットは通常のブラウザウィンドウに入り、シークレットウィンドウには入りません。",
+  "A fuller diagnostics report": "より充実した診断レポート",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "アプリのインストール方法、ブラウザ、クラッシュ、よくある警告、各チャットの状態も表示します。個人的な情報は引き続き含みません。"
 }

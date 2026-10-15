@@ -2431,5 +2431,12 @@
   "Answer ChatGPT's tool approval cards with Deny or Allow once, right in the app.": "直接在應用程式中以「拒絕」或「允許一次」回覆 ChatGPT 的工具核准卡片。",
   "Activity shows the app, the extension and each plugin with its status, and one button updates them.": "活動頁顯示應用程式、擴充功能和每個外掛的狀態，一個按鈕即可全部更新。",
   "Codex and Claude Code in Usage": "用量中的 Codex 和 Claude Code",
-  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "查看 Codex 的限額以及 Codex 和 Claude Code 使用的 Token，還能在聊天中詢問用量。"
+  "See Codex's limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.": "查看 Codex 的限額以及 Codex 和 Claude Code 使用的 Token，還能在聊天中詢問用量。",
+  "Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.": "在 ChatGPT 思考時也能用的新回合，以及更完整的診斷報告。",
+  "Fresh turns that hold": "可靠的新回合",
+  "Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.": "長時間工作現在在 ChatGPT 思考或執行工具時也會在新回合中繼續。",
+  "No chats in incognito": "不在無痕視窗中開啟聊天",
+  "Chats the app opens go to your regular browser window, never an incognito one.": "應用程式開啟的聊天會進入你的一般瀏覽器視窗，絕不會進入無痕視窗。",
+  "A fuller diagnostics report": "更完整的診斷報告",
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它也會顯示應用程式的安裝方式、瀏覽器、當機、常見警告以及每個聊天的狀態，仍不包含任何個人資訊。"
 }
