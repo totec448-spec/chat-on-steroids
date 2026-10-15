@@ -2438,5 +2438,6 @@
   "No chats in incognito": "Gizli pencerede sohbet yok",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Uygulamanın açtığı sohbetler gizli pencereye değil, normal tarayıcı pencerenize gider.",
   "A fuller diagnostics report": "Daha ayrıntılı bir tanılama raporu",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Uygulamanın nasıl kurulduğunu, tarayıcıyı, çökmeleri, sık uyarıları ve her sohbetin durumunu da gösterir; yine kişisel bir şey içermez."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Uygulamanın nasıl kurulduğunu, tarayıcıyı, çökmeleri, sık uyarıları ve her sohbetin durumunu da gösterir; yine kişisel bir şey içermez.",
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox eklentiyi kendisi günceller. Hemen yapmak için Firefox'ta about:addons'u açın, Güncellemeleri denetle'yi seçin ve ardından ChatGPT'yi yenileyin."
 }

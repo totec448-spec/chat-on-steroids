@@ -2438,5 +2438,6 @@
   "No chats in incognito": "Никаких чатов в режиме инкогнито",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Чаты, которые открывает приложение, попадают в обычное окно браузера, а не в окно инкогнито.",
   "A fuller diagnostics report": "Более подробный диагностический отчёт",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Он также показывает, как установлено приложение, браузер, сбои, частые предупреждения и состояние каждого чата — по-прежнему без личных данных."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Он также показывает, как установлено приложение, браузер, сбои, частые предупреждения и состояние каждого чата — по-прежнему без личных данных.",
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox обновляет дополнение сам. Чтобы сделать это сейчас, откройте about:addons в Firefox, выберите «Проверить наличие обновлений» и обновите ChatGPT."
 }
