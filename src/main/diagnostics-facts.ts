@@ -200,11 +200,14 @@ export interface ChatFactsSession {
   selectedModel?: { model?: string } | null; workerAssignment?: unknown;
 }
 
-/** Chats active in the last day, numbered; never their ids, titles or tasks. */
+/** The most recently active chats are listed; the rest are only counted. */
+const MAX_CHAT_LINES = 15;
+
+/** Chats active in the last day, newest first and numbered; never their ids, titles or tasks. */
 export function chatLines(sessions: ChatFactsSession[], inputs: Array<{ sessionId: string | null; state: string }>, now = Date.now()): string[] {
   const active = sessions.filter(session => session.endedAt === null && now - session.updatedAt <= DAY)
-    .sort((a, b) => a.updatedAt - b.updatedAt || a.id.localeCompare(b.id));
-  const lines = active.map((session, index) => {
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+  const lines = active.slice(0, MAX_CHAT_LINES).map((session, index) => {
     const mine = inputs.filter(input => input.sessionId === session.id);
     const states = [...new Set(mine.map(input => input.state))].map(state => `${state} ${mine.filter(input => input.state === state).length}`);
     const model = session.selectedModel?.model && /^[A-Za-z0-9._:-]{1,40}$/.test(session.selectedModel.model) ? `, model ${session.selectedModel.model}` : '';
@@ -214,7 +217,9 @@ export function chatLines(sessions: ChatFactsSession[], inputs: Array<{ sessionI
   });
   const known = new Set(sessions.map(session => session.id));
   const orphaned = inputs.filter(input => !input.sessionId || !known.has(input.sessionId)).length;
-  return [...lines, `Older or ended chats: ${sessions.length - active.length}; inputs without a chat: ${orphaned}`];
+  const unlisted = active.length - lines.length;
+  return [...lines, `Older or ended chats: ${sessions.length - active.length}; inputs without a chat: ${orphaned}` +
+    (unlisted > 0 ? `; ${unlisted} more active chat(s) not listed` : '')];
 }
 
 export function resetDiagnosticsFactsForTests(): void {
