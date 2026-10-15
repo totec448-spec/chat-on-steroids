@@ -35,6 +35,10 @@ vi.mock('electron', () => ({
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
 vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null, extensionUpdateOffer: () => null, prepareExtensionUpdate: () => null }));
 vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
+const surfacePaths = vi.hoisted(() => ({ forget: vi.fn(async () => undefined) }));
+vi.mock('../src/main/mcp/persistent-paths.js', () => ({
+  loadSurfaceTokens: vi.fn(async () => ({})), rememberSurfaceTokens: vi.fn(async () => true), forgetSurfaceTokens: surfacePaths.forget
+}));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
@@ -101,7 +105,7 @@ it('keeps the reported interface language and the extension preferences through 
   expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
 });
 
-it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
+it.each(['playfulStatus', 'playfulContinue', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.
   const base = getConfig();
@@ -392,6 +396,17 @@ it('publishes the owning session when delivered input history is revised in plac
     await writeDurableNow('session-input', previous ?? []);
     input.resetInputForTests();
   }
+});
+
+// #924: turning stable connector URLs off forgets the stored tokens; turning it on keeps the running ones.
+it('forgets the stored connector URL tokens when the option is turned off', async () => {
+  surfacePaths.forget.mockClear();
+  expect(await save({ ...getConfig(), mcp: { instructions: getConfig().mcp.instructions, persistentUrls: true } })).toMatchObject({ ok: true });
+  expect(getConfig().mcp.persistentUrls).toBe(true);
+  expect(surfacePaths.forget).not.toHaveBeenCalled();
+  expect(await save({ ...getConfig(), mcp: { instructions: getConfig().mcp.instructions, persistentUrls: false } })).toMatchObject({ ok: true });
+  expect(getConfig().mcp.persistentUrls).toBe(false);
+  expect(surfacePaths.forget).toHaveBeenCalledTimes(1);
 });
 
 it('stages clipboard image bytes with a preview through the general attachment owner', async () => {
@@ -957,14 +972,14 @@ describe('settings writes from more than one UI', () => {
     const base = defaultConfig(); await saveConfig(base);
     const wanted = { ...base, mcp: { instructions: 'Use the approved project only.' }, ui: { ...base.ui, browserOnly: true } };
     expect((await save(wanted, base)).ok).toBe(true);
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual(wanted.mcp);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     expect((await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual(wanted.mcp);
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     const legacy = { ...base } as any; delete legacy.mcp;
     expect((await save(legacy, legacy)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual(wanted.mcp);
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
     const current = getConfig();
     expect((await save({ ...current, mcp: { instructions: '' } }, current)).ok).toBe(true);
     expect(getConfig().mcp.instructions).toBe('');
@@ -1349,6 +1364,65 @@ describe('every link the window offers', () => {
  * press that closed the window and installed nothing would be worse than no button at all.
  */
 describe('installing a downloaded update on request', () => {
+  it('reports the failed app check after requesting the running connectors without quitting or changing settings', async () => {
+    const updater = await import('../src/main/update.js');
+    const connections = await import('../src/main/connection.js');
+    const refresh = await import('../src/main/plugin-refresh.js');
+    const connected = vi.spyOn(connections, 'connect').mockResolvedValue(undefined);
+    const requested = vi.spyOn(refresh, 'requestPluginRefreshes').mockResolvedValue(undefined);
+    const checked = vi.spyOn(updater, 'checkForUpdates').mockResolvedValue(undefined);
+    const status = vi.spyOn(updater, 'updateStatus').mockReturnValue({ current: '2.1.31', latest: null, stage: 'failed', checkedAt: null, error: 'Network unavailable' });
+    const before = structuredClone(getConfig()), quits = quitToInstallCalls;
+    try {
+      const reply = await handlers.get('update:all')!(null, undefined);
+      expect(reply).toEqual({ ok: false, error: 'Network unavailable' });
+      expect(checked).toHaveBeenCalledTimes(1);
+      expect(connected).toHaveBeenCalledTimes(1);
+      expect(requested).toHaveBeenCalledWith('2.1.31', expect.arrayContaining(['core']));
+      expect(quitToInstallCalls).toBe(quits); expect(getConfig()).toEqual(before);
+    } finally { checked.mockRestore(); status.mockRestore(); connected.mockRestore(); requested.mockRestore(); }
+  });
+  it.each(['cancel', 'approve', 'changed-installer', 'no-window'] as const)('acquires native restart approval before update intent: %s', async outcome => {
+    const updater = await import('../src/main/update.js');
+    const refresh = await import('../src/main/plugin-refresh.js');
+    const checked = vi.spyOn(updater, 'checkForUpdates').mockResolvedValue(undefined);
+    const status = vi.spyOn(updater, 'updateStatus').mockReturnValue({ current: '2.1.35', latest: '99.0.0', stage: 'ready', checkedAt: 1, error: null });
+    const marked = vi.spyOn(updater, 'markInstallOnQuit').mockReturnValue(outcome !== 'changed-installer');
+    const requested = vi.spyOn(refresh, 'requestPluginRefreshes').mockResolvedValue(undefined);
+    const oldWindow = currentWindow, quits = quitToInstallCalls;
+    currentWindow = outcome === 'no-window' ? null : {
+      setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() }
+    };
+    const approval = faultGate();
+    if (outcome !== 'no-window') vi.mocked(dialog.showMessageBox).mockImplementationOnce(async () => {
+      await approval.hold(); return { response: outcome === 'cancel' ? 0 : 1, checkboxChecked: false };
+    });
+    try {
+      const pending = handlers.get('update:all')!(null, undefined);
+      if (outcome !== 'no-window') {
+        await approval.entered;
+        expect(requested).not.toHaveBeenCalled(); expect(marked).not.toHaveBeenCalled(); expect(quitToInstallCalls).toBe(quits);
+        expect(dialog.showMessageBox).toHaveBeenLastCalledWith(currentWindow, expect.objectContaining({
+          message: 'Restart to install the update?', buttons: ['Keep working', 'Restart and install'], defaultId: 0, cancelId: 0
+        }));
+        approval.release();
+      }
+      const reply = await pending;
+      if (outcome === 'cancel' || outcome === 'no-window') {
+        expect(reply).toEqual({ ok: true, data: 'cancelled' });
+        expect(requested).not.toHaveBeenCalled(); expect(marked).not.toHaveBeenCalled(); expect(quitToInstallCalls).toBe(quits);
+      } else {
+        expect(marked).toHaveBeenCalledExactlyOnceWith('99.0.0');
+        if (outcome === 'approve') {
+          expect(reply).toEqual({ ok: true, data: 'restarting' }); expect(quitToInstallCalls).toBe(quits + 1);
+        } else {
+          expect(reply).toMatchObject({ ok: false }); expect(quitToInstallCalls).toBe(quits);
+        }
+      }
+    } finally {
+      currentWindow = oldWindow; checked.mockRestore(); status.mockRestore(); marked.mockRestore(); requested.mockRestore();
+    }
+  });
   it('refuses, and does not quit, when nothing has been downloaded', async () => {
     const before = quitToInstallCalls;
     const reply = (await handlers.get('update:install')!(null, undefined)) as { ok: boolean; error: string };

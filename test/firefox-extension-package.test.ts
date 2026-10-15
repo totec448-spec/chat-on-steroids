@@ -22,6 +22,15 @@ describe('Firefox companion packaging groundwork', () => {
     expect(pkg.scripts['extension:firefox:stage']).toBe('node scripts/stage-firefox-extension.mjs');
   });
 
+  // Mozilla's add-on review flags markup assigned through innerHTML; the gear icon was the one case.
+  it('assigns no markup through innerHTML in the scripts the add-on ships', async () => {
+    for (const file of (await fs.readdir(extensionRoot)).filter(name => name.endsWith('.js'))) {
+      const source = await fs.readFile(path.join(extensionRoot, file), 'utf8');
+      expect(source, file).not.toMatch(/\.innerHTML\s*=(?!=)/);
+      expect(source, file).not.toMatch(/\.outerHTML\s*=(?!=)/);
+    }
+  });
+
   it('derives only the Gecko manifest delta from the canonical companion manifest', async () => {
     const source = JSON.parse(await fs.readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
     const manifest = firefoxManifest(source);
@@ -31,15 +40,19 @@ describe('Firefox companion packaging groundwork', () => {
     expect(manifest.background).toEqual({ scripts: ['background.js'], type: 'module' });
     expect(manifest.content_security_policy).toEqual({ extension_pages: "script-src 'self'; object-src 'self'" });
     expect(manifest.browser_specific_settings).toEqual({
+      // The id is permanent once Mozilla signs it; updates come from the latest release.
       gecko: {
-        id: 'chat-on-steroids-companion@local',
-        strict_min_version: '128.0',
+        id: 'companion@chatonsteroids.app',
+        strict_min_version: '140.0',
+        update_url: 'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/firefox-updates.json',
         data_collection_permissions: { required: ['personalCommunications', 'websiteContent'] }
       }
     });
 
-    // Runtime code and permissions stay shared; this is package compatibility only.
-    expect(manifest.permissions).toEqual(source.permissions);
+    // Runtime code and permissions stay shared; this is package compatibility only. Firefox has no
+    // `debugger` permission (no DevTools API for extensions), so the Gecko manifest leaves it out.
+    expect(source.permissions).toContain('debugger');
+    expect(manifest.permissions).toEqual(source.permissions.filter((permission: string) => permission !== 'debugger'));
     expect(manifest.host_permissions).toEqual(source.host_permissions);
     expect(manifest.content_scripts).toEqual(source.content_scripts);
     expect(source.background).toEqual({ service_worker: 'background.js', type: 'module' });

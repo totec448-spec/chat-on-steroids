@@ -1,7 +1,9 @@
 import { currentLanguage, ui, t } from './i18n.js';
 import { $, el, run } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
+import type { ProviderUsage } from '../shared/provider-usage.js';
 let snapshot: UsageOverview | null = null;
+let otherAppsGeneration = 0;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
 const WEEK_START_KEY = 'cos.usage.weekStart';
@@ -54,9 +56,10 @@ function paintMessages(): void {
   ui($('usageMessagePeriod'), 'textContent', period);
   ui(select, 'title', () => `${t('Change start day')}\n${period()}`);
 }
-export async function refreshUsage(): Promise<void> {
+export async function refreshUsage(fresh = false): Promise<void> {
   document.getElementById('usageTooltip')?.remove();
   const generation = ++loadGeneration;
+  void refreshOtherApps(fresh);
   $('refreshUsage').setAttribute('disabled', '');
   const status = $('usageStatus');
   ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
@@ -228,6 +231,75 @@ function paintCost(): void {
   daySection.append(breakdown);
   $('usageDays').replaceChildren(modelSection, daySection);
 }
+/** A limit row in the page's own shape: a name with a note, then the value, its reset and a bar. */
+function limitRow(name: () => string, note: (() => string) | null, value: () => string, small: () => string, remainingPercent: number | null): HTMLElement {
+  const row = el('div', 'usage-limit');
+  const title = el('div'); title.append(el('strong', '', name));
+  if (note) title.append(el('small', 'muted', note));
+  const detail = el('div'); detail.append(el('b', '', value), el('small', 'muted', small));
+  if (remainingPercent !== null) {
+    const progress = document.createElement('progress'); progress.max = 100; progress.value = remainingPercent;
+    ui(progress, 'aria-label', () => t("{0}: {1}% remaining", [name(), Math.round(remainingPercent)]));
+    detail.append(progress);
+  }
+  row.append(title, detail);
+  return row;
+}
+
+const codexWindowName = (minutes: number) => minutes === 10080 ? t("Weekly limit") : minutes % 60 === 0 ? t("{0}-hour limit", [minutes / 60]) : t("{0}-minute limit", [minutes]);
+/** Codex's reason codes for a reached limit, as a sentence; an unknown code stays readable as it is. */
+const codexReason = (code: string): string =>
+  code === 'workspace_owner_credits_depleted' ? t("The workspace's Codex credits are used up") : code.replace(/_/g, ' ');
+const when = (time: number) => new Date(time).toLocaleString(currentLanguage(), { dateStyle: 'short', timeStyle: 'short' });
+
+/**
+ * Codex's and Claude Code's usage (#482). What an app's provider reported is kept apart from what
+ * was counted from the logs here, and a window that has reset since its reading says so instead of
+ * showing an old percentage as current.
+ */
+export async function refreshOtherApps(fresh = false): Promise<void> {
+  const generation = ++otherAppsGeneration;
+  const host = $('otherAppsUsage');
+  let value: ProviderUsage | null | undefined;
+  try { value = await run(window.api.getProviderUsage(fresh)); } catch { value = null; }
+  if (generation !== otherAppsGeneration) return;
+  host.replaceChildren();
+  if (!value) { host.append(el('p', 'muted', () => t("Usage of other apps could not be read. Try Refresh."))); return; }
+  if (!value.enabled) { host.append(el('p', 'muted', () => t("Off. Nothing is read from other apps."))); return; }
+  const now = Date.now();
+  const lastWeek = (tokens: number[]) => tokens.reduce((sum, value) => sum + value, 0);
+  if (!value.codex) host.append(el('p', 'muted', () => t("No Codex logs on this computer.")));
+  else {
+    for (const limit of value.codex.limits) {
+      const as = () => t("Reported by Codex {0}", [when(limit.observedAt)]);
+      for (const window of limit.windows) {
+        const reset = window.resetsAt !== null && window.resetsAt <= now;
+        const remaining = Math.max(0, 100 - window.usedPercent);
+        host.append(limitRow(() => `Codex · ${codexWindowName(window.windowMinutes)}`, as,
+          () => reset ? t("Reset since this reading") : t("{0}% remaining", [Math.round(remaining)]),
+          () => window.resetsAt === null ? t("Reset not reported") : reset ? t("Codex reports again with its next answer") : t("Resets {0}", [when(window.resetsAt)]),
+          reset ? null : remaining));
+      }
+      if (limit.reached && !limit.windows.length) host.append(limitRow(() => `Codex · ${limit.id}`, as, () => t("Limit reached"), () => codexReason(limit.reached!), null));
+    }
+    const days = value.codex.days;
+    const today = days.at(-1);
+    host.append(limitRow(() => t("Codex · tokens"), () => t("Counted from Codex's logs on this computer"),
+      () => t("{0} today", [count.format(today ? today.input + today.output : 0)]),
+      () => t("{0} in 7 days", [count.format(lastWeek(days.map(day => day.input + day.output)))]), null));
+  }
+  if (!value.claude) host.append(el('p', 'muted', () => t("No Claude Code logs on this computer.")));
+  else {
+    const total = (day: NonNullable<ProviderUsage['claude']>['days'][number]) =>
+      day.models.reduce((sum, model) => sum + model.input + model.cacheWrite + model.cacheRead + model.output, 0);
+    const days = value.claude.days;
+    const today = days.at(-1);
+    host.append(limitRow(() => t("Claude Code · tokens"), () => t("Plan limits not reported: Claude Code shows them in its own /usage"),
+      () => t("{0} today", [count.format(today ? total(today) : 0)]),
+      () => t("{0} in 7 days", [count.format(lastWeek(days.map(total)))]), null));
+  }
+}
+
 export function initUsage(): void {
   try {
     const saved = localStorage.getItem(WEEK_START_KEY);
@@ -261,5 +333,5 @@ export function initUsage(): void {
     const input = $<HTMLInputElement>(id); input.value = String(formula[key]);
     input.addEventListener('input', () => { if (input.value !== '' && input.validity.valid && Number.isFinite(input.valueAsNumber)) { formula[key] = input.valueAsNumber; saveFormula(); paintCost(); } });
   }
-  $('refreshUsage').addEventListener('click', () => void refreshUsage());
+  $('refreshUsage').addEventListener('click', () => void refreshUsage(true));
 }

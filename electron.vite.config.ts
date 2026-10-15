@@ -49,6 +49,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
           'pet-overlay': resolve(__dirname, 'src/renderer/pet-overlay.html'),
+          'update-progress': resolve(__dirname, 'src/renderer/update-progress.html'),
           'cos-browser': resolve(__dirname, 'src/renderer/cos-browser.html'),
           'cos-browser-sign-in': resolve(__dirname, 'src/renderer/cos-browser-sign-in.html')
         }

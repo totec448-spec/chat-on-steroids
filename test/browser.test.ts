@@ -23,6 +23,46 @@ describe('browser-backed ChatGPT commands', () => {
       ['--new-window', '--window-size=520,760', 'https://chatgpt.com/auth/login'], path.win32.dirname(executable));
     expect(JSON.stringify(launch.mock.calls)).not.toMatch(/remote-debugging|user-data-dir|user-agent/);
   });
+  // Firefox support (2.1.38, the maintainer's decision): its own installs, no Chromium switches.
+  it('finds Firefox where each platform installs it', () => {
+    expect(preferredBrowserCandidates('win32', { ProgramFiles: 'C:\\Program Files', 'ProgramFiles(x86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' }, undefined, 'firefox'))
+      .toEqual(expect.arrayContaining(['C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
+        'C:\\Users\\a\\AppData\\Local\\Mozilla Firefox\\firefox.exe',
+        // Developer Edition and Nightly install to folders of their own (seen on the test VM, 2026-10-14).
+        'C:\\Program Files\\Firefox Developer Edition\\firefox.exe', 'C:\\Program Files\\Firefox Nightly\\firefox.exe']));
+    expect(preferredBrowserCandidates('darwin', {}, '/Users/a', 'firefox')).toEqual(expect.arrayContaining([
+      '/Applications/Firefox.app/Contents/MacOS/firefox', '/Users/a/Applications/Firefox.app/Contents/MacOS/firefox',
+      '/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox', '/Applications/Firefox Nightly.app/Contents/MacOS/firefox']));
+    const linux = preferredBrowserCandidates('linux', { PATH: '/usr/local/bin' }, '/home/a', 'firefox');
+    expect(linux).toEqual(expect.arrayContaining(['/usr/local/bin/firefox', '/usr/local/bin/firefox-esr', '/usr/bin/firefox', '/snap/bin/firefox',
+      '/home/a/.local/share/flatpak/exports/bin/org.mozilla.firefox', '/var/lib/flatpak/exports/bin/org.mozilla.firefox']));
+    expect(linux.some(candidate => /chrom|msedge|brave/i.test(candidate))).toBe(false);
+  });
+  it('opens sign-in and chats in Firefox without Chromium switches', async () => {
+    const firefox = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    await openBrowserSignIn('firefox', { platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' }, usable: candidate => candidate === firefox, launch });
+    expect(launch).toHaveBeenLastCalledWith(firefox, ['--new-window', 'https://chatgpt.com/auth/login'], path.win32.dirname(firefox));
+    const url = 'https://chatgpt.com/?cos-model-catalog=selected';
+    expect(await openInPreferredBrowser(url, { browser: 'firefox', platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: candidate => candidate === firefox, launch })).toBe(firefox);
+    expect(launch).toHaveBeenLastCalledWith(firefox, [url], path.win32.dirname(firefox));
+    await expect(openInPreferredBrowser(url, { browser: 'firefox', platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: candidate => candidate.endsWith('chrome.exe'), launch })).rejects.toThrow(/Firefox.*not found/);
+  });
+  it('sees a running Firefox by its own process names', async () => {
+    const probe = vi.fn(async (_script: string) => ({ stdout: 'running', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 }));
+    expect(await isPreferredBrowserRunning('win32', probe, 'firefox')).toBe(true);
+    expect(probe.mock.calls[0]?.[0]).toContain("ProcessName -eq 'firefox'");
+    const result = { stdout: 'init\n/Applications/Firefox.app/Contents/MacOS/firefox\nps\n', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
+    const ps = vi.fn(async () => result);
+    expect(await isPreferredBrowserRunning('darwin', undefined, 'firefox', ps)).toBe(true);
+    expect(await isPreferredBrowserRunning('darwin', undefined, 'chrome', ps)).toBe(false);
+    result.stdout = 'init\nfirefox-esr\n';
+    expect(await isPreferredBrowserRunning('linux', undefined, 'firefox', ps)).toBe(true);
+    result.stdout = 'init\nGoogle Chrome\n';
+    expect(await isPreferredBrowserRunning('linux', undefined, 'firefox', ps)).toBe(false);
+  });
   it('does not open a different family when the selected sign-in browser is missing', async () => {
     const launch = vi.fn(async () => ({ pid: 123 }));
     await expect(openBrowserSignIn('brave', { platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },

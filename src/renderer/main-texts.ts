@@ -3,8 +3,8 @@ import type { MainText } from '../shared/main-texts.js';
 
 /**
  * The tray menu, Session finish notice, tunnel-loss notices and CoS browser tray notice in the
- * selected language. The main process has no catalogs, so this document translates the exact
- * source texts and hands them over.
+ * selected language, including native update restart confirmation. The main process has no
+ * catalogs, so this document translates the exact source texts and hands them over.
  * Literal `t()` calls keep the catalog audit able to see each key.
  */
 export function mainTexts(): Record<MainText, string> {
@@ -15,6 +15,16 @@ export function mainTexts(): Record<MainText, string> {
     'Connect': t('Connect'),
     'Disconnect': t('Disconnect'),
     'Quit': t('Quit'),
+    'Updating Chat On Steroids': t('Updating Chat On Steroids'),
+    'Saving your work…': t('Saving your work…'),
+    'Waiting for your permission in Windows…': t('Waiting for your permission in Windows…'),
+    'Starting the installer. Chat On Steroids opens again by itself.':
+      t('Starting the installer. Chat On Steroids opens again by itself.'),
+    'Restart to install the update?': t('Restart to install the update?'),
+    'Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.':
+      t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'),
+    'Keep working': t('Keep working'),
+    'Restart and install': t('Restart and install'),
     'Connected': t('Connected'),
     'No internet': t('No internet'),
     'Not connected': t('Not connected'),

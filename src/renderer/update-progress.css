@@ -1,0 +1,19 @@
+/* The "Installing" window (src/main/update-progress.ts): the app's own type, ink and accent. */
+:root { --page: #f4f4f5; --ink: #0c0c0e; --soft: #56565e; --edge: #dcdce1; --track: #e7e7ea; --accent: #486f9d; color-scheme: light; }
+:root[data-theme="dark"] { --page: #181818; --ink: #eceeeb; --soft: #b5b7b3; --edge: #363834; --track: #2c2d2b; --accent: #b0cbed; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--page); color: var(--ink); overflow: hidden; cursor: default; user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+  -webkit-app-region: drag;
+}
+.update-progress { display: flex; flex-direction: column; height: 100%; padding: 26px 28px 24px; border: 1px solid var(--edge); }
+h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.2px; line-height: 1.3; }
+.version { margin: 3px 0 0; color: var(--soft); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.step { flex: 1; margin: 16px 0 0; font-size: 13.5px; line-height: 1.5; }
+.bar { position: relative; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+.bar span { position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; border-radius: 2px; background: var(--accent); animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .bar span { left: 0; width: 100%; animation: none; opacity: .6; } }
+html:lang(ja) body, html:lang(zh-CN) body, html:lang(zh-TW) body, html:lang(ko) body { letter-spacing: 0; }

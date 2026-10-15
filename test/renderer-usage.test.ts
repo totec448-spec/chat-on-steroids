@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { UsageOverview } from '../src/shared/usage.js';
+import type { ProviderUsage } from '../src/shared/provider-usage.js';
 
 let dom: JSDOM;
 /**
@@ -277,4 +278,54 @@ it('prints estimated token counts as whole numbers where compact notation keeps 
   expect(peak()).toBe('307.374');
   setLanguage('en');
   expect(peak()).toBe('307.4K');
+});
+
+// #482: Codex's and Claude Code's usage, read from their own logs on this computer.
+it('shows other apps’ reported limits apart from tokens counted here, and says what is not reported', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const now = Date.now();
+  const today = new Date(now); const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const providers: ProviderUsage = { enabled: true, readAt: now,
+    codex: { limits: [
+      { id: 'codex', plan: 'plus', reached: null, observedAt: now - 60_000, credits: null, windows: [
+        { windowMinutes: 300, usedPercent: 30, resetsAt: now + 3_600_000 },
+        { windowMinutes: 10080, usedPercent: 65, resetsAt: now - 1000 }
+      ] },
+      { id: 'premium', plan: null, reached: 'workspace_owner_credits_depleted', observedAt: now - 60_000, credits: null, windows: [] }
+    ], days: [{ date: key, input: 2_000_000, cachedInput: 1_500_000, output: 40_000 }] },
+    claude: { days: [{ date: key, models: [{ model: 'claude-opus-5-5', input: 10, cacheWrite: 1000, cacheRead: 3_000_000, output: 5000 }] }] } };
+  const getProviderUsage = vi.fn(async () => ({ ok: true, data: providers }));
+  const data: UsageOverview = { contextTokenCap: 256_000, tokens: 0, models: [], days: [], sessions: 0, limits: [], messages: { through: now, days: [] } };
+  Object.assign(dom.window, { api: { getUsage: async () => ({ ok: true, data }), getProviderUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const { initLanguage } = await import('../src/renderer/i18n.js'); initLanguage();
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage();
+  await usage.refreshUsage();
+  const host = dom.window.document.getElementById('otherAppsUsage')!;
+  const text = host.textContent!;
+  expect(text).toContain('Codex · 5-hour limit');
+  expect(text).toContain('70% remaining');
+  // A window that has reset since Codex last reported is not shown as still 35% left.
+  expect(text).toContain('Reset since this reading');
+  expect(text).not.toContain('35% remaining');
+  expect(text).toContain('Limit reached');
+  // Codex's own reason code reads as a sentence in the app's language, not as raw text.
+  expect(text).toContain("The workspace's Codex credits are used up");
+  expect(text).not.toContain('workspace_owner_credits_depleted');
+  expect(text).not.toContain('workspace owner credits depleted');
+  expect(text).toContain('Claude Code');
+  expect(text).toContain('Plan limits not reported');
+  expect(text).toContain('3M');
+  expect(getProviderUsage).toHaveBeenCalledWith(false);
+  (dom.window.document.getElementById('refreshUsage') as HTMLButtonElement).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(getProviderUsage).toHaveBeenLastCalledWith(true);
+
+  getProviderUsage.mockResolvedValueOnce({ ok: true, data: { enabled: true, readAt: now, codex: null, claude: null } });
+  await usage.refreshUsage();
+  expect(host.textContent).toContain('No Codex logs on this computer');
+  getProviderUsage.mockResolvedValueOnce({ ok: true, data: { enabled: false, readAt: now, codex: null, claude: null } });
+  await usage.refreshUsage();
+  expect(host.textContent).toContain('Off');
+  expect(host.textContent).not.toContain('Codex ·');
 });

@@ -530,6 +530,9 @@ async function withBackgroundExecRecovery(
  * between a completed local operation, its unknown attribution, and an undelivered agent
  * message: none of those facts implies that completed work is about to disappear.
  */
+/** Tools whose answer does not depend on which chat called them. */
+const IDENTITY_FREE_TOOLS: ReadonlySet<string> = new Set(['usage']);
+
 function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
@@ -1095,7 +1098,10 @@ async function dispatchTracked(
   // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
   // never visited that owner and therefore needs its own single redaction pass.
   const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
-  let delivered = nested ? baseResult : withUnattributedNotice(
+  // A tool that reads nothing belonging to a chat (usage) answers before the page's evidence
+  // for its request arrives; the attribution notice would only add noise to every such answer.
+  const identityFree = IDENTITY_FREE_TOOLS.has(name);
+  let delivered = nested ? baseResult : identityFree ? (deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish)) : withUnattributedNotice(
     context.caller.conversationId,
     deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
     context.caller.requestId,
