@@ -113,6 +113,9 @@ describe('install and system', () => {
       'macOS download quarantine still set: yes',
       'Update: idle, latest 2.1.38, not checked yet'
     ]);
+    // After a check, no `latest` means nothing newer was published (seen on the 2.1.39 RC).
+    expect(facts.installLines({ kind: 'macOS app in /Applications', packaged: true, folderWritable: true, quarantined: null,
+      update: { current: '2.1.39', latest: null, stage: 'idle', error: null, checkedAt: now - 4 * 60_000 }, now })[2]).toBe('Update: up to date (2.1.39), checked 4 min ago');
   });
 
   it('describes the machine in numbers', () => {
