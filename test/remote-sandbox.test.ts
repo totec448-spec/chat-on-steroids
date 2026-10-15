@@ -17,6 +17,8 @@ const SERVER = ['/usr/libexec/sftp-server', '/usr/lib/openssh/sftp-server', '/us
 const real = describe.skipIf(!SERVER || process.platform === 'win32');
 
 let directory: string, app: string, root: Root;
+/** Only callers that work on a server folder say so; see the refusal below. */
+const on = { remote: true } as const;
 const servers: ChildProcessWithoutNullStreams[] = [];
 
 beforeEach(async () => {
@@ -44,19 +46,19 @@ afterEach(async () => {
 
 real('paths in a folder on a server', () => {
   it('resolves files and folders by their path on the server', async () => {
-    expect(await resolvePath([root], '/app/src/a.ts')).toEqual({ real: path.join(app, 'src', 'a.ts'), virtual: '/app/src/a.ts', root });
-    expect(await resolvePath([root], '/app')).toMatchObject({ real: app, virtual: '/app' });
-    expect((await resolvePath([root], '/app/with space ü.txt')).real).toBe(path.join(app, 'with space ü.txt'));
+    expect(await resolvePath([root], '/app/src/a.ts', on)).toEqual({ real: path.join(app, 'src', 'a.ts'), virtual: '/app/src/a.ts', root });
+    expect(await resolvePath([root], '/app', on)).toMatchObject({ real: app, virtual: '/app' });
+    expect((await resolvePath([root], '/app/with space ü.txt', on)).real).toBe(path.join(app, 'with space ü.txt'));
     // A link that stays inside resolves to where it points.
-    expect((await resolvePath([root], '/app/inside/a.ts')).real).toBe(path.join(app, 'src', 'a.ts'));
+    expect((await resolvePath([root], '/app/inside/a.ts', on)).real).toBe(path.join(app, 'src', 'a.ts'));
   });
 
   it('refuses traversal, a link leaving the folder and a missing file unless a write allows it', async () => {
-    await expect(resolvePath([root], '/app/../outside')).rejects.toThrow(SandboxError);
-    await expect(resolvePath([root], '/app/escape')).rejects.toThrow(/escapes its approved folder/);
-    await expect(resolvePath([root], '/app/escape/new.txt', { allowMissing: true })).rejects.toThrow(/escapes its approved folder/);
-    await expect(resolvePath([root], '/app/src/new.ts')).rejects.toThrow(/Not found: \/app\/src\/new.ts/);
-    expect(await resolvePath([root], '/app/src/new/deeper.ts', { allowMissing: true }))
+    await expect(resolvePath([root], '/app/../outside', on)).rejects.toThrow(SandboxError);
+    await expect(resolvePath([root], '/app/escape', on)).rejects.toThrow(/escapes its approved folder/);
+    await expect(resolvePath([root], '/app/escape/new.txt', { ...on, allowMissing: true })).rejects.toThrow(/escapes its approved folder/);
+    await expect(resolvePath([root], '/app/src/new.ts', on)).rejects.toThrow(/Not found: \/app\/src\/new.ts/);
+    expect(await resolvePath([root], '/app/src/new/deeper.ts', { ...on, allowMissing: true }))
       .toMatchObject({ real: path.join(app, 'src', 'new', 'deeper.ts'), virtual: '/app/src/new/deeper.ts' });
   });
 
@@ -64,12 +66,19 @@ real('paths in a folder on a server', () => {
   // its target wherever the link points: refused, never treated as a new file.
   it('refuses a dangling link instead of treating it as a new file', async () => {
     await fs.symlink(path.join(directory, 'outside', 'planted.txt'), path.join(app, 'dangling'));
-    await expect(resolvePath([root], '/app/dangling', { allowMissing: true })).rejects.toThrow(/link that could not be resolved/);
-    await expect(resolvePath([root], '/app/dangling/deeper.txt', { allowMissing: true })).rejects.toThrow(/link that could not be resolved/);
+    await expect(resolvePath([root], '/app/dangling', { ...on, allowMissing: true })).rejects.toThrow(/link that could not be resolved/);
+    await expect(resolvePath([root], '/app/dangling/deeper.txt', { ...on, allowMissing: true })).rejects.toThrow(/link that could not be resolved/);
+  });
+
+  // A caller written for this computer's disk would act on a local path that only exists on the
+  // server: it never receives one.
+  it('refuses a server folder to a caller that does not work on servers', async () => {
+    await expect(resolvePath([root], '/app/src/a.ts')).rejects.toThrow(/only in folders on this computer/);
+    await expect(resolvePath([root], '/app/new.ts', { allowMissing: true })).rejects.toThrow(/only in folders on this computer/);
   });
 
   it('says so when the folder is gone from the server', async () => {
     await fs.rm(app, { recursive: true, force: true });
-    await expect(resolvePath([root], '/app/src/a.ts')).rejects.toThrow(/not available on the server/);
+    await expect(resolvePath([root], '/app/src/a.ts', on)).rejects.toThrow(/not available on the server/);
   });
 });

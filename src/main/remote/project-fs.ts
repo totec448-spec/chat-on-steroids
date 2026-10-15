@@ -14,25 +14,35 @@ import { sftpFor } from './ssh.js';
  * `EINVAL` …), so a tool written against one works on the other.
  */
 export interface ProjectFs {
+  /** How paths are spelled there: this computer's own rules, or POSIX on a server. */
+  readonly path: path.PlatformPath;
   getMetadata(path: string): Promise<FileMetadata>;
   readDirectory(path: string): Promise<ReadDirectoryEntry[]>;
   readFileStream(path: string): AsyncGenerator<Buffer, void, undefined>;
   readFile(path: string, maxBytes?: number): Promise<Buffer>;
+  /** `readFile` plus the strict UTF-8 decode, byte-order mark kept. */
+  readFileText(path: string): Promise<string>;
   writeFile(path: string, contents: Buffer | string): Promise<void>;
   createDirectory(path: string, options: CreateDirectoryOptions): Promise<void>;
   remove(path: string, options: RemoveOptions): Promise<void>;
   walk(root: string, options: WalkOptions): Promise<WalkOutcome>;
 }
 
+/**
+ * This computer's file system. Each call looks its function up when it runs, as the direct imports
+ * did, so a test that replaces one of them still sees every call.
+ */
 export const localFs: ProjectFs = {
-  getMetadata: local.getMetadata,
-  readDirectory: local.readDirectory,
-  readFileStream: local.readFileStream,
-  readFile: local.readFile,
-  writeFile: local.writeFile,
-  createDirectory: local.createDirectory,
-  remove: local.remove,
-  walk: local.walk
+  path,
+  getMetadata: target => local.getMetadata(target),
+  readDirectory: target => local.readDirectory(target),
+  readFileStream: target => local.readFileStream(target),
+  readFile: (target, maxBytes) => local.readFile(target, maxBytes),
+  readFileText: target => local.readFileText(target),
+  writeFile: (target, contents) => local.writeFile(target, contents),
+  createDirectory: (target, options) => local.createDirectory(target, options),
+  remove: (target, options) => local.remove(target, options),
+  walk: (root, options) => local.walk(root, options)
 };
 
 export function fsForRoot(root: Root): ProjectFs {
@@ -89,23 +99,26 @@ export function sftpFs(remote: RemoteFolder): ProjectFs {
     isFile: !entry.isSymbolicLink && entry.isFile
   })));
 
+  const readFile = (target: string, maxBytes: number = local.MAX_READ_FILE_BYTES) => withClient(async client => {
+    const limit = Number.isFinite(maxBytes) ? Math.max(1, Math.min(local.MAX_READ_FILE_BYTES, Math.floor(maxBytes))) : local.MAX_READ_FILE_BYTES;
+    const tooLarge = () => local.invalidInput(`file is too large to read: limit is ${limit} bytes`);
+    if ((await client.stat(target)).size > limit) throw tooLarge();
+    // One byte past the limit shows a file that grew since the size was read.
+    const bytes = await client.readFile(target, { maxBytes: limit + 1 });
+    if (bytes.length > limit) throw tooLarge();
+    return bytes;
+  });
+
   return {
+    path: path.posix,
     getMetadata,
     readDirectory,
+    readFile,
+    readFileText: async target => local.decodeFileText(await readFile(target)),
 
     async *readFileStream(target) {
       yield* (await sftpFor(remote)).readStream(target);
     },
-
-    readFile: (target, maxBytes = local.MAX_READ_FILE_BYTES) => withClient(async client => {
-      const limit = Number.isFinite(maxBytes) ? Math.max(1, Math.min(local.MAX_READ_FILE_BYTES, Math.floor(maxBytes))) : local.MAX_READ_FILE_BYTES;
-      const tooLarge = () => local.invalidInput(`file is too large to read: limit is ${limit} bytes`);
-      if ((await client.stat(target)).size > limit) throw tooLarge();
-      // One byte past the limit shows a file that grew since the size was read.
-      const bytes = await client.readFile(target, { maxBytes: limit + 1 });
-      if (bytes.length > limit) throw tooLarge();
-      return bytes;
-    }),
 
     writeFile: (target, contents) => withClient(async client => {
       // A local write goes through a link to its target; the SFTP write replaces whatever is at
