@@ -2529,6 +2529,43 @@ window.addEventListener('drop', (event) => event.preventDefault());
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
 initUpdateReadiness();
 $('updateReviewSetup').addEventListener('click', () => showTab('setup'));
+/**
+ * The question before Update all restarts, in the app's own dialog (a system message box looked
+ * foreign, 2026-10-15). Drawn like What's New: the app's tile, the version, one calm question.
+ * Keep working stays first and focused; only the named version is approved.
+ */
+function confirmUpdateRestart(version: string): Promise<boolean> {
+  document.getElementById('updateRestartDialog')?.remove();
+  return new Promise(resolve => {
+    const dialog = document.createElement('dialog');
+    dialog.id = 'updateRestartDialog'; dialog.className = 'whats-new-dialog update-restart-dialog';
+    const head = document.createElement('header'); head.className = 'whats-new-head';
+    const hero = document.createElement('div'); hero.className = 'whats-new-hero'; hero.setAttribute('aria-hidden', 'true');
+    hero.innerHTML = '<span class="whats-new-tile"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>' +
+      '<span class="whats-new-seal"><i class="ico ph ph-arrow-clockwise"></i></span>';
+    const named = document.createElement('span'); named.className = 'whats-new-version';
+    ui(named, 'textContent', () => t('Version {0}', [version]));
+    const title = document.createElement('h2'); title.id = 'updateRestartTitle';
+    ui(title, 'textContent', () => t('Restart to install the update?'));
+    const lead = document.createElement('p'); lead.className = 'whats-new-lead'; lead.id = 'updateRestartLead';
+    ui(lead, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
+    dialog.setAttribute('aria-labelledby', title.id); dialog.setAttribute('aria-describedby', lead.id);
+    head.append(hero, named, title, lead);
+    const actions = document.createElement('footer'); actions.className = 'whats-new-actions';
+    const keep = document.createElement('button'); keep.type = 'button'; keep.className = 'whats-new-link update-restart-keep';
+    ui(keep, 'textContent', () => t('Keep working'));
+    keep.addEventListener('click', () => dialog.close());
+    const restart = document.createElement('button'); restart.type = 'button'; restart.className = 'whats-new-done update-restart-go';
+    ui(restart, 'textContent', () => t('Restart and install'));
+    let approved = false;
+    restart.addEventListener('click', () => { approved = true; dialog.close(); });
+    actions.append(keep, restart); dialog.append(head, actions);
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+    dialog.addEventListener('close', () => { dialog.remove(); resolve(approved); });
+    document.body.append(dialog); dialog.showModal(); keep.focus();
+  });
+}
+
 const updateAllButton = $<HTMLButtonElement>('updateAll');
 updateAllButton.addEventListener('click', async () => {
   if (updateAllButton.disabled) return;
@@ -2538,13 +2575,18 @@ updateAllButton.addEventListener('click', async () => {
   updateAllError = null;
   if (state) paintUpdateReadiness(state, updateAllError);
   try {
-    const reply = await api.updateAll();
+    let reply = await api.updateAll();
+    if (reply.ok && reply.data === 'confirm') {
+      const version = state?.update.latest;
+      if (!version || !await confirmUpdateRestart(version)) { toast(t('Update postponed. You can keep working.')); return; }
+      reply = await api.updateAll(version);
+    }
     if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
     else if (result === 'checking-connectors') toast(document.getElementById('updateReadinessCard') ? t('Plugin checks requested. Any remaining steps are shown in Update status.') : t('Checking…'));
-    else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
+    else if (result === 'confirm') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
     updateAllError = error instanceof Error ? error.message : String(error);
   } finally {

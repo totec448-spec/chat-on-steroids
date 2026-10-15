@@ -259,7 +259,7 @@ const api = {
   // there is nothing here to choose - the main process knows what is staged.
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
-  updateAll: () => call<import('../shared/types.js').UpdateAllResult>('update:all'),
+  updateAll: (restartVersion?: string) => call<import('../shared/types.js').UpdateAllResult>('update:all', restartVersion),
   downloadUpdate: () => call<boolean>('update:download'),
   /** Settings opened: re-check for an update if the last answer is older than ten minutes. */
   refreshUpdate: () => call<boolean>('update:refresh'),

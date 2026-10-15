@@ -1,7 +1,7 @@
 /**
  * English source of the texts the main process shows outside the window: the tray menu and its
  * tooltip, the Session finish desktop notice with its buttons, tunnel-loss notices, and the
- * one-time notice that the CoS browser hid to the tray, the window that says an update is installing, and update restart confirmation.
+ * one-time notice that the CoS browser hid to the tray, the window that says an update is installing.
  *
  * Same contract as STOP_NOTICE_TEXTS (#855): the main process has no interface catalogs, so the
  * renderer translates exactly these strings and publishes them; anything else is refused, and a
@@ -18,10 +18,6 @@ export const MAIN_TEXTS = [
   'Saving your work…',
   'Waiting for your permission in Windows…',
   'Starting the installer. Chat On Steroids opens again by itself.',
-  'Restart to install the update?',
-  'Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.',
-  'Keep working',
-  'Restart and install',
   'Connected',
   'No internet',
   'Not connected',
