@@ -69,6 +69,7 @@ const {
   manualDownloadName,
   manualDownloadUrl,
   markInstallOnQuit,
+  onInstallerTakeover,
   onUpdateHandoffStep,
   releaseVersion,
   resetUpdateForTests,
@@ -653,6 +654,20 @@ describe('installing on request', () => {
     ]);
     // Measured on Windows: started with windowsHide, the installer's window stayed hidden too.
     expect(spawnOptions[0]?.windowsHide).not.toBe(true);
+  });
+
+  it('waits for the shown installer to take over, and never for a silent one', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    let waits = 0;
+    onInstallerTakeover(async () => { waits++; });
+    expect(markInstallOnQuit()).toBe(true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(waits).toBe(1);
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(waits, 'an ordinary quit installs silently and exits').toBe(1);
+    onInstallerTakeover(async () => undefined);
   });
 
   it('relaunches an AppImage install itself, having no installer to ask', async () => {

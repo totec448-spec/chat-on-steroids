@@ -17,7 +17,7 @@ export const MAIN_TEXTS = [
   'Updating Chat On Steroids',
   'Saving your work…',
   'Waiting for your permission in Windows…',
-  'Starting the new version. Chat On Steroids opens again by itself.',
+  'Starting the installer. Chat On Steroids opens again by itself.',
   'Restart to install the update?',
   'Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.',
   'Keep working',

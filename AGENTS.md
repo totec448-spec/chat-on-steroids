@@ -5087,7 +5087,9 @@ A quit that installs for a person waiting on it (`installingVersion()`, set by I
 all) opens `update-progress.html` from `will-quit`: a frameless window without preload in the
 app's appearance colors and language, with texts only from `MAIN_TEXTS` (saving, Windows'
 permission, starting the new version; `onUpdateHandoffStep`). That handoff runs the Windows
-installer visibly (`--updated --force-run`, no `/S`); `scripts/windows-installer-acl.nsh` keeps an
+installer visibly (`--updated --force-run`, no `/S`, not `windowsHide`) and waits until it takes
+over (`onInstallerTakeover`): in update mode the installer closes the running app once its progress
+page shows, which closes the Installing window (bounded at 90 s). `scripts/windows-installer-acl.nsh` keeps an
 update's install mode without the "for whom" page (`customInstallMode`) and its finish page starts
 the app and ends instead of waiting for Finish (`customFinishPage`). An ordinary quit stays `/S`.
 `scripts/make-icon.mjs` draws the installer's header and sidebar bitmaps from the app icon.
