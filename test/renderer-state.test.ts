@@ -1168,6 +1168,14 @@ it('shows connection status once and keeps diagnostics out of the desktop popove
     expect(doc.getElementById('connectionAnnounce')!.textContent).toBe(title);
   }
 
+  // 2026-10-15: OpenAI's tunnel service answered with 503/504 for hours while the internet worked;
+  // "No internet" sent people to check their network for nothing.
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'offline', offlineCause: 'service' } });
+  expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe('OpenAI outage');
+  expect(label.textContent).toBe('OpenAI outage');
+  expect(doc.getElementById('connectionAnnounce')!.textContent).toBe('OpenAI outage');
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnected', offlineCause: null } });
+
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('pt-BR');
   expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe('Não conectado');

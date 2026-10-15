@@ -20,6 +20,7 @@ export const MAIN_TEXTS = [
   'Starting the installer. Chat On Steroids opens again by itself.',
   'Connected',
   'No internet',
+  'OpenAI outage',
   'Not connected',
   'Core connection lost',
   'Desktop connection lost',
