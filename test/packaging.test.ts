@@ -164,6 +164,26 @@ describe('cross-platform packaging targets', () => {
     expect(installer).not.toMatch(/(?:no-sandbox|disable-gpu-sandbox)/i);
   });
 
+  it('shows an update the person asked for as a branded progress window that restarts the app by itself', () => {
+    // 2026-10-15: after Restart and install the app vanished for about 100 s with nothing on
+    // screen. The installer now runs visibly for that case; it skips every question an update
+    // already answered and closes itself at the end instead of waiting for Finish.
+    const config = yamlFile('electron-builder.yml');
+    const installer = readFileSync(path.join(root, 'scripts/windows-installer-acl.nsh'), 'utf8');
+    // An update keeps the installation's own mode; the "install for whom" page never shows.
+    expect(installer).toMatch(/!macro customInstallMode[\s\S]*\$\{if\} \$\{isUpdated\}[\s\S]*\$isForceMachineInstall "1"[\s\S]*\$isForceCurrentInstall "1"[\s\S]*!macroend/);
+    // The finish page of an update starts the app when asked to and ends the installer.
+    expect(installer).toMatch(/!macro customFinishPage[\s\S]*MUI_PAGE_CUSTOMFUNCTION_PRE[\s\S]*!insertmacro MUI_PAGE_FINISH[\s\S]*!macroend/);
+    expect(installer).toMatch(/\$\{if\} \$\{isUpdated\}\s+\$\{if\} \$\{isForceRun\}[\s\S]*ExecShellAsUser[\s\S]*\$\{endif\}\s+Abort/);
+    // A fresh install keeps its Run checkbox.
+    expect(installer).toContain('!define MUI_FINISHPAGE_RUN_FUNCTION');
+    expect(config.nsis.installerHeader).toBe('build/installerHeader.bmp');
+    expect(config.nsis.installerSidebar).toBe('build/installerSidebar.bmp');
+    const icons = readFileSync(path.join(root, 'scripts/make-icon.mjs'), 'utf8');
+    expect(icons).toContain("'installerHeader.bmp'");
+    expect(icons).toContain("'installerSidebar.bmp'");
+  });
+
   it('builds canaries only for the targets most installs use, and releases for all of them', () => {
     expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
     expect(releaseTargets('common').files).toEqual(['Chat-On-Steroids-Setup-x64.exe', 'Chat-On-Steroids-macOS-arm64.dmg',
