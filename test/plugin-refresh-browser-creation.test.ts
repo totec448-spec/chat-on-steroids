@@ -6,8 +6,8 @@ const source = readFileSync(new URL('../extension/background.js', import.meta.ur
 const workflow = source.slice(source.indexOf('let pluginRefreshFlight = null;'), source.indexOf('async function catalogProbe('));
 
 it.each([
-  ['asdk_app_core', true], ['asdk_app_plugins', true]
-] as const)('rediscovers enrolled %s in the installed list and keeps the observation tab (observeOnly=%s)', async (appId, observeOnly) => {
+  ['asdk_app_core', false], ['asdk_app_plugins', false], ['asdk_app_core', true], ['asdk_app_plugins', true]
+] as const)('opens %s on its native settings route, or the installed list for an observation, and keeps the elected tab (observeOnly=%s)', async (appId, observeOnly) => {
   const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId, observeOnly };
   const settingsUrl = `https://chatgpt.com/settings/plugins-settings${observeOnly ? '' : `/plugin_${appId}`}`;
   const markedUrl = `${settingsUrl}?cos-plugin-refresh=${request.id}`;
@@ -35,6 +35,21 @@ it.each([
   tab = null;
   await start().run([{}], true);
   expect(create).toHaveBeenCalledTimes(1);
+});
+
+it.each(['https://chatgpt.com/', 'https://chatgpt.com/c/synthetic-conversation'])('does not redirect an elected helper that has left settings for %s', async url => {
+  const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId: 'asdk_app_core' };
+  const tab = { id: 8, url };
+  const create = vi.fn(), update = vi.fn(), sendMessage = vi.fn();
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], createChatTab: create,
+    call: async () => ({ ok: true, data: { requests: [request] } }),
+    chrome: { storage: { session: { get: async () => ({ pluginRefreshOwner: { id: request.id, tab: tab.id } }) } },
+      tabs: { query: async () => [tab], get: async () => tab, update, sendMessage } } });
+  vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
+  await context.run([{}], true);
+  expect(create).not.toHaveBeenCalled();
+  expect(update).not.toHaveBeenCalled();
+  expect(sendMessage).not.toHaveBeenCalled();
 });
 
 it('keeps one operation on its original tab after marker loss, worker restart, and user closure', async () => {

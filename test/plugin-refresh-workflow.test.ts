@@ -141,7 +141,7 @@ it('opens an enrolled exact App Id directly in marked settings without name disc
   });
   vm.runInContext(`${code}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
   await (context.run as Function)([{ surface: 'core' }], true);
-  expect(create).toHaveBeenCalledExactlyOnceWith(`https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic`, true);
+  expect(create).toHaveBeenCalledExactlyOnceWith(`https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}`, true);
 });
 it.each([{ deny: true }, { navigateDuringClaim: true }, { navigateHrefDuringClaim: true }])('never clicks or blames a moved page after denied claim or changed navigation: %j', async options => {
   const h = workflow(options);
