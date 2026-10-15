@@ -17,6 +17,14 @@ const CATALOG = /(^|\/)(locales\/[^/]+\.json|_locales\/[^/]+\/messages\.json)$/;
 const UI = /^(src\/renderer\/(?!locales\/)|extension\/(popup|options|sidepanel)[^/]*\.(html|css|js)$|extension\/content\.css$)/;
 const STRAY = /(^|\/)(\.DS_Store|Thumbs\.db|npm-debug\.log[^/]*|[^/]+\.log|[^/]+\.orig|[^/]+\.rej)$|^docs\/(worklog|notes|scratch)[^/]*$/i;
 
+/** Files whose change alters what the app or the extension does for a person. */
+const BEHAVIOR = /^(src|extension|native)\//;
+/**
+ * Contributor PRs opened from here on (user, 2026-10-15) show a behavior change working in the real
+ * app, so a review only needs smaller checks of its own.
+ */
+export const LIVE_PROOF_SINCE = '2026-10-15T16:00:00Z';
+
 /** Files that define contracts between processes, the extension and stored data; AGENTS.md maps them. */
 const CONTRACT = /^(src\/preload\/index\.ts|src\/main\/(ipc|plugins-ipc)\.ts|src\/shared\/[^/]+\.ts)$/;
 /** The template's headings and the names contributors already use for the same thing. */
@@ -24,7 +32,8 @@ const HEADINGS = {
   why: ['why', 'problem', 'root cause', 'cause', 'summary', 'motivation'],
   what: ['what changed', 'what changes', 'what', 'change', 'changes', 'fix'],
   test: ['test', 'tests', 'testing', 'validation', 'verification'],
-  screenshots: ['screenshots', 'screenshot', 'before and after', 'ui']
+  screenshots: ['screenshots', 'screenshot', 'before and after', 'ui'],
+  proof: ['live proof', 'proof', 'live test', 'manual test']
 };
 
 /** Text of the first `##` section with one of these headings, without HTML comments; empty when missing. */
@@ -42,10 +51,10 @@ function section(body, key) {
 
 /**
  * @param {{ body: string, files: Array<{ path: string, changes: number }>, draft?: boolean,
- *   fromFork?: boolean, maintainerCanModify?: boolean }} pr
+ *   fromFork?: boolean, maintainerCanModify?: boolean, maintainer?: boolean, createdAt?: string }} pr
  * @returns {string[]} what is missing, in words a contributor can act on; empty when it passes
  */
-export function checkPullRequest({ body, files, draft = false, fromFork = false, maintainerCanModify = true }) {
+export function checkPullRequest({ body, files, draft = false, fromFork = false, maintainerCanModify = true, maintainer = true, createdAt = '' }) {
   const problems = [];
   const text = String(body || '');
   // No issue is required: the description carries the why and the what, and discussion happens
@@ -71,6 +80,13 @@ export function checkPullRequest({ body, files, draft = false, fromFork = false,
   if (files.some((file) => UI.test(file.path)) && !/!\[[^\]]*\]\(|<img\s/i.test(section(text, 'screenshots')) &&
       !/^(?:[-*]\s+(?:\[[ xX]\]\s+)?)?no visual changes?:\s*\S.{10,}/im.test(text)) {
     problems.push('This changes the interface: add before and after screenshots under "## Screenshots", or write "No visual change: <reason>" when nothing on screen changes.');
+  }
+
+  if (!maintainer && Date.parse(createdAt) >= Date.parse(LIVE_PROOF_SINCE) &&
+      files.some((file) => BEHAVIOR.test(file.path) && !TESTS.test(file.path) && !CATALOG.test(file.path)) &&
+      !/!\[[^\]]*\]\(|<img\s|<video\s|https:\/\/github\.com\/user-attachments\/|```[^\n]*\n\s*\S/i.test(section(text, 'proof')) &&
+      !/^(?:[-*]\s+(?:\[[ xX]\]\s+)?)?no behavior changes?:\s*\S.{10,}/im.test(text)) {
+    problems.push('This changes what the app does: show it working in the real app under "## Live proof" (a screenshot, a recording, or an excerpt of the app log in a code block), or write "No behavior change: <reason>".');
   }
 
   if (files.some((file) => CONTRACT.test(file.path)) && !files.some((file) => file.path === 'AGENTS.md') &&
@@ -105,7 +121,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   if (!pr) { console.log('Not a pull request; nothing to check.'); process.exit(0); }
   const problems = checkPullRequest({
     body: pr.body ?? '', files: changedFiles(`origin/${pr.base.ref}`), draft: pr.draft === true,
-    fromFork: pr.head?.repo?.full_name !== pr.base?.repo?.full_name, maintainerCanModify: pr.maintainer_can_modify !== false
+    fromFork: pr.head?.repo?.full_name !== pr.base?.repo?.full_name, maintainerCanModify: pr.maintainer_can_modify !== false,
+    maintainer: ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association) || pr.user?.type === 'Bot', createdAt: pr.created_at ?? ''
   });
   if (!problems.length) { console.log('Pull request checklist passed.'); process.exit(0); }
   console.log('This pull request is not ready for review yet. See CONTRIBUTING.md.\n');

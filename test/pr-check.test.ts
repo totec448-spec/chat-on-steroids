@@ -103,3 +103,34 @@ describe('pull request checklist', () => {
     expect(check({ body: stacked, files, draft: true })).toEqual([]);
   });
 });
+
+// 2026-10-15, user: a contributor PR that changes app behavior shows it working in the real app,
+// so a review only needs smaller checks. Maintainers and PRs opened earlier are not asked.
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { LIVE_PROOF_SINCE } from '../scripts/pr-check.mjs';
+
+describe('live proof for behavior changes', () => {
+  const contributor = { maintainer: false, createdAt: '2026-10-16T09:00:00Z' };
+  const fix = [{ path: 'extension/content.js', changes: 40 }, { path: 'test/content-script.test.ts', changes: 60 }];
+  const checkLive = check as (pr: Parameters<typeof check>[0] & { maintainer?: boolean; createdAt?: string }) => string[];
+  const proof = (text: string) => `${good}\n## Live proof\n\n${text}\n`;
+
+  it('asks a new contributor PR that changes the app for live proof', () => {
+    expect(Date.parse(LIVE_PROOF_SINCE)).toBeLessThan(Date.parse(contributor.createdAt));
+    expect(checkLive({ body: good, files: fix, ...contributor })).toEqual([expect.stringContaining('## Live proof')]);
+    expect(checkLive({ body: proof('It works, trust me.'), files: fix, ...contributor })).toHaveLength(1);
+  });
+
+  it('accepts a screenshot, a recording link or a log excerpt from the real app', () => {
+    expect(checkLive({ body: proof('![after](https://github.com/user-attachments/assets/0480676d-ab5b-4ddc-b7c4-0ed664d9b432)'), files: fix, ...contributor })).toEqual([]);
+    expect(checkLive({ body: proof('https://github.com/user-attachments/assets/0480676d-ab5b-4ddc-b7c4-0ed664d9b432'), files: fix, ...contributor })).toEqual([]);
+    expect(checkLive({ body: proof('```\n12:01:02 [bridge] receipt confirmed for the first send\n```'), files: fix, ...contributor })).toEqual([]);
+    expect(checkLive({ body: `${good}\nNo behavior change: only renames a private helper.\n`, files: fix, ...contributor })).toEqual([]);
+  });
+
+  it('leaves maintainers, earlier PRs and changes outside the app alone', () => {
+    expect(checkLive({ body: good, files: fix, maintainer: true, createdAt: contributor.createdAt })).toEqual([]);
+    expect(checkLive({ body: good, files: fix, maintainer: false, createdAt: '2026-10-14T09:00:00Z' })).toEqual([]);
+    expect(checkLive({ body: good, files: [{ path: 'scripts/pr-check.mjs', changes: 10 }, { path: 'test/pr-check.test.ts', changes: 10 }], ...contributor })).toEqual([]);
+  });
+});
