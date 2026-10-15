@@ -2,6 +2,7 @@
 
 Chrome, Edge and Brave SVGs: https://github.com/alrra/browser-logos/tree/main/src
 Downloaded 2026-10-03 from the chrome/chrome.svg, edge/edge.svg and brave/brave.svg paths.
+Firefox SVG: the same repository's firefox/firefox.svg, downloaded 2026-10-14.
 These are the respective browser trademarks, used to identify the browser choice.
 CoS: existing extension/icons/icon128.png, copied without modification.
 

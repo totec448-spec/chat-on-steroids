@@ -11,11 +11,15 @@ export type PluginSource = {
   auth?: 'oauth';
   path?: string;
 };
+export const DEFAULT_PLUGIN_LONGEST_CALL_SECONDS = 120;
+export const MAX_PLUGIN_LONGEST_CALL_SECONDS = 1800;
 export interface PluginConfigPatch {
   config?: Record<string, string>;
   credentials?: Record<string, string>;
   source?: PluginSource;
   name?: string;
+  /** Per-installation overall MCP tool call limit, not a server environment variable. */
+  longestCallSeconds?: number;
 }
 export interface PluginInstallRequest extends PluginConfigPatch {
   catalogId?: string;
@@ -55,6 +59,7 @@ export interface PluginView {
   catalogId?: string;
   source: PluginSource;
   config: Record<string, string>;
+  longestCallSeconds: number;
   credentialKeys: string[];
   fields?: PluginField[];
   version: string;

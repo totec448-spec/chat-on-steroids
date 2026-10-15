@@ -208,6 +208,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     await Promise.all([...tabs.values()].map(release));
   }
   async function attach(tabId, command) {
+    // Firefox gives extensions no DevTools protocol: say so instead of failing on an undefined API.
+    if (!chrome.debugger?.attach) error('BROWSER_CONTROL_UNAVAILABLE: Browser control needs Chrome, Edge or Brave. This browser gives extensions no DevTools access.');
     if (tabs.size >= 32 && !tabs.has(tabId)) error('BROWSER_TAB_LIMIT: release an unused tab first.');
     const previous = tabs.get(tabId);
     if (previous && !owns(previous, command)) error('BROWSER_TAB_OWNED: another conversation owns this attachment. browser_snapshot can inspect this same tab without attach; opening a duplicate is unnecessary for DOM review.');

@@ -261,7 +261,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -274,6 +274,7 @@ function request(
   if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
   if (options.browser) headers['x-extension-browser'] = options.browser;
   if (options.host) headers['x-extension-host'] = options.host;
+  if (options.engine) headers['x-extension-engine'] = options.engine;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -621,6 +622,50 @@ describe('who is allowed to talk to it', () => {
     expect((await bridgeStatus()).externalExtension?.present).toBe(false);
   });
 
+  // A browser that may not open chatgpt.com runs no content script: Setup has to say so (2026-10-14).
+  it('projects whether the external browser may access ChatGPT', async () => {
+    await pair();
+    const status = (chatgptAccess?: boolean) => request('POST', '/status', { host: 'browser', browser: 'ffffffffffffffff0001',
+      body: { openConversations: [], ...(chatgptAccess === undefined ? {} : { chatgptAccess }) } });
+    await status(false);
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, chatgptAccess: false });
+    await status(true);
+    expect((await bridgeStatus()).externalExtension?.chatgptAccess).toBe(true);
+    // An older extension says nothing: unknown, never a claimed lack of access.
+    await status();
+    expect((await bridgeStatus()).externalExtension?.chatgptAccess).toBeUndefined();
+  });
+
+  // Firefox updates its signed add-on itself (2.1.38): Setup and the log must know which engine it is.
+  it('tells a Firefox add-on apart and lets its preflight carry the engine', async () => {
+    await pair();
+    const preflight = await request('OPTIONS', '/events', { auth: null });
+    expect(preflight.headers['access-control-allow-headers']).toContain('x-extension-engine');
+    await request('GET', '/status', { host: 'browser', engine: 'gecko' });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
+    await request('GET', '/status', { host: 'browser', engine: 'webkit' });
+    expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
+    await request('GET', '/status', { host: 'browser' });
+    expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
+  });
+
+  // Chrome and Firefox both connected (VM, 2026-10-14): Setup showed whichever polled last, not the
+  // browser chosen for ChatGPT. The chosen kind keeps the projection while it is present.
+  it('projects the external browser that fits the chosen ChatGPT browser', async () => {
+    await pair();
+    const firefox = { host: 'browser', browser: 'ffffffffffffffff0001', engine: 'gecko', body: { openConversations: [], chatgptAccess: true } };
+    const chrome = { host: 'browser', browser: 'cccccccccccccccc0001', body: { openConversations: [], chatgptAccess: false } };
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    await request('POST', '/status', firefox);
+    await request('POST', '/status', chrome);
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ engine: 'gecko', chatgptAccess: true });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await request('POST', '/status', chrome);
+    await request('POST', '/status', firefox);
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ chatgptAccess: false });
+    expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
+  });
+
   it('retains an incompatible external version without granting presence', async () => {
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     try {
@@ -758,6 +803,26 @@ describe('who is allowed to talk to it', () => {
       expect(reply.body.error).toBe('forbidden_origin');
       expect(reply.headers['access-control-allow-origin']).toBeUndefined();
     }
+  });
+
+  it('serves a Firefox add-on, whose extension origin is moz-extension://, and nothing that only looks like one', async () => {
+    const firefox = 'moz-extension://0d6c1b4e-3a5f-4c2b-9e7d-1f2a3b4c5d6e';
+    const hello = await request('GET', '/hello', { origin: firefox, auth: null });
+    expect(hello.status).toBe(200);
+    expect(hello.headers['access-control-allow-origin']).toBe(firefox);
+    const preflight = await request('OPTIONS', '/events', { origin: firefox, auth: null });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers['access-control-allow-origin']).toBe(firefox);
+    for (const origin of ['https://moz-extension.example', 'moz-extensionx://abc', 'http://moz-extension://abc']) {
+      expect((await request('GET', '/hello', { origin, auth: null })).status, origin).toBe(403);
+    }
+    // The wake channel is the app's only way to wake the add-on; Firefox opens it with that origin too.
+    await pair();
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake?host=browser', { origin: firefox });
+    try {
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
   });
 
   it('serves a request that carries no Origin at all', async () => {
@@ -1192,9 +1257,11 @@ describe('extension update holds', () => {
     expect(lines().slice(before).map(entry => entry.message)).toEqual(['bridge: the browser extension waits to update: a ChatGPT tab is still answering']);
     await status('already-tried');
     expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
+    await status('browser-updates-itself');
+    expect(lines().at(-1)!.message).toContain('Firefox updates the signed add-on itself');
     // An unknown reason is not logged, and a report without a hold resets it.
     await status('made-up'); await status(); await status('chat-busy');
-    expect(lines().slice(before)).toHaveLength(3);
+    expect(lines().slice(before)).toHaveLength(4);
   });
 });
 
@@ -2622,6 +2689,57 @@ describe('automatic compaction', () => {
       await saveConfig(base);
     }
   }
+
+  /**
+   * 2026-10-14, a live prime at Extra High: its ticket was filed at 401,797 tokens while it kept
+   * working; 20 minutes later ChatGPT's stream broke ("resume HTTP 404"). The transport failure
+   * brought the ticket's pickup forward, but the asking phase still waited for the turn to stop
+   * working, and a turn above High has a 20-minute silence window. The handoff sat at Preparing.
+   */
+  it('asks a compacting chat for its handoff on the next pass after its stream breaks, even in a long thinking window', async () => {
+    try {
+      await pair();
+      const conversationId = randomUUID();
+      await withThreshold(10_000, async () => {
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'model_selection', time: Date.now(), model: 'GPT-6 Thinking', reasoningEffort: 'xhigh' },
+          { kind: 'turn_start', time: Date.now(), turnId: 'deliberate-turn' },
+          ...over(),
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Checked the dashboards' }
+        ] } });
+        const sessionId = (await request('GET', `/activity?conversationId=${conversationId}`)).body.sessionId as string;
+        await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
+        vi.useFakeTimers();
+        // The turn keeps working past the ticket's first pickup interval: nothing to ask yet.
+        await vi.advanceTimersByTimeAsync(3 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Opened the map' }
+        ] } });
+        await sweepStaleSwarm(Date.now());
+        const offered = async () => ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string }>)
+          .filter(row => row.conversationId === conversationId);
+        expect(await offered()).toEqual([]);
+        // The page reports the answer's stream gone: the handoff is due on the next pass.
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'chat_error', time: Date.now(), turnId: 'deliberate-turn', recoverable: true,
+            text: 'Connection interrupted. Waiting for the complete answer' }
+        ] } });
+        await vi.advanceTimersByTimeAsync(30_000);
+        await sweepStaleSwarm(Date.now());
+        const [pickup] = await offered() as Array<{ conversationId: string; reason: string; token: string }>;
+        expect(pickup).toMatchObject({ reason: 'compaction' });
+        // One pickup per reported loss: once reloaded, a turn that works again is left alone.
+        expect((await request('POST', '/repairs/claim', { body: { token: pickup!.token } })).body.allowed).toBe(true);
+        await request('GET', `/status?repaired=${encodeURIComponent(pickup!.token)}&repairAction=reloaded`);
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        await request('POST', '/events', { body: { conversationId, events: [
+          { kind: 'page_tool', time: Date.now(), turnId: 'deliberate-turn', label: 'Back at work' }
+        ] } });
+        await sweepStaleSwarm(Date.now());
+        expect(await offered()).toEqual([]);
+      });
+    } finally { vi.useRealTimers(); }
+  });
 
   it.each(['failed', 'old-turn', 'new-question', 'completed', 'stopped', 'auto-off', 'pro'] as const)(
     'compacts only the exact failed oversized source after a transport error (%s)', async scenario => {
@@ -5439,6 +5557,28 @@ describe('delivering a bootstrap', () => {
     // The second wake reaches the browser now, not only after the first one's page claims it.
     expect(status.body.revivals.map((entry: { conversationId: string }) => entry.conversationId).sort()).toEqual([...chats].sort());
     expect(status.body.revival).toEqual(status.body.revivals[0]);
+  });
+
+  // #1086: a page that redeemed the wake and failed before Send says so ("transient"); the
+  // broker wakes it again itself instead of spending a strike and troubling the prime.
+  it('keeps a worker waking when its page was merely not ready before Send', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'dcdcdcdc-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'one more thing' }]);
+    const { id } = await waitForRevival();
+    await request('POST', '/commands/redeem', { body: { id, client: 'tab-slow', conversationId } });
+    const primeBefore = swarmState().agents.find((agent) => agent.role === 'prime')!.pending;
+    const ack = await request('POST', '/commands/ack', {
+      body: { id, status: 'failed', error: 'ChatGPT never re-exposed a usable composer after model selection', detail: 'transient', client: 'tab-slow' }
+    });
+    expect(ack.status).toBe(200);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+    expect(swarmState().agents.find((agent) => agent.role === 'prime')!.pending).toBe(primeBefore);
+    expect(getLog().some(entry => entry.message.includes("worker-1's page was not ready"))).toBe(true);
   });
 
   it('puts the worker back to sleep, with its slot and its message intact, when the browser cannot wake it', async () => {
@@ -15832,6 +15972,24 @@ describe('which extension build is running', () => {
       const later = await request('POST', '/commands/redeem', stale);
       expect(later.body.error, 'the up-to-date browser went quiet a minute ago').not.toBe('stale_extension_build');
     } finally { clock.mockRestore(); }
+  });
+
+  // Firefox updates its signed add-on itself, up to a day after the app: Chrome's copy is current
+  // within minutes. When Firefox is where ChatGPT runs, its add-on must keep working meanwhile;
+  // measured on the VM 2026-10-14, a new chat sat unclaimed in Firefox for 14 minutes.
+  it('never refuses the Firefox add-on as out of date while Firefox is the ChatGPT browser', async () => {
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    await request('GET', '/status', { extensionBuild: SHIPPED });
+    const gecko = { body: { id: 'x', client: 'firefox-client' }, extensionBuild: 'deadbeefcafe', engine: 'gecko' };
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    expect((await request('POST', '/commands/redeem', gecko)).body.error, 'Firefox not chosen: ordinary rule').toBe('stale_extension_build');
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    expect((await request('POST', '/commands/redeem', gecko)).body.error).not.toBe('stale_extension_build');
+    expect((await request('POST', '/repairs/claim', { body: {}, extensionBuild: 'deadbeefcafe', engine: 'gecko' })).body).not.toEqual({ allowed: false });
+    // An old Chromium copy is still refused while Firefox is chosen.
+    expect((await request('POST', '/commands/redeem', { ...gecko, engine: undefined })).body.error).toBe('stale_extension_build');
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
   });
 
   it('compares nothing in a checkout that was never packaged', async () => {

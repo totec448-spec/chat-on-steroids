@@ -6,6 +6,7 @@
  * Optional tunnel failures stay on their own Settings cards and cannot fail Core.
  */
 
+import { loadSurfaceTokens, rememberSurfaceTokens } from './mcp/persistent-paths.js';
 import { connectorProof } from './connector-proof.js';
 import type { ConnectionState, ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
@@ -403,6 +404,9 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
   const startupCurrent = () => !starting || current();
   try {
     setStatus({ state: 'starting-server', detail: 'Starting the local server…', publicUrl: null });
+    // Opt-in stable URLs for a tunnel of the user's own (#924): the stored tokens, else fresh ones.
+    const keepUrls = getConfig().mcp?.persistentUrls === true;
+    const kept = keepUrls ? await loadSurfaceTokens().catch(() => ({})) : {};
     const startedEndpoint = await startMcpServer(() => {
       const live = getConfig();
       return {
@@ -412,7 +416,10 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
         readOnly: live.readOnly,
         privacyScreenshots: live.ui.privacyScreenshots
       };
-    });
+    }, kept);
+    if (keepUrls && !(await rememberSurfaceTokens(startedEndpoint.urls))) {
+      logWarn('connector URLs: secure storage is unavailable, so they change at the next start');
+    }
     if (shutdownRequested) {
       await startedEndpoint.stop({ forceAfterMs: 30_000 }).catch(() => {});
       return;
@@ -689,6 +696,11 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
     health: null,
     surfaces: describeSurfaces()
   });
+}
+
+/** Keeps the running connector URLs from now on (the option was just turned on); false if it could not. */
+export async function rememberRunningSurfaceTokens(): Promise<boolean> {
+  return endpoint ? rememberSurfaceTokens(endpoint.urls) : true;
 }
 
 export function connect(current?: () => boolean): Promise<void> {

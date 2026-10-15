@@ -240,6 +240,14 @@ describe('OpenAI tunnel process ownership', () => {
     child.stderr.emit('data', Buffer.from(JSON.stringify({ level: 'WARN', msg: 'poll failed; backing off', error: 'dial tcp: i/o timeout' }) + '\n'));
     await vi.advanceTimersByTimeAsync(45_000);
     expect(reports.at(-1).state).toBe('offline');
+    const { updateReadiness } = await import('../src/renderer/update-readiness-state.js');
+    const core = updateReadiness({
+      update: { current: '2.1.36', latest: null, stage: 'idle', checkedAt: 1 },
+      bridge: { running: true, paired: true, present: true, extensionVersion: '2.1.36' },
+      status: { ...reports.at(-1), surfaces: [] }
+    } as any).find(row => row.id === 'core')!;
+    expect(core.reason).toContain('ChatGPT cannot use the plugin');
+    expect(core.reason).not.toMatch(/\bconnector\b/i);
     expect(fixture.children).toHaveLength(1);
     await handle.stop();
   });

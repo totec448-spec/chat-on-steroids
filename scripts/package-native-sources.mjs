@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { fetchFirst } from './fetch-retry.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noticeDirectory = path.join(root, 'docs', 'licenses', 'native');
@@ -23,6 +24,10 @@ for (const source of inventory.sources) {
     throw new Error(`Invalid or duplicate native source filename: ${source.file}`);
   }
   filenames.add(source.file);
+  const mirrors = source.mirrors ?? [];
+  if (!Array.isArray(mirrors) || mirrors.some(mirror => typeof mirror !== 'string' || !mirror.startsWith('https://'))) {
+    throw new Error(`Invalid native source mirrors: ${source.file}`);
+  }
   if (!source.url.startsWith('https://') || !/^[a-f0-9]{64}$/.test(source.sha256) ||
       !Number.isSafeInteger(source.bytes) || source.bytes < 1 || source.bytes > 256 * 1024 * 1024) {
     throw new Error(`Incomplete native source identity: ${source.file}`);
@@ -46,7 +51,8 @@ await Promise.all(Array.from({ length: 8 }, async () => {
     try { bytes = await fs.readFile(destination); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     if (!bytes) {
-      const response = await fetch(source.url, { signal: AbortSignal.timeout(180_000) });
+      // Byte-identical copies only: the checksum below decides, whichever address answered.
+      const response = await fetchFirst([source.url, ...(source.mirrors ?? [])], { timeoutMs: 180_000 });
       if (!response.ok) throw new Error(`Native source download failed: ${source.file}: HTTP ${response.status}`);
       const chunks = [];
       let size = 0;

@@ -10433,7 +10433,12 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
   });
 
-  it.each([[false, 1], [true, 0]])('treats a clean, lasting regeneration of the settled question as a turn (failure banner: %s)', async (banner, starts) => {
+  it.each([[null, 1], ['Message delivery timed out. Please try again.', 0],
+    // A German account, 2026-10-14: these banners were not read as failures, so every recovery
+    // reload claimed a phantom turn for the dead question and cancelled its own Continue.
+    ['Zeitüberschreitung bei der Übermittlung der Nachricht. Bitte versuche es erneut.', 0],
+    ['Verbindung unterbrochen. Warten auf die vollständige Antwort.', 0]
+  ] as const)('treats a clean, lasting regeneration of the settled question as a turn (failure banner: %s)', async (banner, starts) => {
     // A Compact & Resume brief rewritten by ChatGPT's Retry after "Resume stream unavailable"
     // is a real generation of the same question; a phantom shows the failure banner instead.
     live = await harness(
@@ -10442,7 +10447,7 @@ describe('a content script reloaded into a turn already in flight', () => {
       midTurn
     );
     await live.hook.pullActivity();
-    if (banner) alertBanner(live.document, 'Message delivery timed out. Please try again.');
+    if (banner) alertBanner(live.document, banner);
     for (let at = 0; at < 7; at++) {
       live.hook.observe();
       await settle();
@@ -13572,6 +13577,9 @@ describe('content-script localization', () => {
     live.hook.toggleMenu();
 
     const control = live.document.querySelector('.clf-compact-btn') as HTMLElement;
+    // The gear is built from DOM nodes, not innerHTML (Mozilla review): still a full SVG with its two shapes.
+    expect(control.querySelector('svg circle')?.getAttribute('r')).toBe('3.1');
+    expect(control.querySelector('svg path')?.getAttribute('d')?.startsWith('M19.4 15a1.65')).toBe(true);
     const menu = live.document.querySelector('.clf-menu') as HTMLElement;
     expect(control.getAttribute('aria-label')).toBe('Chat On Steroids ayarları');
     expect(menu.getAttribute('aria-label')).toBe('Chat On Steroids ayarları');
@@ -16006,6 +16014,8 @@ describe('the fresh chat the app opened', () => {
         error: expect.stringMatching(/page changed|fresh chat|navigation/i)
       })
     ]);
+    // A changed target is not a slow page: it is not offered as a transient failure.
+    expect(live.sent.find((message) => message.type === 'ack')?.detail).toBeUndefined();
   });
 
   it('abandons a redeemed bootstrap when recorder takeover supersedes its document owner', async () => {
@@ -17218,7 +17228,9 @@ describe('the fresh chat the app opened', () => {
         id: 'cmd-enter-noop',
         status: 'failed',
         // #882: the failure names the step Send reached, here a Send button that never enabled.
-        error: 'ChatGPT did not accept the bootstrap send (send-not-ready)'
+        error: 'ChatGPT did not accept the bootstrap send (send-not-ready)',
+        // #1086: refused before the native click, so nothing was sent and a wake may be retried.
+        detail: 'transient'
       })
     ]);
     expect(live.sent.some((message) => message.type === 'ack' && message.status === 'sent')).toBe(false);

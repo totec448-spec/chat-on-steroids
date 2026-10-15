@@ -345,6 +345,8 @@ var CLF_DOM = (() => {
     // The same failures on a pt-BR account, as measured 2026-10-12 (a send that never reached the
     // model, and its dropped answer). Only observed wording; other languages stay unrecognised.
     if (/^(?:a entrega da mensagem atingiu o tempo limite(?:\. tente novamente\.?)?|conexão interrompida\.? aguardando a resposta completa\.?)(?: tentar novamente)?$/i.test(line)) return true;
+    // The same two on a German account, as measured 2026-10-14 after a long answer's stream broke.
+    if (/^(?:zeitüberschreitung bei der übermittlung der nachricht(?:\. bitte versuche es erneut\.?)?|verbindung unterbrochen\.? warten auf die vollständige antwort\.?)(?: erneut versuchen)?$/i.test(line)) return true;
     return /^(?:message delivery timed out(?:\. please try again\.?)?|connection interrupted\.? waiting for the complete answer\.?|chatgpt stream recovery polling timed out\.?|stream cache expired\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|a network error occurred\.?(?: please check your connection and try again\.?)?|resume stream unavailable\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)(?: retry)?$/i.test(line);
   }
 
@@ -886,8 +888,66 @@ var CLF_DOM = (() => {
    * card on a kept (undisplayed) page, or one without an enabled button, is not waiting.
    */
   function approvalWaiting() {
-    return safe(() => [...document.querySelectorAll(APPROVAL_CARD)].some(card =>
-      !onKeptPage(card) && card.getClientRects().length > 0 && card.querySelector('button:not([disabled])') !== null), false);
+    return safe(() => waitingApprovalCard() !== null, false);
+  }
+
+  function waitingApprovalCard() {
+    return [...document.querySelectorAll(APPROVAL_CARD)].find(card =>
+      !onKeptPage(card) && card.getClientRects().length > 0 && card.querySelector('button:not([disabled])') !== null) ?? null;
+  }
+
+  /**
+   * The waiting card as the app shows it to the person (2.1.38): its words, line by line, without
+   * its buttons and key hints, and whether ChatGPT lets Allow once be pressed. In a chat with
+   * external app access switched off, ChatGPT shows the card with Allow once disabled and only
+   * Deny enabled (2026-10-14), so the app must not offer Allow there. Only text leaves the page.
+   */
+  function approvalCard() {
+    return safe(() => {
+      const node = waitingApprovalCard();
+      if (!node) return null;
+      const clone = node.cloneNode(true);
+      for (const drop of clone.querySelectorAll('button, kbd, svg, script, style, [aria-hidden="true"]')) drop.remove();
+      const lines = [];
+      const block = element => element.closest('div, p, li, h1, h2, h3, h4, h5, h6');
+      const groups = new Map();
+      const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const owner = node.parentElement && block(node.parentElement);
+        if (!owner) continue;
+        groups.set(owner, (groups.get(owner) || '') + node.textContent);
+      }
+      for (const text of groups.values()) {
+        const line = text.replace(/\s+/g, ' ').trim().slice(0, 300);
+        if (line && lines.at(-1) !== line && lines.length < 8) lines.push(line);
+      }
+      return { node, lines, allow: approvalButton(node, 'allow') !== null };
+    }, null);
+  }
+
+  /** Deny carries an Esc key hint and Allow once a Return hint (2026-10-14); no label is read. */
+  function approvalButton(card, choice) {
+    const hint = choice === 'deny' ? 'Esc' : choice === 'allow' ? '\u23CE' : null;
+    if (!hint) return null;
+    const buttons = [...card.querySelectorAll('button')].filter(button =>
+      [...button.querySelectorAll('kbd')].some(kbd => kbd.textContent.trim() === hint));
+    const button = buttons.length === 1 ? buttons[0] : null;
+    return button && !button.disabled && button.getAttribute('aria-disabled') !== 'true' ? button : null;
+  }
+
+  /**
+   * Presses Deny or Allow once on exactly the card the person answered in the app. A card that is
+   * gone or replaced is never answered through an old reference, and the options menu beside
+   * Allow once (where "always" lives) is never touched.
+   */
+  function answerApprovalCard(card, choice) {
+    return safe(() => {
+      if (!card || !card.isConnected || waitingApprovalCard() !== card) return 'card_changed';
+      const button = approvalButton(card, choice);
+      if (!button) return 'unavailable';
+      button.click();
+      return 'clicked';
+    }, 'unavailable');
   }
 
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
@@ -3481,6 +3541,8 @@ var CLF_DOM = (() => {
     sectionSignature,
     generating,
     approvalWaiting,
+    approvalCard,
+    answerApprovalCard,
     stopButton,
     stopGeneration,
     sendButton,
