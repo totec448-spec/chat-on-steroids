@@ -2408,5 +2408,10 @@
   "Plan limits not reported: Claude Code shows them in its own /usage": "尚未回報方案限額：Claude Code 會在自身的 /usage 中顯示",
   "Reported by Codex {0}": "Codex 回報於 {0}",
   "Reset since this reading": "此次讀取後已重設",
-  "Usage of other apps could not be read. Try Refresh.": "無法讀取其他應用程式的用量。請嘗試重新整理。"
+  "Usage of other apps could not be read. Try Refresh.": "無法讀取其他應用程式的用量。請嘗試重新整理。",
+  "ChatGPT workspace without admin rights": "沒有管理員權限的 ChatGPT 工作區",
+  "In Business, Enterprise and Edu workspaces, admins decide who may add custom apps. If Plugins offers no way to add a custom MCP server, ask a workspace admin to add the Core plugin with the name, description and tunnel ID shown here.": "在 Business、Enterprise 和 Edu 工作區中，由管理員決定誰可以新增自訂應用程式。如果「外掛」中沒有新增自訂 MCP 伺服器的選項，請工作區管理員使用此處顯示的名稱、說明和通道 ID 新增 Core 外掛。",
+  "The tunnel must belong to your workspace's organization on platform.openai.com. If Platform only shows your Personal organization, ask an admin to invite you to that organization, or to create the tunnel and a restricted key (Tunnels: Read and Use) for you.": "通道必須屬於你的工作區在 platform.openai.com 上的組織。如果 Platform 只顯示你的個人組織，請管理員邀請你加入該組織，或為你建立通道和受限金鑰（Tunnels: Read 和 Use）。",
+  "A Cloudflare quick tunnel gets a new URL on every start, so an admin would have to update the plugin each time. A tunnel ID stays the same, and so does your own HTTPS tunnel with Keep plugin URLs across restarts (Settings → General → For developers).": "Cloudflare 快速通道每次啟動都會取得新的 URL，因此管理員每次都得更新外掛。通道 ID 不會改變；開啟「重新啟動後保留外掛程式 URL」（設定 → 一般 → 開發者選項）的自有 HTTPS 通道也不會。",
+  "Anyone who can use the plugin can use this computer within the permissions you chose. Where the workspace allows it, ask the admin to make the plugin available only to you.": "能使用此外掛的人，都能在你選擇的權限範圍內使用這台電腦。如果工作區允許，請管理員將外掛設為僅限你使用。"
 }
