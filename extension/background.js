@@ -4725,6 +4725,79 @@ const HANDLERS = {
   }
 };
 
+/** This browser's own name and version, for the diagnostics report; nothing else about it. */
+async function browserIdentity() {
+  const clean = (name, version) => /^[A-Za-z0-9 ._-]{1,40}$/.test(String(name || '')) && /^[0-9][0-9.]{0,30}$/.test(String(version || ''))
+    ? { name: String(name), version: String(version) } : null;
+  try {
+    // Firefox answers for itself; Chrome-family browsers have no such call.
+    if (typeof browser !== 'undefined' && typeof browser.runtime?.getBrowserInfo === 'function') {
+      const info = await browser.runtime.getBrowserInfo();
+      const named = clean(info?.name, info?.version);
+      if (named) return named;
+    }
+  } catch { /* Fall through to the Chrome-family brands. */ }
+  try {
+    const data = navigator.userAgentData;
+    const values = data && typeof data.getHighEntropyValues === 'function' ? await data.getHighEntropyValues(['fullVersionList']) : null;
+    const brands = (Array.isArray(values?.fullVersionList) ? values.fullVersionList : Array.isArray(data?.brands) ? data.brands : [])
+      .filter(entry => !/not.?a.?brand/i.test(String(entry?.brand || '')));
+    // "Chromium" is listed by every Chrome-family browser; the other brand says which one it is.
+    const entry = brands.find(item => item.brand !== 'Chromium') || brands[0];
+    const named = entry && clean(entry.brand, entry.version);
+    if (named) return named;
+  } catch { /* Unknown below. */ }
+  return { name: 'unknown', version: null };
+}
+
+/**
+ * Browser and ChatGPT tab facts for the diagnostics report (2026-10-15): the browser's name and
+ * version, ChatGPT tabs counted by state, and which of ChatGPT's controls the most recently used
+ * awake tab still has. Counts and booleans only.
+ */
+async function environmentDiagnostics() {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { tabs = []; }
+  if (!Array.isArray(tabs)) tabs = [];
+  const backgroundWindow = await storedBackgroundWindow().catch(() => null);
+  const count = test => tabs.filter(test).length;
+  const awake = tabs.filter(tab => Number.isInteger(tab.id) && tab.status === 'complete' && tab.discarded !== true && tab.frozen !== true && tab.incognito !== true)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+  let page = null;
+  if (awake.length) {
+    try {
+      const reply = await tabReply(awake[0].id, { type: 'clf-page-checks' });
+      if (reply && typeof reply === 'object') {
+        page = {
+          composer: reply.composer === true, sendArea: reply.sendArea === true, modelMenu: reply.modelMenu === true, plusMenu: reply.plusMenu === true,
+          language: typeof reply.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(reply.language) ? reply.language : null
+        };
+      }
+    } catch { page = null; }
+  }
+  return {
+    browser: await browserIdentity(),
+    tabs: {
+      open: tabs.length,
+      discarded: count(tab => tab.discarded === true),
+      frozen: count(tab => tab.frozen === true),
+      loading: count(tab => tab.status === 'loading'),
+      grouped: count(tab => Number.isInteger(tab.groupId) && tab.groupId >= 0),
+      inBackgroundWindow: Number.isInteger(backgroundWindow?.id) ? count(tab => tab.windowId === backgroundWindow.id) : 0
+    },
+    page
+  };
+}
+
+/** The snapshot is published on every maintenance pass; a page is asked at most once a minute. */
+let environmentCache = null;
+async function cachedEnvironmentDiagnostics() {
+  if (environmentCache && Date.now() - environmentCache.at < 60_000) return environmentCache.value;
+  const value = await environmentDiagnostics().catch(() => null);
+  environmentCache = { at: Date.now(), value };
+  return value;
+}
+
 /** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
 async function companionDiagnosticSnapshot(found) {
   const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
@@ -4749,7 +4822,8 @@ async function companionDiagnosticSnapshot(found) {
     preferences: { overwrite: preferences[RENDER_STREAM_KEY] !== false, durations: preferences[SHOW_TIMES_KEY] === true },
     // Defaults on a fresh install are not choices; the app keeps only values someone stored.
     preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
-    tab: await HANDLERS.tabStatus()
+    tab: await HANDLERS.tabStatus(),
+    environment: await cachedEnvironmentDiagnostics()
   };
 }
 

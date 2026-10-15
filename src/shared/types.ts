@@ -651,6 +651,16 @@ export interface CompanionDiagnostics {
     durations: boolean;
   };
   tab: CompanionTabDiagnostics | null;
+  /** For the diagnostics report: names, versions, counts and booleans only. Absent from older extensions. */
+  environment?: CompanionEnvironment | null;
+}
+
+export interface CompanionEnvironment {
+  browser: { name: string; version: string | null };
+  /** ChatGPT tabs by state. */
+  tabs: { open: number; discarded: number; frozen: number; loading: number; grouped: number; inBackgroundWindow: number };
+  /** Which of ChatGPT's controls the most recently used awake ChatGPT tab still has. */
+  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null } | null;
 }
 
 export interface CompanionTraceEntry {
