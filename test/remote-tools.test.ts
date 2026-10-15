@@ -171,4 +171,40 @@ real('tools in a folder on a server', () => {
     expect(existsSync(path.join(app, 'one.ts'))).toBe(false);
     expect(existsSync(path.join(local, 'two.ts'))).toBe(false);
   });
+
+  it('finds files by name in every folder, the server folder included', async () => {
+    await fs.writeFile(path.join(local, 'a-local.ts'), 'x');
+    const reply = await call('find', { query: 'a', mode: 'name', include: '*.ts' });
+    expect(reply.isError, reply.text).toBe(false);
+    expect(reply.text).toContain('/app/src/a.ts');
+    expect(reply.text).toContain('/local/a-local.ts');
+  });
+
+  it('searches contents on the server, skipping excluded folders, with plain text and a regex', async () => {
+    await fs.mkdir(path.join(app, 'node_modules', 'pkg'), { recursive: true });
+    await fs.writeFile(path.join(app, 'node_modules', 'pkg', 'index.js'), 'export const a = 1;\n');
+    const plain = await call('find', { query: 'const a', mode: 'content', path: '/app' });
+    expect(plain.isError, plain.text).toBe(false);
+    expect(plain.text).toContain('/app/src/a.ts:1: export const a = 1;');
+    expect(plain.text).not.toContain('node_modules');
+    const pattern = await call('find', { query: 'line [12]0$', mode: 'content', path: '/app', regex: true });
+    expect(pattern.text).toContain('/app/notes.txt:10: line 10');
+    expect(pattern.text).toContain('/app/notes.txt:20: line 20');
+    expect(pattern.text).not.toContain('line 30');
+    const one = await call('find', { query: 'line 7', mode: 'content', path: '/app/notes.txt' });
+    expect(one.text).toContain('/app/notes.txt:7: line 7');
+    const limited = await call('find', { query: 'line', mode: 'content', path: '/app', max_results: 3 });
+    expect(limited.text).toContain('3 matches');
+    expect(limited.text).toContain('truncated: limit');
+  });
+
+  it('still searches the other folders when the server cannot be reached, and says which was not searched', async () => {
+    await fs.writeFile(path.join(local, 'a-local.ts'), 'x');
+    closeRemoteSessions();
+    setSftpOpenerForTests(async () => { throw new Error('The server did not answer in time.'); });
+    const reply = await call('find', { query: 'a', mode: 'name' });
+    expect(reply.isError, reply.text).toBe(false);
+    expect(reply.text).toContain('/local/a-local.ts');
+    expect(reply.text).toMatch(/not_searched: \/app \(.*did not answer in time/);
+  });
 });
