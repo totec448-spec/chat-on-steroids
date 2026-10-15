@@ -102,7 +102,8 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { restoreManagedWorktrees } from './worktrees/index.js';
-import { applyStagedUpdate, ELEVATION_ANSWER_MS, startUpdateChecks } from './update.js';
+import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onUpdateHandoffStep, startUpdateChecks } from './update.js';
+import { setUpdateProgressStep, showUpdateProgress } from './update-progress.js';
 import { resumeUpdateRefresh } from './update-all.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
@@ -731,6 +732,13 @@ app.on('will-quit', (event) => {
   stopInputStartup();
   tray?.destroy();
   tray = null;
+  // A person who pressed Restart and install sees what happens until the installer takes over;
+  // the main window is already gone here (2.1.38).
+  const installing = installingVersion();
+  if (installing) {
+    onUpdateHandoffStep(setUpdateProgressStep);
+    showUpdateProgress(installing);
+  }
 
   void runShutdownSequence(
     [
