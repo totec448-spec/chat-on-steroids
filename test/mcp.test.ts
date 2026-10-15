@@ -933,6 +933,18 @@ describe('surface boundaries', () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
+  it('answers usage without the identity notice, which only matters for chat-bound work', async () => {
+    everything();
+    // usage reads nothing that belongs to a chat. It answers before the page's evidence for its
+    // request arrives, so it always looked unattributed, and the notice reached the model each time.
+    const usage = JSON.stringify((await core('tools/call', { name: 'usage', arguments: {} })).body.result?.content);
+    expect(usage).toContain('ChatGPT limits');
+    expect(usage).not.toContain('Identity notice');
+    // The same harness still marks chat-bound tools, so the call above really was unattributed.
+    const read = JSON.stringify((await core('tools/call', { name: 'read', arguments: { paths: ['/workspace'] } })).body.result?.content);
+    expect(read).toContain('Identity notice');
+  });
+
   it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
     everything();
     const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
