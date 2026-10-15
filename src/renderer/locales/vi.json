@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "Không thể đọc trạng thái cập nhật plugin đã lưu.",
   "The release information has no valid version number.": "Thông tin bản phát hành không có số phiên bản hợp lệ.",
   "The downloaded update did not match the published checksum.": "Mã kiểm tra của bản cập nhật đã tải xuống không khớp với mã đã công bố.",
+  "GitHub could not be reached. Check your connection": "Không thể kết nối với GitHub. Kiểm tra kết nối của bạn",
   "Could not check for updates: HTTP {0}.": "Không thể kiểm tra bản cập nhật: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "Không thể tải xuống {0}: HTTP {1}.",
   "Release {0} does not include {1}.": "Bản phát hành {0} không có {1}.",

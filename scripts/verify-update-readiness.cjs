@@ -271,6 +271,32 @@ app.whenReady().then(async () => {
       await js(`window.fixturePush(window.fixtureState)`);
       assert.equal(await js(`document.getElementById('updateAllError').checkVisibility()`),true);
       assert.deepEqual(await js('window.mutations'),['update-all','diagnostics-report']);
+      // The updater owns network classification; both release-check and download banners
+      // must use the same translated reason as the card and retained operation error.
+      const networkReason = copy('GitHub could not be reached. Check your connection');
+      for (const program of [
+        `(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:null,error:'GitHub could not be reached'};window.fixturePush(next)})()`,
+        `(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:'99.0.0',error:'GitHub could not be reached'};window.fixturePush(next)})()`
+      ]) {
+        await js(program);
+        assert.ok(await js(`document.querySelector('[data-update-part="app"]').textContent.includes(${JSON.stringify(networkReason)})`),lang+' readable network reason in app row');
+        for (const id of ['updateText','updateLine']) {
+          assert.ok(await js(`document.getElementById('${id}').textContent.includes(${JSON.stringify(networkReason)})`),lang+' translated network reason in '+id);
+        }
+      }
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'GitHub could not be reached'})`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      await until(`!document.querySelector('.toast')`);
+      assert.ok(await js(`document.getElementById('updateAllError').textContent.includes(${JSON.stringify(networkReason)})`),lang+' translated operation failure');
+      assert.ok(await js(`document.getElementById('updateAllError').textContent.includes(${JSON.stringify(copy('Choose Update all to retry.'))})`),lang+' explicit network retry');
+      assert.equal(await js(`(()=>{const c=document.querySelector('.update-readiness');return c.scrollWidth<=c.clientWidth+1&&[...c.querySelectorAll('p:not(.sr-only),button')].every(e=>e.scrollWidth<=e.clientWidth+1)})()`),true,lang+' network recovery copy wraps');
+      await js(`document.getElementById('updateReadinessToggle').click()`);
+      assert.equal(await js(`(()=>{const e=document.getElementById('updateAllError'),b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return e.checkVisibility()&&e.getBoundingClientRect().bottom<=innerHeight&&r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' network failure and retry stay reachable with closed details');
+      if(['en','ja','de'].includes(lang)){await pause(200);await shot('network-after-'+lang+'.png');}
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate();window.fixturePush(window.fixtureState)`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,lang+' explicit successful retry clears network error');
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
       console.log('PASS locale: '+lang+'; closed details, translated failure, both actions reachable, no implicit retry');
     }
     assert.deepEqual(errors,[],'No production renderer errors');

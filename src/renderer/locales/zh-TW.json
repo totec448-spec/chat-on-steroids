@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "無法讀取已儲存的外掛更新狀態。",
   "The release information has no valid version number.": "版本發布資訊中沒有有效的版本號碼。",
   "The downloaded update did not match the published checksum.": "下載的更新檔案檢查碼與發布的值不一致。",
+  "GitHub could not be reached. Check your connection": "無法連線 GitHub。請檢查網路連線",
   "Could not check for updates: HTTP {0}.": "無法檢查更新：HTTP {0}。",
   "Could not download {0}: HTTP {1}.": "無法下載 {0}：HTTP {1}。",
   "Release {0} does not include {1}.": "版本 {0} 不包含 {1}。",

@@ -46,7 +46,8 @@ vi.mock('electron', () => ({
     relaunch: (options: { execPath?: string }) => relaunched.push(options)
   }
 }));
-vi.mock('../src/main/logger.js', () => ({ logInfo: () => undefined, logWarn: () => undefined }));
+const warnings: string[] = [];
+vi.mock('../src/main/logger.js', () => ({ logInfo: () => undefined, logWarn: (message: string) => warnings.push(message) }));
 
 const { APP_VERSION } = await import('../src/main/version.js');
 const { isNewer } = await import('../src/shared/types.js');
@@ -139,6 +140,7 @@ beforeEach(() => {
   packaged = true;
   spawned.length = 0;
   relaunched.length = 0;
+  warnings.length = 0;
   resetUpdateForTests();
 });
 
@@ -670,6 +672,45 @@ describe('staged executable authority across later events', () => {
 
 describe('a check or download that goes wrong on a bad connection', () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it.each(['API', 'public release page', 'artifact'] as const)('explains a rejected %s request, keeps its diagnostic and can retry', async request => {
+    const { fetch } = github({ apiStatus: request === 'public release page' ? 403 : undefined });
+    const answer = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async input => {
+      const url = String(input);
+      if (request === 'API' ? url.includes('api.github.com')
+        : request === 'public release page' ? url === 'https://github.com/totec448-spec/chat-on-steroids/releases/latest'
+        : url.endsWith(WINDOWS_ASSET)) {
+        throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') });
+      }
+      return answer(input);
+    });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({
+      latest: request === 'artifact' ? NEXT : null, stage: 'failed', error: 'GitHub could not be reached'
+    });
+    expect(fetch).toHaveBeenCalledTimes(request === 'API' ? 1 : request === 'public release page' ? 2 : 3);
+    expect(warnings).toContain('update check failed: fetch failed');
+    expect(markInstallOnQuit()).toBe(false);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+  });
+
+  it.each([
+    new Error('fetch failed'),
+    new TypeError('Invalid URL'),
+    new Error('EACCES: permission denied')
+  ])('preserves an unrelated updater error: %s', async failure => {
+    const { fetch } = github();
+    fetch.mockRejectedValueOnce(failure);
+    await checkForUpdates();
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed', error: failure.message });
+    expect(warnings).toContain(`update check failed: ${failure.message}`);
+  });
 
   /**
    * The app starts at login, often before the network is up. The check failed, Activity showed

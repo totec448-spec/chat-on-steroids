@@ -235,7 +235,10 @@ export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
   const run = runPass()
     .catch((err: Error) => {
-      set({ stage: 'failed', error: err.message });
+      // This pass owns GitHub requests; keep its transport failure readable without
+      // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
+      const reason = err instanceof TypeError && err.message === 'fetch failed' ? 'GitHub could not be reached' : err.message;
+      set({ stage: 'failed', error: reason });
       logWarn(`update check failed: ${err.message}`);
     })
     .finally(() => {

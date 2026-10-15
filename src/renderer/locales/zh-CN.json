@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "无法读取已保存的插件更新状态。",
   "The release information has no valid version number.": "发布信息中没有有效的版本号。",
   "The downloaded update did not match the published checksum.": "下载的更新文件校验和与发布的值不一致。",
+  "GitHub could not be reached. Check your connection": "无法连接 GitHub。请检查网络连接",
   "Could not check for updates: HTTP {0}.": "无法检查更新：HTTP {0}。",
   "Could not download {0}: HTTP {1}.": "无法下载 {0}：HTTP {1}。",
   "Release {0} does not include {1}.": "版本 {0} 不包含 {1}。",
