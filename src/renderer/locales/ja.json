@@ -2439,5 +2439,7 @@
   "Chats the app opens go to your regular browser window, never an incognito one.": "アプリが開くチャットは通常のブラウザウィンドウに入り、シークレットウィンドウには入りません。",
   "A fuller diagnostics report": "より充実した診断レポート",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "アプリのインストール方法、ブラウザ、クラッシュ、よくある警告、各チャットの状態も表示します。個人的な情報は引き続き含みません。",
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox はアドオンを自動で更新します。今すぐ更新するには Firefox で about:addons を開いて「更新を確認」を選び、ChatGPT を再読み込みしてください。",
+  "{0} min": "{0} 分",
   "OpenAI outage": "OpenAI 障害"
 }

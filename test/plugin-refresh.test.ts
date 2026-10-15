@@ -21,6 +21,22 @@ const publish = (version = '1', declarations = tools) => { publishPluginSurface(
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
 const consumeStartup = consumeRequestedPluginRefreshStartup;
+it.each(['claimed', 'manual', 'completed'] as const)('keeps the scoped enrolled App ID in an explicit %s observation without another Refresh claim', async state => {
+  publish(); const first = (await pendingPluginRefreshes())[0]!;
+  if (state === 'manual') await requireManualPluginRefresh({ ...first, appId, connectorName: first.connectorName,
+    tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual outcome' });
+  else {
+    expect(await claim(first)).toBe(true);
+    if (state === 'completed') expect(await completePluginRefresh({ ...first, appId, tools })).toBe(true);
+  }
+  await requestPluginRefreshes(APP_VERSION);
+  const observation = (await pendingPluginRefreshes(false))[0]!;
+  expect(observation).toMatchObject({ appId, observeOnly: true });
+  expect(observation.id).not.toBe(first.id);
+  expect(await claim(observation)).toBe(false);
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ appId,
+    attempted: state !== 'manual', manual: state === 'manual' });
+});
 it.each(['claimed', 'manual', 'completed'] as const)('preserves unscoped legacy %s authority until the same app proves its tunnel and full schema', async state => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
   const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });

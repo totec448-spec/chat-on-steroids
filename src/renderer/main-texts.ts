@@ -23,6 +23,7 @@ export function mainTexts(): Record<MainText, string> {
     'Connected': t('Connected'),
     'No internet': t('No internet'),
     'OpenAI outage': t('OpenAI outage'),
+    'Diagnostics report': t('Diagnostics report'),
     'Not connected': t('Not connected'),
     'Core connection lost': t('Core connection lost'),
     'Desktop connection lost': t('Desktop connection lost'),
