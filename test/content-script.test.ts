@@ -730,6 +730,33 @@ describe('desktop input delivery and helper ownership', () => {
     expect(result).toEqual({ ok: purpose === 'rotation' });
     expect(live.sent.filter(message => message.ack)).toHaveLength(purpose === 'rotation' ? 1 : 0);
   });
+  // 2026-10-15, live on the VM: in the first turn of a chat the app opened, ChatGPT shows no row
+  // for the question (#942), and every automatic continue was refused before its claim because
+  // the page could not name the last user message. The page's own turn id is the proof instead.
+  it('takes an automatic continue into a first turn whose question is not shown', async () => {
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    // ChatGPT redraws the new chat without its question while the turn keeps running.
+    for (const row of live.document.querySelectorAll('[data-message-author-role="user"]')) row.closest('[data-testid^="conversation-turn"]')?.remove() ?? row.remove();
+    live.hook.observe(); await live.hook.flush();
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'rotation-continue', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn })).toEqual({ ok: true });
+    expect(sends()).toBe(1);
+    expect(live.sent.filter(message => message.ack)).toHaveLength(1);
+  });
   it('sends a message into the running turn while one of its calls is still running (#1231)', async () => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
