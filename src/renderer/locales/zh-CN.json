@@ -2439,5 +2439,6 @@
   "Chats the app opens go to your regular browser window, never an incognito one.": "应用打开的聊天会进入你的普通浏览器窗口，绝不会进入无痕窗口。",
   "A fuller diagnostics report": "更完整的诊断报告",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它还会显示应用的安装方式、浏览器、崩溃、常见警告以及每个聊天的状态，仍不包含任何个人信息。",
-  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox 会自行更新该附加组件。要立即更新，请在 Firefox 中打开 about:addons，选择“检查更新”，然后刷新 ChatGPT。"
+  "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox 会自行更新该附加组件。要立即更新，请在 Firefox 中打开 about:addons，选择“检查更新”，然后刷新 ChatGPT。",
+  "{0} min": "{0} 分钟"
 }
