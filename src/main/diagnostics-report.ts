@@ -11,8 +11,11 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
-import { app, dialog, shell, webContents, type BrowserWindow } from 'electron';
+import { execFile } from 'node:child_process';
+import { constants as fsConstants, promises as fs } from 'node:fs';
+import { app, dialog, screen, shell, webContents, type BrowserWindow } from 'electron';
+import { chatLines, crashLines, errorSummaryLines, installKind, installLines, systemLines, toolCallLines, type ChatFactsSession } from './diagnostics-facts.js';
+import type { UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
@@ -35,6 +38,8 @@ export interface DiagnosticsReportSources {
   log: string;
   /** Every process of the app with what it is for; numbers only. */
   memory?: ProcessMemory[];
+  /** Lines from `diagnostics-facts.ts`: numbers, states and option names; error samples are scrubbed here. */
+  facts?: { install: string[]; system: string[]; crashes: string[]; errors: string[]; tools: string[]; chats: string[] };
   now: number;
 }
 
@@ -106,6 +111,43 @@ export function memoryFacts(window: BrowserWindow | null): ProcessMemory[] {
   } catch { return []; }
 }
 
+/** The app's own folder (the .app bundle on macOS): what a silent update has to write. */
+function appFolder(): string {
+  const exe = process.execPath;
+  const bundle = /^(.*?\.app)\/Contents\/MacOS\//.exec(exe)?.[1];
+  return bundle ? path.dirname(bundle) : path.dirname(exe);
+}
+
+/** Whether macOS still holds the download quarantine on the app; null elsewhere or unknown. */
+function quarantined(): Promise<boolean | null> {
+  const bundle = /^(.*?\.app)\/Contents\/MacOS\//.exec(process.execPath)?.[1];
+  if (process.platform !== 'darwin' || !bundle) return Promise.resolve(null);
+  return new Promise(resolve => execFile('/usr/bin/xattr', ['-p', 'com.apple.quarantine', bundle], { timeout: 3000 },
+    (error, stdout) => resolve(error ? ((error as { code?: unknown }).code === 1 ? false : null) : stdout.trim().length > 0)));
+}
+
+/** Everything `diagnostics-facts.ts` describes, gathered now. */
+export async function collectReportFacts(sources: { update: UpdateStatus; sessions: ChatFactsSession[]; inputs: Array<{ sessionId: string | null; state: string }>; now: number }):
+  Promise<NonNullable<DiagnosticsReportSources['facts']>> {
+  const writable = await fs.access(appFolder(), fsConstants.W_OK).then(() => true, () => false);
+  const disk = await fs.statfs(app.getPath('userData')).then(info => info.bavail * info.bsize, () => null);
+  let scaleFactors: number[] = [];
+  try { scaleFactors = screen.getAllDisplays().map(display => display.scaleFactor); } catch { /* No screen before ready. */ }
+  let crashDir: string | null = null;
+  try { crashDir = app.getPath('crashDumps'); } catch { /* Not available on this platform. */ }
+  return {
+    install: installLines({ kind: installKind(process.platform, process.execPath, process.env), packaged: app.isPackaged,
+      folderWritable: writable, quarantined: await quarantined(), update: sources.update, now: sources.now }),
+    system: systemLines({ totalBytes: os.totalmem(), freeBytes: os.freemem(), cpuModel: os.cpus()[0]?.model ?? '', cpuCount: os.cpus().length,
+      diskFreeBytes: disk, uptimeSeconds: process.uptime(), scaleFactors }),
+    crashes: await crashLines(crashDir, sources.now),
+    errors: errorSummaryLines(),
+    tools: toolCallLines(sources.now),
+    // Finished inputs say nothing about a stuck chat; only waiting and moving ones are counted.
+    chats: chatLines(sources.sessions, sources.inputs.filter(input => !['sent', 'failed', 'cancelled'].includes(input.state)), sources.now)
+  };
+}
+
 export function renderDiagnosticsReport(sources: DiagnosticsReportSources): string {
   const context: ScrubContext = {
     home: sources.home,
@@ -139,6 +181,11 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
       `System: ${sources.app.platform} ${sources.app.osRelease} (${sources.app.arch}), locale ${sources.app.locale}`,
       `Electron ${sources.app.electron}, Chrome ${sources.app.chrome}`
     ]),
+    ...(sources.facts ? [
+      section('Install and updates', sources.facts.install.map(scrub)),
+      section('System', sources.facts.system.map(scrub)),
+      section('Crashes and restarts', sources.facts.crashes)
+    ] : []),
     section('Browser connection', [...json(scrubValue(sources.bridge)), ...json(scrubValue(sources.extension))]),
     section('Connection self-test', sources.selfTest
       ? [sources.selfTest.summary, ...sources.selfTest.checks.map(check => `- ${check.name}: ${check.status} — ${check.detail}`)].map(scrub)
@@ -146,6 +193,11 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
     section('Settings', reportableSettings(getConfig())),
     ...(sources.memory?.length ? [section('Memory', memoryLines(sources.memory))] : []),
     section('Chats', [`${sources.sessions.length} chat(s), ${ended} ended, ${sources.projects.length} project(s)`]),
+    ...(sources.facts ? [
+      section('Active chats', sources.facts.chats.map(scrub)),
+      section('Tool calls (last 24 hours)', sources.facts.tools),
+      section('Most frequent warnings and errors since start', sources.facts.errors.map(scrub))
+    ] : []),
     section('Pending work', [...sources.commands, ...sources.workers].map(row => JSON.stringify(scrubValue(row)))),
     section('Log (most recent last)', [scrub(sources.log)])
   ];

@@ -78,7 +78,7 @@ import { runningToolActivity } from './mcp/call-context.js';
 import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
-import { readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
+import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
@@ -1201,6 +1201,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       new Promise<null>(resolve => setTimeout(() => resolve(null), 10_000).unref())
     ]);
     const workers = swarmState().agents;
+    const sessions = await listSessions().catch(() => []);
+    const now = Date.now();
+    const facts = await collectReportFacts({ update: updateStatus(), sessions,
+      inputs: await listInputs().catch(() => []), now }).catch(() => undefined);
     const text = renderDiagnosticsReport({
       app: systemFacts(app), home: app.getPath('home'),
       bridge: await bridgeStatus(), extension: await companionDiagnostics().catch(() => null),
@@ -1208,12 +1212,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       commands: pendingCommands().map(({ id, what, lastError }) => ({ command: id, what, lastError })),
       workers: workers.map(({ id, role, state, model, reasoningEffort, createdAt, activatedAt, finishedAt, pending, delivered, conversationId, revivable }) =>
         ({ worker: id, role, state, model, reasoningEffort, createdAt, activatedAt, finishedAt, pending, delivered, conversationId, revivable })),
-      sessions: await listSessions().catch(() => []),
+      sessions,
       projects: await listProjects().catch(() => []),
       workerTexts: workers.flatMap(worker => [worker.task ?? '', worker.label ?? '', worker.result ?? '']),
       log: await readRecentLog(),
       memory: memoryFacts(getWindow()),
-      now: Date.now()
+      ...(facts ? { facts } : {}),
+      now
     });
     return saveDiagnosticsReport(text, getWindow());
   });
