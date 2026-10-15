@@ -37,7 +37,16 @@ Core, Desktop and Plugins are separate plugins in ChatGPT. Configure each surfac
 
 **Cloudflare quick tunnel:** connect in CoS and use the displayed public URL as the MCP server URL in ChatGPT. The random path is a secret and changes on restart.
 
-**Your own HTTPS tunnel** (for example a named Cloudflare tunnel): forward to the loopback URL shown by CoS and preserve its secret path. Treat the resulting URL like a password. The secret path changes every time CoS starts, even when your hostname stays the same, so after each restart update the URL in each Chat On Steroids app in ChatGPT and refresh it. Until then, ChatGPT still lists the app but has no tools from it. The OpenAI Secure Tunnel avoids this, because ChatGPT stores its tunnel ID instead of a URL.
+**Your own HTTPS tunnel** (for example a named Cloudflare tunnel): forward to the loopback URL shown by CoS and preserve its secret path. Treat the resulting URL like a password. By default the secret path changes every time CoS starts, even when your hostname stays the same, so after each restart you would update the URL in each Chat On Steroids app in ChatGPT and refresh it. Turn on **Settings → General → For developers → Keep plugin URLs across restarts** to keep the paths instead (they are stored in your system's secure storage; turning it off forgets them). The OpenAI Secure Tunnel needs neither, because ChatGPT stores its tunnel ID instead of a URL.
+
+### ChatGPT Business, Enterprise and Edu workspaces
+
+In these workspaces, the workspace's admins decide who may add custom apps, and the tunnel has to belong to the workspace's organization on Platform. A member without admin rights can run into two walls ([#1495](https://github.com/totec448-spec/chat-on-steroids/issues/1495)). Setup's **Add it in ChatGPT** step has the same advice under **ChatGPT workspace without admin rights**.
+
+- **Platform shows only your Personal organization.** Being a member of the workspace in ChatGPT doesn't make you a member of its organization on [platform.openai.com](https://platform.openai.com). Ask an admin to invite you to that organization, or to create the tunnel and a **Restricted** API key with **Tunnels: Read** and **Tunnels: Use** for you.
+- **Plugins offers no way to add a custom MCP server.** Ask an admin to add the **Core** plugin (and **Desktop** or **Plugins** if you use them) with the exact name and description Setup shows, connected to your tunnel ID.
+- **Use an address that doesn't change.** A tunnel ID never changes, so the admin adds the plugin once. With your own HTTPS tunnel, turn on **Keep plugin URLs across restarts** before sending the admin the URL. A Cloudflare quick tunnel gets a new URL on every start, so it doesn't work for a plugin an admin publishes.
+- **Keep it to yourself.** Anyone who can use the plugin can use your computer within the permissions you chose in CoS. Where the workspace allows it, ask the admin to make the plugin available only to you.
 
 ## Browser bridge port
 
