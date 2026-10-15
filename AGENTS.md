@@ -5078,7 +5078,9 @@ retaining the original diagnostic in its warning log. The card, update banners a
 Update all error share the renderer's update-error formatter; unknown errors remain literal.
 On Windows the handoff first repeats the installer's own `icacls` sandbox grant on the app folder;
 an exit code there means the folder needs an administrator, so the installer is started through
-`Start-Process -Verb RunAs` (#1490). The handoff leaves `updates/handoff.json`; a next start still
+`Start-Process -Verb RunAs` (#1490). That PowerShell stays attached (detached it has no console and
+runs nothing), and the handoff waits for Windows' answer, at most `ELEVATION_ANSWER_MS`, which the
+shutdown's update-handoff budget covers; a refusal is logged. The handoff leaves `updates/handoff.json`; a next start still
 older than that version reports `UpdateStatus.notInstalled` once (the update line says it did not
 install and never "Up to date" over it), and installing again clears it.
 
