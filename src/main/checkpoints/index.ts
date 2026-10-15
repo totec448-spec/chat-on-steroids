@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { responseTurnId } from '../../shared/chronology.js';
 import { CHECKPOINT_REF_PREFIX, type CheckpointRestoreResult, type ProjectGitSnapshot } from '../../shared/project-git.js';
+import { getConfig } from '../config.js';
 import { logWarn } from '../logger.js';
 import { currentCall } from '../mcp/call-context.js';
 import { projectRestoreTarget, revalidateProjectFileTarget } from '../project-files.js';
@@ -128,10 +129,13 @@ async function captureWithinBudget(context: RepositoryContext, sessionId: string
 
 /**
  * Called after a patch verified and before it executes. Never fails the patch: an unproven
- * caller, a chat without a Git project or a capture failure simply takes no checkpoint.
+ * caller, a chat without a Git project or a capture failure simply takes no checkpoint. With
+ * `projects.codeCheckpoints` Off (read here, at capture time) none is taken; existing ones stay
+ * listed and `restoreCheckpoint` is unaffected.
  */
 export async function checkpointBeforePatch(realPaths: readonly string[]): Promise<void> {
   try {
+    if (getConfig().projects?.codeCheckpoints !== true) return;
     const caller = currentCall()?.caller;
     const sessionId = caller?.sessionId;
     if (!sessionId) return;
