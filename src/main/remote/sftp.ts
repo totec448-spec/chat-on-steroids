@@ -240,12 +240,24 @@ export class SftpClient {
     catch (error) { if ((error as SftpError).code === 'EOF') return null; throw error; }
   }
 
+  /** Opens a regular file for reading; a folder, device or pipe is refused like a local read refuses it. */
+  private async openRead(target: string): Promise<{ handle: Buffer; size: number }> {
+    const handle = (await this.expect(Packet.Handle, this.request(Packet.Open, w => w.string(target).u32(OPEN_READ).attrs(), target))).bytes();
+    try {
+      const stats = (await this.expect(Packet.Attrs, this.request(Packet.Fstat, w => w.bytes(handle), target))).attrs();
+      if (!stats.isFile) throw new SftpError('EINVAL', `path \`${target}\` is not a file`);
+      return { handle, size: stats.size };
+    } catch (error) {
+      await this.closeHandle(handle);
+      throw error;
+    }
+  }
+
   /** The file's bytes, up to `maxBytes`; a file still growing is read until its end at that moment. */
   async readFile(target: string, options: { maxBytes?: number } = {}): Promise<Buffer> {
     const limit = Math.max(0, options.maxBytes ?? DEFAULT_MAX_READ);
-    const handle = (await this.expect(Packet.Handle, this.request(Packet.Open, w => w.string(target).u32(OPEN_READ).attrs(), target))).bytes();
+    const { handle, size } = await this.openRead(target);
     try {
-      const size = (await this.expect(Packet.Attrs, this.request(Packet.Fstat, w => w.bytes(handle), target))).attrs().size;
       const known = Math.min(size, limit);
       const parts: Buffer[] = [];
       // The size known up front is read in parallel chunks; a short chunk is completed after.
@@ -276,6 +288,34 @@ export class SftpClient {
         parts.push(more); total += more.length;
       }
       return Buffer.concat(parts);
+    } finally { await this.closeHandle(handle); }
+  }
+
+  /** The file's bytes in pieces of up to 1 MiB, each read as parallel chunks; stops at the end. */
+  async *readStream(target: string): AsyncGenerator<Buffer, void, undefined> {
+    const { handle } = await this.openRead(target);
+    try {
+      for (let start = 0; ; start += CHUNK * IN_FLIGHT) {
+        const batch: Array<Promise<Buffer | null>> = [];
+        for (let index = 0; index < IN_FLIGHT; index++) batch.push(this.readChunk(handle, start + index * CHUNK, CHUNK, target));
+        const parts: Buffer[] = [];
+        let ended = false;
+        let offset = start;
+        for (const data of await Promise.all(batch)) {
+          let piece = data ?? Buffer.alloc(0);
+          while (piece.length < CHUNK) {
+            const more = await this.readChunk(handle, offset + piece.length, CHUNK - piece.length, target);
+            if (!more?.length) break;
+            piece = Buffer.concat([piece, more]);
+          }
+          parts.push(piece);
+          offset += CHUNK;
+          if (piece.length < CHUNK) { ended = true; break; }
+        }
+        const bytes = Buffer.concat(parts);
+        if (bytes.length) yield bytes;
+        if (ended) return;
+      }
     } finally { await this.closeHandle(handle); }
   }
 
