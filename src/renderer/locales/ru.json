@@ -1967,6 +1967,7 @@
   "The saved plugin update state could not be read.": "Не удалось прочитать сохранённое состояние обновления плагинов.",
   "The release information has no valid version number.": "В информации о выпуске нет допустимого номера версии.",
   "The downloaded update did not match the published checksum.": "Контрольная сумма загруженного обновления не совпадает с опубликованной.",
+  "GitHub could not be reached. Check your connection": "Не удалось подключиться к GitHub. Проверьте подключение к сети",
   "Could not check for updates: HTTP {0}.": "Не удалось проверить обновления: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "Не удалось скачать {0}: HTTP {1}.",
   "Release {0} does not include {1}.": "Выпуск {0} не содержит {1}.",
