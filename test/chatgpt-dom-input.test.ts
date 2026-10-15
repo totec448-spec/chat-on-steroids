@@ -717,6 +717,26 @@ describe('Core app mention on app-owned sends (#861)', () => {
     expect(clicked.textContent!.trim().startsWith('Exact app prompt')).toBe(true);
     expect(api.messages().find(message => message.role === 'user')?.text).toBe('Exact app prompt');
   });
+  it('clicks Send once the editor drew the token while this page\'s timers are held back', async () => {
+    // 2026-10-15, Firefox: in the minimized window that holds app-opened chats, a 0 ms timer
+    // fired 25 s late. The editor had drawn the token at once; the wait for one task was the delay.
+    (dom.window as unknown as { MessageChannel: typeof MessageChannel }).MessageChannel = MessageChannel;
+    let clicked = false;
+    button.addEventListener('click', () => {
+      clicked = true;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    const result = api.send({ mention });
+    // Real tasks pass; no timer of this page fires.
+    for (let task = 0; task < 5 && !clicked; task++) await new Promise(resolve => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => { channel.port1.close(); resolve(null); };
+      channel.port2.postMessage(null);
+    });
+    expect(clicked).toBe(true);
+    expect(await result).toBe(true);
+  });
   it('removes its own token again when Send is not accepted', async () => {
     const result = api.send({ mention, acceptanceTimeoutMs: 1000 });
     await vi.advanceTimersByTimeAsync(1100);
