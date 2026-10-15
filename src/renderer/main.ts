@@ -2531,35 +2531,35 @@ initUpdateReadiness();
 $('updateReviewSetup').addEventListener('click', () => showTab('setup'));
 /**
  * The question before Update all restarts, in the app's own dialog (a system message box looked
- * foreign, 2026-10-15). Keep working is first and focused; only the named version is approved.
+ * foreign, 2026-10-15). Drawn like What's New: the app's tile, the version, one calm question.
+ * Keep working stays first and focused; only the named version is approved.
  */
 function confirmUpdateRestart(version: string): Promise<boolean> {
   document.getElementById('updateRestartDialog')?.remove();
   return new Promise(resolve => {
     const dialog = document.createElement('dialog');
-    dialog.id = 'updateRestartDialog'; dialog.className = 'plugin-dialog pet-delete-dialog';
-    const head = document.createElement('div'); head.className = 'plugin-dialog-head';
+    dialog.id = 'updateRestartDialog'; dialog.className = 'whats-new-dialog update-restart-dialog';
+    const head = document.createElement('header'); head.className = 'whats-new-head';
+    const hero = document.createElement('div'); hero.className = 'whats-new-hero'; hero.setAttribute('aria-hidden', 'true');
+    hero.innerHTML = '<span class="whats-new-tile"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>' +
+      '<span class="whats-new-seal"><i class="ico ph ph-arrow-clockwise"></i></span>';
+    const named = document.createElement('span'); named.className = 'whats-new-version';
+    ui(named, 'textContent', () => t('Version {0}', [version]));
     const title = document.createElement('h2'); title.id = 'updateRestartTitle';
     ui(title, 'textContent', () => t('Restart to install the update?'));
-    dialog.setAttribute('aria-labelledby', title.id);
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'btn';
-    ui(close, 'textContent', () => t('Close'));
-    close.addEventListener('click', () => dialog.close());
-    head.append(title, close);
-    const body = document.createElement('div'); body.className = 'plugin-dialog-body';
-    const named = document.createElement('p'); named.className = 'update-restart-version';
-    ui(named, 'textContent', () => t('Version {0}', [version]));
-    const note = document.createElement('p');
-    ui(note, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
-    const actions = document.createElement('div'); actions.className = 'pet-delete-actions';
-    const keep = document.createElement('button'); keep.type = 'button'; keep.className = 'btn btn-solid pet-delete-cancel';
+    const lead = document.createElement('p'); lead.className = 'whats-new-lead'; lead.id = 'updateRestartLead';
+    ui(lead, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
+    dialog.setAttribute('aria-labelledby', title.id); dialog.setAttribute('aria-describedby', lead.id);
+    head.append(hero, named, title, lead);
+    const actions = document.createElement('footer'); actions.className = 'whats-new-actions';
+    const keep = document.createElement('button'); keep.type = 'button'; keep.className = 'whats-new-link update-restart-keep';
     ui(keep, 'textContent', () => t('Keep working'));
     keep.addEventListener('click', () => dialog.close());
-    const restart = document.createElement('button'); restart.type = 'button'; restart.className = 'btn plugin-configure';
+    const restart = document.createElement('button'); restart.type = 'button'; restart.className = 'whats-new-done update-restart-go';
     ui(restart, 'textContent', () => t('Restart and install'));
     let approved = false;
     restart.addEventListener('click', () => { approved = true; dialog.close(); });
-    actions.append(keep, restart); body.append(named, note, actions); dialog.append(head, body);
+    actions.append(keep, restart); dialog.append(head, actions);
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
     dialog.addEventListener('close', () => { dialog.remove(); resolve(approved); });
     document.body.append(dialog); dialog.showModal(); keep.focus();

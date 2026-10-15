@@ -2588,7 +2588,7 @@ it('asks in the app\'s own dialog before Update all restarts, with Keep working 
   button.click();
   await vi.waitFor(() => expect(dialog()?.open).toBe(true));
   expect(updateAll).toHaveBeenNthCalledWith(1);
-  expect(dialog()!.classList.contains('plugin-dialog')).toBe(true);
+  expect(dialog()!.classList.contains('whats-new-dialog')).toBe(true);
   expect(dialog()!.textContent).toContain('2.1.99');
   expect(w.document.activeElement?.textContent).toBe('Keep working');
   (w.document.activeElement as HTMLButtonElement).click();
