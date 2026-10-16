@@ -54,7 +54,6 @@ import {
   type Hunk,
   type PatchPathResolver
 } from '../codex/apply-patch/index.js';
-import { DEFAULT_APPLY_PATCH_FILE_UPDATE_MODE } from '../codex/apply-patch/mode.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -1907,11 +1906,10 @@ async function runParsedPatch(
       return { result: fail(friendlyError(error)), content: null, exitCode: null };
     }
   }
-  // Move-only is a separate permission from Edit. Upstream's default update mode normalizes
-  // even context-only moves to LF, so a CRLF file would be byte-rewritten under Move alone.
-  // Preserve line endings whenever Edit is unavailable; any real content change was already
-  // rejected by patchCapabilityDenial before resolution.
-  const patchUpdateMode = caps !== undefined && !caps.edit ? 'preserve_line_endings' : DEFAULT_APPLY_PATCH_FILE_UPDATE_MODE;
+  // Upstream's default update mode splits on LF only: lines outside a hunk keep their CR while
+  // the hunk's context and new lines lose it, so one edit leaves a CRLF file with mixed endings
+  // (and a context-only move under Move alone would rewrite bytes). Keep each file's own endings.
+  const patchUpdateMode = 'preserve_line_endings';
 
   try {
     await verifyApplyPatchArgs(
