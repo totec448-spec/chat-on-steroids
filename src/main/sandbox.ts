@@ -287,7 +287,30 @@ function isNativePosixPath(roots: readonly Root[], input: unknown): input is str
  * equivalent virtual path; resolvePath then runs that through the exact same realpath,
  * symlink/junction and allowMissing checks as an originally-virtual path.
  */
+/**
+ * A path as a server prints it (`pwd`, error output), inside a server root's folder (#1469), as
+ * the virtual path it names. Lexical only, on every platform: the result is validated like any
+ * virtual path, and its folder is checked on the server. Local roots and virtual spellings win.
+ */
+function serverNativePath(roots: readonly Root[], input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
+  const first = trimmed.split('/').find(part => part.length > 0)?.toLowerCase();
+  if (first !== undefined && roots.some(root => root.name.toLowerCase() === first)) return null;
+  if (roots.some(root => !root.remote && path.posix.isAbsolute(root.path) && isContained(root.path, trimmed))) return null;
+  for (const root of roots) {
+    if (!root.remote) continue;
+    const prefix = root.remote.path.replace(/\/+$/, '');
+    if (trimmed === prefix || trimmed === `${prefix}/` || trimmed.startsWith(`${prefix}/`)) {
+      return `/${root.name}${trimmed.slice(prefix.length).replace(/\/+$/, '')}`;
+    }
+  }
+  return null;
+}
+
 async function normaliseNativePath(roots: readonly Root[], input: string): Promise<string | null> {
+  const onServer = typeof input === 'string' ? serverNativePath(roots, input) : null;
+  if (onServer) return onServer;
   const nativeWindows = isNativeWindowsPath(input);
   const nativePosix = isNativePosixPath(roots, input);
   if (!nativeWindows && !nativePosix) return null;
@@ -320,6 +343,8 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
     canonicalNative = native;
   }
   for (const root of roots) {
+    // A server root has no path on this computer to compare with.
+    if (root.remote) continue;
     let rootReal: string;
     try {
       rootReal = await realRoot(root);

@@ -77,6 +77,18 @@ real('paths in a folder on a server', () => {
     await expect(resolvePath([root], '/app/new.ts', { allowMissing: true })).rejects.toThrow(/only in folders on this computer/);
   });
 
+  // The model reads the server's own paths in command output (`pwd`) and copies them back.
+  it('takes a path as the server prints it, with the same rules as the virtual one', async () => {
+    expect(await resolvePath([root], `${app}/src/a.ts`, on)).toMatchObject({ real: path.join(app, 'src', 'a.ts'), virtual: '/app/src/a.ts' });
+    expect(await resolvePath([root], app, on)).toMatchObject({ virtual: '/app' });
+    await expect(resolvePath([root], `${app}/../outside`, on)).rejects.toThrow(SandboxError);
+    await expect(resolvePath([root], `${app}/escape/x`, { ...on, allowMissing: true })).rejects.toThrow(/escapes its approved folder/);
+    // Only at a segment boundary: a sibling whose name merely starts the same is not inside.
+    await expect(resolvePath([root], `${app}-other/x`, on)).rejects.toThrow(SandboxError);
+    // A caller that does not work on servers still never receives it.
+    await expect(resolvePath([root], `${app}/src/a.ts`)).rejects.toThrow(/only in folders on this computer/);
+  });
+
   it('says so when the folder is gone from the server', async () => {
     await fs.rm(app, { recursive: true, force: true });
     await expect(resolvePath([root], '/app/src/a.ts', on)).rejects.toThrow(/not available on the server/);

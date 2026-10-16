@@ -64,6 +64,21 @@ describe.skipIf(!SERVER || process.platform === 'win32')('opening SFTP through a
     expect(await fs.readFile(path.join(dir, 'args'), 'utf8')).toContain('-s -- me@box sftp');
   });
 
+  // On Windows a child outlives the app that started it; ssh also need not exit when its stream
+  // ends. Closing the sessions (as quitting does) ends the ssh processes themselves.
+  it('ends the ssh processes when the sessions are closed', async () => {
+    const fake = path.join(dir, 'fake-ssh');
+    await fs.writeFile(fake, `#!/bin/sh\necho $$ > "${dir}/pid"\n${SERVER}\nsleep 30\n`, { mode: 0o755 });
+    await sftpFor({ host: 'me@box', path: dir }, { ssh: fake });
+    const pid = Number((await fs.readFile(path.join(dir, 'pid'), 'utf8')).trim());
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    expect(alive()).toBe(true);
+    closeRemoteSessions();
+    const end = Date.now() + 3000;
+    while (alive() && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 50));
+    expect(alive()).toBe(false);
+  });
+
   it('reports why ssh could not connect', async () => {
     const fake = path.join(dir, 'fake-ssh');
     await fs.writeFile(fake, '#!/bin/sh\necho "me@box: Permission denied (publickey)." >&2\nexit 255\n', { mode: 0o755 });

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { SftpClient, SftpError } from './sftp.js';
@@ -92,9 +92,18 @@ export function sshProgram(): string {
 
 export interface SshOptions { ssh?: string }
 
+/**
+ * The ssh processes behind open SFTP sessions. Closing a session's stream need not end its ssh, and
+ * on Windows a child outlives the app that started it, so `closeRemoteSessions` ends them itself.
+ */
+const sftpProcesses = new Set<ChildProcess>();
+
 /** One SFTP session over `ssh -s <host> sftp`; ssh's error output explains a failed start. */
 export async function openSftp(remote: RemoteFolder, options: SshOptions = {}): Promise<SftpClient> {
   const child = spawn(options.ssh ?? sshProgram(), sshArgs(remote, ['-s'], ['sftp']), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  sftpProcesses.add(child);
+  child.once('exit', () => sftpProcesses.delete(child));
+  child.once('error', () => sftpProcesses.delete(child));
   let stderr = '';
   child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 8192) stderr += chunk.toString('utf8'); });
   const exited = new Promise<never>((_resolve, reject) => {
@@ -135,8 +144,10 @@ export function sftpFor(remote: RemoteFolder, options: SshOptions = {}): Promise
   return opening;
 }
 
-/** Closes every SFTP session (quit, tests). */
+/** Closes every SFTP session and ends the ssh processes behind them (quit, tests). */
 export function closeRemoteSessions(): void {
   for (const session of sessions.values()) session.then(client => client.close(), () => undefined);
   sessions.clear();
+  for (const child of sftpProcesses) { try { child.kill(); } catch { /* already gone */ } }
+  sftpProcesses.clear();
 }
