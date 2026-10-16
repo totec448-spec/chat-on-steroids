@@ -828,6 +828,41 @@ describe('desktop input delivery and helper ownership', () => {
     expect(ends[0]!.event).toMatchObject({ outcome: 'completed' });
   });
 
+  it('opens the first turn from a Send the app acknowledged more than 30 seconds after it began', async () => {
+    // 2026-10-16, live in Firefox: a background window throttled the page, and the app-sent first
+    // message took 30 s from its composer receipt to the app's acknowledgement. The receipt was
+    // only accepted within 30 s of its start, so it never was; the next look at the page came
+    // after the answer, the question was already history, and no turn opened (1 in 4 new chats).
+    const submitted = 'Slow-ack test: reply with exactly the word ready.';
+    let holdActivity = false;
+    let releaseActivity!: (value: unknown) => void;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => holdActivity
+        ? new Promise(resolve => { releaseActivity = resolve; })
+        : ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [] } }),
+      desktop_input: message => {
+        if (message.ack) live!.advance(31_000);
+        return { ok: true, data: message.authorize ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: submitted }) } };
+      }
+    });
+    holdActivity = true;
+    live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+    live.hook.observe();
+    let user!: HTMLElement;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      user = userTurn(live!.document, 'slow-ack-user', submitted, { sent: false });
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    user.remove();
+    const answer = assistantTurn(live.document, 'slow-ack-answer', []);
+    prose(live.document, answer, 'slow-ack-message', 'ready');
+    releaseActivity({ ok: true, data: { entries: [], stream: [], nextSince: 1, activeTurnId: null, userAnchors: [] } });
+    await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
   it('closes a fast first answer whose end_turn ChatGPT reported before the turn opened (#1099)', async () => {
     // 2026-10-04, live: in a new chat ChatGPT redrew the first exchange without the question, and
     // an Instant answer had finished, end_turn and all, before the accepted Send opened the turn.
