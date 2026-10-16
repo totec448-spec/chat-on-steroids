@@ -7,6 +7,7 @@ import type {
   ControlApiInputs,
   ControlApiLive,
   ControlApiLog,
+  ControlApiModels,
   ControlApiSession,
   ControlApiSessionDetail,
   ControlApiSessionList,
@@ -20,6 +21,7 @@ import { userPromptText } from '../shared/user-prompt.js';
 import { swarmState } from './agents.js';
 import { sessionControlsFor } from './bridge.js';
 import type { SessionControlsView } from './bridge.js';
+import { getChatModels } from './chat-models.js';
 import { getLog, logWarn } from './logger.js';
 import { redactSecretText } from './redaction.js';
 import { deliveryProof, listInputs } from './session/input.js';
@@ -551,6 +553,13 @@ export async function serveRead(route: string, params: URLSearchParams): Promise
     return projectAgents(swarmState());
   }
   if (route === '/v1/log') return activityLog(params);
+  if (route === '/v1/models') {
+    parseQuery(params, {});
+    // The saved catalog only: reading it never opens a page or the picker.
+    const { state, observedAt, models } = getChatModels();
+    const body: ControlApiModels = { state, observedAt, models: models.map(({ id, label, efforts }) => ({ id, label, efforts: [...efforts] })) };
+    return body;
+  }
   const session = SESSION_ROUTE.exec(route);
   if (session) return session[2] ? sessionEvents(session[1]!, params) : sessionDetail(session[1]!, params);
   return undefined;
