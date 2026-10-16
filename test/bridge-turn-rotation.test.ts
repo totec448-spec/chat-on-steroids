@@ -20,7 +20,8 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { APP_VERSION, BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
-const { resetBridgeForTests, shutdownBridge, startBridge } = await import('../src/main/bridge.js');
+const { resetBridgeForTests, shutdownBridge, startBridge, sessionInputActivity } = await import('../src/main/bridge.js');
+const { getSession } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, writeDurableSoon } = await import('../src/main/durable.js');
 const { findSessionByConversation, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
@@ -173,6 +174,29 @@ describe('turn rotation (#1402)', () => {
     await setGoalSwitchNow(chat, which, true);
     await attributedCall(chat);
     expect(await rotationsFor(sessionId)).toEqual([]);
+  });
+
+  it('lets the next message go once the fresh turn after a rotation answers', async () => {
+    // The page reports a rotation as one batch: the rotated turn's end, the fresh turn's start
+    // and the continue. A batch with an end never moved the activity grant to the new turn, and
+    // the fresh turn's later work renewed it under the rotated turn's id. The fresh turn's final
+    // then spent nothing, so the chat looked busy and a message typed after the answer was held
+    // behind the rotated turn for 163 s (2.1.40 release round, Windows).
+    const chat = 'f0f00003-1111-4111-8111-000000000007';
+    const sessionId = await turnFor(chat, 'g-rot-follow-0-1', 31);
+    await attributedCall(chat);
+    const at = Date.now();
+    await events(chat, [
+      { kind: 'turn_end', time: at, turnId: 'g-rot-follow-0-1', outcome: 'interrupted' },
+      { kind: 'turn_start', time: at + 1, turnId: 'g-rot-follow-0-2' },
+      { kind: 'user_message', time: at + 2, turnId: 'g-rot-follow-0-2', messageId: 'rot-follow-continue', text: 'Continue the task from where you are.' }
+    ]);
+    await events(chat, [{ kind: 'page_tool', time: at + 3, turnId: 'g-rot-follow-0-2', label: 'Read file', messageId: 'rot-follow-tool' }]);
+    await events(chat, [{ kind: 'assistant_message', time: at + 4, turnId: 'g-rot-follow-0-2', messageId: 'rot-follow-final', text: 'All steps are done.', state: 'final', final: true }]);
+    await events(chat, [{ kind: 'turn_end', time: at + 5, turnId: 'g-rot-follow-0-2', outcome: 'completed' }]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    // Before the fix this still read as exact work on the rotated turn g-rot-follow-0-1.
+    expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: false, possible: false });
   });
 
   it('is off at 0 minutes', async () => {
