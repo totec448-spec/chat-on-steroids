@@ -1407,7 +1407,10 @@ private func captureWindow(
     let configuration = SCStreamConfiguration()
     configuration.width = width
     configuration.height = height
-    configuration.showsCursor = true
+    // ScreenCaptureKit fails with -3811 when a desktop-independent window on another
+    // Space requests the current desktop's cursor. Capture that window's pixels alone;
+    // never activate it or substitute a crop of whichever desktop happens to be visible.
+    configuration.showsCursor = window.isOnScreen
     configuration.ignoreShadowsSingleWindow = true
     let filter = SCContentFilter(desktopIndependentWindow: window)
     let image = try captureImage(filter: filter, configuration: configuration)
