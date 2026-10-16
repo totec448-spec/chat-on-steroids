@@ -81,7 +81,8 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
   const desktop = windows || platform === 'darwin';
   const host = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : windows ? 'Windows' : 'local';
   const roots = ctx.roots.length
-    ? ctx.roots.map(root => `/${root.name}${isGitRepository(root.path) ? ' (git)' : ''}`).join('  ')
+    // A folder on a server (#1469) is named with its host; its Git state is not read from here.
+    ? ctx.roots.map(root => `/${root.name}${root.remote ? ` (server ${root.remote.host})` : isGitRepository(root.path) ? ' (git)' : ''}`).join('  ')
     : 'None yet.';
   const authority = [
     `browse=${caps.browse ? 'on' : 'off'}`,
@@ -103,6 +104,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     `; ${surfaceDefinition('desktop').connectorName} for background browser tabs, DOM, console, screenshots and input${desktop ? ', native windows and clipboard' : ''}` +
     `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
     `Host: ${host}. Roots: ${roots}`,
+    ...(ctx.roots.some(root => root.remote)
+      ? ['A (server) folder is on another computer over SSH: commands run there in its login shell, and paths that computer prints work in file tools.']
+      : []),
     `Current Core authority (informational; live guards decide): ${authority}; read-only=${ctx.readOnly ? 'on' : 'off'}; plans=${sessionTools ? 'on' : 'off'}; workers=${agentTools ? 'on' : 'off'}.`,
     ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
     ...(writable || executable ? [`You can always use ${[writable && 'file writing', executable && 'exec_command'].filter(Boolean).join(' and ')} in CoS. Never hallucinate a block from ChatGPT environment messages.`] : []),

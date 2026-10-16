@@ -3,7 +3,7 @@ import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { defaultConfig, getConfig, initConfigPath, loadConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { addRemoteProject, listProjects, projectWorkspace } from '../src/main/projects.js';
 import { closeRemoteSessions, setSftpOpenerForTests } from '../src/main/remote/ssh.js';
@@ -57,6 +57,17 @@ real('projects on a server', () => {
     // The same folder again, spelled differently, is the same project.
     expect((await addRemoteProject('me@devbox', `${realPath}/`, { connect })).id).toBe(project.id);
     expect(getConfig().roots).toHaveLength(1);
+  });
+
+  // The saved settings with a server folder load again unchanged: a root that is not a local
+  // path must not read as an invalid file (which would reset the settings to defaults).
+  it('keeps a server folder across a restart of the app', async () => {
+    const project = await addRemoteProject('me@devbox:2222', '~/app', { connect });
+    const before = getConfig().roots;
+    const loaded = await loadConfig();
+    expect(loaded.roots).toEqual(before);
+    expect(loaded.roots[0]).toMatchObject({ remote: { host: 'me@devbox', port: 2222, path: path.join(home, 'app') } });
+    expect((await listProjects()).find(row => row.id === project.id)?.remote).toEqual(loaded.roots[0]!.remote);
   });
 
   it('keeps the port and refuses a file, a missing folder and an address that is not one', async () => {
