@@ -2440,5 +2440,14 @@
   "A fuller diagnostics report": "より充実した診断レポート",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "アプリのインストール方法、ブラウザ、クラッシュ、よくある警告、各チャットの状態も表示します。個人的な情報は引き続き含みません。",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox はアドオンを自動で更新します。今すぐ更新するには Firefox で about:addons を開いて「更新を確認」を選び、ChatGPT を再読み込みしてください。",
-  "{0} min": "{0} 分"
+  "{0} min": "{0} 分",
+  "Folder on this computer…": "このコンピュータ上のフォルダ…",
+  "Folder on a server (SSH)…": "サーバー上のフォルダ（SSH）…",
+  "Test and add": "テストして追加",
+  "Add a folder on a server": "サーバー上のフォルダを追加",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids はあなた自身の SSH 設定（~/.ssh/config、エージェント、鍵、既知のホスト）で接続します。サインインは鍵のみで、サーバーには何もインストールされません。",
+  "SSH address": "SSH アドレス",
+  "Folder on the server": "サーバー上のフォルダ",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222、または ~/.ssh/config の Host",
+  "/srv/app or ~/app": "/srv/app または ~/app"
 }

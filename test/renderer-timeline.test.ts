@@ -1968,6 +1968,38 @@ it('Share a folder creates a sidebar project and keeps it when an older list ref
   expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: project.id, text: 'Work in this folder' });
 });
 
+// #1469: the sidebar's + offers a folder on this computer or one on a server.
+it('offers a local folder and a server folder from the sidebar +, and marks a server project', async () => {
+  const { w } = await boot([], false);
+  const api = (w as any).api;
+  const doc = w.document;
+  const local = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1', name: 'Local', path: '/local', createdAt: 1 };
+  const remote = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee2', name: 'app', path: 'me@devbox:/srv/app', createdAt: 2, remote: { host: 'me@devbox', path: '/srv/app' } };
+  api.addProject = vi.fn(async () => ({ ok: true, data: local }));
+  api.addRemoteProject = vi.fn(async () => ({ ok: true, data: remote }));
+  const item = (action: string) => doc.querySelector<HTMLButtonElement>(`[data-row-action="${action}"]`);
+  (doc.getElementById('addProject') as HTMLButtonElement).click();
+  await settle();
+  expect(item('add-local-project')?.textContent).toContain('Folder on this computer');
+  item('add-local-project')!.click();
+  await settle();
+  expect(api.addProject).toHaveBeenCalledTimes(1);
+  expect(doc.querySelector(`[data-project-id="${local.id}"] .project-badge`)).toBeNull();
+  (doc.getElementById('addProject') as HTMLButtonElement).click();
+  await settle();
+  item('add-ssh-project')!.click();
+  await settle();
+  expect((doc.getElementById('sshProjectDialog') as HTMLDialogElement).open).toBe(true);
+  (doc.getElementById('sshProjectAddress') as HTMLInputElement).value = 'me@devbox';
+  (doc.getElementById('sshProjectFolder') as HTMLInputElement).value = '/srv/app';
+  doc.getElementById('sshProjectForm')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await settle();
+  expect(api.addRemoteProject).toHaveBeenCalledWith('me@devbox', '/srv/app');
+  const badge = doc.querySelector(`[data-project-id="${remote.id}"] .project-badge`);
+  expect(badge?.textContent).toBe('SSH');
+  expect(badge?.getAttribute('title')).toBe('me@devbox');
+});
+
 it('sends a new chat at once with Automatic when no model list is readable and none was asked for (#864)', async () => {
   // ChatGPT Go and Free show no model picker, so Send used to wait two minutes for a list that never came.
   const { w, live } = await boot([], false, [], [], { noModels: true });

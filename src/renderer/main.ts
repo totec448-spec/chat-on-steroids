@@ -340,7 +340,6 @@ $('sidebarPets').addEventListener('click', () => showTab('pets'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
-$('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
 let zoomEdited = false;
 void api.getZoom().then(result => {

@@ -2440,5 +2440,14 @@
   "A fuller diagnostics report": "Daha ayrıntılı bir tanılama raporu",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Uygulamanın nasıl kurulduğunu, tarayıcıyı, çökmeleri, sık uyarıları ve her sohbetin durumunu da gösterir; yine kişisel bir şey içermez.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox eklentiyi kendisi günceller. Hemen yapmak için Firefox'ta about:addons'u açın, Güncellemeleri denetle'yi seçin ve ardından ChatGPT'yi yenileyin.",
-  "{0} min": "{0} dk"
+  "{0} min": "{0} dk",
+  "Folder on this computer…": "Bu bilgisayardaki klasör…",
+  "Folder on a server (SSH)…": "Sunucudaki klasör (SSH)…",
+  "Test and add": "Test et ve ekle",
+  "Add a folder on a server": "Sunucudaki bir klasörü ekle",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids kendi SSH kurulumunuzla bağlanır: ~/.ssh/config dosyanız, ajanınız, anahtarlarınız ve bilinen ana bilgisayarlarınız. Oturum açma yalnızca anahtarla çalışır ve sunucuya hiçbir şey kurulmaz.",
+  "SSH address": "SSH adresi",
+  "Folder on the server": "Sunucudaki klasör",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "ben@sunucu, ben@sunucu:2222 veya ~/.ssh/config içindeki bir Host",
+  "/srv/app or ~/app": "/srv/app veya ~/app"
 }

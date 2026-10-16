@@ -2440,5 +2440,14 @@
   "A fuller diagnostics report": "Un informe de diagnóstico más completo",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "También muestra cómo está instalada la app, el navegador, los fallos, las advertencias frecuentes y el estado de cada chat, sin nada personal.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox actualiza el complemento por sí mismo. Para hacerlo ahora, abre about:addons en Firefox, elige Buscar actualizaciones y después recarga ChatGPT.",
-  "{0} min": "{0} min"
+  "{0} min": "{0} min",
+  "Folder on this computer…": "Carpeta en este ordenador…",
+  "Folder on a server (SSH)…": "Carpeta en un servidor (SSH)…",
+  "Test and add": "Probar y añadir",
+  "Add a folder on a server": "Añadir una carpeta en un servidor",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids se conecta con tu propia configuración SSH: tu ~/.ssh/config, tu agente, tus claves y tus hosts conocidos. El inicio de sesión solo funciona con una clave y no se instala nada en el servidor.",
+  "SSH address": "Dirección SSH",
+  "Folder on the server": "Carpeta en el servidor",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "yo@servidor, yo@servidor:2222 o un Host de ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app o ~/app"
 }
