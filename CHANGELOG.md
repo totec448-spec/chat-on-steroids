@@ -37,7 +37,7 @@ Projects can now live on a server you reach over SSH. In the composer, `/` offer
 - **Usage page.** Codex's 5-hour and weekly limits are labeled as Codex, instead of looking like limits on your ChatGPT chats.
 - **Two browsers.** If one of them still has an older extension, new chats open in the up-to-date browser right away instead of waiting.
 - **"OpenAI outage" instead of "No internet"** when OpenAI's tunnel service fails, because your internet is fine then.
-- **Fresh turns.** A continue that couldn't be sent stays at the time it was made, instead of sitting at the end of the chat.
+- **Fresh turns.** After a long turn the app continued in a fresh turn, your next message goes out right away, and no leftover "Continue" blocks it. A continue that couldn't be sent stays at the time it was made, instead of sitting at the end of the chat.
 - **Mac: windows on another Space.** Observing a window on an inactive Space works again.
 - **Windows.** A command's exit status shows as the signed number Codex shows (for example −1 instead of 4294967295), and the key hints in Settings show only Ctrl shortcuts.
 - **Firefox.** New chats the app opens no longer occasionally lose their turn, which left Goal, Loop or queued messages waiting. When the add-on is behind the app, the notice says how Firefox updates it.
