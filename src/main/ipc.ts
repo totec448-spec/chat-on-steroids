@@ -88,8 +88,8 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
-import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
+import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
+import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
@@ -948,7 +948,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)
       : scope.projectId ? projectWorkspace(scope.projectId) : Promise.resolve(null);
     const before = await folder();
-    const library = await listSkillLibrary({ projectPath: before?.real ?? null, refreshCodexPlugins: true });
+    const library = await listSkillLibrary({ projectPath: localProjectPath(before), refreshCodexPlugins: true });
     if ((await folder())?.real !== before?.real) throw new Error('The project changed while Skills were loading');
     return library;
   });
@@ -1120,6 +1120,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('projectFiles:attach', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
+    // A file in a project on a server (#1469) is copied over SFTP first.
+    const snapshot = await serverFileSnapshot(projectId, path);
+    if (snapshot) {
+      const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+      try { return await stageInputAttachment(snapshot.file, retained); } finally { await snapshot.cleanup(); }
+    }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });

@@ -7,7 +7,7 @@ import { getConfig, updateConfig } from './config.js';
 import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
 import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
-import type { RemoteFolder } from '../shared/types.js';
+import type { RemoteFolder, Root } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
 
@@ -176,6 +176,20 @@ async function resolveProject(project: LocalProject): Promise<{ virtual: string;
   if (!samePath(resolved.real, project.path) || !(await fs.stat(resolved.real)).isDirectory()) throw new Error('Project folder changed or is unavailable');
   return { virtual: resolved.virtual, real: resolved.real };
 }
+/** The approved folder on a server (#1469) that holds this virtual path, if it is on one. */
+export function serverRootOf(virtual: string): Root | undefined {
+  const name = virtual.split('/').find(part => part.length > 0)?.toLowerCase();
+  return getConfig().roots.find(root => root.remote !== undefined && root.name.toLowerCase() === name);
+}
+
+/**
+ * A project's folder on this computer, for what reads only this computer's disk (its Skills). A
+ * folder on a server has none: its chats list the Skills here, and the server's are not read in v1.
+ */
+export function localProjectPath(folder: { virtual: string; real: string } | null): string | null {
+  return folder && !serverRootOf(folder.virtual) ? folder.real : null;
+}
+
 /** Null means no project. A broken explicit binding is an error, never permission to guess cwd. */
 export async function getSessionProject(sessionId: string): Promise<{ virtual: string; real: string } | null> {
   const session = await getSession(sessionId);

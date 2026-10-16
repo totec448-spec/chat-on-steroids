@@ -434,7 +434,7 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function editablePreview(value: ProjectFilePreview): value is ProjectFilePreview & { text: string; revision: string } {
-    return !value.binary && value.text !== null && !value.truncated && typeof value.revision === 'string';
+    return !project?.remote && !value.binary && value.text !== null && !value.truncated && typeof value.revision === 'string';
   }
 
   async function leaveEditorIfNeeded(): Promise<boolean> {
@@ -539,6 +539,10 @@ export function createFilePanel(options: FilePanelOptions) {
   function updateActions(): void {
     const target = actionSelection();
     const inFiles = mode === 'files';
+    // A project on a server (#1469) is browsed and previewed here; v1 changes its files only
+    // through ChatGPT's tools, so actions that could only fail there are not offered.
+    const onServer = Boolean(project?.remote);
+    for (const button of [newFile, newFolder, rename, remove, reveal]) button.hidden = onServer;
     const mutable = inFiles && Boolean(project) && target.path !== '' &&
       (target.kind === 'file' || target.kind === 'directory');
     rename.disabled = !mutable;
