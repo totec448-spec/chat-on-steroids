@@ -757,6 +757,43 @@ describe('desktop input delivery and helper ownership', () => {
     expect(sends()).toBe(1);
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
+  it('clears its own automatic continue when the Send it clicked did not take it', async () => {
+    // 2.1.40 release round, Windows: a rotation fired right after a tool result while the model
+    // was already finishing. Its Send click delivered nothing, the receipt could not be confirmed,
+    // and the continue was left in ChatGPT's composer, so the person's next message failed on "an
+    // unsent draft". An automatic continue is never the person's text: when the composer still
+    // holds exactly it, it is cleared.
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    for (const row of live.document.querySelectorAll('[data-message-author-role="user"]')) row.closest('[data-testid^="conversation-turn"]')?.remove() ?? row.remove();
+    live.hook.observe(); await live.hook.flush();
+    const sends = watchSend(live.document);
+    // The click lands as the turn ends: nothing is sent, the text stays in the composer, and
+    // ChatGPT draws the first turn's question again, so the page cannot prove the click failed.
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      stopGenerating(live!.document);
+      userTurn(live!.document, 'question-redrawn', 'The original question of this chat.');
+    });
+    const held = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) =>
+      held(fn, ms === live!.hook.DESKTOP_RECEIPT_MS ? 0 : ms)) as typeof live.window.setTimeout;
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
+    expect(sends()).toBe(1);
+    expect(result).toEqual({ ok: false });
+    // Still reported as uncertain, never resent, but no longer left in the person's composer.
+    expect(live.sent.filter(message => message.fail).map(message => message.error)).toEqual(['Native Send receipt was not confirmed.']);
+    expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
   it('sends a message into the running turn while one of its calls is still running (#1231)', async () => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
