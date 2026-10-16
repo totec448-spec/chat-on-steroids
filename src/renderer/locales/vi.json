@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "Không thể tải các cuộc trò chuyện của dự án này.",
   "Search projects…": "Tìm dự án…",
   "No projects found": "Không tìm thấy dự án",
+  "No project": "Không có dự án",
   "Projects: {0}": "Dự án: {0}",
   "ChatGPT Project unavailable": "Dự án ChatGPT không khả dụng",
   "Creating in ChatGPT…": "Đang tạo trong ChatGPT…",

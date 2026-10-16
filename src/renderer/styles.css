@@ -2591,7 +2591,8 @@ input[readonly] {
   color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); line-height: 16px; font-variant-numeric: tabular-nums; }
 .sess-workers .is-working { color: var(--accent); }
 .sess-workers .is-failed { color: var(--red); }
-.sess-card > .worker-toggle { align-self: flex-start; margin-top: 1px; }
+/* Centred on the project and state line (18px), keeping the arrow's full 26px target. */
+.sess-card > .worker-toggle { align-self: flex-start; margin-top: -4px; }
 .inbox-cards > .worker-group { margin: 0; }
 .inbox-top ~ .project-show-more { margin-inline-start: 10px; font-size: calc(13px * var(--text-scale, 1)); }
 /* A chosen project whose history could not be read: the line, and its Retry beside it. */

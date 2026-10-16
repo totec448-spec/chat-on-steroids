@@ -1474,9 +1474,9 @@ function inboxCard(summary: SessionSummary, workers?: SessionSummary[]): HTMLEle
   const project = projects.find(entry => entry.id === projectGroup(summary.projectId));
   // With one project chosen, its name on every card would only repeat the filter.
   if (!inboxProject) {
-    // A chat outside every project says so in the words of the project tree's own section.
+    // A chat outside every project says so, where a project's name would be.
     const name = el('span', 'sess-project');
-    name.append(project ? projectMark(project) : icon('i-chat', 'ico project-mark'), el('span', '', () => project?.name ?? t('Chats')));
+    name.append(project ? projectMark(project) : icon('i-chat', 'ico project-mark'), el('span', '', () => project?.name ?? t('No project')));
     meta.append(name);
   }
   const state = el('span', 'sess-state');

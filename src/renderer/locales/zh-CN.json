@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "无法加载此项目的聊天。",
   "Search projects…": "搜索项目…",
   "No projects found": "未找到项目",
+  "No project": "无项目",
   "Projects: {0}": "项目：{0}",
   "ChatGPT Project unavailable": "ChatGPT 项目不可用",
   "Creating in ChatGPT…": "正在 ChatGPT 中创建…",

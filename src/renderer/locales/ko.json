@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "이 프로젝트의 채팅을 불러올 수 없습니다.",
   "Search projects…": "프로젝트 검색…",
   "No projects found": "프로젝트를 찾지 못했습니다",
+  "No project": "프로젝트 없음",
   "Projects: {0}": "프로젝트: {0}",
   "ChatGPT Project unavailable": "ChatGPT 프로젝트 사용 불가",
   "Creating in ChatGPT…": "ChatGPT에 만드는 중…",

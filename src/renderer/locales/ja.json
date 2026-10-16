@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "このプロジェクトのチャットを読み込めませんでした。",
   "Search projects…": "プロジェクトを検索…",
   "No projects found": "プロジェクトが見つかりません",
+  "No project": "プロジェクトなし",
   "Projects: {0}": "プロジェクト: {0}",
   "ChatGPT Project unavailable": "ChatGPT プロジェクトを利用できません",
   "Creating in ChatGPT…": "ChatGPT に作成中…",

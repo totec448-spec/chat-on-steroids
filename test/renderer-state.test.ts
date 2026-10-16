@@ -909,6 +909,16 @@ it('calls an unread reply a New response on its card, the word its row badge alr
   expect(card.textContent).not.toContain('Done');
 });
 
+it('says No project on the card of a chat outside every project', async () => {
+  const now = Date.now();
+  const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('loose', { updatedAt: now })]) });
+  const doc = mounted.window.document;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
+  const project = inboxCardState(doc, 'loose').card.querySelector<HTMLElement>('.sess-meta > .sess-project')!;
+  expect(project.textContent).toBe('No project');
+  expect(project.querySelector('.ico.ph-chat-circle, .ico.project-mark')).not.toBeNull();
+});
+
 it('never settles a chat waiting on approval, a stopped recovery or a block, nor a parent whose worker does; a failed one settles after a day and still says so', async () => {
   const old = Date.now() - 3 * DAY;
   const worker = (id: string, parent: string) => inboxChat(id, {

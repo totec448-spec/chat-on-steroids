@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "Bu projenin sohbetleri yüklenemedi.",
   "Search projects…": "Proje ara…",
   "No projects found": "Proje bulunamadı",
+  "No project": "Proje yok",
   "Projects: {0}": "Projeler: {0}",
   "ChatGPT Project unavailable": "ChatGPT projesi kullanılamıyor",
   "Creating in ChatGPT…": "ChatGPT'de oluşturuluyor…",

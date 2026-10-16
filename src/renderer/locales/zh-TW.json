@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "無法載入此專案的聊天。",
   "Search projects…": "搜尋專案…",
   "No projects found": "找不到專案",
+  "No project": "無專案",
   "Projects: {0}": "專案：{0}",
   "ChatGPT Project unavailable": "ChatGPT 專案無法使用",
   "Creating in ChatGPT…": "正在 ChatGPT 中建立…",
