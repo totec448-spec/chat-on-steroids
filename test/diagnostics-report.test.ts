@@ -60,6 +60,37 @@ describe('the diagnostics report', () => {
     expect(report).toContain('1 chat(s), 0 ended, 1 project(s)');
   });
 
+  // 2026-10-15, user: more of what a first answer needs, still nothing personal.
+  it('adds install, system, crash, error, tool and chat facts, with error samples scrubbed like the log', () => {
+    const report = renderDiagnosticsReport({ ...sources, facts: {
+      install: ['Installed as: macOS app in /Applications (packaged)'],
+      system: ['Memory: 16.0 GB total, 3.5 GB free'],
+      crashes: ['Crash reports in the last 30 days: 0'],
+      errors: ["3× warn 10:00–10:05 UTC: tool read rejected: ENOENT, open '/Users/jane/Clients/Acme Corp/invoices.xlsx'"],
+      tools: ['read: 3 call(s), 1 error(s), 0 timeout(s), median 20 ms'],
+      chats: ['#1 main chat: active 5 min ago, 12 tool call(s), 0 failed command(s), 0 refused, inputs: none']
+    } });
+    for (const heading of ['## Install and updates', '## System', '## Crashes and restarts', '## Most frequent warnings and errors since start',
+      '## Tool calls (last 24 hours)', '## Active chats']) expect(report).toContain(heading);
+    expect(report).toContain('read: 3 call(s), 1 error(s)');
+    expect(report).toContain('3× warn 10:00–10:05 UTC: tool read rejected: ENOENT');
+    for (const value of personal) expect(report.toLowerCase(), value).not.toContain(value.toLowerCase());
+  });
+
+  it('says which browser runs ChatGPT, its tabs by state and which page controls were found', () => {
+    const report = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: {
+      browser: { name: 'Google Chrome', version: '154.0.7400.12' },
+      tabs: { open: 5, discarded: 1, frozen: 1, loading: 0, grouped: 2, inBackgroundWindow: 0 },
+      page: { composer: true, sendArea: true, modelMenu: false, plusMenu: true, language: 'de-DE' } } } });
+    expect(report).toContain('## Browser and ChatGPT page');
+    expect(report).toContain('Browser: Google Chrome 154.0.7400.12');
+    expect(report).toContain('ChatGPT tabs: 5 open, 1 discarded, 1 frozen, 0 loading, 2 in a tab group, 0 in the app\'s background window');
+    expect(report).toContain('Page checks (most recently used ChatGPT tab): composer found, send area found, model menu NOT found, + menu found, page language de-DE');
+    const none = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: { browser: { name: 'Firefox', version: '144.0' },
+      tabs: { open: 0, discarded: 0, frozen: 0, loading: 0, grouped: 0, inBackgroundWindow: 0 }, page: null } } });
+    expect(none).toContain('Page checks: no awake ChatGPT tab answered');
+  });
+
   it('scrubs Windows paths inside JSON sections, where backslashes are doubled', () => {
     const report = renderDiagnosticsReport({ ...sources, home: 'C:\\Users\\Jane',
       commands: [{ command: 'c2', what: 'worker:run-1:worker-3', lastError: 'spawn C:\\Users\\Jane\\bin\\codex.exe ENOENT' }],

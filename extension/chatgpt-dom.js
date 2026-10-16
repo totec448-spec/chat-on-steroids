@@ -2830,10 +2830,24 @@ var CLF_DOM = (() => {
     const proven = provenAppsFor(connectorName);
     return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
-  function pluginInstalledButtons(connectorName) {
+  function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null) {
     // Native links name their exact App Id, even when a fresh provider rename has not reached
     // the learned name yet. Legacy buttons still need names; the destination proves identity.
-    const proven = provenAppsFor(connectorName);
+    // A scoped enrolled observation keeps its App Id; other proven aliases cannot replace it.
+    if (expectedAppId !== null && (typeof expectedAppId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(expectedAppId))) return null;
+    let proven = provenAppsFor(connectorName);
+    if (expectedAppId !== null && expectedSurface !== null) {
+      const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
+      if (surfaceAt < 0) return null;
+      const identified = ownApps.filter(app => app.appId === expectedAppId);
+      if (identified.length) {
+        // The durable exact ID and its requested surface survive colliding renames.
+        // An ID associated with another surface cannot borrow this row's authority.
+        if (identified.some(app => app.surface !== expectedSurface)) return null;
+        proven = identified;
+      } else if (proven !== null && (proven.some(app => app.surface !== expectedSurface) ||
+          (!proven.length && connectorNames()[surfaceAt] !== connectorName))) return null;
+    }
     if (proven === null) return null;
     const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
     const named = node => names.includes(text(node));
@@ -2850,12 +2864,16 @@ var CLF_DOM = (() => {
             const url = new URL(button.href, location.href);
             const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
             if (url.origin !== location.origin || !route || url.hash) return false;
+            if (expectedAppId !== null && route[1] !== expectedAppId) return false;
             if (proven.length) return proven.some(app => app.appId === route[1]);
+            if (expectedAppId !== null) return true;
           }
+          if (expectedAppId !== null) return false; // An enrolled observation needs the link's exact ID, never a name-only button.
           return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
         });
         return rows.length ? rows : null;
       }
+      if (expectedAppId !== null) return null; // Legacy rows cannot prove a native installed App Id.
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
         (panel.querySelector('[data-testid="plugin-icon-wrapper"]') || panel.querySelector('a[href="/plugins"]')));
       if (panels.length !== 1) return null;
@@ -2961,6 +2979,25 @@ var CLF_DOM = (() => {
     });
   }
   /** UI only transports a requested selection. Provider state proves identity and availability. */
+  /**
+   * Which of ChatGPT's controls this page still has, for the diagnostics report (2026-10-15):
+   * after ChatGPT changes its page, a report says what the extension no longer finds. Booleans
+   * and the page's language tag only, never text from the page.
+   */
+  function pageChecks() {
+    return safe(() => {
+      const language = document.documentElement.getAttribute('lang') || '';
+      return {
+        composer: Boolean(composer()),
+        sendArea: Boolean(composerActions()),
+        modelMenu: Boolean(modelPickerTrigger()),
+        // The October 2026 composer marks it only as its add-context navigation target.
+        plusMenu: Boolean(document.querySelector('[data-composer-navigation-target="add-context"],#composer-plus-btn,[data-testid="composer-plus-btn"]')),
+        language: /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language) ? language : null
+      };
+    }, { composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
+  }
+
   function modelPickerTrigger() {
     const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
     const candidates = [...new Set([...(composer()?.closest('form')?.querySelectorAll('button[aria-haspopup="menu"]') || []),
@@ -3476,6 +3513,7 @@ var CLF_DOM = (() => {
     turnIdOf,
     messageIdOf,
     composerAuthoredText,
+    pageChecks,
     userPromptText,
     userMessageReaction,
     presentUserPrompts,

@@ -4751,7 +4751,8 @@ it('retains the visible collapsed group beyond the normal resident target and st
   // One deliberate movement keeps filling the edge through collapsed batches.
   // Await the actual read result, including its animation-frame yields.
   pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
-  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 5000 });
+  // 2.7 s here; the macOS x64 release runner stopped at 300–390 of 400 rows after 5 s (2026-10-15).
+  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 20_000 });
   expect(timeline.querySelector('.tool-group')).toBe(group);
   expect(timeline.querySelectorAll('.raw')).toHaveLength(0);
   for (let i = 0; i < 14; i++) {
@@ -4796,6 +4797,25 @@ it('clears a delivered check when later model activity arrives without a timer',
   expect(receipt.hidden).toBe(true);
 });
 
+
+// 2026-10-15, the user's Mac: three fresh-turn continues that failed ("the browser did not pick up
+// this message within 60 seconds") stayed at the end of the chat as its newest messages, even after
+// the work moved on. A failed automatic continue belongs to its time, like a cancelled one.
+it('keeps a failed fresh-turn continue at its creation time, not at the end of the chat', async () => {
+  const app = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'before-rotation', message: text('Original work') },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'user_message', messageId: 'after-rotation', message: text('Later continuation') }
+  ]);
+  const { w, live } = app;
+  live.inputs.push({ id: 'failed-rotation', sessionId: summary([]).id, conversationId: 'chat-b', text: 'Continue the task from where you are.',
+    mode: 'auto', dueAt: T0 + 1000, createdAt: T0 + 1000, state: 'failed', owner: null, model: null, reasoningEffort: null, purpose: 'rotation',
+    error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+  await app.append([]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('[data-input-id="failed-rotation"]')).not.toBeNull();
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Continue the task from where you are.');
+  expect(timeline.textContent!.indexOf('Continue the task from where you are.')).toBeLessThan(timeline.textContent!.indexOf('Later continuation'));
+});
 
 it('keeps a cancelled automatic draft at its creation time as later messages arrive', async () => {
   const app = await boot([

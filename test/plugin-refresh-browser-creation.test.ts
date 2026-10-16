@@ -5,6 +5,53 @@ import { expect, it, vi } from 'vitest';
 const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const workflow = source.slice(source.indexOf('let pluginRefreshFlight = null;'), source.indexOf('async function catalogProbe('));
 
+it.each([
+  ['asdk_app_core', false], ['asdk_app_plugins', false], ['asdk_app_core', true], ['asdk_app_plugins', true]
+] as const)('opens %s on its native settings route, or the installed list for an observation, and keeps the elected tab (observeOnly=%s)', async (appId, observeOnly) => {
+  const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId, observeOnly };
+  const settingsUrl = `https://chatgpt.com/settings/plugins-settings${observeOnly ? '' : `/plugin_${appId}`}`;
+  const markedUrl = `${settingsUrl}?cos-plugin-refresh=${request.id}`;
+  const saved: Record<string, unknown> = {};
+  let tab: { id: number; url: string } | null = null;
+  const create = vi.fn(async (url: string) => (tab = { id: 8, url }));
+  const update = vi.fn(async (_id: number, patch: { url: string }) => { if (tab) tab.url = patch.url; return tab; });
+  const sendMessage = vi.fn(async () => ({ ok: true }));
+  const start = () => {
+    const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], createChatTab: create,
+      call: async () => ({ ok: true, data: { requests: [request] } }),
+      chrome: { storage: { session: { get: async () => saved, set: async (next: object) => Object.assign(saved, next) } },
+        tabs: { query: async () => tab ? [tab] : [], get: async () => { if (!tab) throw Error('closed'); return tab; }, update, sendMessage } } });
+    vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context); return context;
+  };
+  await start().run([{}], true);
+  expect(create).toHaveBeenCalledExactlyOnceWith(markedUrl, true);
+  expect(saved.pluginRefreshOwner).toEqual({ id: request.id, tab: 8 });
+  tab!.url = settingsUrl; // Provider navigation drops the marker; MV3 then starts a new worker.
+  await start().run([{}], true);
+  expect(update).toHaveBeenCalledExactlyOnceWith(8, { url: markedUrl });
+  expect(create).toHaveBeenCalledTimes(1);
+  await start().run([{}], true);
+  expect(sendMessage).toHaveBeenCalledExactlyOnceWith(8, { type: 'clf-plugin-refresh', request });
+  tab = null;
+  await start().run([{}], true);
+  expect(create).toHaveBeenCalledTimes(1);
+});
+
+it.each(['https://chatgpt.com/', 'https://chatgpt.com/c/synthetic-conversation'])('does not redirect an elected helper that has left settings for %s', async url => {
+  const request = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', appId: 'asdk_app_core' };
+  const tab = { id: 8, url };
+  const create = vi.fn(), update = vi.fn(), sendMessage = vi.fn();
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], createChatTab: create,
+    call: async () => ({ ok: true, data: { requests: [request] } }),
+    chrome: { storage: { session: { get: async () => ({ pluginRefreshOwner: { id: request.id, tab: tab.id } }) } },
+      tabs: { query: async () => [tab], get: async () => tab, update, sendMessage } } });
+  vm.runInContext(`${workflow}\nglobalThis.run = inspectRequestedPluginRefresh;`, context);
+  await context.run([{}], true);
+  expect(create).not.toHaveBeenCalled();
+  expect(update).not.toHaveBeenCalled();
+  expect(sendMessage).not.toHaveBeenCalled();
+});
+
 it('keeps one operation on its original tab after marker loss, worker restart, and user closure', async () => {
   const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const saved: Record<string, unknown> = {};

@@ -33,3 +33,17 @@ it('starts over when a maintainer asks again after the reminder', () => {
   expect(decide(events, at(15.9))).toBeNull();
   expect(decide(events, at(16))).toBe('remind');
 });
+
+// A red PR the not-ready bot turned into a draft still waits on its author; other drafts do not.
+// @ts-expect-error The script is plain Node without type declarations.
+import { watched as isWatched } from '../scripts/waiting-prs.mjs';
+const watched = isWatched as (pr: { draft: boolean; author_association: string; user: { type: string }; labels?: Array<{ name: string }> }) => boolean;
+
+it('watches drafts the not-ready bot made, and still skips other drafts, maintainers and bots', () => {
+  const pr = { draft: false, author_association: 'CONTRIBUTOR', user: { type: 'User' }, labels: [] as Array<{ name: string }> };
+  expect(watched(pr)).toBe(true);
+  expect(watched({ ...pr, draft: true })).toBe(false);
+  expect(watched({ ...pr, draft: true, labels: [{ name: 'not-ready' }] })).toBe(true);
+  expect(watched({ ...pr, author_association: 'OWNER' })).toBe(false);
+  expect(watched({ ...pr, user: { type: 'Bot' } })).toBe(false);
+});

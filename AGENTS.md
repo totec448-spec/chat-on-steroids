@@ -193,7 +193,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Setting | Fresh installation | Migration / runtime rule |
 | --- | --- | --- |
 | Roots | None. | Root-requiring capabilities cannot be published usefully until a root is approved. |
-| Tool capabilities | Current `defaultConfig()` starts all Core capability flags on; read-only off. | Omitted legacy flags use conservative `DEFAULT_CAPABILITIES`. Malformed existing config is conservative recovery, not fresh consent. |
+| Tool capabilities | Current `defaultConfig()` starts all Core capability flags on; read-only off. | Omitted legacy flags use conservative `DEFAULT_CAPABILITIES`. Malformed existing config is conservative recovery, not fresh consent. A `ui` preference holding a value this version does not know (a newer app's choice, e.g. Firefox before 2.1.38) is dropped alone and uses its default; the original file is still kept as `config.json.unreadable-*`. |
 | Recording | Always on; history is kept until a chat is deleted. | Config load normalizes the legacy `sessions.record`/`retainDays` to `true`/`0` (`config.ts`); `pruneSessions` is a no-op. Only an explicit chat delete or confirmed image-storage cleanup removes history. |
 | Context / compaction | Advisory 400,000; limit rounded from advisory × 4/3; auto-compaction on at advisory. | Estimated local units. Automatic execution additionally requires live work, current ownership and eligible model/role. |
 | Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8; global worker admission cap Off (`0`, configurable through 64). | Legacy absent enabled/allow-unattributed fields remain false; an absent global cap remains Off. Existing choices stay exact. |
@@ -1255,11 +1255,14 @@ because they need the app to answer. A Goal helper decision (`purpose: 'decision
 never gets an app mention. A fresh-turn continue (`purpose: 'rotation'`, #1402)
 also keeps Core.
 An independent default-off `ui.mentionPlugins` preference selects **Plugins instead of Core**
-for ordinary user-authored prompts COS sends; Goal/Loop, workers and recovery
-always select Core and decision helpers still select neither. The exact Plugins app id comes
+for ordinary user-authored prompts COS sends; Goal/Loop and fresh-turn continues follow the
+Core mention as before, workers and recovery always select Core, and decision helpers still
+select neither. The exact Plugins app id comes
 only from this page's provider system hints and must match this installation's connector
 name, including its optional computer suffix. Missing, duplicate or foreign IDs
-produce no Plugins token, never a guessed or other-computer attachment. App-managed
+produce no Plugins token, never a guessed or other-computer attachment; the prompt then
+keeps the Core mention (when that is on), so an account that attaches apps only on mention
+(#861) never loses its tools to a missing Plugins app. App-managed
 picture requests still suppress mentions; directly typed ChatGPT messages are untouched.
 The provider can withhold or cache tool declarations even with an authentic mention;
 this is not a repair of stale tool catalogs or ChatGPT-side exposure decisions.
@@ -3973,7 +3976,10 @@ whose question differs from the turn's recorded question (`timelineTurns[turnId]
 the moment the page switches turns cannot file the newer answer's outline under the earlier turn. A DIL reply whose
 `content` is only `::chatgpt-content-reference{…}` naming itself is read as the `fallbackMarkdown`
 of that one `dil` reference (`shellItemText`), so its recorded text is the reply rather than the
-directive. GPT-6 writes each interim sentence of a running turn as such an assistant message nested
+directive. That `fallbackMarkdown` can leave out what the drawing has (#1477): a table with only its
+header row, and a button as a bare `[label]` line. `shared/dil-tables.ts` (`completedDilText`) fills
+such a table from the recorded `renderedHtml` table with the same header and drops a line that is
+exactly a drawn button's label; the timeline and Copy/Export both apply it. GPT-6 writes each interim sentence of a running turn as such an assistant message nested
 in the `chatgpt-reasoning-group`; `shellTurnSource` records it as commentary (never the turn's end,
 whatever `phase` it carries) unless a top-level item owns that id. In that Markdown the timeline shows an `entity` widget as its name in bold and drops
 widgets it cannot draw (`image_group`). Formulas render with KaTeX (`renderer/math.ts`): `\( … \)`
@@ -4487,6 +4493,10 @@ Plugins catalog limit use proven ids first.
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
 A unique surface with account-proven App IDs accepts only its proven IDs, permitting
 renames before learned names catch up; a same-named foreign ID never falls back.
+An explicit observation retains its scoped enrolled App ID and first rediscovers that
+exact native installed link, rather than treating other proven aliases as competing targets.
+Its existing requested surface validates the ID through cross-surface name collisions;
+another surface, absent ID, name-only row or duplicate native link cannot substitute it.
 First enrollment and legacy buttons use the unique configured/learned name leaf.
 Unknown, catalog, external, transcript, hidden or ambiguous rows grant no authority.
 After awaits, the same unique connected visible link must retain its exact href;
@@ -4771,11 +4781,18 @@ connection/document epochs fence delayed results. The bridge cache is presentati
 clears on disconnect/stop/reset. Request discovery, receipt, exact ownership and recorded tool
 activity remain distinct evidence. Optional embedded-host presentation does not enable or
 implement an embedded browser.
+The snapshot's optional `environment` (`CompanionEnvironment`) feeds the diagnostics report only:
+the browser's name and version, ChatGPT tabs counted by state, and `clf-page-checks` booleans plus
+the page language from the most recently used awake ChatGPT tab, read at most once a minute.
+`sanitiseCompanionDiagnostics` keeps names, versions, counts and booleans and drops everything else.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
 development discovery uses Electron's app root for `resources/tunnel`, independent of source
 nesting, bundle layout and the launching shell's working directory. Restore missing binaries
 with `npm run tunnel`, which verifies the pinned archive checksum before staging it.
+An `offline` report carries `offlineCause: 'service'` (into `ConnectionStatus.offlineCause`) when
+OpenAI's control plane answered a poll with 5xx in the last 3 minutes: the internet works and the UI
+says "OpenAI outage" instead of "No internet".
 `diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
 replacement tunnels or claim a broken provider was repaired. Update checks (§20), browser wake
 and MCP connection have separate lifecycles.
@@ -4908,12 +4925,13 @@ lifetime; unrelated later settings saves do not silence them. Ordinary callers o
 predicate and retain the existing lifecycle behavior.
 
 **Explicit update command.** `update:all` / preload `updateAll()` groups concurrent presses
-and stages supported releases. Ready installers ask for native approval in the selected
-interface language; Keep working is the default. Cancellation grants neither shutdown nor
-connector intent. Approval commits exact-target intent before ordinary shutdown; the staged
+and stages supported releases. A ready installer answers `confirm` until the call names that
+exact version (`updateAll(version)`); the window asks in its own dialog (`#updateRestartDialog`,
+Keep working first and focused), never a system message box. Keep working grants neither
+shutdown nor connector intent. Approval commits exact-target intent before ordinary shutdown; the staged
 version is rechecked before quitting. Manual platform steps remain manual. A failed release
 check still requests the running connectors and preserves the app failure. Receipts
-`restarting/manual/checking-connectors/cancelled` prove no component completion. The explicit
+`restarting/manual/checking-connectors/confirm` prove no component completion. The explicit
 target build may connect once with auto-connect off without changing preferences. Startup
 consumes that reservation durably and uses the settings-incarnation predicate. Activity
 explains the connection exception and possible restart, retains errors until explicit retry,

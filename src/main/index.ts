@@ -27,7 +27,8 @@ import { setSystemProxyResolver } from './tunnel/index.js';
 import { configureAppProxy, refreshAppProxy } from './app-proxy.js';
 import { openSessionChat, registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
-import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
+import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, snapshotLogOnCrash } from './logger.js';
+import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { initSecretsPath, keychainReadPending } from './secrets.js';
@@ -367,7 +368,7 @@ function refreshTray(): void {
   const offline = state === 'offline';
   // Offline keeps the running icon: the bridge is up, the internet is not.
   const running = connected || offline;
-  const label = mainText(connected ? 'Connected' : offline ? 'No internet' : 'Not connected');
+  const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
   tray.setToolTip(`Chat On Steroids — ${label}`);
@@ -412,6 +413,11 @@ void app.whenReady().then(async () => {
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
   powerMonitor.on('suspend', suspendConnectionLossNotices);
   powerMonitor.on('resume', resumeConnectionLossNotices);
+  // Counted for the diagnostics report: kinds of warnings, ended page and helper processes, sleep.
+  onLog(tallyLogEntry);
+  powerMonitor.on('suspend', () => noteRuntimeEvent('sleep'));
+  app.on('render-process-gone', (_event, _contents, details) => noteRuntimeEvent(`page process gone: ${details.reason}`));
+  app.on('child-process-gone', (_event, details) => noteRuntimeEvent(`${details.type} process gone: ${details.reason}`));
   const userData = app.getPath('userData');
   initLogFile(path.join(userData, 'app.log'));
   process.on('uncaughtExceptionMonitor', (error, origin) => {

@@ -547,6 +547,25 @@ describe('who is allowed to talk to it', () => {
     expect(await companionDiagnostics()).toBeNull();
   });
 
+  // 2026-10-15: browser, ChatGPT tab counts and page checks for the diagnostics report; only
+  // names, versions, counts and booleans pass.
+  it('keeps the browser and page facts the companion reports, bounded to names, counts and booleans', async () => {
+    await pair();
+    const pending = companionDiagnostics();
+    expect((await request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, tab: null, environment: {
+        browser: { name: 'Google Chrome', version: '154.0.7400.12', path: 'must not be forwarded' },
+        tabs: { open: 5, discarded: 1, frozen: 1, loading: -3, grouped: 2, inBackgroundWindow: 'x', titles: ['must not be forwarded'] },
+        page: { composer: true, sendArea: 'yes', modelMenu: true, plusMenu: false, language: 'must not be forwarded' } } } })).status).toBe(200);
+    const snapshot = await pending;
+    expect(snapshot?.environment).toEqual({
+      browser: { name: 'Google Chrome', version: '154.0.7400.12' },
+      tabs: { open: 5, discarded: 1, frozen: 1, loading: 0, grouped: 2, inBackgroundWindow: 0 },
+      page: { composer: true, sendArea: false, modelMenu: true, plusMenu: false, language: null }
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('must not be forwarded');
+  });
+
   it('keeps the extension preferences it stored and hands them and the app language back in /status', async () => {
     await pair();
     const diagnostics = (preferences: { overwrite: boolean; durations: boolean }, stored: boolean) => ({ capturedAt: Date.now(),
@@ -1262,6 +1281,21 @@ describe('extension update holds', () => {
     // An unknown reason is not logged, and a report without a hold resets it.
     await status('made-up'); await status(); await status('chat-busy');
     expect(lines().slice(before)).toHaveLength(4);
+  });
+
+  // 2.1.39 release round: Chrome (updated) and Firefox (waiting for its signed add-on) both report
+  // every 30 seconds; one shared memory of the last hold logged Firefox's reason on every round.
+  it('logs a hold once per browser while another browser reports no hold', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (browser: string, updateHold?: string) => request('POST', '/status', { browser,
+      body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    for (let round = 0; round < 4; round += 1) {
+      await status('chromebrowser00000001');
+      await status('firefoxbrowser0000001', 'browser-updates-itself');
+    }
+    expect(lines().slice(before)).toHaveLength(1);
   });
 });
 
@@ -16008,6 +16042,31 @@ describe('which extension build is running', () => {
       const later = await request('POST', '/commands/redeem', stale);
       expect(later.body.error, 'the up-to-date browser went quiet a minute ago').not.toBe('stale_extension_build');
     } finally { clock.mockRestore(); }
+  });
+
+  // 2.1.39 release round, Windows VM: Firefox on the old add-on polled first and became the owner
+  // of a new chat it was then refused to claim as out of date; Chrome was never offered it, and the
+  // chat sat queued for 7 minutes until Firefox closed.
+  it('does not let an out-of-date companion take a new chat it would be refused', async () => {
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    const id = randomUUID();
+    try {
+      await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome });
+      await input.enqueueInput({ id, sessionId: null, text: 'Open one chat', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      const offered = async (browser: string, extensionBuild: string) =>
+        ((await request('POST', '/status', { body: { openConversations: [] }, browser, extensionBuild })).body.inputs as Array<{ id: string }>)
+          .some(row => row.id === id);
+      expect(await offered(firefox, 'deadbeefcafe')).toBe(false);
+      expect(await offered(chrome, SHIPPED)).toBe(true);
+    } finally {
+      input.resetInputForTests();
+      await writeDurableNow('session-input', []);
+    }
   });
 
   // Firefox updates its signed add-on itself, up to a day after the app: Chrome's copy is current
