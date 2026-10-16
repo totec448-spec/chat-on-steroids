@@ -150,8 +150,10 @@ export function initSkills(options: Options) {
       const key = `files:${projectId ?? ''}:${range?.directory ?? ''}`;
       if (!projectId || !current() || !range || range.kind !== 'file' || files?.projectId !== projectId || files.directory !== (range.directory ?? '') || loadedKey !== key || painted !== selectionKey() || composing) { close(); return; }
       const path = skill.file.path.replace(/[\\ ]/g, value => `\\${value}`);
-      const reference = `@${path}${skill.file.kind === 'directory' ? '/' : ''}`;
-      const text = input.value.slice(0, range.start) + reference + input.value.slice(range.end);
+      const directory = skill.file.kind === 'directory';
+      const reference = `@${path}${directory ? '/' : ' '}`;
+      const suffixStart = !directory && input.value[range.end] === ' ' ? range.end + 1 : range.end;
+      const text = input.value.slice(0, range.start) + reference + input.value.slice(suffixStart);
       close(); project((prefixOwner === options.owner() ? displayedPrefix : '') + text, 'authored', range.start + reference.length); input.focus(); return;
     }
     if ('command' in skill) {

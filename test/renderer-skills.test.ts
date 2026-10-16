@@ -80,7 +80,7 @@ it('offers only literal-safe file references and supports escaped spaces', async
   expect(f.listFiles).toHaveBeenLastCalledWith('project-a', 'space dir');
   expect(f.input.value).toBe('@space\\ dir/');
   (f.host.querySelector('[data-file-path="space dir/main.ts"]') as HTMLButtonElement).click();
-  expect(f.input.value).toBe('@space\\ dir/main.ts');
+  expect(f.input.value).toBe('@space\\ dir/main.ts ');
   const reference = 'Inspect @space\\ dir/';
   expect(skillCompletion(reference, reference.length)).toMatchObject({ kind: 'file', directory: 'space dir' });
 });
@@ -108,9 +108,21 @@ it('opens a project-scoped @ picker and inserts a relative file or folder refere
   (f.host.querySelector('[data-file-path="src"]') as HTMLButtonElement).click(); await settle();
   expect(f.listFiles).toHaveBeenLastCalledWith('project-a', 'src');
   expect(f.input.value).toBe('Inspect @src/ with this file');
+  expect(f.host.querySelector('[data-file-path="src/main.ts"]')).not.toBeNull();
+  expect(f.host.hidden).toBe(false);
   (f.host.querySelector('[data-file-path="src/main.ts"]') as HTMLButtonElement).click();
+  await settle();
   expect(f.input.value).toBe('Inspect @src/main.ts with this file');
-  expect(f.input.selectionStart).toBe('Inspect @src/main.ts'.length);
+  expect(f.input.selectionStart).toBe('Inspect @src/main.ts '.length);
+  expect(f.key('Enter')).toBe(false);
+});
+
+it('ends a file reference so Enter is left for the composer to send', async () => {
+  const f = await fixture();
+  f.type('@'); await settle();
+  (f.host.querySelector('[data-file-path="README.md"]') as HTMLButtonElement).click();
+  expect(f.input.value).toBe('@README.md ');
+  expect(f.key('Enter')).toBe(false);
 });
 
 it('offers exact inline Skills for deliberate selection without running app commands', async () => {
@@ -200,7 +212,7 @@ it('reloads the directory when the caret moves and refuses stale keyboard choice
   f.input.setSelectionRange(text.length, text.length); f.input.dispatchEvent(new Event('click')); await settle();
   expect(f.listFiles).toHaveBeenLastCalledWith('project-a', 'two');
   (f.host.querySelector('[data-file-path="two/foo.txt"]') as HTMLButtonElement).click();
-  expect(f.input.value).toBe('@one/foo @two/foo.txt');
+  expect(f.input.value).toBe('@one/foo @two/foo.txt ');
 
   f.type('@'); await settle();
   const old = f.host.querySelector('[data-file-path="foo.txt"]') as HTMLButtonElement | null;
