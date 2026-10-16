@@ -23,6 +23,7 @@ import { ensureUsablePath, normalizeEnvironment } from '../env.js';
 import { findWindowsPowerShell, terminateProcessTree } from '../exec.js';
 import { logInfo, logWarn } from '../logger.js';
 import type { MacOSDesktopAccessStatus, MacOSPermissionState } from '../../shared/types.js';
+import { noteMacOSGrants } from './macos-grants.js';
 import { HELPER_SCRIPT } from './helper.js';
 
 /** Width the screenshot is scaled down to, matching computer-use convention. */
@@ -2002,6 +2003,8 @@ export async function refreshMacOSDesktopAccess(
       checkedAt: Date.now(),
       error: null
     };
+    try { status.grantedBefore = await noteMacOSGrants(status); }
+    catch { /* Without the memory the status still says what is missing, only not why. */ }
     if (generation === macOSDesktopAccessRefreshGeneration) publishMacOSDesktopAccess(status);
     return generation === macOSDesktopAccessRefreshGeneration ? status : macOSDesktopAccess;
   } catch (err) {
