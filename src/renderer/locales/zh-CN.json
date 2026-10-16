@@ -2462,5 +2462,7 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
   "/srv/app or ~/app": "/srv/app 或 ~/app",
   "Prefer Plugins on app-sent messages": "应用发送的消息优先使用 Plugins",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，Chat On Steroids 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。"
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，Chat On Steroids 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。",
+  "This task was sent or removed before your edit was saved.": "在你的修改保存之前，此任务已发送或被移除。",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "在你的修改保存之前，此任务已发送或被移除，因此你的修改已放入输入框。"
 }

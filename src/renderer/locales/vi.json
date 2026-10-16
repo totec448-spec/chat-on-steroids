@@ -2462,5 +2462,7 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "toi@maychu, toi@maychu:2222 hoặc một Host trong ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app hoặc ~/app",
   "Prefer Plugins on app-sent messages": "Ưu tiên Plugins trong tin nhắn do ứng dụng gửi",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Khi bật, Chat On Steroids dùng Plugins thay cho Core trong các tin nhắn thông thường do ứng dụng gửi. Goal, Loop, tác nhân và khôi phục luôn dùng Core. Mỗi tin nhắn chỉ nhắc đến một ứng dụng. Tin nhắn gửi trực tiếp trong ChatGPT không thay đổi."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Khi bật, Chat On Steroids dùng Plugins thay cho Core trong các tin nhắn thông thường do ứng dụng gửi. Goal, Loop, tác nhân và khôi phục luôn dùng Core. Mỗi tin nhắn chỉ nhắc đến một ứng dụng. Tin nhắn gửi trực tiếp trong ChatGPT không thay đổi.",
+  "This task was sent or removed before your edit was saved.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu, nên bản chỉnh sửa đã được đưa vào ô soạn tin."
 }
