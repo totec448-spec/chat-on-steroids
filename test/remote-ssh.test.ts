@@ -79,6 +79,14 @@ describe.skipIf(!SERVER || process.platform === 'win32')('opening SFTP through a
     expect(alive()).toBe(false);
   });
 
+  // ssh's output can close before its error text is read (seen on Linux CI): the reason still
+  // has to come through, not a bare "connection closed".
+  it('reports why ssh could not connect even when its output closes first', async () => {
+    const fake = path.join(dir, 'fake-ssh');
+    await fs.writeFile(fake, '#!/bin/sh\nexec 1>&-\nsleep 0.3\necho "me@box: Permission denied (publickey)." >&2\nexit 255\n', { mode: 0o755 });
+    await expect(openSftp({ host: 'me@box', path: '/' }, { ssh: fake })).rejects.toThrow(/key/i);
+  });
+
   it('reports why ssh could not connect', async () => {
     const fake = path.join(dir, 'fake-ssh');
     await fs.writeFile(fake, '#!/bin/sh\necho "me@box: Permission denied (publickey)." >&2\nexit 255\n', { mode: 0o755 });
