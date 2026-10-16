@@ -19,8 +19,13 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
+      checks: read
     env:
       GH_TOKEN: ${{ github.token }}
+      # GitHub never lets the workflow token convert a PR to a draft, whatever its permissions.
+      # With this optional secret (a token allowed to write pull requests) the bot can; without it
+      # the PR is labeled and told it is out of the review queue, without claiming a draft.
+      DRAFT_TOKEN: ${{ secrets.PR_DRAFT_TOKEN }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
     steps:

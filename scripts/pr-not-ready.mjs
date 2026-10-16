@@ -19,6 +19,35 @@ export function notReadyDecision(pr, conclusion) {
 }
 
 export const NOT_READY_COMMENT = `A check failed, so this PR is a draft again and not in the review queue yet. The failed check's log says what is missing (see CONTRIBUTING.md). Once everything is green, click **Ready for review** and it goes back into the queue.`;
+/** When GitHub refuses the conversion, the comment must not claim one (live, #1548). */
+export const NOT_READY_COMMENT_UNDRAFTED = `A check failed, so this PR is not in the review queue yet. The failed check's log says what is missing (see CONTRIBUTING.md). Once everything is green, it goes back into the queue by itself.`;
+
+/**
+ * Carries out one decision through \`request(path, init)\`. GraphQL reports a refused mutation with
+ * HTTP 200 and an \`errors\` list, so the conversion counts only when GitHub returns the draft. A
+ * label comes off only when no check on that commit still fails: CI and the checklist finish
+ * separately, and one green run said nothing about the other (live 2026-10-15).
+ */
+export async function applyNotReady(request, { repository, sha, pr, decision }, draftRequest = request) {
+  const path = `/repos/${repository}/issues/${pr.number}`;
+  if (decision === 'draft') {
+    const reply = await draftRequest('/graphql', { method: 'POST', body: JSON.stringify({
+      query: 'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
+      variables: { id: pr.node_id } }) });
+    const drafted = reply?.data?.convertPullRequestToDraft?.pullRequest?.isDraft === true;
+    await request(`${path}/labels`, { method: 'POST', body: JSON.stringify({ labels: [NOT_READY_LABEL] }) });
+    await request(`${path}/comments`, { method: 'POST', body: JSON.stringify({ body: drafted ? NOT_READY_COMMENT : NOT_READY_COMMENT_UNDRAFTED }) });
+    return drafted ? 'draft' : `labeled (draft refused: ${(reply?.errors ?? []).map(error => error.message).join('; ') || 'no draft in the reply'})`;
+  }
+  if (decision === 'clear') {
+    const runs = (await request(`/repos/${repository}/commits/${sha}/check-runs?per_page=100`))?.check_runs ?? [];
+    const failing = runs.filter(run => run.conclusion === 'failure').map(run => run.name);
+    if (failing.length) return `kept (${failing.join(', ')} still failing)`;
+    await request(`${path}/labels/${NOT_READY_LABEL}`, { method: 'DELETE' });
+    return 'clear';
+  }
+  return decision;
+}
 
 async function github(path, token, init = {}) {
   const response = await fetch(`${API}${path}`, { ...init, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`,
@@ -35,19 +64,12 @@ async function main() {
   if (!repository || !token || !sha || !conclusion) throw new Error('GITHUB_REPOSITORY, GH_TOKEN, HEAD_SHA and RUN_CONCLUSION are required');
   // A run from a fork lists no pull requests, so match the open PRs by their head commit.
   const prs = (await github(`/repos/${repository}/pulls?state=open&per_page=100`, token)).filter(pr => pr.head?.sha === sha);
+  // The workflow token cannot convert a PR to a draft; an optional token with that right can.
+  const draftToken = process.env.DRAFT_TOKEN || token;
   for (const pr of prs) {
-    const decision = notReadyDecision(pr, conclusion);
-    const path = `/repos/${repository}/issues/${pr.number}`;
-    if (decision === 'draft') {
-      await github('/graphql', token, { method: 'POST', body: JSON.stringify({
-        query: 'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
-        variables: { id: pr.node_id } }) });
-      await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [NOT_READY_LABEL] }) });
-      await github(`${path}/comments`, token, { method: 'POST', body: JSON.stringify({ body: NOT_READY_COMMENT }) });
-    } else if (decision === 'clear') {
-      await github(`${path}/labels/${NOT_READY_LABEL}`, token, { method: 'DELETE' });
-    }
-    console.log(`#${pr.number}: ${decision}`);
+    const outcome = await applyNotReady((path, init) => github(path, token, init), { repository, sha, pr, decision: notReadyDecision(pr, conclusion) },
+      (path, init) => github(path, draftToken, init));
+    console.log(outcome.startsWith('labeled') ? `::warning::#${pr.number}: ${outcome}` : `#${pr.number}: ${outcome}`);
   }
 }
 
