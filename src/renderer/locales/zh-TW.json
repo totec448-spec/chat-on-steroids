@@ -2446,5 +2446,6 @@
   "Open settings": "開啟設定",
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "更新後桌面存取已失效：macOS 仍顯示為已允許，但需要重新請求。",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "桌面存取已開啟，但 macOS 尚未授予 Chat On Steroids 所需的權限。",
-  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS 仍顯示 Chat On Steroids 為已允許，但該權限屬於先前的版本：由於沒有開發者簽章，每次更新在 macOS 看來都是新的應用程式。請選擇「修復權限」，在 macOS 詢問時允許，然後完全退出並重新開啟應用程式。"
+  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS 仍顯示 Chat On Steroids 為已允許，但該權限屬於先前的版本：由於沒有開發者簽章，每次更新在 macOS 看來都是新的應用程式。請選擇「修復權限」，在 macOS 詢問時允許，然後完全退出並重新開啟應用程式。",
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "請選擇「修復權限」，在 macOS 詢問時允許，然後完全退出並重新開啟應用程式。系統設定中顯示為已允許、但更新後不再生效的權限，也能由此修復。"
 }
