@@ -2446,5 +2446,6 @@
   "Open settings": "設定を開く",
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "アップデート後にデスクトップへのアクセスが動作しなくなりました。macOS では許可済みと表示されていますが、もう一度許可を求める必要があります。",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "デスクトップへのアクセスはオンですが、macOS が Chat On Steroids に必要な権限を与えていません。",
-  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS では Chat On Steroids が許可済みと表示されていますが、その権限は以前のバージョンのものです。開発者署名がないため、アップデートのたびに macOS からは新しいアプリとして扱われます。「権限を修復」を選び、macOS に尋ねられたら許可してから、アプリを完全に終了して開き直してください。"
+  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS では Chat On Steroids が許可済みと表示されていますが、その権限は以前のバージョンのものです。開発者署名がないため、アップデートのたびに macOS からは新しいアプリとして扱われます。「権限を修復」を選び、macOS に尋ねられたら許可してから、アプリを完全に終了して開き直してください。",
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "「権限を修復」を選び、macOS に尋ねられたら許可してから、アプリを完全に終了して開き直してください。システム設定では許可済みと表示されていても、アップデート後に適用されなくなった権限もこれで直ります。"
 }
