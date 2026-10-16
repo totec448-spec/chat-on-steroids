@@ -965,6 +965,26 @@ it.each(['cancelled', 'browser'])('retires the editor when Save learns the queue
   expect(live.inputs[0]?.text).toBe('Original');
   if (state === 'cancelled') expect(w.document.querySelector('#finishQueue [data-input-id="retired-edit"]')).toBeNull();
   else expect(w.document.querySelector('#finishQueue [data-input-id="retired-edit"]')).not.toBeNull();
+  // The edit the user typed is not lost: an empty composer takes it, and a notice says why.
+  expect(w.document.querySelector<HTMLTextAreaElement>('#chatInput')!.value).toBe('Late edit');
+  expect(w.document.querySelector('.toast')?.textContent).toContain('your edit is in the composer');
+});
+
+it('keeps the composer\'s own draft when a late queued edit cannot be saved', async () => {
+  const { w, live, append } = await boot([]);
+  live.inputs.push({ id: 'late-edit', sessionId: summary([]).id, text: 'Original', mode: 'after-turn', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  const composer = w.document.querySelector<HTMLTextAreaElement>('#chatInput')!;
+  composer.value = 'My next message'; composer.dispatchEvent(new w.Event('input', { bubbles: true }));
+  (w.document.querySelector('[aria-label="Edit queued task"]') as HTMLButtonElement).click();
+  const field = w.document.querySelector<HTMLTextAreaElement>('#finishQueue textarea')!;
+  field.value = 'Late edit';
+  (w as any).api.editQueuedInput = async () => { live.inputs[0]!.state = 'browser'; return { ok: true, data: false }; };
+  (field.nextElementSibling as HTMLButtonElement).click(); await settle();
+  expect(composer.value).toBe('My next message');
+  expect(w.document.querySelector('.toast')?.textContent).toContain('before your edit was saved');
+  expect(w.document.querySelector('.toast')?.textContent).not.toContain('in the composer');
 });
 
 it('retires a queued editor synchronously on New Chat and ignores its delayed save after returning', async () => {
