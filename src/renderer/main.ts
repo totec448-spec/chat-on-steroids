@@ -645,20 +645,26 @@ function paintDesktopAccess(next: AppState): void {
   box.hidden = missing.length === 0;
   if (box.hidden) return;
 
-  const stale = desktopAccessProblem(next)?.stale === true;
+  const problem = desktopAccessProblem(next);
+  const stale = problem?.stale === true;
+  // Repair resets only this app's own entry and asks again, so it is safe whether or not an
+  // earlier grant is remembered; the first version that remembers grants knows of none.
+  const repairable = problem?.missing === true;
   ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
   ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
     (stale
       ? t("macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
-      : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
-  $<HTMLButtonElement>('repairDesktopAccess').hidden = !stale;
+      : repairable
+        ? t("Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.")
+        : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
+  $<HTMLButtonElement>('repairDesktopAccess').hidden = !repairable;
   $<HTMLButtonElement>('openDesktopScreen').hidden =
     !needsScreen || access.screen === 'granted';
   $<HTMLButtonElement>('openDesktopAccessibility').hidden =
     !needsAccessibility || access.accessibility === 'granted';
   // Repair asks for Accessibility again itself; a second request button would only compete with it.
   $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
-    !needsAccessibility || access.accessibility === 'granted' || stale;
+    !needsAccessibility || access.accessibility === 'granted' || repairable;
 }
 
 /**
