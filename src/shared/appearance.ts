@@ -1,5 +1,7 @@
 /** Saved appearance is presentation only. Theme remains the existing ui.theme choice. */
 export const APPEARANCE_FONTS = ['system', 'sans', 'serif', 'mono'] as const;
+/** 'projects' is the project tree; 'inbox' is one list of chats, active ones first. */
+export const SIDEBAR_LAYOUTS = ['projects', 'inbox'] as const;
 export type AppearanceTheme = 'light' | 'dark';
 export interface AppearancePalette {
   background: string;
@@ -13,12 +15,13 @@ export interface AppearanceSettings {
   font: typeof APPEARANCE_FONTS[number];
   fontSize: number;
   translucentSidebar: boolean;
+  sidebarLayout: typeof SIDEBAR_LAYOUTS[number];
 }
 export function defaultAppearance(): AppearanceSettings {
   return {
     light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
     dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
-    font: 'system', fontSize: 14, translucentSidebar: true
+    font: 'system', fontSize: 14, translucentSidebar: true, sidebarLayout: 'projects'
   };
 }
 
@@ -36,7 +39,8 @@ export function mergeAppearance(live: AppearanceSettings | undefined, base: Appe
   });
   return { light: palette('light'), dark: palette('dark'), font: pick(current.font, before.font, wanted.font),
     fontSize: pick(current.fontSize, before.fontSize, wanted.fontSize),
-    translucentSidebar: pick(current.translucentSidebar, before.translucentSidebar, wanted.translucentSidebar) };
+    translucentSidebar: pick(current.translucentSidebar, before.translucentSidebar, wanted.translucentSidebar),
+    sidebarLayout: pick(current.sidebarLayout, before.sidebarLayout, wanted.sidebarLayout) };
 }
 
 function channels(hex: string): number[] {
