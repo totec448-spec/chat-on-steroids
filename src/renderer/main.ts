@@ -1,5 +1,6 @@
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
+import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
@@ -644,15 +645,20 @@ function paintDesktopAccess(next: AppState): void {
   box.hidden = missing.length === 0;
   if (box.hidden) return;
 
+  const stale = desktopAccessProblem(next)?.stale === true;
   ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
   ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
-    t("Grant the missing macOS permission, then fully quit and reopen the app."));
+    (stale
+      ? t("macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
+      : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
+  $<HTMLButtonElement>('repairDesktopAccess').hidden = !stale;
   $<HTMLButtonElement>('openDesktopScreen').hidden =
     !needsScreen || access.screen === 'granted';
   $<HTMLButtonElement>('openDesktopAccessibility').hidden =
     !needsAccessibility || access.accessibility === 'granted';
+  // Repair asks for Accessibility again itself; a second request button would only compete with it.
   $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
-    !needsAccessibility || access.accessibility === 'granted';
+    !needsAccessibility || access.accessibility === 'granted' || stale;
 }
 
 /**
@@ -1610,6 +1616,7 @@ function apply(next: AppState): void {
   readCommandAllowlist();
   paintGroups();
   paintDesktopAccess(next);
+  paintDesktopAccessNotice(next, { repair: () => void repairDesktopAccess(), open: () => showTab('home') });
 
   // ---- folders
   paintRoots(config.roots);
@@ -2496,6 +2503,16 @@ async function runChecks(): Promise<void> {
 }
 
 $('runChecks').addEventListener('click', () => void runChecks());
+async function repairDesktopAccess(): Promise<void> {
+  for (const id of ['repairDesktopAccess', 'desktopAccessNoticeRepair']) $<HTMLButtonElement>(id).disabled = true;
+  try {
+    const next = await run(api.repairDesktopAccess());
+    if (next) apply(next);
+  } finally {
+    for (const id of ['repairDesktopAccess', 'desktopAccessNoticeRepair']) $<HTMLButtonElement>(id).disabled = false;
+  }
+}
+$('repairDesktopAccess').addEventListener('click', () => void repairDesktopAccess());
 $('requestDesktopAccessibility').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('requestDesktopAccessibility');
   button.disabled = true;

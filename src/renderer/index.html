@@ -161,6 +161,12 @@
         <span>The tools of a Chat On Steroids plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
         <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
+      <div class="notice" id="desktopAccessNotice" role="status" hidden>
+        <i class="ico ph ph-warning" aria-hidden="true"></i>
+        <span id="desktopAccessNoticeText"></span>
+        <button class="btn btn-quiet" id="desktopAccessNoticeRepair" type="button" hidden>Repair permissions</button>
+        <button class="btn btn-quiet" id="desktopAccessNoticeOpen" type="button">Open settings</button>
+      </div>
       <div class="notice" id="credentialsUnreadable" role="alert" hidden>
         <i class="ico ph ph-lock-key" aria-hidden="true"></i>
         <span>The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.</span>
@@ -405,6 +411,7 @@
                     <div class="desktop-access" id="desktopAccess" hidden>
                       <strong id="desktopAccessTitle">Desktop access needs attention</strong>
                       <p id="desktopAccessDetail"></p>
+                      <button class="btn btn-solid" id="repairDesktopAccess" type="button" hidden>Repair permissions</button>
                       <button class="btn btn-solid" id="requestDesktopAccessibility" type="button">Request Accessibility</button>
                       <button
                         class="btn"

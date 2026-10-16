@@ -20,7 +20,8 @@ export const CONTROL_API_ROUTES = [
   '/v1/agents',
   '/v1/workers/{ownerId}',
   '/v1/workers/{ownerId}/reports',
-  '/v1/log'
+  '/v1/log',
+  '/v1/models'
 ] as const;
 
 /**
@@ -361,6 +362,15 @@ export interface ControlApiAgents {
     contextTokens: number;
     result: ControlApiText | null;
   }>;
+}
+
+/** The models this ChatGPT account offers, as the app last read them from ChatGPT's own picker. */
+export interface ControlApiModels {
+  /** `ready` once the app has read the picker; `unknown`, `pending` or `unavailable` until then. */
+  state: string;
+  observedAt: number | null;
+  /** An `id` and one of its `efforts` are what `POST /v1/inputs` takes as `model` and `reasoningEffort`. */
+  models: Array<{ id: string; label: string; efforts: string[] }>;
 }
 
 export interface ControlApiLog {
