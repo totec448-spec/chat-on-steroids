@@ -19,11 +19,27 @@ function inCodeOrLink(text: string, position: number): boolean {
   return false;
 }
 
+/**
+ * Index just past the last whitespace that no backslash escapes (a line break always counts). No
+ * @ reference reaches back across it, and every @ after it that follows whitespace starts a valid
+ * one, so the reference search below succeeds at its first candidate instead of rescanning the
+ * text from every @: a pasted run of escaped spaces ("\\ @") made each keystroke quadratic, and
+ * 200 KB of it froze the composer for 17 s.
+ */
+function referenceSearchStart(before: string): number {
+  for (let at = before.length - 1; at >= 0; at--) {
+    const char = before[at]!;
+    if (/\s/.test(char) && (before[at - 1] !== '\\' || /[\r\n\u2028\u2029]/.test(char))) return at + 1;
+  }
+  return 0;
+}
+
 /** Returns a completion only for a collapsed caret in a safe slash or project-reference token. */
 export function skillCompletion(text: string, start: number, end = start): Completion | null {
   if (start !== end || /\S/.test(text.slice(end).split(/\s/, 1)[0] ?? '')) return null;
   const before = text.slice(0, start);
-  const file = /(?:^|\s)(@(?:\\+[^\r\n\u2028\u2029\\]|[^\s\\])*\\*)$/i.exec(before);
+  // The search starts just after whitespace, so ^ there stands for the \s it follows.
+  const file = /(?:^|\s)(@(?:\\+[^\r\n\u2028\u2029\\]|[^\s\\])*\\*)$/i.exec(before.slice(referenceSearchStart(before)));
   if (file) {
     if (inCodeOrLink(text, start)) return null;
     const at = start - file[1]!.length;
