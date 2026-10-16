@@ -110,9 +110,11 @@ describe('MCP worker spawn with automatic Git isolation', () => {
   // local folder of the same path happens to be a Git repository, workers share the server folder.
   it('lets workers in a server project share its folder instead of making a local worktree', async () => {
     const defaults = defaultConfig();
-    await saveConfig({ ...defaults, roots: [{ name: 'approved', path: temp }, { name: 'server', path: `me@devbox:${repository}`, remote: { host: 'me@devbox', path: repository } }],
+    // A server path is POSIX; on Windows a local folder cannot share its spelling.
+    const serverPath = repository.startsWith('/') ? repository : '/srv/repository';
+    await saveConfig({ ...defaults, roots: [{ name: 'approved', path: temp }, { name: 'server', path: `me@devbox:${serverPath}`, remote: { host: 'me@devbox', path: serverPath } }],
       multiAgent: { ...defaults.multiAgent, enabled: true, autoWorktrees: true } });
-    setWorkspaceFor(`chat:${primeConversation}`, { real: repository, virtual: '/server' });
+    setWorkspaceFor(`chat:${primeConversation}`, { real: serverPath, virtual: '/server' });
     const allocation = vi.spyOn(worktrees, 'allocWorkerWorkspace');
     const response = await spawn([{ task: 'Work in the server project' }]);
     expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
