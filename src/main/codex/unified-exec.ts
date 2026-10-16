@@ -45,7 +45,7 @@ import {
   UNIFIED_EXEC_ENV
 } from './unified-exec-constants.js';
 import { terminateProcessTree } from '../exec.js';
-import { prefixPowershellScriptWithUtf8, type ShellType } from './shell.js';
+import { prefixPowershellScriptWithUtf8, withPowershellExitStatus, type ShellType } from './shell.js';
 
 // --------------------------------------------------------------------------- errors
 
@@ -806,8 +806,9 @@ export class UnifiedExecProcessManager {
     try {
       // `UnifiedExecRuntime::run` prefixes every PowerShell script before it reaches the
       // process launcher so pipe-mode output is UTF-8 just like PTY output.
+      // The app also ends it with the exit status of its last statement (see withPowershellExitStatus).
       const command =
-        request.shellType === 'powershell' ? prefixPowershellScriptWithUtf8(request.command) : request.command;
+        request.shellType === 'powershell' ? withPowershellExitStatus(prefixPowershellScriptWithUtf8(request.command)) : request.command;
       process = await UnifiedExecProcess.spawn({
         batchMarker: request.batchMarker,
         command,
