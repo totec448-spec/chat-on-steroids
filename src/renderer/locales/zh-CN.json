@@ -2447,6 +2447,7 @@
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "更新后桌面访问已失效：macOS 仍显示为已允许，但需要重新请求。",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "桌面访问已开启，但 macOS 尚未授予 Chat On Steroids 所需的权限。",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS 仍显示 Chat On Steroids 为已允许，但该权限属于之前的版本：由于没有开发者签名，每次更新在 macOS 看来都是一个新应用。请选择“修复权限”，在 macOS 询问时允许，然后完全退出并重新打开应用。",
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "请选择“修复权限”，在 macOS 询问时允许，然后完全退出并重新打开应用。系统设置中显示为已允许、但更新后不再生效的权限，也能由此修复。",
   "Prefer Plugins on app-sent messages": "应用发送的消息优先使用 Plugins",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，COS 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。"
 }
