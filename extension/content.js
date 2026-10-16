@@ -13256,8 +13256,10 @@
           userSendReceipt === witnessedSendReceipt && witnessedSendReceipt?.text === submittedText &&
           (witnessedSendReceipt.conversationId === target ||
             (!target && witnessedSendReceipt.conversationId === deliveredConversation)) &&
-          (witnessedSendReceipt.previousMessageId ?? null) === (previousUserId ?? null) &&
-          Date.now() - witnessedSendReceipt.at <= USER_SEND_RECEIPT_MS) {
+          (witnessedSendReceipt.previousMessageId ?? null) === (previousUserId ?? null)) {
+        // No age limit: the checks above prove this is the same live receipt for this send. A
+        // background Firefox window stretched Send to the app's acknowledgement past 30 s, the
+        // receipt went unaccepted and then expired, and the first turn never opened (2026-10-16).
         witnessedSendReceipt.accepted = { messageId: receipt.user.id, conversationId: deliveredConversation, epoch };
       }
       // Stop/composer-clear may precede the exact user row. This receipt, not that early
