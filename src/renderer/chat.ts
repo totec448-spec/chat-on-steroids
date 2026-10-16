@@ -6416,6 +6416,8 @@ async function refreshInputQueue(): Promise<void> {
             } else if (saved === false) {
               // A claimed or removed row no longer owns an editor. Refresh projects
               // its actual delivery state; it must never preserve this stale draft.
+              // The text the user typed must not vanish with it: an empty composer takes it.
+              keepUnsavedQueueEdit(value);
               inputQueueGeneration++;
               retireCard();
               void refreshInputQueue();
@@ -6448,6 +6450,23 @@ async function refreshInputQueue(): Promise<void> {
     $('inputQueue').append(row);
   }
 }
+/**
+ * A queued edit whose Save came too late: the message was sent or removed while it was open. The
+ * typed text goes into an empty composer, as Retry does, so it can still be sent; a draft the user
+ * already has there is never replaced.
+ */
+function keepUnsavedQueueEdit(text: string): void {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  if (authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) {
+    toast(t("This task was sent or removed before your edit was saved."));
+    return;
+  }
+  replaceComposerDraft();
+  input.value = text.trim();
+  rememberDraft(); skillPicker?.restore(); paintComposerImages(); paintDeliveryControls();
+  toast(t("This task was sent or removed before your edit was saved, so your edit is in the composer."));
+}
+
 async function retryPlannedInput(entry: InputEntry): Promise<void> {
   if (dismissedInputNotices.has(entry.id) || entry.stagesApplied || !['failed', 'cancelled'].includes(entry.state)) return;
   // The outbox retains the authored workflow after failure. Retry that payload, not

@@ -2462,5 +2462,7 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "ben@sunucu, ben@sunucu:2222 veya ~/.ssh/config içindeki bir Host",
   "/srv/app or ~/app": "/srv/app veya ~/app",
   "Prefer Plugins on app-sent messages": "Uygulamanın gönderdiği iletilerde Plugins kullan",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde Chat On Steroids, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde Chat On Steroids, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez.",
+  "This task was sent or removed before your edit was saved.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı; düzenlemeniz giriş alanında."
 }

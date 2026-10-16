@@ -2462,5 +2462,7 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "я@сервер, я@сервер:2222 или Host из ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app или ~/app",
   "Prefer Plugins on app-sent messages": "Предпочитать Plugins для сообщений из COS",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, Chat On Steroids использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, Chat On Steroids использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются.",
+  "This task was sent or removed before your edit was saved.": "Эта задача была отправлена или удалена до того, как ваше изменение сохранилось.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Эта задача была отправлена или удалена до того, как ваше изменение сохранилось, поэтому изменение перенесено в поле ввода."
 }
