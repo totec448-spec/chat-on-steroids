@@ -2309,7 +2309,8 @@
   "Send into the running turn now": "Gửi ngay vào lượt đang chạy",
   "The turn ended before this message could join it. It stays queued.": "Lượt đã kết thúc trước khi tin nhắn này kịp tham gia. Tin nhắn vẫn nằm trong hàng đợi.",
   "Messages during a running turn": "Tin nhắn trong lượt đang chạy",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Điều mà tin nhắn bạn gửi khi ChatGPT đang làm việc thực hiện theo mặc định. ⌘⇧Enter (Ctrl+Shift+Enter trên Windows và Linux) sẽ gửi theo cách còn lại.",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "Điều mà tin nhắn bạn gửi khi ChatGPT đang làm việc thực hiện theo mặc định. {0} sẽ gửi theo cách còn lại.",
+  "Shift": "Shift",
   "Join the running turn": "Tham gia lượt đang chạy",
   "Wait until the turn ends": "Chờ đến khi lượt kết thúc",
   "Notify when a chat finishes": "Thông báo khi một cuộc trò chuyện xong",
@@ -2320,7 +2321,7 @@
   "Previous match": "Kết quả trước",
   "Next match": "Kết quả tiếp theo",
   "Send messages with": "Gửi tin nhắn bằng",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Phím dùng để gửi nội dung bạn nhập. Với ⌘Enter (Ctrl+Enter trên Windows và Linux), Enter sẽ xuống dòng.",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "Phím dùng để gửi nội dung bạn nhập. Với {0}, Enter sẽ xuống dòng.",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "Ghim",
@@ -2460,5 +2461,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "toi@maychu, toi@maychu:2222 hoặc một Host trong ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app hoặc ~/app",
   "Prefer Plugins on app-sent messages": "Ưu tiên Plugins trong tin nhắn do ứng dụng gửi",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Khi bật, COS dùng Plugins thay cho Core trong các tin nhắn thông thường do ứng dụng gửi. Goal, Loop, tác nhân và khôi phục luôn dùng Core. Mỗi tin nhắn chỉ nhắc đến một ứng dụng. Tin nhắn gửi trực tiếp trong ChatGPT không thay đổi."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Khi bật, Chat On Steroids dùng Plugins thay cho Core trong các tin nhắn thông thường do ứng dụng gửi. Goal, Loop, tác nhân và khôi phục luôn dùng Core. Mỗi tin nhắn chỉ nhắc đến một ứng dụng. Tin nhắn gửi trực tiếp trong ChatGPT không thay đổi."
 }

@@ -2309,7 +2309,8 @@
   "Send into the running turn now": "Отправить сейчас в текущий ход",
   "The turn ended before this message could join it. It stays queued.": "Ход завершился раньше, чем это сообщение успело в него попасть. Оно остаётся в очереди.",
   "Messages during a running turn": "Сообщения во время хода",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Что по умолчанию делает сообщение, отправленное, пока ChatGPT работает. ⌘⇧Enter (Ctrl+Shift+Enter в Windows и Linux) отправляет его другим способом.",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "Что по умолчанию делает сообщение, отправленное, пока ChatGPT работает. {0} отправляет его другим способом.",
+  "Shift": "Shift",
   "Join the running turn": "Добавить в текущий ход",
   "Wait until the turn ends": "Ждать окончания хода",
   "Notify when a chat finishes": "Уведомлять, когда чат закончил",
@@ -2320,7 +2321,7 @@
   "Previous match": "Предыдущее совпадение",
   "Next match": "Следующее совпадение",
   "Send messages with": "Отправлять сообщения клавишей",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Какая клавиша отправляет набранный текст. С ⌘Enter (Ctrl+Enter в Windows и Linux) Enter начинает новую строку.",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "Какая клавиша отправляет набранный текст. С {0} Enter начинает новую строку.",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "Закрепить",
@@ -2460,5 +2461,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "я@сервер, я@сервер:2222 или Host из ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app или ~/app",
   "Prefer Plugins on app-sent messages": "Предпочитать Plugins для сообщений из COS",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, COS использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, Chat On Steroids использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются."
 }

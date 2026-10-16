@@ -2309,7 +2309,8 @@
   "Send into the running turn now": "立即发送到正在进行的这一轮",
   "The turn ended before this message could join it. It stays queued.": "这一轮在此消息加入前已结束。它仍在队列中。",
   "Messages during a running turn": "正在进行的轮次中的消息",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "在 ChatGPT 工作时发送的消息默认如何处理。⌘⇧Enter（Windows 和 Linux 上为 Ctrl+Shift+Enter）按另一种方式发送。",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "在 ChatGPT 工作时发送的消息默认如何处理。{0} 按另一种方式发送。",
+  "Shift": "Shift",
   "Join the running turn": "加入正在进行的这一轮",
   "Wait until the turn ends": "等待这一轮结束",
   "Notify when a chat finishes": "聊天完成时通知",
@@ -2320,7 +2321,7 @@
   "Previous match": "上一个匹配项",
   "Next match": "下一个匹配项",
   "Send messages with": "发送消息的按键",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "用哪个键发送你输入的内容。选择 ⌘Enter（Windows 和 Linux 上为 Ctrl+Enter）时，Enter 用于换行。",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "用哪个键发送你输入的内容。选择 {0} 时，Enter 用于换行。",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "置顶",
@@ -2460,5 +2461,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
   "/srv/app or ~/app": "/srv/app 或 ~/app",
   "Prefer Plugins on app-sent messages": "应用发送的消息优先使用 Plugins",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，COS 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。"
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，Chat On Steroids 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。"
 }

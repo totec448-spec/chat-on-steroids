@@ -2309,7 +2309,8 @@
   "Send into the running turn now": "Devam eden tura şimdi gönder",
   "The turn ended before this message could join it. It stays queued.": "Bu mesaj katılamadan tur sona erdi. Sırada kalmaya devam ediyor.",
   "Messages during a running turn": "Devam eden bir tur sırasında mesajlar",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT çalışırken gönderdiğin bir mesajın varsayılan davranışı. ⌘⇧Enter (Windows ve Linux'ta Ctrl+Shift+Enter) onu diğer şekilde gönderir.",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "ChatGPT çalışırken gönderdiğin bir mesajın varsayılan davranışı. {0} onu diğer şekilde gönderir.",
+  "Shift": "Shift",
   "Join the running turn": "Devam eden tura katıl",
   "Wait until the turn ends": "Tur bitene kadar bekle",
   "Notify when a chat finishes": "Bir sohbet bitince bildir",
@@ -2320,7 +2321,7 @@
   "Previous match": "Önceki eşleşme",
   "Next match": "Sonraki eşleşme",
   "Send messages with": "Mesajları şununla gönder",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "Yazdığını hangi tuşun gönderdiği. ⌘Enter (Windows ve Linux'ta Ctrl+Enter) seçiliyken Enter yeni satır başlatır.",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "Yazdığını hangi tuşun gönderdiği. {0} seçiliyken Enter yeni satır başlatır.",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "Sabitle",
@@ -2460,5 +2461,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "ben@sunucu, ben@sunucu:2222 veya ~/.ssh/config içindeki bir Host",
   "/srv/app or ~/app": "/srv/app veya ~/app",
   "Prefer Plugins on app-sent messages": "Uygulamanın gönderdiği iletilerde Plugins kullan",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde COS, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde Chat On Steroids, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez."
 }

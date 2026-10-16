@@ -2309,7 +2309,8 @@
   "Send into the running turn now": "実行中のターンに今すぐ送信",
   "The turn ended before this message could join it. It stays queued.": "このメッセージが加わる前にターンが終了しました。キューに残っています。",
   "Messages during a running turn": "実行中のターン中のメッセージ",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT の作業中に送ったメッセージの既定の動作です。⌘⇧Enter（Windows と Linux では Ctrl+Shift+Enter）でもう一方の方法で送信します。",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "ChatGPT の作業中に送ったメッセージの既定の動作です。{0} でもう一方の方法で送信します。",
+  "Shift": "Shift",
   "Join the running turn": "実行中のターンに加える",
   "Wait until the turn ends": "ターンの終了を待つ",
   "Notify when a chat finishes": "チャットが終わったら通知",
@@ -2320,7 +2321,7 @@
   "Previous match": "前の一致",
   "Next match": "次の一致",
   "Send messages with": "メッセージの送信キー",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "入力した内容を送信するキーです。⌘Enter（Windows と Linux では Ctrl+Enter）にすると、Enter で改行します。",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "入力した内容を送信するキーです。{0} にすると、Enter で改行します。",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "ピン留め",
@@ -2460,5 +2461,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222、または ~/.ssh/config の Host",
   "/srv/app or ~/app": "/srv/app または ~/app",
   "Prefer Plugins on app-sent messages": "アプリから送るメッセージでPluginsを優先",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "有効にすると、COSが送る通常のメッセージにはCoreではなくPluginsを使用します。ゴール、ループ、ワーカー、復旧では常にCoreを使います。メッセージで参照するアプリは1つだけです。ChatGPTから直接送るメッセージは変更されません。"
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "有効にすると、Chat On Steroids が送る通常のメッセージには Core ではなく Plugins を使用します。ゴール、ループ、ワーカー、復旧では常に Core を使います。メッセージで参照するアプリは1つだけです。ChatGPT から直接送るメッセージは変更されません。"
 }
