@@ -1492,6 +1492,16 @@
     </div>
 
     <!-- Chat search (⌘K / Ctrl+K, or the magnifier beside the app name): recent chats, then matches. -->
+    <dialog class="plugin-dialog ssh-project-dialog" id="sshProjectDialog" aria-labelledby="sshProjectTitle">
+      <div class="plugin-dialog-head"><h2 id="sshProjectTitle">Add a folder on a server</h2><button class="btn" id="sshProjectClose" type="button">Close</button></div>
+      <form id="sshProjectForm" class="plugin-dialog-body">
+        <p>Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.</p>
+        <label class="plugin-field" for="sshProjectAddress"><span>SSH address</span><input id="sshProjectAddress" required autocomplete="off" spellcheck="false" placeholder="me@server, me@server:2222 or a Host from ~/.ssh/config" /></label>
+        <label class="plugin-field" for="sshProjectFolder"><span>Folder on the server</span><input id="sshProjectFolder" required autocomplete="off" spellcheck="false" placeholder="/srv/app or ~/app" /></label>
+        <p id="sshProjectError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
+      </form>
+    </dialog>
     <dialog class="search-dialog" id="searchDialog" aria-label="Search chats">
       <div class="search-dialog-field">
         <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>

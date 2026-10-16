@@ -292,6 +292,26 @@ it('reads a DIL answer as the model wrote it, without the escapes its fallback a
   expect(await read('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and \\_after\\_'))
     .toBe('```python\nx = a[0] ** 2  # note \\[\n```\n\n`C:\\Users\\[x]` and _after_');
 });
+it('decodes the entities a DIL fallback writes for | and & in plain text, once', async () => {
+  // Measured on GPT-6 (2026-10-16): the model wrote `a|b <c> &d \\e *f*` and the fallback held
+  // `a&#124;b \\<c> &amp;d \\\\e \\*f\\*`, the code span verbatim. Readers saw &#124; and &amp;.
+  const f = fixture();
+  const answer = f.entry.turn.items[2];
+  answer.content = `::chatgpt-content-reference{index="0" source_message_id="${ANSWER}"}`;
+  const read = async (fallbackMarkdown: string) => {
+    answer.contentReferences = [{ type: 'dil', source_message_id: ANSWER, model_dil_v2: { fallbackMarkdown } }];
+    return (await f.ask()).turns[0].messages.find((m: any) => m.rawMessageId === ANSWER).rawText;
+  };
+  expect(await read('a&#124;b \\<c> &amp;d \\\\e \\*f\\*\n`a|b <c> &d \\e *f*`\nEND'))
+    .toBe('a|b <c> &d \\e *f*\n`a|b <c> &d \\e *f*`\nEND');
+  expect(await read('KIWI &#124; /home/maxim/cos-ssh-live')).toBe('KIWI | /home/maxim/cos-ssh-live');
+  // A literal entity the model wrote has its & encoded, so one pass gives back the literal text.
+  expect(await read('Write &amp;#124; or &amp;amp; or &amp;lt;b&amp;gt; &#x7C; &#X7c;')).toBe('Write &#124; or &amp; or &lt;b&gt; | |');
+  // Code and formulas keep their own text.
+  expect(await read('`x &amp; y` and \\(a &amp; b\\)')).toBe('`x &amp; y` and \\(a &amp; b\\)');
+  // Not an entity: left as it is.
+  expect(await read('R&D, a & b, &nope; &#;')).toBe('R&D, a & b, &nope; &#;');
+});
 it('keeps the LaTeX of a DIL answer as written, while its plain text still loses the escapes (#1342)', async () => {
   // Recorded from GPT-6 on 2026-10-12. The fallback escapes plain text only: a display formula is a
   // block between a line "\\[" and a line "\\]", an inline one sits in \\( … \\), and both hold raw
@@ -309,7 +329,7 @@ it('keeps the LaTeX of a DIL answer as written, while its plain text still loses
   // Literal punctuation around formulas, a one-line formula ChatGPT made a block, and $$ … $$, which
   // ChatGPT itself treats as plain text.
   expect(await read("The RPA (random phase approximation) costs \\$5 or \\$10, see \\[note 1\\] and {braces} and 50% of a&#124;b, x = 1, a+b, \\#tag, \\~wave\\~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\)\\.\n\n\\[\nE = mc^2\n\\]\n\n\\$\\$\n\\\\int\\_0\\^\\\\infty e\\^,dx = \\\\frac}2\n\\$\\$"))
-    .toBe("The RPA (random phase approximation) costs $5 or $10, see [note 1] and {braces} and 50% of a&#124;b, x = 1, a+b, #tag, ~wave~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\).\n\n\\[\nE = mc^2\n\\]\n\n$$\n\\int_0^\\infty e^,dx = \\frac}2\n$$");
+    .toBe("The RPA (random phase approximation) costs $5 or $10, see [note 1] and {braces} and 50% of a|b, x = 1, a+b, #tag, ~wave~.\n\\(x\\), \\(n=2\\) and \\(\\alpha+\\beta\\).\n\n\\[\nE = mc^2\n\\]\n\n$$\n\\int_0^\\infty e^,dx = \\frac}2\n$$");
   // An opening without its closing is not a formula: the text is unescaped as before.
   expect(await read('Odd \\( left open and \\[ too')).toBe('Odd ( left open and [ too');
   expect(await read('\\[\nnever closed \\_here\\_')).toBe('[\nnever closed _here_');

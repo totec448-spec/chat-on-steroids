@@ -2448,6 +2448,15 @@
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "Доступ к рабочему столу включён, но macOS не выдала Chat On Steroids нужное разрешение.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS всё ещё показывает Chat On Steroids как разрешённое приложение, но это разрешение относится к предыдущей версии: без подписи разработчика каждое обновление для macOS — новое приложение. Выберите «Восстановить разрешения», разрешите доступ, когда macOS спросит, затем полностью закройте и снова откройте приложение.",
   "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Выберите «Восстановить разрешения», разрешите доступ, когда macOS спросит, затем полностью закройте и снова откройте приложение. Это также исправляет разрешение, которое Системные настройки показывают как выданное, но которое после обновления больше не действует.",
+  "Folder on this computer…": "Папка на этом компьютере…",
+  "Folder on a server (SSH)…": "Папка на сервере (SSH)…",
+  "Test and add": "Проверить и добавить",
+  "Add a folder on a server": "Добавить папку на сервере",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids подключается через ваши собственные настройки SSH: ~/.ssh/config, агент, ключи и известные хосты. Вход возможен только по ключу, и на сервер ничего не устанавливается.",
+  "SSH address": "Адрес SSH",
+  "Folder on the server": "Папка на сервере",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "я@сервер, я@сервер:2222 или Host из ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app или ~/app",
   "Prefer Plugins on app-sent messages": "Предпочитать Plugins для сообщений из COS",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, COS использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются."
 }

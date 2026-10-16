@@ -2448,6 +2448,15 @@
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "데스크톱 접근이 켜져 있지만 macOS가 Chat On Steroids에 필요한 권한을 주지 않았습니다.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS에는 Chat On Steroids가 아직 허용됨으로 표시되지만, 그 권한은 이전 버전의 것입니다. 개발자 서명이 없어서 업데이트할 때마다 macOS는 새 앱으로 인식합니다. 권한 복구를 선택하고 macOS가 물으면 허용한 뒤 앱을 완전히 종료하고 다시 여세요.",
   "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "권한 복구를 선택하고 macOS가 물으면 허용한 뒤 앱을 완전히 종료하고 다시 여세요. 시스템 설정에는 허용됨으로 표시되지만 업데이트 후 더 이상 적용되지 않는 권한도 이것으로 해결됩니다.",
+  "Folder on this computer…": "이 컴퓨터의 폴더…",
+  "Folder on a server (SSH)…": "서버의 폴더(SSH)…",
+  "Test and add": "테스트 후 추가",
+  "Add a folder on a server": "서버의 폴더 추가",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids는 사용자의 SSH 설정(~/.ssh/config, 에이전트, 키, 알려진 호스트)으로 연결합니다. 로그인은 키로만 가능하며 서버에는 아무것도 설치되지 않습니다.",
+  "SSH address": "SSH 주소",
+  "Folder on the server": "서버의 폴더",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server, me@server:2222 또는 ~/.ssh/config의 Host",
+  "/srv/app or ~/app": "/srv/app 또는 ~/app",
   "Prefer Plugins on app-sent messages": "앱에서 보내는 메시지에 Plugins 우선 사용",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "활성화하면 COS에서 보내는 일반 메시지에 Core 대신 Plugins를 사용합니다. Goal, Loop, 워커 및 복구에서는 항상 Core를 사용합니다. 메시지당 한 앱만 멘션합니다. ChatGPT에서 직접 보낸 메시지는 변경되지 않습니다."
 }
