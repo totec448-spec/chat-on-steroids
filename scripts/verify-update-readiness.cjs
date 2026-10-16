@@ -80,6 +80,10 @@ app.whenReady().then(async () => {
       assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<600,JSON.stringify(geometry));
       assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),n=document.getElementById(b.getAttribute('aria-describedby'));return n.id==='updateAllNotice'&&n.classList.contains('sr-only')&&n.textContent===b.title})()`),true,'Restart explanation remains linked for assistive technology and pointer users');
       if (lang==='ja') assert.equal(geometry.title,'更新状況');
+      // The open card's blocks keep their 12 px rhythm: grid on <details> itself never reaches its
+      // children (Chromium lays them out in ::details-content), so the note sat flush under the list.
+      const tightest = await js(`(()=>{const d=[...document.getElementById('updateReadinessDetails').children].filter(e=>e.tagName!=='SUMMARY'&&e.getClientRects().length).map(e=>e.getBoundingClientRect());return Math.min(...d.slice(1).map((r,i)=>r.top-d[i].bottom))})()`);
+      assert.ok(tightest >= 8, lang+' '+theme+' readiness blocks have room between them: '+tightest);
       await shot('ready-'+lang+'-'+theme+'.png');
     }
     await open('lang=en');
