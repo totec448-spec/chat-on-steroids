@@ -2471,5 +2471,7 @@
   "Mac permissions repaired": "Mac の権限を修復",
   "If an update left Desktop access broken on a Mac, one click repairs it.": "アップデートで Mac のデスクトップアクセスが使えなくなったら、ワンクリックで修復できます。",
   "Prefer Plugins": "Plugins を優先",
-  "If you like, messages the app sends use your Plugins app instead of Core.": "必要なら、アプリが送るメッセージで Core の代わりに Plugins アプリを使います。"
+  "If you like, messages the app sends use your Plugins app instead of Core.": "必要なら、アプリが送るメッセージで Core の代わりに Plugins アプリを使います。",
+  "This task was sent or removed before your edit was saved.": "編集を保存する前に、このタスクは送信または削除されました。",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "編集を保存する前に、このタスクは送信または削除されました。編集内容は入力欄にあります。"
 }

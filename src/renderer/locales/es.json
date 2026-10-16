@@ -2471,5 +2471,7 @@
   "Mac permissions repaired": "Permisos de Mac reparados",
   "If an update left Desktop access broken on a Mac, one click repairs it.": "Si una actualización dejó sin funcionar el acceso al escritorio en un Mac, un clic lo repara.",
   "Prefer Plugins": "Preferir Plugins",
-  "If you like, messages the app sends use your Plugins app instead of Core.": "Si quieres, los mensajes que envía la aplicación usan tu aplicación Plugins en lugar de Core."
+  "If you like, messages the app sends use your Plugins app instead of Core.": "Si quieres, los mensajes que envía la aplicación usan tu aplicación Plugins en lugar de Core.",
+  "This task was sent or removed before your edit was saved.": "Esta tarea se envió o se eliminó antes de que se guardara tu cambio.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Esta tarea se envió o se eliminó antes de que se guardara tu cambio, así que tu cambio está en el editor."
 }

@@ -2471,5 +2471,7 @@
   "Mac permissions repaired": "Mac izinleri onarıldı",
   "If an update left Desktop access broken on a Mac, one click repairs it.": "Bir güncelleme Mac’te masaüstü erişimini bozduysa tek tıkla onarılır.",
   "Prefer Plugins": "Plugins tercih et",
-  "If you like, messages the app sends use your Plugins app instead of Core.": "İsterseniz uygulamanın gönderdiği iletiler Core yerine Plugins uygulamanızı kullanır."
+  "If you like, messages the app sends use your Plugins app instead of Core.": "İsterseniz uygulamanın gönderdiği iletiler Core yerine Plugins uygulamanızı kullanır.",
+  "This task was sent or removed before your edit was saved.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı; düzenlemeniz giriş alanında."
 }
