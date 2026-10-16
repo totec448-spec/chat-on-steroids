@@ -2447,5 +2447,14 @@
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "El acceso al escritorio dejó de funcionar tras la actualización: macOS todavía lo muestra como permitido, pero hay que volver a pedirlo.",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "El acceso al escritorio está activado, pero macOS no ha concedido a Chat On Steroids el permiso que necesita.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS todavía muestra Chat On Steroids como permitido, pero ese permiso pertenece a una versión anterior: sin firma de desarrollador, cada actualización es una aplicación nueva para macOS. Elige Reparar permisos, permite el acceso cuando macOS lo pida y, después, cierra por completo la aplicación y vuelve a abrirla.",
-  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Elige Reparar permisos, permite el acceso cuando macOS lo pida y, después, cierra por completo la aplicación y vuelve a abrirla. Reparar también arregla un permiso que Ajustes del Sistema muestra como permitido pero que ya no se aplica tras una actualización."
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Elige Reparar permisos, permite el acceso cuando macOS lo pida y, después, cierra por completo la aplicación y vuelve a abrirla. Reparar también arregla un permiso que Ajustes del Sistema muestra como permitido pero que ya no se aplica tras una actualización.",
+  "Folder on this computer…": "Carpeta en este ordenador…",
+  "Folder on a server (SSH)…": "Carpeta en un servidor (SSH)…",
+  "Test and add": "Probar y añadir",
+  "Add a folder on a server": "Añadir una carpeta en un servidor",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids se conecta con tu propia configuración SSH: tu ~/.ssh/config, tu agente, tus claves y tus hosts conocidos. El inicio de sesión solo funciona con una clave y no se instala nada en el servidor.",
+  "SSH address": "Dirección SSH",
+  "Folder on the server": "Carpeta en el servidor",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "yo@servidor, yo@servidor:2222 o un Host de ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app o ~/app"
 }

@@ -2447,5 +2447,14 @@
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "L'accès au bureau ne fonctionne plus depuis la mise à jour : macOS l'affiche encore comme autorisé, mais doit le redemander.",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "L'accès au bureau est activé, mais macOS n'a pas accordé à Chat On Steroids l'autorisation nécessaire.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS affiche encore Chat On Steroids comme autorisé, mais cette autorisation appartient à une version précédente : sans signature de développeur, chaque mise à jour est une nouvelle app pour macOS. Choisissez Réparer les autorisations, autorisez l'accès quand macOS le demande, puis quittez complètement et relancez l'application.",
-  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Choisissez Réparer les autorisations, autorisez l'accès quand macOS le demande, puis quittez complètement et relancez l'application. Cela corrige aussi une autorisation que Réglages Système affiche comme accordée mais qui ne s'applique plus après une mise à jour."
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Choisissez Réparer les autorisations, autorisez l'accès quand macOS le demande, puis quittez complètement et relancez l'application. Cela corrige aussi une autorisation que Réglages Système affiche comme accordée mais qui ne s'applique plus après une mise à jour.",
+  "Folder on this computer…": "Dossier sur cet ordinateur…",
+  "Folder on a server (SSH)…": "Dossier sur un serveur (SSH)…",
+  "Test and add": "Tester et ajouter",
+  "Add a folder on a server": "Ajouter un dossier sur un serveur",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids se connecte avec votre propre configuration SSH : votre ~/.ssh/config, votre agent, vos clés et vos hôtes connus. La connexion fonctionne uniquement avec une clé, et rien n'est installé sur le serveur.",
+  "SSH address": "Adresse SSH",
+  "Folder on the server": "Dossier sur le serveur",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "moi@serveur, moi@serveur:2222 ou un Host de ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app ou ~/app"
 }

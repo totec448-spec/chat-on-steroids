@@ -268,6 +268,8 @@ async function rootsOf(approvedRoots: readonly Root[]): Promise<ResolvedRoot[]> 
   const result: ResolvedRoot[] = [];
   for (const root of approvedRoots) {
     if (!root.name || /[\\/]/.test(root.name)) throw new WorkerWorktreeError('WORKTREE_ROOT_INVALID', 'approved root has an invalid virtual name');
+    // A server folder (#1469) has no local path; worktrees are only made in folders on this computer.
+    if (root.remote) continue;
     // An unrelated approved folder may be offline (for example a disconnected drive).
     // Only existing, resolved roots may authorize an allocation or an owned lease.
     // The selected source and lease's original owning root are checked below.

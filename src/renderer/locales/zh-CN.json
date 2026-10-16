@@ -2447,5 +2447,14 @@
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "更新后桌面访问已失效：macOS 仍显示为已允许，但需要重新请求。",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "桌面访问已开启，但 macOS 尚未授予 Chat On Steroids 所需的权限。",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS 仍显示 Chat On Steroids 为已允许，但该权限属于之前的版本：由于没有开发者签名，每次更新在 macOS 看来都是一个新应用。请选择“修复权限”，在 macOS 询问时允许，然后完全退出并重新打开应用。",
-  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "请选择“修复权限”，在 macOS 询问时允许，然后完全退出并重新打开应用。系统设置中显示为已允许、但更新后不再生效的权限，也能由此修复。"
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "请选择“修复权限”，在 macOS 询问时允许，然后完全退出并重新打开应用。系统设置中显示为已允许、但更新后不再生效的权限，也能由此修复。",
+  "Folder on this computer…": "此电脑上的文件夹…",
+  "Folder on a server (SSH)…": "服务器上的文件夹（SSH）…",
+  "Test and add": "测试并添加",
+  "Add a folder on a server": "添加服务器上的文件夹",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids 使用你自己的 SSH 配置连接：~/.ssh/config、代理、密钥和已知主机。只能使用密钥登录，服务器上不会安装任何东西。",
+  "SSH address": "SSH 地址",
+  "Folder on the server": "服务器上的文件夹",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
+  "/srv/app or ~/app": "/srv/app 或 ~/app"
 }
