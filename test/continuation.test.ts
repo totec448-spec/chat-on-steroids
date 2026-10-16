@@ -874,6 +874,41 @@ describe('the swarm handover', () => {
     spawn({ workers: [{ task: 'read the tests' }], caller: { conversationId } });
   };
 
+  it('adopts a pending continuation when its prime fleet starts after the compact ticket', async () => {
+    // Production timeline: the durable continuation existed 17 seconds before
+    // the prime/worker run was created. That run must inherit the still-open
+    // handover, rather than vetoing the eventual destination session rebind.
+    const session = await createSession({ title: 'late prime', conversationId: CHAT_A });
+    const opened = await openContinuationNow(session.id, CHAT_A, true);
+    startSwarm(CHAT_A);
+    expect(bindConversation('worker-1', 'worker-late-prime')).toBe(true);
+    finishAgent({ conversationId: 'worker-late-prime' }, 'work finished, available to revive');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(swarmRunning()).toBe(false);
+    await attachSummary(opened.token, SAMPLE_BRIEF);
+    await claimContinuationNow(opened.token, 'replacement-tab');
+    expect(freezePrimeTransfer(CHAT_A)).toBe('frozen');
+    expect(await commitContinuation(opened.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+    // An entirely parked family has no active prime incarnation. Its durable
+    // owner is proved by the worker history projected to B, not primeConversation().
+    expect(swarmStateForCaller({ conversationId: CHAT_B }).agents.find(a => a.id === 'worker-1'))
+      .toMatchObject({ state: 'sleeping', conversationId: 'worker-late-prime' });
+  });
+
+  it('does not arm a different conversation’s late prime group from the pending ticket', async () => {
+    const session = await createSession({ title: 'only A owns this ticket', conversationId: CHAT_A });
+    const opened = await openContinuationNow(session.id, CHAT_A, true);
+    startSwarm(CHAT_C);
+    expect(freezePrimeTransfer(CHAT_C)).toBe('unavailable');
+    await attachSummary(opened.token, SAMPLE_BRIEF);
+    await claimContinuationNow(opened.token, 'replacement-tab');
+    expect(await commitContinuation(opened.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+    expect(swarmStateForCaller({ conversationId: CHAT_B }).agents).toEqual([]);
+    expect(swarmStateForCaller({ conversationId: CHAT_C }).agents.some(agent => agent.id === 'prime')).toBe(true);
+  });
+
   it('moves a parked prime worker history to the replacement chat and revives the exact old worker', async () => {
     const summary = await createSession({ title: 'parked reusable workers', conversationId: CHAT_A });
     startSwarm(CHAT_A);

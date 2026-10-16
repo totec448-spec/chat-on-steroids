@@ -25,7 +25,7 @@ import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace, bindAgentWorkspace } from './workspace.js';
 import { requestCorrelation } from './session/correlation.js';
 import { getSession, findSessionByConversation, recordWorkerAssignment } from './session/store.js';
-import { continuationForSession } from './session/continuation.js';
+import { continuationForSession, continuationForSourceConversation } from './session/continuation.js';
 
 export const PRIME_ID = 'prime';
 
@@ -2140,6 +2140,11 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
         );
       }
     } else {
+      // A durable Compact & Resume ticket can predate the first worker spawn.
+      // beginPrimeTransfer() then saw no fleet, so this newly created prime
+      // must inherit the continuation owner's existing transfer intent.
+      // Otherwise the later session commit rightly refuses to strand workers in A.
+      const pendingHandoff = conversationId ? continuationForSourceConversation(conversationId) : null;
       run = {
         // This is an incarnation key, not a display id. Browser bootstrap commands persist
         // independently and quote it so a late `worker-1` from run A can never bind `worker-1`
@@ -2152,7 +2157,9 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
         localOwnerId: input.caller.localOwnerId,
         startedAt: Date.now(),
         agents: new Map([[PRIME_ID, makePrime(conversationId)]]),
-        transfer: null,
+        transfer: pendingHandoff
+          ? { from: pendingHandoff.from, at: pendingHandoff.openedAt, frozen: pendingHandoff.state === 'committing' }
+          : null,
         primeGoneAt: null
       };
       runs.set(run.runId, run);
