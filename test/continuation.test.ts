@@ -84,7 +84,7 @@ const { createSession, getSession, initSessionStore, resetSessionStoreForTests, 
   '../src/main/session/store.js'
 );
 const store = await import('../src/main/session/store.js');
-const { recordChatObservations, resetRecorderForTests, sessionForConversation } = await import('../src/main/session/recorder.js');
+const { recordChatObservations, resetRecorderForTests, ResumeDestinationPendingError, sessionForConversation } = await import('../src/main/session/recorder.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
 const {
   goalObjectiveFor,
@@ -1482,6 +1482,33 @@ describe('the window in which a replacement chat is expected', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(await observation).toBe(sessionId);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('never creates another local session for a delayed dispatched resume after the recorder wait expires', async () => {
+    const { sessionId, token } = await readyContinuation();
+    const destination = '94949494-2222-4333-8444-777777777777';
+    await claimContinuationNow(token, 'delayed-resume-command');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const create = vi.spyOn(store, 'createSession');
+    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+    const observation = sessionForConversation(destination);
+    // Register the rejection handler before advancing fake time; otherwise Node
+    // reports a transient unhandled rejection before the later assertion awaits it.
+    const deferred = expect(observation).rejects.toBeInstanceOf(ResumeDestinationPendingError);
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+
+    // The resume gate still owns this dispatched handoff. A timeout is not evidence that
+    // an unknown conversation is unrelated, and must never create a competing session.
+    expect(resumeOpeningChat()).toBe(true);
+    await deferred;
+    expect(create).not.toHaveBeenCalled();
+    expect(await commitContinuation(token, destination)).toBe(true);
+    expect(await sessionForConversation(destination)).toBe(sessionId);
+    expect((await store.findSessionByConversation(destination))?.id).toBe(sessionId);
   });
 
   it.each(['abort', 'expiry'] as const)('releases unrelated new recording when the resume claim ends by %s', async reason => {

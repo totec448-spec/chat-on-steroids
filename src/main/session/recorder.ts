@@ -277,6 +277,14 @@ async function settleResumeCommit(): Promise<void> {
   }
 }
 
+/** Retry the same observation after the unresolved handoff transfers its session. */
+export class ResumeDestinationPendingError extends Error {
+  constructor() {
+    super('a dispatched replacement chat is still waiting for its original local session');
+    this.name = 'ResumeDestinationPendingError';
+  }
+}
+
 async function initializeSessionForConversation(
   conversationId: string | null,
   title?: string
@@ -307,6 +315,15 @@ async function initializeSessionForConversation(
       return moved.sessionId;
     }
     known = await findSessionByConversation(conversationId);
+    if (!known && resumeOpeningChat()) {
+      // An already-dispatched handoff can remain unresolved longer than this bounded
+      // wait. The deadline limits how long an unrelated chat must wait; it cannot
+      // prove this unknown chat is unrelated. Do not mint a second local session for
+      // a possible resume destination. Throw an exact retry reason: returning null
+      // would let a later gate transition turn the bridge's response into HTTP 200
+      // and ACK an observation that was never stored.
+      throw new ResumeDestinationPendingError();
+    }
   }
   if (!known && (await conversationWasSuperseded(conversationId))) {
     // Compact & Resume moved this chat's session onto its replacement. Whatever the old page
