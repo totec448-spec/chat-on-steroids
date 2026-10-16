@@ -1782,6 +1782,9 @@ replace stable identities by temp→rename, never regress final to streaming, an
 chronological anchors across revisions. Metadata coalesces ordinary updates but writes immediately
 at ownership boundaries; it can rebuild history-derived fields without inventing an empty session
 when recovery lacks proof. Legacy files overlay lazily rather than triggering a whole-history rewrite.
+Rebuilding for newly introduced derived fields or estimate versions is an informational migration.
+Missing checkpoints and known history-watermark mismatches remain warnings; successful reconstruction
+is logged only after the replacement checkpoint is written.
 
 Native image-only user messages keep their exact message identity, empty authored text and
 bounded attachment metadata. They participate in the same turn/receipt chronology as text and
