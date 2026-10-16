@@ -40,7 +40,7 @@ Projects can now live on a server you reach over SSH. In the composer, `/` offer
 - **Fresh turns.** A continue that couldn't be sent stays at the time it was made, instead of sitting at the end of the chat.
 - **Mac: windows on another Space.** Observing a window on an inactive Space works again.
 - **Windows.** A command's exit status shows as the signed number Codex shows (for example −1 instead of 4294967295), and the key hints in Settings show only Ctrl shortcuts.
-- **Firefox.** When the add-on is behind the app, the notice says how Firefox updates it.
+- **Firefox.** New chats the app opens no longer occasionally lose their turn, which left Goal, Loop or queued messages waiting. When the add-on is behind the app, the notice says how Firefox updates it.
 - **Smaller fixes.** The diagnostics report's save dialog is titled in your language, the update details in **Activity** are spaced properly again, and a normal update no longer fills the log with warnings.
 
 ## [2.1.39] — Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report
