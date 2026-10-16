@@ -49,6 +49,16 @@ import { prefixPowershellScriptWithUtf8, type ShellType } from './shell.js';
 
 // --------------------------------------------------------------------------- errors
 
+
+/**
+ * An exit status as the signed 32-bit number Codex reports (Rust's `ExitStatus::code()` is an
+ * i32). Windows hands a process's DWORD over unsigned, so a program exiting with -1 (ssh.exe on a
+ * dropped connection) arrived as 4294967295.
+ */
+export function signedExitCode(code: number | null): number | null {
+  return code !== null && code > 0x7fffffff && code <= 0xffffffff ? code - 0x100000000 : code;
+}
+
 export type UnifiedExecErrorKind =
   | 'create_process'
   | 'process_failed'
@@ -446,7 +456,8 @@ class UnifiedExecProcess {
     this.outputClosedNotify.notifyWaiters();
   }
 
-  private signalExit(exitCode: number | null): void {
+  private signalExit(raw: number | null): void {
+    const exitCode = signedExitCode(raw);
     if (!this.exited) {
       this.exited = true;
       this.exit = exitCode;

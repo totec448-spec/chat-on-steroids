@@ -59,7 +59,9 @@ it('says draft only when GitHub confirms the conversion, and reports a refused o
   expect(await applyNotReady(refused.request, input('draft'))).toBe('labeled (draft refused: Resource not accessible by integration)');
   const comment = JSON.parse(refused.calls.at(-1)!.init!.body!).body as string;
   expect(comment).toBe(NOT_READY_COMMENT_UNDRAFTED);
-  expect(comment).not.toMatch(/draft/i);
+  // It does not claim the PR is a draft already; the maintainer's job converts it shortly after.
+  expect(comment).not.toMatch(/is a draft|draft again/i);
+  expect(comment).toContain('Ready for review');
 });
 
 // Live: CI turned green while the checklist was still red, and the label came off.
@@ -81,4 +83,17 @@ it('converts with the optional draft token, since the workflow token never may',
   const workflow = readFileSync('.github/workflows/pr-not-ready.yml', 'utf8');
   expect(workflow).toContain('DRAFT_TOKEN: ${{ secrets.PR_DRAFT_TOKEN }}');
   expect(workflow).not.toMatch(/contents:\s*write/);
+});
+
+// Live 2026-10-16, #1558: CI and the checklist failed one after the other, each run reached the
+// bot before the PR was a draft, and the author got the same comment twice.
+it('comments once: a second failure on a labeled PR only retries the conversion', async () => {
+  const labeled = pr({ labels: [{ name: NOT_READY_LABEL }] });
+  expect(notReadyDecision(labeled, 'failure')).toBe('redraft');
+  const drafts = fake({ '/graphql': { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } } });
+  expect(await applyNotReady(drafts.request, input('redraft'))).toBe('draft');
+  expect(drafts.calls.map(call => call.path)).toEqual(['/graphql']);
+  const refused = fake({ '/graphql': { errors: [{ message: 'Resource not accessible by integration' }] } });
+  expect(await applyNotReady(refused.request, input('redraft'))).toBe('labeled (draft refused: Resource not accessible by integration)');
+  expect(refused.calls.map(call => call.path)).toEqual(['/graphql']);
 });
