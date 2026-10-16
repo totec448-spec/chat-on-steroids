@@ -20,6 +20,7 @@ it('chooses the week start from a weekday menu, keeps exact counts, and restores
   const data: UsageOverview = { contextTokenCap: 256_000, tokens: 0, models: [], days: [], sessions: 1,
     limits: [
       { model: 'gpt-6-pro', scope: 'model', remaining: 123, remainingPercent: null, resetAt: null, windowSeconds: 604800, observedAt: Date.now() },
+      { model: 'Codex', scope: 'codex', remaining: null, remainingPercent: 16, resetAt: null, windowSeconds: 18000, observedAt: Date.now() },
       { model: 'deep_research', scope: 'feature', remaining: 250, remainingPercent: null, resetAt: null, windowSeconds: null, observedAt: Date.now() }
     ],
     messages: { through: new Date(2026, 8, 21, 12).getTime(), days: [
@@ -49,6 +50,11 @@ it('chooses the week start from a weekday menu, keeps exact counts, and restores
   const quotas = element('usageLimits').textContent;
   expect(quotas).toContain('123 remaining');
   expect(quotas).toContain('250 remaining');
+  // wham/usage's windows are Codex's, labeled as such and listed after the chat limits (2026-10-16).
+  const rows = [...element('usageLimits').querySelectorAll('.usage-limit')].map(row => row.textContent);
+  expect(rows.at(-1)).toContain('Codex · 5-hour limit');
+  expect(rows.at(-1)).toContain('Codex usage, not your ChatGPT chats');
+  expect(quotas).not.toContain('Shared across all models');
   expect(element('usageMessageCounts').textContent).toContain('sent');
   expect(element('usageMessageCounts').textContent).not.toContain('remaining');
   choose(6);

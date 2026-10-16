@@ -86,14 +86,16 @@
       const reset = typeof row?.reset_after === 'string' ? Date.parse(row.reset_after) : NaN;
       if ((model || feature) && remaining !== null) add({ model: model || feature, scope: model ? 'model' : 'feature', remaining, remainingPercent: null, resetAt: Number.isFinite(reset) && reset > 0 ? reset : null, windowSeconds: null });
     }
-    const rates = [{ ...data, label: 'Shared usage' }, ...(Array.isArray(data.additional_rate_limits) ? data.additional_rate_limits.slice(0, 40) : [])];
+    // wham/usage is Codex's usage endpoint: its windows are Codex limits (Codex's /status and
+    // ChatGPT's sidebar panel), never limits on ChatGPT chat messages.
+    const rates = [{ ...data, label: 'Codex' }, ...(Array.isArray(data.additional_rate_limits) ? data.additional_rate_limits.slice(0, 40) : [])];
     for (const rate of rates) {
       const model = label(rate?.model_slug), name = model || label(rate?.limit_name) || label(rate?.label);
       for (const window of [rate?.rate_limit?.primary_window, rate?.rate_limit?.secondary_window]) {
         const used = finite(window?.used_percent);
         if (!name || used === null || used > 100) continue;
         const reset = finite(window?.reset_at);
-        add({ model: name, scope: model ? 'model' : 'shared', remaining: null, remainingPercent: 100 - used, resetAt: reset === null || reset === 0 ? null : reset * 1000, windowSeconds: finite(window?.limit_window_seconds) || null });
+        add({ model: name, scope: 'codex', remaining: null, remainingPercent: 100 - used, resetAt: reset === null || reset === 0 ? null : reset * 1000, windowSeconds: finite(window?.limit_window_seconds) || null });
       }
     }
     latestOrder = order;
