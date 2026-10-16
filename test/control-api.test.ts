@@ -145,7 +145,7 @@ describe('local control API listener', () => {
     const health = await request(port, '/v1/health', { headers: auth });
     expect(health.body).toMatchObject({
       protocol: 1,
-      routes: ['/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log']
+      routes: ['/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log', '/v1/models']
     });
   });
 
