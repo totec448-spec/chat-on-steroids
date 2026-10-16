@@ -7,7 +7,10 @@ import { eventTokens } from '../../shared/session.js';
 import { usageDateKey, usageMessageFamily, usageModelKey, usageWeekStart, type ModelUsage, type UsageMessageDay, type UsageModelTokens, type UsageOverview } from '../../shared/usage.js';
 import { getChatModels } from '../chat-models.js';
 import { isProModel } from '../../shared/chat-models.js';
-const row = z.object({ model: z.string().min(1).max(100), scope: z.enum(['model', 'feature', 'shared']), remaining: z.number().finite().nonnegative().nullable(), remainingPercent: z.number().min(0).max(100).nullable(), resetAt: z.number().finite().positive().nullable(), windowSeconds: z.number().finite().positive().nullable() });
+// An extension from before 2.1.40 sends wham/usage windows as "shared": they were Codex's all along.
+const legacyCodex = (entry: { model: string; scope: string }) => entry.scope === 'shared'
+  ? { ...entry, model: entry.model === 'Shared usage' ? 'Codex' : entry.model, scope: 'codex' as const } : entry;
+const row = z.object({ model: z.string().min(1).max(100), scope: z.enum(['model', 'feature', 'codex', 'shared']), remaining: z.number().finite().nonnegative().nullable(), remainingPercent: z.number().min(0).max(100).nullable(), resetAt: z.number().finite().positive().nullable(), windowSeconds: z.number().finite().positive().nullable() });
 let limits: ModelUsage[] = [];
 let latestObservedAt = 0;
 const FRESH_MS = 10 * 60000;
@@ -18,7 +21,7 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
   // A snapshot is one account observation. Never merge old counters from another
   // account/tab into the latest response; an explicit empty snapshot clears them.
   latestObservedAt = capturedAt;
-  limits = parsed.map((entry) => ({ ...entry, observedAt: capturedAt }));
+  limits = parsed.map((entry) => ({ ...legacyCodex(entry), observedAt: capturedAt }) as ModelUsage);
 }
 /** ChatGPT's latest reported limits, as the page last showed them. */
 export function reportedUsageLimits(): ModelUsage[] {
