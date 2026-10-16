@@ -24,6 +24,12 @@ export function decide(events, now) {
   return now - ask >= REMIND_AFTER_DAYS * DAY ? 'remind' : null;
 }
 
+/** Contributor PRs this check follows: ready ones, and drafts the not-ready bot made from red ones. */
+export function watched(pr) {
+  if (MAINTAINER.has(pr.author_association) || pr.user?.type === 'Bot') return false;
+  return !pr.draft || (pr.labels ?? []).some(label => label.name === 'not-ready');
+}
+
 export const REMINDER = `${MARK}
 Friendly nudge: this PR has been waiting for an answer or a fix for ${REMIND_AFTER_DAYS} days. Anything from you (a push, a reply, or "I need more time") keeps it open. Without that it will be closed in ${CLOSE_AFTER_REMINDER_DAYS} days. It can be reopened any time, nothing is lost.`;
 export const CLOSING = 'Closing this for now since it has been quiet for a while. Thanks for the work! Reopen it whenever you pick it up again, or push to the branch and ask us to reopen.';
@@ -63,7 +69,7 @@ async function main() {
   if (!repository || !token) throw new Error('GITHUB_REPOSITORY and GH_TOKEN are required');
   const prs = await github(`/repos/${repository}/pulls?state=open&per_page=100`, token);
   for (const pr of prs) {
-    if (pr.draft || MAINTAINER.has(pr.author_association) || pr.user.type === 'Bot') continue;
+    if (!watched(pr)) continue;
     const action = decide(await eventsFor(repository, pr, token), Date.now());
     if (!action) continue;
     const body = action === 'remind' ? REMINDER : CLOSING;

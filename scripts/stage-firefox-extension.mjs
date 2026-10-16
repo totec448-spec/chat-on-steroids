@@ -32,7 +32,10 @@ export function firefoxManifest(source) {
       data_collection_permissions: {
         required: ['personalCommunications', 'websiteContent']
       }
-    }
+    },
+    // Firefox for Android supports data_collection_permissions only from 142; without this the
+    // 140 minimum above draws Mozilla's validator warning (seen on the 2.1.38 submission).
+    gecko_android: { strict_min_version: '142.0' }
   };
   return manifest;
 }

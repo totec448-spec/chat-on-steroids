@@ -14,6 +14,7 @@ const keys = [
   "The saved plugin update state could not be read.",
   "The release information has no valid version number.",
   "The downloaded update did not match the published checksum.",
+  "GitHub could not be reached. Check your connection",
   "Could not check for updates: HTTP {0}.",
   "Could not download {0}: HTTP {1}.",
   "Release {0} does not include {1}.",

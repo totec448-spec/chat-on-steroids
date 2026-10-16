@@ -9,6 +9,81 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.39] — Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report
+
+Long work continues in a fresh turn again, also while ChatGPT is thinking or running a tool. Chats the app opens stay out of incognito windows, and the diagnostics report now answers most questions about a problem by itself.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### 🛠 Fixed
+
+- **Fresh turns for long work.** In 2.1.38 the automatic continue often couldn't be sent. While ChatGPT is thinking or running a tool, it often shows only **Stop** and no **Send**, so the continue appeared in the chat as a failed message, every few minutes, and the long turn broke anyway. The app now stops the answer right after the tool result and sends the continue as the next message, so the work carries on in a fresh turn. A message you type yourself never stops an answer. If a turn can't be continued twice, the app leaves it alone instead of trying again and again.
+- **No chats in incognito windows.** If the extension is allowed in incognito and an incognito window was in front, a chat the app opened (for example a sub-agent's) landed there. ChatGPT is signed out there, so it failed over and over. Those chats now open in your regular window, or in a new regular window if only incognito ones are open.
+- **Settings stay when a value is unknown.** If a setting holds a choice this version doesn't know, for example after going back from a newer version, only that choice returns to its default instead of all your settings.
+
+### ✨ Improved
+
+- **A fuller diagnostics report** (**Activity → Diagnostics report**). Besides versions, connection and the log, it now also shows:
+  - how the app is installed and whether it can update itself;
+  - the computer's memory, processor, free disk space and uptime;
+  - crashes and restarts;
+  - the most frequent warnings since the app started;
+  - which tools were called in the last day and how often they failed;
+  - the state of each active chat, numbered instead of named;
+  - the browser and its ChatGPT tabs;
+  - which of ChatGPT's controls the extension still finds.
+
+  It still contains nothing personal: no names, folders, chat titles or text.
+- **Bug reports on GitHub** now ask for the diagnostics report and a check on the latest release, so we can usually help with the first answer.
+
+## [2.1.38] — Firefox, fresh turns for long work, and answering approvals from the app
+
+Firefox joins Chrome, Edge and Brave as a ChatGPT browser. Long work now continues in a fresh turn every 30 minutes, so it no longer breaks around the 40-minute mark. You can answer ChatGPT's tool approval cards right in the app. Updates gain one **Update all** button with a clear status for every part, and Usage now also shows Codex and Claude Code.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+- If CoS asks you to refresh its plugins in ChatGPT, do so (or let **Automatic plugin refresh** do it): Core has a new `usage` tool.
+
+### ✨ Highlights
+
+- **Firefox.** Choose **Mozilla Firefox** as the ChatGPT browser in Setup or **Settings → Agents & automation → Browser & history**. The add-on is signed by Mozilla, installs with one click from Setup and updates itself through Firefox.
+- **Fresh turns for long work.** Turns that ran longer than about 35 minutes almost always broke (lost stream, "Message delivery timed out"), while stopping and continuing never did. Once a turn has run 30 minutes, the app now sends a short automatic continue right after the next tool result: ChatGPT ends the turn and carries on in a fresh one, and nothing is lost. Change or switch it off under **Settings → Agents & automation → Start a fresh turn after**. Pro models, Goal, Loop and sub-agents are left alone.
+- **Answer approval cards from the app.** When ChatGPT asks whether a plugin may run a tool, the waiting row in the app shows the card's own words with **Deny** and **Allow once**. One click answers exactly that card in the browser. The app never answers on its own, not for Goal or Loop either.
+- **Update all.** **Settings → Activity** shows the app, the browser extension and each plugin with its status, and one **Update all** button brings everything up to date. Restarting for an update asks first, with **Keep working** preselected.
+- **Codex and Claude Code in Usage.** **Settings → Usage → Other apps on this computer** shows Codex's 5-hour and weekly limits as Codex reported them, and the tokens Codex and Claude Code used, counted from their own logs on this computer. Only numbers are read, never what you wrote; you can switch it off. Ask "how much usage do I have left?" in a chat and Core answers with ChatGPT's and Codex's limits.
+- **Writing blocks you can copy.** ChatGPT's writing blocks (drafts, templates, e-mails) show as their own panel with a header and a **Copy** button.
+
+### 🛠 Fixed
+
+- **German ChatGPT errors.** "Verbindung unterbrochen. Warten auf die vollständige Antwort." and "Zeitüberschreitung bei der Übermittlung der Nachricht" are now recognized, so recovery continues the answer instead of reloading the page in a loop.
+- **Updates into a protected folder on Windows.** When the install folder needs an administrator, the app now asks Windows for permission instead of quietly not installing. If an update still didn't install, the app says so at the next start.
+- **When an update can't reach GitHub,** the app now says so and suggests checking your connection, instead of a bare "fetch failed".
+- **Worker wakes after a page that wasn't ready.** A worker whose page simply wasn't ready yet is woken again 15 seconds later instead of counting as failed.
+- **Plugins after a long tool call.** A tool call that runs past its time limit no longer takes the whole plugin offline.
+- **Two worktree changes at once** in the same repository no longer collide.
+- **A busy sidebar** with many projects and long histories no longer slows the app down on every update.
+- **A permission group with nothing switched on** now says so in your language instead of the English word "off".
+- **Long runs paused by a safety card.** ChatGPT's safety check sometimes flagged Core's command tool as a "Suspicious Instruction" and stopped the run on an approval card. The tool now describes itself plainly.
+- **Background chats in Firefox** are sent and confirmed much sooner, and their first answer reliably gets its turn, with **Copy** and **Export**.
+- **Built-in browser next to Chrome.** With the built-in browser chosen, new chats no longer open in a Chrome window that also has the extension.
+- **Tables with a copy button.** When ChatGPT draws a table with its own copy button, the app now shows every row, and **Copy** includes them.
+
+### ✨ Improved
+
+- **Plugin URLs that stay the same.** If you publish CoS through your own tunnel, **Settings → General → For developers → Keep plugin URLs across restarts** keeps each plugin's address, so ChatGPT keeps finding its tools after a restart.
+- **Longest call per plugin.** Each added plugin has its own **Longest call (seconds)**, from 1 second to 30 minutes.
+- **When the browser keeps the extension off ChatGPT,** Setup says so and shows where to allow it.
+- **Workspace members without admin rights.** Setup's **Add it in ChatGPT** step explains what to ask your admin for in a ChatGPT Business, Enterprise or Edu workspace.
+- **The built-in browser minimizes where you want:** taskbar or tray (Dock or menu bar on macOS).
+- **Two browsers connected:** Setup shows which kind each one is.
+- **Local control API:** it can stop the answer a chat is writing, and run workers.
+- **Updates you can follow.** The question before restarting is now the app's own dialog, with **Keep working** first. While an update installs, a Chat On Steroids window shows each step, and on Windows the installer's progress follows. From this version on, the app opens again by itself without a click.
+- **Codex limits explained.** When Codex stops at a limit, Usage says why in your language, for example when the workspace's Codex credits are used up.
+- **The automatic Continue** no longer ends with a random fun fact. Switch it back on under **Settings → General → Playful asides in automatic Continue**.
+
 ## [2.1.37] — Find in chat, slash commands and Send now
 
 Everyday comforts for working in chats: find text in a chat with ⌘F, reach most actions with `/` commands, choose what Enter does and what a message during a running answer does, send a queued message right away, and get a notification when a chat finishes. Long runs keep your computer awake, the final answer of a long turn shows where it belongs, and worker chats can leave your ChatGPT chat list once they're done.

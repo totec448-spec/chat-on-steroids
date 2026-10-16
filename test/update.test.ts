@@ -20,12 +20,22 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawned: Array<{ file: string; args: string[] }> = [];
+const spawnOptions: Array<Record<string, unknown> | undefined> = [];
+/** How the elevation step ends: Windows' answer as PowerShell's exit code, or a held answer. */
+const elevation: { exitCode: number | 'held'; finish: ((code: number) => void) | null } = { exitCode: 0, finish: null };
 /** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
 const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
 vi.mock('node:child_process', () => ({
-  spawn: (file: string, args: string[]) => {
+  spawn: (file: string, args: string[], options?: Record<string, unknown>) => {
     spawned.push({ file, args });
-    return { on: () => undefined, unref: () => undefined };
+    spawnOptions.push(options);
+    const listeners: Record<string, (value: unknown) => void> = {};
+    if (file === 'powershell.exe') {
+      const finish = (code: number) => queueMicrotask(() => listeners.exit?.(code));
+      if (elevation.exitCode === 'held') elevation.finish = finish;
+      else finish(elevation.exitCode);
+    }
+    return { on: (event: string, listener: (value: unknown) => void) => { listeners[event] = listener; }, unref: () => undefined, kill: () => true };
   },
   execFile: (file: string, args: string[], _options: unknown, done: (err: (Error & { code?: number | string }) | null) => void) => {
     icacls.calls.push({ file, args });
@@ -46,7 +56,8 @@ vi.mock('electron', () => ({
     relaunch: (options: { execPath?: string }) => relaunched.push(options)
   }
 }));
-vi.mock('../src/main/logger.js', () => ({ logInfo: () => undefined, logWarn: () => undefined }));
+const warnings: string[] = [];
+vi.mock('../src/main/logger.js', () => ({ logInfo: () => undefined, logWarn: (message: string) => warnings.push(message) }));
 
 const { APP_VERSION } = await import('../src/main/version.js');
 const { isNewer } = await import('../src/shared/types.js');
@@ -54,9 +65,12 @@ const {
   applyStagedUpdate,
   checkForUpdates,
   checkForUpdatesIfStale,
+  installingVersion,
   manualDownloadName,
   manualDownloadUrl,
   markInstallOnQuit,
+  onInstallerTakeover,
+  onUpdateHandoffStep,
   releaseVersion,
   resetUpdateForTests,
   restoreUpdateHandoff,
@@ -138,7 +152,11 @@ beforeEach(() => {
   userData = mkdtempSync(path.join(tmpdir(), 'cos-update-'));
   packaged = true;
   spawned.length = 0;
+  spawnOptions.length = 0;
+  elevation.exitCode = 0;
+  elevation.finish = null;
   relaunched.length = 0;
+  warnings.length = 0;
   resetUpdateForTests();
 });
 
@@ -281,6 +299,7 @@ describe('staging the new version', () => {
     // and without starting the app again behind a user who quit for their own reasons.
     await applyStagedUpdate();
     expect(spawned).toEqual([{ file: staged, args: ['/S', '--updated'] }]);
+    expect(spawnOptions[0]?.windowsHide).toBe(true);
   });
 
   /**
@@ -300,8 +319,60 @@ describe('staging the new version', () => {
     expect(spawned[0]!.file).toBe('powershell.exe');
     const script = spawned[0]!.args.at(-1)!;
     expect(script).toContain(`Start-Process -FilePath '${staged.replaceAll("'", "''")}'`);
-    expect(script).toContain("-ArgumentList '/S','--updated','--force-run'");
+    // Asked to install now: the installer is shown, not silent (2026-10-15).
+    expect(script).toContain("-ArgumentList '--updated','--force-run'");
     expect(script).toContain('-Verb RunAs');
+  });
+
+  it('waits for Windows to answer, with the permission step attached to this app', async () => {
+    // 2026-10-15, Windows VM: started detached, PowerShell had no console and ran nothing, so no
+    // prompt ever showed. Attached, it ends with this app unless the handoff waits for the answer.
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => false);
+    elevation.exitCode = 'held';
+    let handedOver = false;
+    const handoff = asPlatform('win32', undefined, () => applyStagedUpdate()).then(() => { handedOver = true; });
+    await vi.waitFor(() => expect(elevation.finish).not.toBeNull());
+    expect(spawnOptions[0]?.detached).not.toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(handedOver).toBe(false);
+    elevation.finish!(0);
+    await handoff;
+    expect(warnings).toEqual([]);
+  });
+
+  it('says so when Windows does not give permission', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    setInstallFolderAccessForTests(async () => false);
+    elevation.exitCode = 1;
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(warnings).toEqual([expect.stringContaining(`Windows did not give permission, so ${NEXT} was not installed`)]);
+    // The next start still says the version did not install.
+    expect(JSON.parse(readFileSync(path.join(userData, 'updates', 'handoff.json'), 'utf8'))).toMatchObject({ version: NEXT });
+  });
+
+  it('names the version a quit installs for a person waiting on it, and reports each handoff step', async () => {
+    // The app shows its own "Installing" window from the quit until the installer takes over.
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(installingVersion()).toBeNull();
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    expect(installingVersion()).toBe(NEXT);
+    const steps: string[] = [];
+    onUpdateHandoffStep(step => steps.push(step));
+    setInstallFolderAccessForTests(async () => false);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(steps).toEqual(['permission', 'installer']);
+    expect(installingVersion()).toBeNull();
+    // A refused prompt reaches no installer.
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    steps.length = 0; elevation.exitCode = 1;
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(steps).toEqual(['permission']);
+    onUpdateHandoffStep(() => undefined);
   });
 
   it('keeps the silent per-user install when the folder is the user’s own', async () => {
@@ -570,15 +641,33 @@ describe('installing on request', () => {
     expect(markInstallOnQuit('98.0.0')).toBe(false);
     expect(markInstallOnQuit(NEXT)).toBe(true);
   });
-  it('asks the installer to start the app again', async () => {
+  it('shows the installer to a person waiting for it and asks it to start the app again', async () => {
+    // 2026-10-15: silent, the app vanished for about 100 s with nothing on screen. The installer's
+    // own progress window now shows and closes itself (scripts/windows-installer-acl.nsh).
     github();
     await asPlatform('win32', undefined, () => checkForUpdates());
 
     expect(markInstallOnQuit()).toBe(true);
     await applyStagedUpdate();
     expect(spawned).toEqual([
-      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated', '--force-run'] }
+      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['--updated', '--force-run'] }
     ]);
+    // Measured on Windows: started with windowsHide, the installer's window stayed hidden too.
+    expect(spawnOptions[0]?.windowsHide).not.toBe(true);
+  });
+
+  it('waits for the shown installer to take over, and never for a silent one', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    let waits = 0;
+    onInstallerTakeover(async () => { waits++; });
+    expect(markInstallOnQuit()).toBe(true);
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(waits).toBe(1);
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    await asPlatform('win32', undefined, () => applyStagedUpdate());
+    expect(waits, 'an ordinary quit installs silently and exits').toBe(1);
+    onInstallerTakeover(async () => undefined);
   });
 
   it('relaunches an AppImage install itself, having no installer to ask', async () => {
@@ -670,6 +759,45 @@ describe('staged executable authority across later events', () => {
 
 describe('a check or download that goes wrong on a bad connection', () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it.each(['API', 'public release page', 'artifact'] as const)('explains a rejected %s request, keeps its diagnostic and can retry', async request => {
+    const { fetch } = github({ apiStatus: request === 'public release page' ? 403 : undefined });
+    const answer = fetch.getMockImplementation()!;
+    const target = request === 'API' ? 'https://api.github.com/repos/totec448-spec/chat-on-steroids/releases/latest'
+      : request === 'public release page' ? 'https://github.com/totec448-spec/chat-on-steroids/releases/latest'
+      : `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${WINDOWS_ASSET}`;
+    fetch.mockImplementation(async input => {
+      if (String(input) === target) {
+        throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') });
+      }
+      return answer(input);
+    });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({
+      latest: request === 'artifact' ? NEXT : null, stage: 'failed', error: 'GitHub could not be reached'
+    });
+    expect(fetch).toHaveBeenCalledTimes(request === 'API' ? 1 : request === 'public release page' ? 2 : 3);
+    expect(warnings).toContain('update check failed: fetch failed');
+    expect(markInstallOnQuit()).toBe(false);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+  });
+
+  it.each([
+    new Error('fetch failed'),
+    new TypeError('Invalid URL'),
+    new Error('EACCES: permission denied')
+  ])('preserves an unrelated updater error: %s', async failure => {
+    const { fetch } = github();
+    fetch.mockRejectedValueOnce(failure);
+    await checkForUpdates();
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed', error: failure.message });
+    expect(warnings).toContain(`update check failed: ${failure.message}`);
+  });
 
   /**
    * The app starts at login, often before the network is up. The check failed, Activity showed

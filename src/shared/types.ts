@@ -159,6 +159,8 @@ export interface UiPrefs {
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
+  playfulContinue?: boolean;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
@@ -179,6 +181,13 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
   turnNotifications?: boolean;
+  /**
+   * #1402: after this many minutes of one turn, the next tool result starts a fresh turn with an
+   * automatic continue (0 = off). Missing means 30.
+   */
+  rotateTurnMinutes?: number;
+  /** Usage › Other apps: read Codex's and Claude Code's local logs (numbers only). Missing means on. */
+  localAppUsage?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
   followUp?: 'steer' | 'queue';
   /** Codex's "Enter key behavior": Enter sends (missing or true), or only Cmd/Ctrl+Enter sends (false). */
@@ -388,6 +397,12 @@ export interface MultiAgentSettings {
 export interface McpSettings {
   /** Appended to the Core and Desktop server instructions, or empty for none. */
   instructions: string;
+  /**
+   * Keep each connector's secret URL path across restarts, for a tunnel of the user's own whose
+   * URL ChatGPT stores (#924). Off by default: tokens rotate on every start. Stored only in the
+   * OS-backed secret store; turning it off forgets them.
+   */
+  persistentUrls?: boolean;
 }
 
 /** The opt-in local control API for an agent watching this app (`src/main/control-api.ts`). */
@@ -465,6 +480,11 @@ export interface ConnectionStatus {
    * connected" from "we know we were connected N seconds ago".
    */
   handshakeAt: number | null;
+  /**
+   * Why an `offline` state is offline: `service` when OpenAI's tunnel service answered with errors,
+   * so this computer's internet works. Null or absent: OpenAI could not be reached at all.
+   */
+  offlineCause?: 'service' | null;
   /** Epoch ms of the last request ChatGPT sent to this app, end-to-end proof. */
   lastRequestAt: number | null;
   /**
@@ -636,6 +656,16 @@ export interface CompanionDiagnostics {
     durations: boolean;
   };
   tab: CompanionTabDiagnostics | null;
+  /** For the diagnostics report: names, versions, counts and booleans only. Absent from older extensions. */
+  environment?: CompanionEnvironment | null;
+}
+
+export interface CompanionEnvironment {
+  browser: { name: string; version: string | null };
+  /** ChatGPT tabs by state. */
+  tabs: { open: number; discarded: number; frozen: number; loading: number; grouped: number; inBackgroundWindow: number };
+  /** Which of ChatGPT's controls the most recently used awake ChatGPT tab still has. */
+  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null } | null;
 }
 
 export interface CompanionTraceEntry {
@@ -723,7 +753,8 @@ export interface UpdateStatus {
 }
 
 /** Receipt only; authoritative component state still establishes completion. */
-export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'cancelled';
+/** `confirm`: the update is downloaded; the app asks the person, then calls again with that version. */
+export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'confirm';
 
 /** Where an installation that cannot update itself gets the new version by hand. */
 export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';

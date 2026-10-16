@@ -1,4 +1,5 @@
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
+import { completedDilText } from '../shared/dil-tables.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
@@ -1294,11 +1295,11 @@ function maybePageSessions(): void {
 
 let diagnosticsExpanded = false;
 
-function projectSortEntries(): Array<{ id: string; scope: string }> {
+function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
   for (const entry of sessions) {
     if (entry.origin?.kind === 'worker' || (!entry.conversationId && entry.origin?.kind !== 'desktop')) continue;
-    const id = projectGroup(entry.projectId);
+    const id = groupOf(entry.projectId);
     if (id) ids.add(id);
   }
   return [...ids].map(id => ({ id, scope: SIDEBAR_PROJECT_SCOPE }));
@@ -1330,7 +1331,10 @@ function paintSessions(): void {
   }
   const rows: HTMLElement[] = [];
   // A task and its expanded workers are one sidebar item for project pagination.
-  const projectRows = new Map<string, Array<{ rows: HTMLElement[]; selected: boolean }>>();
+  // Store lightweight owners until the visible page is known. Creating DOM for
+  // hundreds of older, off-page project tasks on every activity push stalls the renderer
+  // even though those nodes are immediately discarded by the project page limit.
+  const projectRows = new Map<string, Array<{ entry: SessionSummary; workers?: SessionSummary[]; selected: boolean }>>();
   const diagnostics: SessionSummary[] = [];
   const group = (key: string, workers: SessionSummary[], parentRow?: HTMLElement, target = rows): void => {
     const button = el('button', 'worker-toggle');
@@ -1342,27 +1346,40 @@ function paintSessions(): void {
     if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
     if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
   };
-  // Pinned chats lead their own list (#1133); each group keeps its own manual order.
-  const orderedSessions = [...new Set(sessions.map(entry => projectGroup(entry.projectId) ?? ''))].flatMap(scope => {
-    const members = sessions.filter(entry => (projectGroup(entry.projectId) ?? '') === scope);
-    const group = (pinned: boolean) => {
+  // Pinned chats lead their own list (#1133). Resolve project membership once for
+  // this paint: scanning all sessions for each project and then searching the project
+  // catalog for every comparison used to multiply work on frequent activity pushes.
+  // A missing project remains grouped, just as projectGroup() does; only an explicitly
+  // ungrouped project returns its chats to the ordinary list.
+  const ungrouped = new Set(projects.filter(project => project.ungrouped).map(project => project.id));
+  const groupOf = (id: string | null | undefined): string | null => id && !ungrouped.has(id) ? id : null;
+  const scoped = new Map<string, SessionSummary[]>();
+  for (const entry of sessions) {
+    const scope = groupOf(entry.projectId) ?? '';
+    const group = scoped.get(scope);
+    if (group) group.push(entry);
+    else scoped.set(scope, [entry]);
+  }
+  const orderedSessions = [...scoped].flatMap(([scope, members]) => {
+    const ordered = (pinned: boolean) => {
       const rows = members.filter(entry => pinnedChat(entry) === pinned);
       return sidebarOrder ? sidebarOrder.ordered(pinnedSortScope(scope, pinned), rows) : rows;
     };
-    return [...group(true), ...group(false)];
+    return [...ordered(true), ...ordered(false)];
   });
   for (const entry of orderedSessions) {
     if (entry.origin?.kind === 'worker') continue;
     if (!entry.conversationId && entry.origin?.kind !== 'desktop') { diagnostics.push(entry); continue; }
-    const projectId = projectGroup(entry.projectId);
-    const target: HTMLElement[] = projectId ? [] : rows;
-    const row = sessionRow(entry); target.push(row);
-    row.dataset.sortScope = pinnedSortScope(projectId ?? '', pinnedChat(entry));
-    const workers = children.get(entry.id); if (workers) group(entry.id, workers, row, target);
+    const projectId = groupOf(entry.projectId);
+    const workers = children.get(entry.id);
     if (projectId) {
       const tasks = projectRows.get(projectId) ?? [];
-      tasks.push({ rows: target, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
+      tasks.push({ entry, workers, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
       projectRows.set(projectId, tasks);
+    } else {
+      const row = sessionRow(entry); rows.push(row);
+      row.dataset.sortScope = pinnedSortScope('', pinnedChat(entry));
+      if (workers) group(entry.id, workers, row, rows);
     }
   }
   const otherWorkers = children.get('other-workers') ?? [];
@@ -1374,7 +1391,7 @@ function paintSessions(): void {
     history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
     rows.push(history);
   }
-  const projectEntries = projectSortEntries();
+  const projectEntries = projectSortEntries(groupOf);
   const orderedProjects = sidebarOrder?.ordered(SIDEBAR_PROJECT_SCOPE, projectEntries) ?? projectEntries;
   const projectSections: HTMLElement[] = [];
   for (const { id } of orderedProjects) {
@@ -1424,7 +1441,14 @@ function paintSessions(): void {
     const tasks = projectRows.get(id) ?? [];
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
-    section.append(...shown.flatMap(task => task.rows));
+    const shownRows: HTMLElement[] = [];
+    for (const task of shown) {
+      const row = sessionRow(task.entry);
+      row.dataset.sortScope = pinnedSortScope(id, pinnedChat(task.entry));
+      shownRows.push(row);
+      if (task.workers) group(task.entry.id, task.workers, row, shownRows);
+    }
+    section.append(...shownRows);
     // The project's own older chats count as "more" too, once it is known to have some (#1190).
     const older = !!projectHistory.get(id)?.cursor;
     if (shown.length < tasks.length || older) {
@@ -2659,7 +2683,8 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
-  let text = withoutMessageReaction(source).slice(0, MAX_RENDERED_HTML_CHARS);
+  // A table ChatGPT drew in full but wrote with only its header (#1477) gets its recorded rows.
+  let text = completedDilText(withoutMessageReaction(source), capture).slice(0, MAX_RENDERED_HTML_CHARS);
   // A ChatGPT directive this app cannot draw (#574 and whatever ChatGPT adds next): the page's own
   // recorded rendering is the faithful presentation; without one, the directive lines are dropped.
   if (hasProviderDirective(text)) {
@@ -5888,7 +5913,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -6088,8 +6113,13 @@ function scheduleReload(change?: SessionChange): void {
   }, 400);
 }
 
-/** Retired automatic drafts belong to their creation time, never the live composer queue. */
+/**
+ * Retired automatic drafts belong to their creation time, never the live composer queue. A dropped
+ * fresh-turn continue (#1402) is one too, cancelled or failed: the app files it again by itself, and
+ * failed ones kept at the end of the chat read as its newest messages long after (2026-10-15).
+ */
 function historicalAutomaticInput(entry: InputEntry): boolean {
+  if (entry.purpose === 'rotation') return (entry.state === 'cancelled' || entry.state === 'failed') && !!entry.error;
   return (!!entry.recovery || (!!entry.finishOwner && !entry.finishOwner.userRequested)) &&
     entry.state === 'cancelled' && !!entry.error;
 }
@@ -6198,7 +6228,7 @@ function paintPendingInputs(): void {
   // A pre-acceptance or failed-materialization row belongs only to its exact draft.
   // A fresh New Chat never inherits another opening.
   const unbound = (entry: InputEntry) => selectedId === null && pendingNewInput?.id === entry.id && pendingNewInput.generation === selectionGeneration && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
-  const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' &&
+  const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' && entry.purpose !== 'rotation' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
   const anchored = (entry: InputEntry) => detailFor === selectedId && (events.some(event =>
     event.kind === 'user_message' && (event.inputId === entry.id ||

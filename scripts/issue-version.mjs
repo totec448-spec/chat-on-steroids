@@ -36,6 +36,80 @@ You'll find the number in the app under **Settings → Activity** ("Up to date! 
 
 export const REOPEN_COMMENT = 'Thanks for adding the version number! The issue is open again.';
 
+/**
+ * Reports opened from here on (user, 2026-10-15) also need the diagnostics report and a check on
+ * the latest release, so the first answer needs no follow-up questions. Older reports keep the
+ * version-only rule above.
+ */
+export const INTAKE_SINCE = '2026-10-15T16:00:00Z';
+/** The label on a new report this check closed; it is also how the check knows to reopen it. */
+export const INTAKE_LABEL = 'incomplete-report';
+
+/** A bug-form answer by its heading, or null when the issue has no such field. */
+function formField(body, label) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  const start = lines.findIndex(line => line.trim() === `### ${label}`);
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^###\s/.test(line));
+  return lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim();
+}
+
+/** An attached text file, or the report pasted whole; a screenshot is not the report. */
+export function hasDiagnostics(value) {
+  const text = String(value ?? '');
+  return /https:\/\/github\.com\/user-attachments\/files\/\d+\/[^\s)]+\.(?:txt|log|md)\b/i.test(text) ||
+    text.includes('# Chat On Steroids diagnostics report');
+}
+
+const versionOf = value => /\bv?(\d+)\.(\d+)\.(\d+)\b/.exec(String(value ?? ''))?.slice(1).map(Number) ?? null;
+function olderThan(value, latest) {
+  const mine = versionOf(value), newest = versionOf(latest);
+  if (!mine || !newest) return false;
+  for (let index = 0; index < 3; index += 1) if (mine[index] !== newest[index]) return mine[index] < newest[index];
+  return false;
+}
+
+/**
+ * Like `versionDecision`, for every requirement at once. `latest` is the newest release's version
+ * (null when unknown); `opened` is true for the event that created the issue. A newer release
+ * coming out never closes an open report on a later edit, but a report this check holds closed
+ * reopens only once it was retried on the newest one.
+ */
+export function intakeDecision(issue, { latest, opened }) {
+  const version = appVersionField(issue.body);
+  if (version === null || MAINTAINERS.has(issue.author_association)) return { decision: 'none', missing: [] };
+  if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) {
+    const decision = versionDecision(issue);
+    return { decision, missing: decision === 'close' ? ['version'] : [] };
+  }
+  const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === INTAKE_LABEL);
+  const held = labeled && issue.state === 'closed';
+  const missing = [];
+  if (!hasVersionNumber(version)) missing.push('version');
+  if (!hasDiagnostics(formField(issue.body, 'Diagnostics report'))) missing.push('diagnostics');
+  const checked = /^\s*[-*]\s+\[[xX]\]\s+I reproduced this on the latest release/m.test(formField(issue.body, 'Latest release') ?? '');
+  if (!checked || ((opened || held) && olderThan(version, latest))) missing.push('latest');
+  if (missing.length) return { decision: issue.state === 'open' && !labeled ? 'close' : 'none', missing };
+  return { decision: held ? 'reopen' : 'none', missing };
+}
+
+const MISSING_TEXT = {
+  version: '**App version**: the exact number, for example `2.1.38`. It is in the app under **Settings → Activity**, or in the browser extension\'s popup.',
+  diagnostics: '**Diagnostics report**: in the app, open **Activity** and click **Diagnostics report**, then drag the saved file into that field. Personal details are already replaced in it; please read it before you attach it. If the app does not open at all, attach its `app.log` instead.',
+  latest: '**Latest release**: please update to the latest release (Settings → Activity), check that the problem is still there, then tick "I reproduced this on the latest release" and put the new version number in.'
+};
+
+/** The comment on a closed new report: every missing part and where it comes from. */
+export function missingComment(missing) {
+  return `Thanks for the report! So we can look into it without back-and-forth, a few things are needed first:
+
+${missing.map(item => `- ${MISSING_TEXT[item]}`).join('\n')}
+
+This issue is closed until then. Please **edit this issue** and add them: it reopens by itself once everything is there.`;
+}
+
+export const INTAKE_REOPEN_COMMENT = 'Thanks, everything is there now! The issue is open again.';
+
 async function github(path, token, init = {}) {
   const response = await fetch(`${API}${path}`, { ...init, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`,
     'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'chat-on-steroids-issue-version', ...(init.headers ?? {}) } });
@@ -52,16 +126,19 @@ async function main() {
   const path = `/repos/${repository}/issues/${number}`;
   const issue = await github(path, token);
   if (issue.pull_request) return;
-  const decision = versionDecision(issue);
+  const latest = await github(`/repos/${repository}/releases/latest`, token).then(release => release?.tag_name ?? null, () => null);
+  const { decision, missing } = intakeDecision(issue, { latest, opened: process.env.ISSUE_ACTION === 'opened' });
+  const fresh = Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE);
+  const label = fresh ? INTAKE_LABEL : LABEL;
   const post = (body) => github(`${path}/comments`, token, { method: 'POST', body: JSON.stringify({ body }) });
   if (decision === 'close') {
-    await post(CLOSE_COMMENT);
-    await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [LABEL] }) });
+    await post(fresh ? missingComment(missing) : CLOSE_COMMENT);
+    await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [label] }) });
     await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
   } else if (decision === 'reopen') {
-    await github(`${path}/labels/${LABEL}`, token, { method: 'DELETE' });
+    await github(`${path}/labels/${label}`, token, { method: 'DELETE' });
     await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'open' }) });
-    await post(REOPEN_COMMENT);
+    await post(fresh ? INTAKE_REOPEN_COMMENT : REOPEN_COMMENT);
   }
   console.log(`#${number}: ${decision}`);
 }
