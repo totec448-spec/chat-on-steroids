@@ -34,9 +34,11 @@ function powershellBatch(commands: readonly string[], marker: string): string {
     '  $global:LASTEXITCODE = 0',
     '  try {',
     '    $__cos_batch_text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($__cos_batch_commands[$__cos_batch_index]))',
-    '    . ([ScriptBlock]::Create($__cos_batch_text))',
-    '    $__cos_batch_succeeded = $?',
-    '    $__cos_batch_code = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($__cos_batch_succeeded) { 0 } else { 1 }',
+    // `$?` after a dot-sourced block is always true; recorded inside, it is the command's own
+    // last statement. So a failing cmdlet is 1, and a native failure a later success replaced is 0.
+    '    $global:__cos_batch_ok = $false',
+    "    . ([ScriptBlock]::Create($__cos_batch_text + \"`n\" + '$global:__cos_batch_ok = $?'))",
+    '    $__cos_batch_code = if ($global:__cos_batch_ok) { 0 } elseif ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }',
     '  } catch {',
     '    [Console]::Error.WriteLine($_.ToString())',
     '    $__cos_batch_code = 1',
