@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import type { ToolContext } from '../src/main/mcp/tools.js';
-import { initSessionStore } from '../src/main/session/store.js';
+import { initSessionStore, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
 import { closeRemoteSessions, setSftpOpenerForTests } from '../src/main/remote/ssh.js';
 import { SftpClient } from '../src/main/remote/sftp.js';
 import { resetWorkspaces } from '../src/main/workspace.js';
@@ -57,7 +57,10 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await unifiedExecManager.terminateAllProcesses();
-  await fs.rm(directory, { recursive: true, force: true });
+  // The recorder may still be writing the last call's session; stop it before removing its folder.
+  resetSessionStoreForTests();
+  unsetSessionRootForTests();
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
 beforeEach(async () => {
