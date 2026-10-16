@@ -2235,7 +2235,17 @@ describe('desktop input delivery and helper ownership', () => {
     ['opt-in retains Core for Loop automation', true, [
       { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
       { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
-    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { automation: true }],
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { automation: 'loop' }],
+    ['opt-in retains Core for Goal automation', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { automation: 'goal' }],
+    // Live 2026-10-16: every ordinary message the app sends carries automation 'off'. Read as "an
+    // automated send", it kept Core on all of them and the option never took effect.
+    ['opt-in selects Plugins for an ordinary message with automation off', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: 'Chat On Steroids Plugins (Windows)' }, { automation: 'off' }],
     ['opt-in retains Core for a fresh-turn rotation', true, [
       { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
       { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
