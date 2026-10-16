@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "Impossible de charger les chats de ce projet.",
   "Search projects…": "Rechercher des projets…",
   "No projects found": "Aucun projet trouvé",
+  "No project": "Aucun projet",
   "Projects: {0}": "Projets : {0}",
   "ChatGPT Project unavailable": "Projet ChatGPT indisponible",
   "Creating in ChatGPT…": "Création dans ChatGPT…",

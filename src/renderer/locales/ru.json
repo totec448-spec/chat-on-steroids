@@ -2476,6 +2476,7 @@
   "Could not load this project's chats.": "Не удалось загрузить чаты этого проекта.",
   "Search projects…": "Поиск проектов…",
   "No projects found": "Проекты не найдены",
+  "No project": "Без проекта",
   "Projects: {0}": "Проекты: {0}",
   "ChatGPT Project unavailable": "Проект ChatGPT недоступен",
   "Creating in ChatGPT…": "Создаём в ChatGPT…",
