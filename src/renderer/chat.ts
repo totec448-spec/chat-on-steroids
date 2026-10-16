@@ -91,7 +91,9 @@ import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HA
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
-import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
+import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
+import { createSearchPopup } from './search-popup.js';
+import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
 
 const api = window.api;
@@ -163,7 +165,7 @@ let loadedOlderSessions = false;
  * Where each project's own history continues (#1190): absent until the project was first
  * expanded, a cursor while it has older chats that are not loaded, null once all of them are.
  */
-const projectHistory = new Map<string, { cursor: { updatedAt: number; id: string } | null; asked: boolean; loading: boolean }>();
+const projectHistory = new Map<string, { cursor: { updatedAt: number; id: string } | null; asked: boolean; loading: boolean; failed?: boolean }>();
 let activeId: string | null = null;
 let selectedId: string | null = null;
 let newChatSelected = true;
@@ -263,6 +265,7 @@ async function removeProjectFromSidebar(id: string): Promise<void> {
     ++sessionsLoadGeneration;
     projects = projects.map(row => row.id === id ? removed : row);
     expandedProjects.delete(id); projectVisibleCounts.delete(id); projectHistory.delete(id);
+    if (inboxProject === id) inboxProject = null;
     if (selectedProjectId === id) {
       if (!selectedId) {
         const oldKey = draftKey();
@@ -683,6 +686,13 @@ let swarm: SwarmState | null = null;
  * main process and repaints from the answer it gets back.
  */
 let blockedChats = new Set<string>();
+/**
+ * Conversations whose page shows ChatGPT's tool approval card, and conversations whose recovery
+ * stopped after its last pickup reload with the step still owed. Mirrored from every session list
+ * like `blockedChats`; only the main process can tell either.
+ */
+let approvalChats = new Set<string>();
+let stoppedChats = new Set<string>();
 /** Exact conversations explicitly allowed while strict chat allowlisting is enabled. */
 let trustedChats = new Set<string>();
 /** Badges the list is currently drawn with. See repaintBadges. */
@@ -769,6 +779,18 @@ function unattributedBlocked(): boolean {
   return multiAgent?.strictChatAllowlist === true || multiAgent?.allowUnattributedCalls === false;
 }
 
+/**
+ * A sub-agent in the words of its parent's summary, read from the badges its own row draws:
+ * needing the person (blocked or failed), running, or sleeping; null once it has finished.
+ */
+type WorkerState = 'running' | 'sleeping' | 'attention';
+function workerState(summary: SessionSummary): WorkerState | null {
+  const badges = sessionBadges(summary);
+  if (badges.some(badge => badge.tone === 'is-failed')) return 'attention';
+  if (badges.some(badge => badge.tone === 'is-active')) return 'running';
+  return badges.includes(AGENT_BADGE.sleeping) ? 'sleeping' : null;
+}
+
 function sessionBadges(summary: SessionSummary): Badge[] {
   const badges: Badge[] = [];
   const origin = summary.origin;
@@ -779,8 +801,11 @@ function sessionBadges(summary: SessionSummary): Badge[] {
       ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
       : [{ text: 'not a chat', tone: '' }];
   }
-  // First, and in the failure tone: a blocked chat is the one state on this row that says the
-  // app is actively refusing work, and the user came to the list to find it at a glance.
+  // First, and in the failure tone: the states that need the person, most pressing first. A chat
+  // waiting on an approval card or a recovery that gave up cannot go on without them, and a blocked
+  // chat is the app actively refusing its work; the user came to the list to find them at a glance.
+  if (approvalChats.has(summary.conversationId)) badges.push({ text: 'Needs approval', tone: 'is-failed' });
+  if (stoppedChats.has(summary.conversationId)) badges.push({ text: 'Recovery stopped', tone: 'is-failed' });
   if (blockedChats.has(summary.conversationId)) badges.push({ text: 'blocked', tone: 'is-failed' });
   if (origin?.kind === 'worker') badges.push({ text: origin.agentId ?? 'worker', tone: '' });
   else if (origin?.kind === 'resume') badges.push({ text: 'resumed', tone: '' });
@@ -827,6 +852,11 @@ function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
 }
 
+/** A row's tooltip: its name, then `state` when a card says more than its badges, then the badges and its age. */
+function sessionRowTitle(summary: SessionSummary, pinned: boolean, badges: Badge[], state: string[] = []): string {
+  return [summary.title || t("Untitled session"), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
+}
+
 function sessionRow(summary: SessionSummary): HTMLElement {
   const row = el('div', 'sess');
   row.dataset.id = summary.id;
@@ -853,7 +883,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const mark = icon('i-pinned', 'ico sess-pin-mark');
     top.append(mark);
   }
-  ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
+  ui(row, 'title', () => sessionRowTitle(summary, pinned, badges));
   const showTip = () => {
     if (sessionTooltipDismissed === summary.id) return;
     // The same chat's tooltip, from before a repaint, stays as it is: recreating it would blink.
@@ -887,6 +917,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     ui(indicator, 'title', () => t(status.text));
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
+  }
+  if (sidebarLayout() === 'inbox') {
+    row.classList.toggle('is-unseen', status?.tone === 'is-unseen');
+    // A spinner already says "now"; every other row says how long it has been quiet.
+    if (status?.tone !== 'is-active') top.append(el('span', 'sess-age', () => compactAge(summary.updatedAt)));
   }
   // One button for the chat's actions, as in ChatGPT; a right click on the row opens the same menu.
   const owner = `chat:${summary.id}`;
@@ -1209,6 +1244,8 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   // Whole-set replacement on every page, older pages included: a block belongs to a
   // conversation, not to whichever page happened to carry its row.
   blockedChats = new Set(list.blocked);
+  approvalChats = new Set(list.approval);
+  stoppedChats = new Set(list.recoveryStopped);
   trustedChats = new Set(list.trusted ?? []);
   if (loadedOlderSessions) {
     for (const entry of list.pressure) pressure.set(entry.id, entry);
@@ -1241,6 +1278,8 @@ async function loadMoreSessions(): Promise<void> {
     sessionTotal = page.total;
     sessionPageCursor = page.nextCursor;
     blockedChats = new Set(page.blocked);
+    approvalChats = new Set(page.approval);
+    stoppedChats = new Set(page.recoveryStopped);
     trustedChats = new Set(page.trusted ?? []);
     for (const entry of page.pressure) pressure.set(entry.id, entry);
     paintSessions();
@@ -1267,10 +1306,17 @@ async function loadProjectHistory(id: string): Promise<void> {
   projectHistory.set(id, state);
   if (state.loading || (state.asked && !state.cursor)) return;
   state.loading = true;
+  state.failed = false;
   try {
     do {
       const page = await run(api.listSessions({ projectId: id, limit: SESSION_PAGE_SIZE, ...(state.cursor ? { cursor: state.cursor } : {}) }));
-      if (!page) return;
+      if (!page) {
+        // The inbox's empty state says so and offers the read again, rather than "No chats yet.".
+        state.failed = true;
+        state.loading = false;
+        paintSessions();
+        return;
+      }
       state.asked = true;
       state.cursor = page.nextCursor ?? null;
       mergeSessionRows(page.sessions);
@@ -1279,10 +1325,15 @@ async function loadProjectHistory(id: string): Promise<void> {
       for (const entry of page.pressure) pressure.set(entry.id, entry);
       paintSessions();
       // A page of workers shows nothing; read on while the project is open and still looks empty.
-    } while (state.cursor && expandedProjects.has(id) && !projectShowsChat(id));
+    } while (state.cursor && projectViewed(id) && !projectShowsChat(id));
   } finally {
     state.loading = false;
   }
+}
+
+/** A project whose chats are on screen: expanded in the project tree, or the inbox's filter. */
+function projectViewed(id: string): boolean {
+  return sidebarLayout() === 'inbox' ? inboxProject === id : expandedProjects.has(id);
 }
 
 function maybePageSessions(): void {
@@ -1296,6 +1347,398 @@ function maybePageSessions(): void {
 
 let diagnosticsExpanded = false;
 
+/**
+ * Which sidebar is drawn, chosen in Appearance. 'projects' is the project tree; 'inbox' is one flat
+ * list filtered by project, with active chats first as cards and quiet ones settled below. A changed
+ * choice arrives with the state push, whose chatApply repaints.
+ */
+function sidebarLayout(): 'projects' | 'inbox' {
+  return deps.state()?.config.ui.appearance?.sidebarLayout === 'inbox' ? 'inbox' : 'projects';
+}
+/** The layout the sidebar was last drawn in; the page's own markup is the project tree's. */
+let paintedLayout: 'projects' | 'inbox' = 'projects';
+
+/** "now", "4m", "5h", "2d", "3w": one short token that fits beside a title. */
+function compactAge(at: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
+  if (minutes < 1) return t('now');
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  return days < 7 ? `${days}d` : `${Math.round(days / 7)}w`;
+}
+
+/** A chat quiet this long, not needing the person, running, unread or pinned, settles into the compact list below. */
+const INBOX_SETTLE_MS = 24 * 60 * 60_000;
+/** The project the inbox shows, or null for all of them. Window-local, like disclosure state. */
+let inboxProject: string | null = null;
+let inboxSettledOpen = true;
+
+/** A chat's sub-agents that keep it in view: running, or needing the person. */
+function busyWorkers(workers: SessionSummary[]): SessionSummary[] {
+  return workers.filter(worker => { const state = workerState(worker); return state === 'running' || state === 'attention'; });
+}
+
+/** When a chat last did something, counting its busy sub-agents' activity as its own. */
+function inboxActiveAt(summary: SessionSummary, busy: SessionSummary[] = []): number {
+  return Math.max(summary.updatedAt, ...busy.map(worker => worker.updatedAt));
+}
+
+/**
+ * A chat waiting on an approval, a stopped recovery or a block never settles: nothing moves until the
+ * person acts. A failed turn ranks with them while it is recent, then settles like any quiet chat.
+ */
+function inboxSettled(summary: SessionSummary, busy: SessionSummary[] = []): boolean {
+  const attention = chatAttention(summary);
+  if ((attention && attention !== 'failed') || pinnedChat(summary) || sessionWorking(summary) || sidebarCompletion?.isUnseen(summary) || busy.length) return false;
+  return Date.now() - summary.updatedAt > INBOX_SETTLE_MS;
+}
+
+/**
+ * What a chat needs from the person, most pressing first, read only from state the app owns, never
+ * from ChatGPT's own words: an approval card waiting (its turn holds until then), a recovery that
+ * gave up with its step still owed, a block (the app refusing its work), or a last turn that failed
+ * or stalled with nothing after it.
+ */
+type ChatAttention = 'approval' | 'recovery' | 'blocked' | 'failed';
+const ATTENTION_ORDER: readonly ChatAttention[] = ['approval', 'recovery', 'blocked', 'failed'];
+const ATTENTION: Record<ChatAttention, { icon: string; label: () => string }> = {
+  approval: { icon: 'i-lock', label: () => t('Needs approval') },
+  recovery: { icon: 'i-retry', label: () => t('Recovery stopped') },
+  blocked: { icon: 'i-ban', label: () => t('Blocked') },
+  failed: { icon: 'i-warning', label: () => t('Failed') }
+};
+function chatAttention(summary: SessionSummary): ChatAttention | null {
+  const id = summary.conversationId;
+  if (id && approvalChats.has(id)) return 'approval';
+  if (id && stoppedChats.has(id)) return 'recovery';
+  if (id && blockedChats.has(id)) return 'blocked';
+  return !summary.activeTurnId && (summary.lastTurnOutcome === 'failed' || summary.lastTurnOutcome === 'stalled') ? 'failed' : null;
+}
+
+/**
+ * A card's place in the inbox: what needs the person (in `ATTENTION_ORDER`), then Working, then a new
+ * reply, then the rest. A chat takes the most pressing place of itself and its busy sub-agents, so a
+ * worker waiting on an approval brings its parent up with it.
+ */
+const INBOX_WORKING = ATTENTION_ORDER.length, INBOX_UNSEEN = INBOX_WORKING + 1, INBOX_REST = INBOX_UNSEEN + 1;
+function inboxRank(summary: SessionSummary, busy: SessionSummary[] = []): number {
+  const attention = chatAttention(summary);
+  let rank = attention ? ATTENTION_ORDER.indexOf(attention)
+    : sessionWorking(summary) ? INBOX_WORKING : sidebarCompletion?.isUnseen(summary) ? INBOX_UNSEEN : INBOX_REST;
+  // A busy worker is running or needs attention; one that failed in its broker has no state of its own here.
+  for (const worker of busy) rank = Math.min(rank, workerState(worker) === 'attention'
+    ? ATTENTION_ORDER.indexOf(chatAttention(worker) ?? 'failed') : INBOX_WORKING);
+  return rank;
+}
+
+/** The project's folder in its sidebar color, as the project tree draws it. */
+function projectMark(project: LocalProject | undefined): HTMLElement {
+  const mark = icon('i-folder', 'ico project-mark');
+  if (project?.color) mark.dataset.projectColor = project.color;
+  if (!project) mark.classList.add('is-blank');
+  return mark;
+}
+
+/** Where a project's native ChatGPT Project stands while it is not linked: a short hint and the full line. */
+function chatgptLinkNote(project: LocalProject): { hint: string; line: string; failed: boolean } | null {
+  const link = project.chatgpt;
+  if (!link || link.state === 'linked') return null;
+  return link.state === 'failed' || link.state === 'uncertain'
+    ? { hint: t('ChatGPT Project unavailable'), line: t("This project's ChatGPT Project isn't available. Retry it from the project's menu."), failed: true }
+    : { hint: t('Creating in ChatGPT…'), line: t('Creating this project in ChatGPT…'), failed: false };
+}
+
+/** A chat's sub-agents as one line of counts, however many there are; nothing once all have finished. */
+function workerSummary(workers: SessionSummary[]): HTMLElement | null {
+  const states = workers.map(workerState);
+  const count = (state: WorkerState) => states.filter(entry => entry === state).length;
+  const attention = count('attention'), running = count('running'), sleeping = count('sleeping');
+  const parts: HTMLElement[] = [];
+  if (attention) parts.push(el('span', 'is-failed', () => attention === 1 ? t('1 needs attention') : t('{0} need attention', [attention])));
+  if (running) parts.push(el('span', 'is-working', () => t('{0} working', [running])));
+  if (sleeping) parts.push(el('span', '', () => t('{0} sleeping', [sleeping])));
+  if (!parts.length) return null;
+  const line = el('span', 'sess-workers');
+  parts.forEach((part, index) => line.append(...(index ? [document.createTextNode(' · ')] : []), part));
+  return line;
+}
+
+/** An active chat as a card: project and state, the title, then the model it runs on and its sub-agents. */
+function inboxCard(summary: SessionSummary, workers?: SessionSummary[]): HTMLElement {
+  const row = sessionRow(summary);
+  row.classList.add('sess-card');
+  const top = row.querySelector<HTMLElement>('.sess-top')!;
+  const meta = el('div', 'sess-meta');
+  const project = projects.find(entry => entry.id === projectGroup(summary.projectId));
+  // With one project chosen, its name on every card would only repeat the filter.
+  if (!inboxProject) {
+    // A chat outside every project says so in the words of the project tree's own section.
+    const name = el('span', 'sess-project');
+    name.append(project ? projectMark(project) : icon('i-chat', 'ico project-mark'), el('span', '', () => project?.name ?? t('Chats')));
+    meta.append(name);
+  }
+  const state = el('span', 'sess-state');
+  const indicator = top.querySelector<HTMLElement>(':scope > .session-status');
+  const age = top.querySelector<HTMLElement>(':scope > .sess-age');
+  const attention = chatAttention(summary);
+  if (attention) {
+    // What it needs from the person says more than how long it has been quiet, and wins over Working.
+    const { icon: glyph, label } = ATTENTION[attention];
+    indicator?.remove(); age?.remove();
+    state.classList.add('is-attention');
+    state.append(icon(glyph), el('span', '', label));
+    // The other three are already among the row's badges, and so in its title.
+    if (attention === 'failed') {
+      const pinned = pinnedChat(summary), badges = sessionBadges(summary);
+      ui(row, 'title', () => sessionRowTitle(summary, pinned, badges, [label()]));
+    }
+  } else if (indicator?.classList.contains('is-active')) {
+    state.classList.add('is-working');
+    state.append(indicator, el('span', '', () => t('Working')));
+  } else if (indicator?.classList.contains('is-unseen')) {
+    // Finished, and its answer not read yet: the same words as the row's own badge.
+    indicator.remove(); age?.remove();
+    state.classList.add('is-unseen');
+    state.append(icon('i-check-circle'), el('span', '', () => t('New response')));
+  } else {
+    if (indicator) state.append(indicator);
+    if (age) state.append(age);
+  }
+  meta.append(state);
+  top.prepend(meta);
+  const model = summary.selectedModel;
+  const detail = model ? el('span', 'sess-detail', () => chatModelName(model.model, model.reasoningEffort)) : null;
+  // Its sub-agents, counted, even while the chat itself is quiet: on the model's line, which has the
+  // room the project and state above it do not.
+  const crew = workers ? workerSummary(workers) : null;
+  if (crew) {
+    const foot = el('div', 'sess-foot');
+    if (detail) foot.append(detail);
+    foot.append(crew);
+    top.append(foot);
+  } else if (detail) top.append(detail);
+  return row;
+}
+
+/** A settled chat: one dim line with its project's folder and its age. */
+function inboxSettledRow(summary: SessionSummary): HTMLElement {
+  const row = sessionRow(summary);
+  row.classList.add('sess-settled');
+  const top = row.querySelector<HTMLElement>('.sess-top')!;
+  if (!inboxProject) {
+    // A chat outside every project gets the chat mark its card uses, not a blank.
+    const project = projects.find(entry => entry.id === projectGroup(summary.projectId));
+    top.prepend(project ? projectMark(project) : icon('i-chat', 'ico project-mark'));
+  }
+  // A turn that failed and was left there still says so once settled, in the card's own words.
+  if (chatAttention(summary) === 'failed') {
+    const { icon: glyph, label } = ATTENTION.failed;
+    const state = el('span', 'sess-state is-attention');
+    state.append(icon(glyph), el('span', '', label));
+    const age = top.querySelector<HTMLElement>(':scope > .sess-age');
+    if (age) state.append(age);
+    top.append(state);
+    const pinned = pinnedChat(summary), badges = sessionBadges(summary);
+    ui(row, 'title', () => sessionRowTitle(summary, pinned, badges, [label()]));
+  }
+  return row;
+}
+
+const inboxPickerTrigger = (): HTMLElement | null => $('chatList').querySelector<HTMLElement>('[data-inbox-control="picker"]');
+/** The inbox's project filter: All and every project, in the project tree's order, searchable by name. */
+const inboxPicker = createSearchPopup({
+  trigger: inboxPickerTrigger, className: 'file-branch', extraClass: 'inbox-project-picker',
+  label: () => t('Projects'), placeholder: () => t('Search projects…'), empty: () => t('No projects found'),
+  choices: () => [
+    { label: t('All'), lead: projectMark(undefined), selected: inboxProject === null, pick: () => selectInboxProject(null) },
+    ...(sidebarOrder?.ordered(SIDEBAR_PROJECT_SCOPE, projectSortEntries()) ?? projectSortEntries()).flatMap(({ id }) => {
+      const project = projects.find(row => row.id === id && !row.ungrouped);
+      if (!project) return [];
+      const note = chatgptLinkNote(project);
+      return [{
+        label: project.name, lead: projectMark(project), selected: inboxProject === id,
+        title: [project.path, ...(note ? [note.line] : [])].join('\n'), ...(note ? { hint: note.hint } : {}),
+        pick: () => selectInboxProject(id)
+      }];
+    })
+  ]
+});
+
+/** Shows one project's chats, or all of them, and reads that project's own history as opening it in the tree does. */
+function selectInboxProject(id: string | null): void {
+  inboxProject = id;
+  // The read starts first, so a project whose last read failed is drawn loading, not failed.
+  if (id) void loadProjectHistory(id);
+  paintSessions();
+  inboxPickerTrigger()?.focus({ preventScroll: true });
+}
+
+function paintInbox(): void {
+  if (inboxProject && !projects.some(project => project.id === inboxProject && !project.ungrouped)) inboxProject = null;
+  const list = $('chatList');
+  // A live update rebuilds the list: focus stays on the same chat's control, or on the same header control.
+  const restoreRowFocus = sidebarFocus(list, 'data-id', ['.sess-top', '.worker-toggle', '.sess-menu']);
+  const restoreControlFocus = sidebarFocus(list, 'data-inbox-control', ['[data-inbox-control]']);
+  const hadControlFocus = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) &&
+    document.activeElement.matches('[data-inbox-control]');
+  const children = workerChildren();
+  const busy = new Map([...children].map(([key, workers]) => [key, busyWorkers(workers)]));
+  const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
+  const attributed = (entry: SessionSummary) => !!entry.conversationId || entry.origin?.kind === 'desktop';
+  const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
+  // What the tree puts under "Unattributed activity", under the same disclosure here.
+  const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
+  const settles = new Set(shown.filter(entry => inboxSettled(entry, busy.get(entry.id))));
+  // A settled chat ranks with the rest: one that failed long ago orders by recency and pages like any quiet chat.
+  const rank = new Map(shown.map(entry => [entry.id, settles.has(entry) ? INBOX_REST : inboxRank(entry, busy.get(entry.id))]));
+  // A pinned chat still leads the list, as it does its tree section; both groups rank by what each chat needs, then by recency.
+  const chats = shown.sort((a, b) => Number(pinnedChat(b)) - Number(pinnedChat(a)) || rank.get(a.id)! - rank.get(b.id)! ||
+    inboxActiveAt(b, busy.get(b.id)) - inboxActiveAt(a, busy.get(a.id)));
+  const active = chats.filter(entry => !settles.has(entry));
+  const settledChats = chats.filter(entry => settles.has(entry));
+  // One project's list holds as many chats as its tree section would, cards and settled lines in the
+  // order drawn, and "Show more" reads on. The selected chat and every chat that needs the person (or
+  // whose worker does) stay in view beyond it: what needs acting on is never behind "Show more".
+  const count = inboxProject ? projectVisibleCounts.get(inboxProject) ?? PROJECT_TASK_PAGE_SIZE : Infinity;
+  const ordered = [...active, ...settledChats];
+  const visible = new Set(ordered.filter((entry, index) => index < count || rank.get(entry.id)! < INBOX_WORKING ||
+    entry.id === selectedId || children.get(entry.id)?.some(worker => worker.id === selectedId) === true));
+  const cardsShown = active.filter(entry => visible.has(entry));
+  const settled = settledChats.filter(entry => visible.has(entry));
+
+  // Search and a new chat, the two things a list like this is opened for.
+  const head = el('div', 'inbox-head');
+  const search = el('button', 'inbox-search') as HTMLButtonElement;
+  search.type = 'button'; search.dataset.inboxControl = 'search';
+  search.setAttribute('aria-haspopup', 'dialog');
+  search.append(icon('i-search'), el('span', 'inbox-search-label', () => t('Search')), el('kbd', '', () => primaryShortcut('K')));
+  search.addEventListener('click', () => $('searchChatsButton').click());
+  const compose = el('button', 'btn inbox-icon-button') as HTMLButtonElement;
+  compose.type = 'button'; compose.dataset.inboxControl = 'compose'; compose.append(icon('i-pencil'));
+  ui(compose, 'title', () => t('New chat'));
+  ui(compose, 'aria-label', () => t('New chat'));
+  compose.addEventListener('click', () => selectNewChat(inboxProject));
+  head.append(search, compose);
+
+  // The project filter: one button that opens a searchable list, then the chosen project's own menu.
+  const filters = el('div', 'inbox-filters');
+  const selected = projects.find(project => project.id === inboxProject);
+  const note = selected ? chatgptLinkNote(selected) : null;
+  const name = () => selected?.name ?? t('All');
+  const trigger = el('button', 'inbox-project-trigger') as HTMLButtonElement;
+  trigger.type = 'button'; trigger.dataset.inboxControl = 'picker';
+  trigger.setAttribute('aria-haspopup', 'dialog');
+  trigger.setAttribute('aria-expanded', String(inboxPicker.open));
+  trigger.append(projectMark(selected), el('span', 'inbox-project-label', name));
+  if (note) {
+    const status = el('span', `session-status ${note.failed ? 'is-failed' : 'is-active'}`);
+    if (!note.failed) syncSessionSpinner(status);
+    trigger.append(status);
+  }
+  trigger.append(disclosureChevron('ico'));
+  ui(trigger, 'title', () => [selected?.path ?? t('All'), ...(note ? [note.line] : [])].join('\n'));
+  ui(trigger, 'aria-label', () => [t('Projects: {0}', [name()]), ...(note ? [note.line] : [])].join(' · '));
+  trigger.addEventListener('click', () => { if (inboxPicker.open) inboxPicker.close(); else inboxPicker.show(); });
+  filters.append(trigger);
+  if (selected) {
+    const { button } = projectMenu(selected.id, 'btn row-menu-button inbox-icon-button inbox-project-menu');
+    button.dataset.inboxControl = 'project-menu';
+    filters.append(button);
+  }
+  const add = el('button', 'btn inbox-icon-button inbox-add') as HTMLButtonElement;
+  add.type = 'button'; add.dataset.inboxControl = 'add'; add.append(icon('i-plus'));
+  ui(add, 'title', () => t('Add a project folder'));
+  ui(add, 'aria-label', () => t('Add a project folder'));
+  add.addEventListener('click', () => $('addProject').click());
+  filters.append(add);
+
+  const top = el('div', 'inbox-top');
+  top.append(head, filters);
+  const rows: HTMLElement[] = [top];
+  // Each chat's sub-agents sit under it, behind the same arrow the project tree draws.
+  const withWorkers = (entries: SessionSummary[], draw: (entry: SessionSummary) => HTMLElement): HTMLElement[] => {
+    const items: HTMLElement[] = [];
+    for (const entry of entries) {
+      const row = draw(entry); items.push(row);
+      const workers = children.get(entry.id); if (workers) workerGroup(entry.id, workers, row, items);
+    }
+    return items;
+  };
+  if (cardsShown.length) {
+    const cards = el('div', 'inbox-cards');
+    cards.append(...withWorkers(cardsShown, entry => inboxCard(entry, children.get(entry.id))));
+    rows.push(cards);
+  }
+  const id = inboxProject;
+  const older = !!id && !!projectHistory.get(id)?.cursor;
+  let showMore: HTMLElement | null = null;
+  if (id && (visible.size < ordered.length || older)) {
+    const more = el('button', 'btn project-show-more', () => t("Show more")) as HTMLButtonElement;
+    more.type = 'button'; more.dataset.inboxControl = 'show-more';
+    ui(more, 'aria-label', () => t("Show more tasks in {0}", [selected?.name ?? t("this project")]));
+    more.addEventListener('click', () => {
+      projectVisibleCounts.set(id, count + PROJECT_TASK_PAGE_INCREMENT);
+      // Older pages are read once the next page would reach past every chat already loaded.
+      if (older && count + PROJECT_TASK_PAGE_INCREMENT > ordered.length) void loadProjectHistory(id);
+      paintSessions();
+    });
+    showMore = more;
+  }
+  if (settled.length) {
+    const box = document.createElement('details');
+    box.className = 'inbox-settled';
+    box.open = inboxSettledOpen;
+    const heading = el('summary', 'inbox-settled-heading');
+    heading.dataset.inboxControl = 'settled';
+    // The lines drawn under it, not every settled chat: the rest wait behind "Show more".
+    heading.append(el('span', '', () => t('Settled')), el('span', 'inbox-count', () => String(settled.length)));
+    box.append(heading, ...withWorkers(settled, inboxSettledRow));
+    box.addEventListener('toggle', () => { inboxSettledOpen = box.open; });
+    rows.push(box);
+  }
+  // After both groups, outside Settled: it reads on in the whole list, and Settled may be closed.
+  if (showMore) rows.push(showMore);
+  const orphans = (children.get('other-workers') ?? []).filter(worker => !id || projectGroup(worker.projectId) === id);
+  const history = workerHistory(orphans);
+  if (history) rows.push(history);
+  const unattributed = unattributedActivity(diagnostics);
+  if (unattributed) rows.push(unattributed);
+  if (!chats.length && !diagnostics.length) rows.push(inboxEmpty(id));
+  $('projectList').replaceChildren();
+  list.replaceChildren(...rows);
+  restoreRowFocus(); restoreControlFocus();
+  // A header control that went with the repaint (the menu of a project just removed) hands focus to the filter.
+  if (hadControlFocus && !list.contains(document.activeElement)) inboxPickerTrigger()?.focus({ preventScroll: true });
+  $('projectsEmpty').hidden = true;
+  $('sessionsEmpty').hidden = true;
+}
+
+/**
+ * The inbox's empty state. A chosen project whose own history is still being read, or not asked for
+ * yet, is not known to be empty; one whose read failed offers to read it again.
+ */
+function inboxEmpty(id: string | null): HTMLElement {
+  const history = id ? projectHistory.get(id) : undefined;
+  if (id && history?.failed) {
+    const box = el('div', 'empty inbox-retry');
+    const retry = el('button', 'btn', () => t('Retry')) as HTMLButtonElement;
+    retry.type = 'button'; retry.dataset.inboxControl = 'retry';
+    // The read starts at once, so the repaint shows it loading.
+    retry.addEventListener('click', () => { void loadProjectHistory(id); paintSessions(); });
+    box.append(el('span', '', () => t("Could not load this project's chats.")), retry);
+    return box;
+  }
+  // Not known to be empty: never read yet, or still reading on past pages that held only workers.
+  if (id && (!history?.asked || (history.loading && !!history.cursor))) {
+    const line = el('p', 'empty', () => t('Loading chats…'));
+    line.setAttribute('role', 'status');
+    return line;
+  }
+  return el('p', 'empty', () => t('No chats yet.'));
+}
+
 function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
   for (const entry of sessions) {
@@ -1306,22 +1749,44 @@ function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<
   return [...ids].map(id => ({ id, scope: SIDEBAR_PROJECT_SCOPE }));
 }
 
-function paintSessions(): void {
-  // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
-  if (sidebarOrder?.interacting) return;
-  // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
-  // Korean) lives in that exact node. The edit's end repaints with everything that changed.
-  if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
-  const projectList = $('projectList'), chatList = $('chatList');
-  // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure
-  // or one of its buttons) attached to its exact project, without moving focus from the
-  // composer or settings. A keyboard user tabbing to a project's buttons lost focus to the
-  // page on the next repaint, and so did the color button after a pick.
+/**
+ * The project's "⋯" button and the menu it opens (also at a right click): Color, Remove and, for a
+ * native ChatGPT Project that could not be created, Retry. The project tree and the inbox share it.
+ */
+function projectMenu(id: string, className: string): { button: HTMLButtonElement; menu: (at?: { x: number; y: number }) => RowMenuOptions } {
+  const owner = `project:${id}`;
+  const button = el('button', className) as HTMLButtonElement;
+  button.type = 'button'; button.dataset.rowMenu = owner; button.append(icon('i-more-vertical'));
+  button.setAttribute('aria-haspopup', 'menu'); button.setAttribute('aria-expanded', String(rowMenuOpenFor(owner)));
+  ui(button, 'title', () => t('More options'));
+  ui(button, 'aria-label', () => t('More options'));
+  const menu = (at?: { x: number; y: number }) => ({
+    owner, at, label: () => projects.find(row => row.id === id)?.name ?? t('Unavailable project'),
+    anchor: () => rowMenuButton(owner), items: () => projectMenuItems(id)
+  });
+  button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleRowMenu(menu()); });
+  return { button, menu };
+}
+
+/**
+ * Activity replaces sidebar nodes. Remembers the focused control, when it is one of `controls`, by its
+ * owner (the nearest element carrying `owner`, the control itself included), and returns what puts
+ * focus back on the same control of the same owner after the rebuild. Focus elsewhere, in the
+ * composer or settings, is left alone.
+ */
+function sidebarFocus(list: HTMLElement, owner: string, controls: string[]): () => void {
   const focused = document.activeElement;
-  const focusedControl = focused instanceof HTMLElement && projectList.contains(focused)
-    ? ['.project-heading', '.project-new', '.project-menu', '.project-show-more'].find(selector => focused.matches(selector))
-    : undefined;
-  const focusedProject = focusedControl ? (focused as HTMLElement).closest<HTMLElement>('.project-group')?.dataset.projectId : undefined;
+  const control = focused instanceof HTMLElement && list.contains(focused) ? controls.find(selector => focused.matches(selector)) : undefined;
+  const id = control ? (focused as HTMLElement).closest<HTMLElement>(`[${owner}]`)?.getAttribute(owner) : null;
+  return () => {
+    if (!control || id == null) return;
+    const host = [...list.querySelectorAll<HTMLElement>(`[${owner}]`)].find(node => node.getAttribute(owner) === id);
+    (host?.matches(control) ? host : host?.querySelector<HTMLElement>(control))?.focus({ preventScroll: true });
+  };
+}
+
+/** Each worker under the chat that started it; one whose chat is not loaded goes under 'other-workers'. */
+function workerChildren(): Map<string, SessionSummary[]> {
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
   for (const entry of sessions) {
@@ -1330,6 +1795,78 @@ function paintSessions(): void {
     const key = parent && ids.has(parent) && parent !== entry.id ? parent : 'other-workers';
     children.set(key, [...(children.get(key) ?? []), entry]);
   }
+  return children;
+}
+
+/**
+ * A chat's sub-agents: the arrow that shows or hides them, on the chat's row (or alone in `target`),
+ * and while they are expanded their rows after it. Both sidebar layouts draw them this way.
+ */
+function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElement | undefined, target: HTMLElement[]): void {
+  const button = el('button', 'worker-toggle');
+  button.append(disclosureChevron());
+  ui(button, 'title', () => t("{0} sub-agents · {1} active", [workers.length, workers.filter(sessionWorking).length]));
+  ui(button, 'aria-label', () => t("{0} {1} sub-agents", [expandedWorkers.has(key) ? t("Collapse") : t("Expand"), workers.length]));
+  button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
+  button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
+  if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
+  if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
+}
+
+/** Workers whose chat is not loaded, behind one quiet disclosure at the end of the list. */
+function workerHistory(workers: SessionSummary[]): HTMLElement | null {
+  if (!workers.length) return null;
+  const history = document.createElement('details'); history.className = 'session-diagnostics';
+  history.open = expandedWorkers.has('other-workers');
+  // Named like the Inbox header's controls, so a live repaint keeps the keyboard on it.
+  const summary = el('summary', '', () => t("Sub-agent history · {0}", [workers.length]));
+  summary.dataset.inboxControl = 'sub-agent-history';
+  history.append(summary);
+  history.append(...workers.map(sessionRow));
+  history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
+  return history;
+}
+
+/**
+ * Activity no chat can be named for (no conversation id, not a desktop chat), behind one quiet
+ * disclosure at the end of the list. Its rows' menus hold the Allow/Block unattributed calls switch.
+ */
+function unattributedActivity(entries: SessionSummary[]): HTMLElement | null {
+  if (!entries.length) return null;
+  const disclosure = document.createElement('details');
+  disclosure.className = 'session-diagnostics';
+  disclosure.open = diagnosticsExpanded;
+  const summary = el('summary', '', () => t("Unattributed activity · {0}", [entries.length]));
+  summary.dataset.inboxControl = 'unattributed';
+  disclosure.append(summary);
+  disclosure.append(...entries.map(sessionRow));
+  disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
+  return disclosure;
+}
+
+function paintSessions(): void {
+  // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
+  if (sidebarOrder?.interacting) return;
+  // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
+  // Korean) lives in that exact node. The edit's end repaints with everything that changed.
+  if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
+  const layout = sidebarLayout();
+  paintedLayout = layout;
+  $('sessionList').classList.toggle('is-inbox', layout === 'inbox');
+  if (layout !== 'inbox') inboxPicker.close();
+  if (layout === 'inbox') {
+    paintInbox();
+    syncSelectedWorkspace();
+    scheduleToolActivityExpiry();
+    return;
+  }
+  const projectList = $('projectList'), chatList = $('chatList');
+  // Activity replaces sidebar nodes. Keep an actively focused project control (its disclosure
+  // or one of its buttons) attached to its exact project, without moving focus from the
+  // composer or settings. A keyboard user tabbing to a project's buttons lost focus to the
+  // page on the next repaint, and so did the color button after a pick.
+  const restoreFocus = sidebarFocus(projectList, 'data-project-id', ['.project-heading', '.project-new', '.project-menu', '.project-show-more']);
+  const children = workerChildren();
   const rows: HTMLElement[] = [];
   // A task and its expanded workers are one sidebar item for project pagination.
   // Store lightweight owners until the visible page is known. Creating DOM for
@@ -1337,16 +1874,6 @@ function paintSessions(): void {
   // even though those nodes are immediately discarded by the project page limit.
   const projectRows = new Map<string, Array<{ entry: SessionSummary; workers?: SessionSummary[]; selected: boolean }>>();
   const diagnostics: SessionSummary[] = [];
-  const group = (key: string, workers: SessionSummary[], parentRow?: HTMLElement, target = rows): void => {
-    const button = el('button', 'worker-toggle');
-    button.append(disclosureChevron());
-    ui(button, 'title', () => t("{0} sub-agents · {1} active", [workers.length, workers.filter(sessionWorking).length]));
-    ui(button, 'aria-label', () => t("{0} {1} sub-agents", [expandedWorkers.has(key) ? t("Collapse") : t("Expand"), workers.length]));
-    button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
-    button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
-    if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
-    if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
-  };
   // Pinned chats lead their own list (#1133). Resolve project membership once for
   // this paint: scanning all sessions for each project and then searching the project
   // catalog for every comparison used to multiply work on frequent activity pushes.
@@ -1380,18 +1907,11 @@ function paintSessions(): void {
     } else {
       const row = sessionRow(entry); rows.push(row);
       row.dataset.sortScope = pinnedSortScope('', pinnedChat(entry));
-      if (workers) group(entry.id, workers, row, rows);
+      if (workers) workerGroup(entry.id, workers, row, rows);
     }
   }
-  const otherWorkers = children.get('other-workers') ?? [];
-  if (otherWorkers.length) {
-    const history = document.createElement('details'); history.className = 'session-diagnostics';
-    history.open = expandedWorkers.has('other-workers');
-    history.append(el('summary', '', () => t("Sub-agent history · {0}", [otherWorkers.length])));
-    history.append(...otherWorkers.map(sessionRow));
-    history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
-    rows.push(history);
-  }
+  const history = workerHistory(children.get('other-workers') ?? []);
+  if (history) rows.push(history);
   const projectEntries = projectSortEntries(groupOf);
   const orderedProjects = sidebarOrder?.ordered(SIDEBAR_PROJECT_SCOPE, projectEntries) ?? projectEntries;
   const projectSections: HTMLElement[] = [];
@@ -1426,17 +1946,7 @@ function paintSessions(): void {
     });
     if (project) {
       // One button for the project's actions, as in ChatGPT; a right click on the row opens the same menu.
-      const owner = `project:${id}`;
-      const more = el('button', 'btn row-menu-button project-menu') as HTMLButtonElement;
-      more.type = 'button'; more.dataset.rowMenu = owner; more.append(icon('i-more-vertical'));
-      more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', String(rowMenuOpenFor(owner)));
-      ui(more, 'title', () => t('More options'));
-      ui(more, 'aria-label', () => t('More options'));
-      const menu = (at?: { x: number; y: number }) => ({
-        owner, at, label: () => projects.find(row => row.id === id)?.name ?? t('Unavailable project'),
-        anchor: () => rowMenuButton(owner), items: () => projectMenuItems(id)
-      });
-      more.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleRowMenu(menu()); });
+      const { button: more, menu } = projectMenu(id, 'btn row-menu-button project-menu');
       heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
       // The project's primary action, beside its menu rather than inside it: one click, as in ChatGPT.
       const create = el('button', 'btn row-menu-button project-new') as HTMLButtonElement;
@@ -1454,7 +1964,7 @@ function paintSessions(): void {
       const row = sessionRow(task.entry);
       row.dataset.sortScope = pinnedSortScope(id, pinnedChat(task.entry));
       shownRows.push(row);
-      if (task.workers) group(task.entry.id, task.workers, row, shownRows);
+      if (task.workers) workerGroup(task.entry.id, task.workers, row, shownRows);
     }
     section.append(...shownRows);
     // The project's own older chats count as "more" too, once it is known to have some (#1190).
@@ -1471,15 +1981,8 @@ function paintSessions(): void {
     }
     projectSections.push(section);
   }
-  if (diagnostics.length) {
-    const disclosure = document.createElement('details');
-    disclosure.className = 'session-diagnostics';
-    disclosure.open = diagnosticsExpanded;
-    disclosure.append(el('summary', '', () => t("Unattributed activity · {0}", [diagnostics.length])));
-    disclosure.append(...diagnostics.map(sessionRow));
-    disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
-    rows.push(disclosure);
-  }
+  const unattributed = unattributedActivity(diagnostics);
+  if (unattributed) rows.push(unattributed);
   // A new node is not :hover until the pointer moves again: the row under it would lose its hover
   // look for a moment, and a sub-agent arrow would jump back to the menu's column and slide out again.
   // The row under the pointer is born pointed (until the pointer leaves), keeps its tooltip, and an
@@ -1511,8 +2014,16 @@ function paintSessions(): void {
         { duration: 150, easing: 'cubic-bezier(.2, .8, .2, 1)' });
     }
   }
-  if (focusedProject && focusedControl) projectSections.find(section => section.dataset.projectId === focusedProject)
-    ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
+  restoreFocus();
+  syncSelectedWorkspace();
+  $('projectsEmpty').hidden = projectSections.length > 0;
+  $('sessionsEmpty').hidden = rows.length > 0;
+
+  scheduleToolActivityExpiry();
+}
+
+/** The panels beside the chat follow the selected chat whichever sidebar drew it. */
+function syncSelectedWorkspace(): void {
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   agentPanel?.update(selectedId, workers);
   filePanel?.update(selectedLocalProject());
@@ -1521,10 +2032,6 @@ function paintSessions(): void {
   workspaceTerminal?.update(selectedLocalProject());
   rightWorkspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
-  $('projectsEmpty').hidden = projectSections.length > 0;
-  $('sessionsEmpty').hidden = rows.length > 0;
-
-  scheduleToolActivityExpiry();
 }
 
 /** Repaint once at the nearest activity-window boundary; no polling clock is needed. */
@@ -6083,7 +6590,8 @@ export function chatApply(state: AppState, previous?: Config): void {
   $('bridgeState').classList.toggle('is-warn', browserRequired && (!bridge.present || !secureStorageAvailable));
   void showExtensionPath();
 
-  if (sessions.length > 0) paintSessions();
+  // A changed layout redraws even with nothing loaded yet: its own controls are the list's head.
+  if (sessions.length > 0 || sidebarLayout() !== paintedLayout) paintSessions();
 }
 
 /** Called when the Chat tab becomes visible or is left, so it only polls when shown. */
@@ -7090,7 +7598,8 @@ export function initChat(next: Deps): void {
     event.preventDefault();
     toggleRowMenu({
       owner: 'add-project',
-      anchor: () => document.getElementById('addProject'),
+      // The Inbox hides the Projects heading and opens this from its own add button: the menu sits there.
+      anchor: () => $('chatList').querySelector<HTMLElement>('[data-inbox-control="add"]') ?? document.getElementById('addProject'),
       label: () => t('Add a project folder'),
       items: () => [
         { action: 'add-local-project', label: () => t('Folder on this computer…'), icon: 'i-folder', run: () => void addLocalProject() },

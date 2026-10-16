@@ -924,6 +924,34 @@ Choosing an item gives focus back to the row's button before the action runs, so
 repaint keeps it there unless the user moved focus meanwhile; an action that moves focus
 (renaming, a new chat's field) still does.
 
+The Inbox layout (`ui.appearance.sidebarLayout: 'inbox'`) is the same sidebar drawn as one list,
+not a second one: its cards and settled lines are `sessionRow`s, and it shares the tree's worker
+grouping (`workerChildren`, `workerGroup`, `workerHistory`: the same arrow, `expandedWorkers` and
+"Sub-agent history"), its "Unattributed activity" disclosure (`unattributedActivity`, with the rows'
+Allow/Block unattributed calls), project menu (`projectMenu`, owner `project:<id>`), history reads and focus
+keeping (`sidebarFocus`). A card's meta line counts its workers in one line ("1 needs attention ·
+2 working · 1 sleeping"), read from the badges the workers' own rows draw (`workerState`); a
+running worker, or one that needs attention, keeps its parent out of Settled and orders it by that activity.
+Cards rank by what the chat needs (`chatAttention`, `inboxRank`), from main-owned state only, never
+ChatGPT's text: Needs approval (`approval`), Recovery stopped (`recoveryStopped`), Blocked, Failed
+(no open turn and last outcome `failed`/`stalled`), then Working, then New response (unseen, the
+row badge's own words), then the rest; recency orders within a rank, and a worker lends its parent
+its own rank. Pinned chats still lead, ranked the same way among themselves. Each attention state is
+one icon and label on the card's meta line, in `--red`. A chat waiting on approval, recovery-stopped
+or blocked never settles; a failed one ranks with them while it is recent, then settles after the
+same 24 hours as any quiet chat, ranked by recency like the rest, its settled line still saying
+Failed. The tree
+shows approval and recovery-stopped as the row's status dot, like `blocked`.
+The project filter is one button opening the shared searchable popup (`renderer/search-popup.ts`,
+also the file panel's branch picker): All and each project in tree order, with a hint while its
+ChatGPT Project is being created or unavailable. A chosen project shows its ⋯ menu beside the
+filter (Remove returns to All), reads its own history as expanding it does (`projectViewed`), and
+holds as many chats as its tree section, cards and Settled counted together in drawn order, then
+"Show more" after both groups, outside Settled (whose count is the lines drawn); the selected chat
+and every chat that needs the person stay visible beyond the page. While that project's own history
+is unread its empty state says "Loading chats…", and after a failed read it offers Retry.
+The filter is window-local, like disclosure state.
+
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
 sidebar list. Adding that same folder again restores grouping. It does not delete files,
@@ -1460,7 +1488,8 @@ page reports it on every `/activity` poll as optional `approval=1|0` (older exte
 ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
 stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
-card on its own.
+card on its own. The session list carries every waiting chat as `approval`; a catalog-only
+`session:changed` fires when a wait starts, ends, or goes stale with no poll left to say so.
 
 Since 2.1.38 the person can answer it in the app. With `approval=1` the page also sends
 `approvalCard` (JSON `{ id, lines, allow }`: an id per card element, kept in a `WeakMap` while it
@@ -2779,7 +2808,11 @@ attempt count and next deadline are stored with the exact Goal reply or queued i
 restart cannot reset the limit. After the third uncollected reload, recovery stops and the composer
 shows a persistent stop status while the original obligation remains saved. A queue item can still
 be sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
-lifetime remains a separate retirement bound. Native-busy polls do not postpone that schedule. A silence episode retiring
+lifetime remains a separate retirement bound. The session list carries stopped chats as
+`recoveryStopped` (the same `pickup-stopped` predicate); a queued input's stop pushes
+`session:changed` with its outbox write, a Goal reply's stop pushes from the pickup sweep as soon as
+it is recorded (before, and whether or not, its last reload is queued), and a
+user acting on it (sending or cancelling the input; a newer question over a Goal reply) clears it. Native-busy polls do not postpone that schedule. A silence episode retiring
 cannot delete a new pickup repair belonging to its durable ticket.
 
 Continue text, source question/work, busy deadline and exclusive send custody live in the
@@ -3951,6 +3984,15 @@ completion is acknowledged locally without writing session metadata. The receipt
 the current selection/load generation has successfully rendered that conversation at the live tail;
 failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
 from appearing unread after an update, and the stored receipts stay bounded.
+`sessions:list` (`readSessionList`, `SessionList`) carries per-chat states only the main process
+holds, as ChatGPT conversation ids, each keyed like `blocked`: `approval` (`approvalWaitingChats()`,
+the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoveryStoppedChats()` in
+bridge.ts: exactly the chats whose `sessionRecoveryCountdowns` reads `pickup-stopped`, asked only of
+sessions with a durable stop mark, so a list with none costs nothing). The pageless verdict
+(`pagelessChats`) is deliberately not in `recoveryStopped`: it is in memory, keeps no obligation and
+lifts when the page polls. "Last turn failed and nothing followed" needs no field:
+`!activeTurnId && lastTurnOutcome` is `failed` or `stalled` (`interrupted` is usually followed by a
+fresh turn: rotation, automatic Continue, a replacing message).
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
@@ -4186,8 +4228,11 @@ Appearance uses `ui.appearance` in the existing config, with separate Light/Dark
 sidebar and accent RGB colors plus contrast. Native color pickers and HEX fields allow every
 six-digit RGB color. A shared font choice, 12–18px base text size and translucent-sidebar switch
 apply immediately; Reset appearance restores both palettes and typography without changing the
-theme, language or setup profile. Text size scales the existing typography hierarchy, including
-code, independently of window zoom. System font retains the locale-specific fallback stack.
+theme, language, setup profile or sidebar layout. `ui.appearance.sidebarLayout` (Layout → Sidebar
+layout: `'projects'`, the default project tree, or `'inbox'`) is read by `chat.ts` from the config,
+never browser storage; a save without it or with another value loads as `'projects'` while the
+rest of the appearance is kept, and the state push after a save repaints the sidebar. Text size
+scales the existing typography hierarchy, including code, independently of window zoom. System font retains the locale-specific fallback stack.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
 it contains no session data. The composer context dialog and accessible label identify local
 estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original

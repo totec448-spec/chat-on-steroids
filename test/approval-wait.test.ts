@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, noteApprovalCard,
+  APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, approvalWaitingChats, noteApprovalCard,
   requestApprovalAnswer, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
 } from '../src/main/approval-wait.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
@@ -59,6 +59,55 @@ describe('approval card episodes', () => {
     expect(approvalCardWaiting('chat', 1_000 + APPROVAL_NOTICE_GRACE_MS)).toBe(true);
     expect(deps.rows).toEqual([]);
     expect(deps.notices).toEqual([]);
+  });
+});
+
+// The sidebar's Inbox ranks every chat, not only the open one, so the list carries the waits.
+describe('the session list view', () => {
+  beforeEach(() => resetApprovalWaits());
+  afterEach(() => { vi.useRealTimers(); resetApprovalWaits(); });
+
+  it('lists the chats whose card waits and drops one once answered or no longer reported, saying so each time', async () => {
+    vi.useFakeTimers();
+    const changes: string[] = [];
+    const deps: ApprovalWaitDeps = { record: async () => ({ seq: 1, time: 1 }), notify: () => undefined, log: () => undefined,
+      changed: () => { changes.push('changed'); } };
+    await noteApprovalCard('answered', true, 'session-a', deps, 1_000);
+    await noteApprovalCard('unrecorded', true, null, deps, 1_000);
+    expect(approvalWaitingChats(1_000).sort()).toEqual(['answered', 'unrecorded']);
+    expect(changes).toHaveLength(2);
+    // Another poll of the same card changes nothing.
+    await noteApprovalCard('answered', true, 'session-a', deps, 3_000);
+    expect(changes).toHaveLength(2);
+    await noteApprovalCard('answered', false, 'session-a', deps, 5_000);
+    expect(approvalWaitingChats(5_000)).toEqual(['unrecorded']);
+    expect(changes).toHaveLength(3);
+    // A page that stopped reporting: the same freshness rule as the recovery hold, and one push
+    // when it runs out, because no poll is left to cause one.
+    expect(approvalWaitingChats(1_000 + APPROVAL_FRESH_MS - 1)).toEqual(['unrecorded']);
+    expect(approvalWaitingChats(1_000 + APPROVAL_FRESH_MS)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(APPROVAL_FRESH_MS);
+    expect(changes).toHaveLength(4);
+  });
+
+  it('pushes the list once the wait has gone stale, even when its timer fires a moment early', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const pushed: string[][] = [];
+    const deps: ApprovalWaitDeps = { record: async () => ({ seq: 1, time: 1 }), notify: () => undefined, log: () => undefined,
+      changed: () => { pushed.push(approvalWaitingChats()); } };
+    // The poll's clock reads 20 ms past the timer's start: the timer comes due 20 ms before the wait goes stale.
+    await noteApprovalCard('chat', true, null, deps, 20);
+    expect(pushed).toEqual([['chat']]);
+    await vi.advanceTimersByTimeAsync(APPROVAL_FRESH_MS);
+    // Due, but the wait is still fresh: a push now would say waiting, with nothing left to push again.
+    expect(approvalWaitingChats()).toEqual(['chat']);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(approvalWaitingChats()).toEqual([]);
+    expect(pushed.at(-1)).toEqual([]);
+    expect(pushed).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(APPROVAL_FRESH_MS);
+    expect(pushed).toHaveLength(2);
   });
 });
 

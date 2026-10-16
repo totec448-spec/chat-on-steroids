@@ -77,6 +77,14 @@ export interface SessionList {
   activeId: string | null;
   /** ChatGPT conversation ids the user has blocked from using local tools. */
   blocked: string[];
+  /** ChatGPT conversation ids whose page shows ChatGPT's tool approval card, waiting for the user. */
+  approval: string[];
+  /**
+   * ChatGPT conversation ids whose recovery stopped after its last pickup reload while the input,
+   * Continue or Goal/Loop step it was collecting is still owed: the user has to act. The same chats
+   * whose `SessionControlsView.recovery` holds a `pickup-stopped` countdown.
+   */
+  recoveryStopped: string[];
   /** ChatGPT conversation ids explicitly trusted for strict allowlisting. */
   trusted?: string[];
   pressure: Array<TokenPressure & { id: string }>;

@@ -580,6 +580,545 @@ it('starts project groups collapsed and deliberately expands the project selecte
   expect(group().open).toBe(true);
 });
 
+it('draws the sidebar layout saved in Appearance, Projects by default, and repaints when it changes', async () => {
+  const { project, session } = projectSidebarFixture();
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
+  });
+  const doc = mounted.window.document;
+  const list = doc.getElementById('sessionList')!, select = doc.getElementById('appearanceSidebarLayout') as HTMLSelectElement;
+  // A config saved before the setting existed has no appearance at all: today's project tree.
+  await vi.waitFor(() => expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull());
+  expect(list.classList.contains('is-inbox')).toBe(false);
+  expect(select.value).toBe('projects');
+  // The choice lives in the app's config, so it arrives with a state push (another window, a restart).
+  const { defaultAppearance } = await import('../src/shared/appearance.js');
+  mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), sidebarLayout: 'inbox' } } };
+  mounted.push(structuredClone(mounted.state));
+  expect(list.classList.contains('is-inbox')).toBe(true);
+  expect(select.value).toBe('inbox');
+  expect(window.localStorage.getItem('chat-on-steroids.sidebar-layout')).toBeNull();
+  // Choosing Projects saves through Settings with the rest of Appearance and redraws the tree.
+  select.value = 'projects'; select.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.find(call => call.ui?.appearance?.sidebarLayout)?.ui.appearance).toMatchObject({ sidebarLayout: 'projects', font: 'system' }), { timeout: 5000 });
+  await vi.waitFor(() => expect(list.classList.contains('is-inbox')).toBe(false), { timeout: 5000 });
+  expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull();
+});
+
+const DAY = 24 * 60 * 60_000;
+/** A recorded chat for the inbox, outside every project unless told otherwise. */
+const inboxChat = (id: string, extra: Record<string, unknown> = {}) => ({
+  ...projectSidebarFixture().session, id, title: id, conversationId: `c-${id}`, chatIds: [`c-${id}`], projectId: null, ...extra
+});
+const listed = (sessions: unknown[], extra: Record<string, unknown> = {}) =>
+  ({ ok: true as const, data: { sessions, activeId: null, pressure: [], blocked: [], ...extra } });
+/** Mounts the chat with the Inbox layout saved in Appearance. */
+async function mountInbox(apiOverrides: Record<string, (...args: any[]) => any>): Promise<GoalMount> {
+  const mounted = await mountChat({}, [], apiOverrides);
+  const { defaultAppearance } = await import('../src/shared/appearance.js');
+  mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), sidebarLayout: 'inbox' } } };
+  mounted.push(structuredClone(mounted.state));
+  await settle();
+  return mounted;
+}
+const inboxProjects = () => ({
+  alpha: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001', name: 'Alpha', path: 'C:\\alpha', createdAt: 1, color: 'teal' as const },
+  beta: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000002', name: 'Bêta', path: 'C:\\beta', createdAt: 2 }
+});
+
+it('draws sub-agents under their parent card with one line of counts, and a busy worker keeps a quiet parent out of Settled', async () => {
+  const old = Date.now() - 3 * DAY;
+  const worker = (id: string, extra: Record<string, unknown> = {}) => inboxChat(id, {
+    startedAt: old, updatedAt: old, origin: { kind: 'worker', fromSessionId: 'parent', agentId: id, task: '' }, ...extra
+  });
+  const sessions = [
+    inboxChat('parent', { title: 'Parent task', startedAt: old, updatedAt: old }),
+    worker('w-run-1', { activityExpiresAt: Date.now() + 60 * 60_000 }),
+    worker('w-run-2', { activityExpiresAt: Date.now() + 60 * 60_000 }),
+    worker('w-sleep', { lastToolCallAt: old - 1, lastFinishReportAt: old }),
+    worker('w-blocked'),
+    inboxChat('w-orphan', { origin: { kind: 'worker', fromSessionId: 'gone', agentId: 'w-orphan', task: '' } }),
+    inboxChat('quiet', { title: 'Quiet chat', startedAt: old, updatedAt: old })
+  ];
+  const mounted = await mountInbox({ listSessions: async () => listed(sessions, { blocked: ['c-w-blocked'] }) });
+  const doc = mounted.window.document;
+  const card = () => doc.querySelector<HTMLElement>('.inbox-cards > .sess-card[data-id="parent"]');
+  await vi.waitFor(() => expect(card()).not.toBeNull());
+  // Quiet for days, but its workers are running: it stays a card. A chat as quiet without them settles.
+  expect(doc.querySelector('.inbox-settled .sess[data-id="parent"]')).toBeNull();
+  expect(doc.querySelector('.inbox-settled .sess[data-id="quiet"]')).not.toBeNull();
+  // Counts only, on the card's meta line, from the same states the workers' own rows show.
+  expect(card()!.querySelector('.sess-foot .sess-workers')?.textContent).toBe('1 needs attention · 2 working · 1 sleeping');
+  // Collapsed at first: the tree's own arrow, on the card.
+  const toggle = () => card()!.querySelector<HTMLButtonElement>(':scope > .worker-toggle')!;
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  expect(toggle().getAttribute('aria-label')).toBe('Expand 4 sub-agents');
+  expect(doc.querySelector('.sess[data-id="w-run-1"]')).toBeNull();
+  toggle().click();
+  expect(toggle().getAttribute('aria-expanded')).toBe('true');
+  const group = card()!.nextElementSibling as HTMLElement;
+  expect(group.classList.contains('worker-group')).toBe(true);
+  expect([...group.querySelectorAll<HTMLElement>(':scope > .sess')].map(row => row.dataset.id)).toEqual(['w-run-1', 'w-run-2', 'w-sleep', 'w-blocked']);
+  toggle().click();
+  expect(doc.querySelector('.worker-group')).toBeNull();
+  // A worker whose chat is not loaded goes in the shared history disclosure at the end.
+  const history = doc.querySelector<HTMLDetailsElement>('#chatList > details.session-diagnostics')!;
+  expect(history.querySelector('summary')?.textContent).toBe('Sub-agent history · 1');
+  expect(history.querySelector('.sess[data-id="w-orphan"]')).not.toBeNull();
+  expect(doc.querySelectorAll('.sess[data-id="w-orphan"]')).toHaveLength(1);
+});
+
+it('filters the inbox with a searchable project picker, by keyboard, and reads the chosen project\'s own history', async () => {
+  const { alpha, beta } = inboxProjects();
+  const older = Array.from({ length: 7 }, (_, index) => inboxChat(`b-old-${index}`, {
+    projectId: beta.id, startedAt: 1, updatedAt: Date.now() - 3 * DAY - index * 1000
+  }));
+  const listSessions = vi.fn(async (options?: { projectId?: string; cursor?: unknown }) => {
+    if (options?.projectId === beta.id) return options.cursor
+      ? listed(older.slice(5), { nextCursor: null })
+      : listed(older.slice(0, 5), { nextCursor: { updatedAt: older[4]!.updatedAt, id: older[4]!.id } });
+    return listed([inboxChat('a1', { projectId: alpha.id, updatedAt: Date.now() }), inboxChat('b1', { projectId: beta.id, updatedAt: Date.now() })]);
+  });
+  const mounted = await mountInbox({ listProjects: async () => ({ ok: true, data: [alpha, beta] }), listSessions });
+  const doc = mounted.window.document, w = mounted.window;
+  const trigger = () => doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!;
+  const popup = () => doc.querySelector<HTMLElement>('.inbox-project-picker:not(.is-leaving)');
+  const options = () => [...popup()!.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+  const search = () => popup()!.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const key = (target: Element, name: string) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  // No sideways chips: one button saying what is shown.
+  expect(doc.querySelector('.inbox-chips, .inbox-chip')).toBeNull();
+  expect(trigger().textContent).toBe('All');
+  expect(trigger().getAttribute('aria-expanded')).toBe('false');
+  expect(trigger().getAttribute('aria-label')).toBe('Projects: All');
+  trigger().focus(); trigger().click();
+  expect(popup()).not.toBeNull();
+  expect(trigger().getAttribute('aria-expanded')).toBe('true');
+  expect(doc.activeElement).toBe(search());
+  expect(popup()!.querySelector('[role="listbox"]')).not.toBeNull();
+  expect(options().map(option => option.textContent)).toEqual(['All', 'Alpha', 'Bêta']);
+  expect(options()[0]!.getAttribute('aria-selected')).toBe('true');
+  // The list's Search opens the chat search dialog, as the brand row's button says.
+  expect(doc.querySelector('#chatList [data-inbox-control="search"]')!.getAttribute('aria-haspopup')).toBe('dialog');
+  // No match: the listbox holds options only, and its empty line sits beside it.
+  search().value = 'zzz'; search().dispatchEvent(new w.Event('input'));
+  expect(popup()!.querySelector('[role="listbox"]')!.children).toHaveLength(0);
+  const none = popup()!.querySelector<HTMLElement>('.file-branch-empty')!;
+  expect(none.textContent).toBe('No projects found');
+  expect(none.closest('[role="listbox"]')).toBeNull();
+  // The search ignores case and accents, as the app's other searches do.
+  search().value = 'BETA'; search().dispatchEvent(new w.Event('input'));
+  expect(options().map(option => option.textContent)).toEqual(['Bêta']);
+  key(search(), 'ArrowDown');
+  expect(doc.activeElement).toBe(options()[0]);
+  key(doc.activeElement!, 'Escape');
+  expect(popup()).toBeNull();
+  expect(doc.activeElement).toBe(trigger());
+  expect(trigger().getAttribute('aria-expanded')).toBe('false');
+  // Enter in the field picks the first match.
+  trigger().click();
+  search().value = 'bet'; search().dispatchEvent(new w.Event('input'));
+  key(search(), 'Enter');
+  expect(popup()).toBeNull();
+  expect(trigger().textContent).toBe('Bêta');
+  expect(doc.activeElement).toBe(trigger());
+  expect(doc.querySelector('.sess[data-id="a1"]')).toBeNull();
+  expect(doc.querySelector('.sess-card[data-id="b1"]')).not.toBeNull();
+  // The project's own history, the read opening it in the tree makes.
+  await vi.waitFor(() => expect(listSessions.mock.calls.filter(([options]) => options?.projectId === beta.id)).toHaveLength(1));
+  await settle();
+  // As many chats as the tree's section would hold, then the tree's "Show more".
+  const settledIds = () => [...doc.querySelectorAll<HTMLElement>('.inbox-settled .sess')].map(row => row.dataset.id);
+  expect(settledIds()).toEqual(['b-old-0', 'b-old-1', 'b-old-2', 'b-old-3']);
+  // Settled counts the lines it draws; "Show more" follows it, outside it.
+  expect(doc.querySelector('.inbox-settled .inbox-count')?.textContent).toBe('4');
+  const more = doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="show-more"]')!;
+  expect(more.closest('.inbox-settled')).toBeNull();
+  expect(more.previousElementSibling?.classList.contains('inbox-settled')).toBe(true);
+  expect(more.getAttribute('aria-label')).toBe('Show more tasks in Bêta');
+  more.click();
+  await vi.waitFor(() => expect(listSessions.mock.calls.filter(([options]) => options?.projectId === beta.id)).toHaveLength(2));
+  expect(listSessions.mock.calls.at(-1)?.[0]).toMatchObject({ projectId: beta.id, cursor: { id: 'b-old-4' } });
+  await vi.waitFor(() => expect(settledIds()).toHaveLength(7));
+  expect(doc.querySelector('.project-show-more')).toBeNull();
+  // A new chat from here opens in the chosen project.
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="compose"]')!.click();
+  expect((doc.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Bêta…');
+});
+
+it('opens the add-project menu at the inbox\'s own add button, with a folder here or on a server', async () => {
+  const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('a1', { updatedAt: Date.now() })]) });
+  const doc = mounted.window.document;
+  const add = () => doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="add"]')!;
+  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  add().click();
+  await vi.waitFor(() => expect(doc.querySelector('.row-menu [data-row-action="add-ssh-project"]')).not.toBeNull());
+  expect(doc.querySelector('.row-menu [data-row-action="add-local-project"]')).not.toBeNull();
+  // The menu belongs to the button the person used, not the hidden Projects heading.
+  expect(add().getAttribute('aria-expanded')).toBe('true');
+  closeRowMenus(doc);
+  expect(doc.activeElement).toBe(add());
+});
+
+it('offers the chosen project\'s own menu in the inbox: Retry ChatGPT Project for a failed link, and Remove returns to All', async () => {
+  const { alpha } = inboxProjects();
+  const failed = { ...alpha, chatgpt: { state: 'failed' as const, requestId: 'r1', error: 'x', updatedAt: 1 } };
+  const retryChatgptProject = vi.fn(async () => ({ ok: true, data: { ...alpha, chatgpt: { state: 'creating', requestId: 'r2', owner: 'o', updatedAt: 2 } } }));
+  const removeProject = vi.fn(async () => ({ ok: true, data: { ...alpha, ungrouped: true } }));
+  const mounted = await mountInbox({
+    listProjects: async () => ({ ok: true, data: [failed] }), retryChatgptProject, removeProject,
+    listSessions: async () => listed([inboxChat('a1', { projectId: alpha.id, updatedAt: Date.now() })])
+  });
+  const doc = mounted.window.document, w = mounted.window;
+  const trigger = () => doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!;
+  const menuButton = () => doc.querySelector<HTMLButtonElement>(`#chatList [data-row-menu="project:${alpha.id}"]`);
+  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  expect(menuButton()).toBeNull();
+  trigger().click();
+  const option = [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(entry => entry.textContent?.startsWith('Alpha'))!;
+  // The link state shows where the project is chosen, with the line that points at Retry.
+  expect(option.querySelector('.file-branch-hint')?.textContent).toBe('ChatGPT Project unavailable');
+  expect(option.title).toContain("This project's ChatGPT Project isn't available. Retry it from the project's menu.");
+  option.click();
+  expect(trigger().title).toContain("This project's ChatGPT Project isn't available. Retry it from the project's menu.");
+  expect(trigger().querySelector('.session-status.is-failed')).not.toBeNull();
+  // The tree's own menu button: the same owner, popup and expanded state.
+  expect(menuButton()!.getAttribute('aria-haspopup')).toBe('menu');
+  menuButton()!.click();
+  expect(menuButton()!.getAttribute('aria-expanded')).toBe('true');
+  expect(doc.querySelector('.row-menu [data-row-action="color"]')).not.toBeNull();
+  // Escape gives focus back to the button, as in the tree.
+  doc.querySelector('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(doc.activeElement).toBe(menuButton());
+  menuButton()!.click();
+  doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="chatgpt-retry"]')!.click();
+  await vi.waitFor(() => expect(retryChatgptProject).toHaveBeenCalledWith(alpha.id));
+  await vi.waitFor(() => expect(trigger().title).toContain('Creating this project in ChatGPT…'));
+  expect(trigger().querySelector('.session-status.is-active')).not.toBeNull();
+  trigger().click();
+  expect(doc.querySelector('.inbox-project-picker [role="option"][aria-selected="true"] .file-branch-hint')?.textContent).toBe('Creating in ChatGPT…');
+  doc.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  // Removing the chosen project returns the list to All, and the keyboard to the filter.
+  menuButton()!.focus(); menuButton()!.click();
+  doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="remove"]')!.click();
+  await vi.waitFor(() => expect(removeProject).toHaveBeenCalledWith(alpha.id));
+  await vi.waitFor(() => expect(trigger().textContent).toBe('All'));
+  expect(menuButton()).toBeNull();
+  expect(doc.activeElement).toBe(trigger());
+});
+
+it('keeps keyboard focus on the same card, worker arrow or filter across a live inbox repaint, and opens a card by keyboard', async () => {
+  const mounted = await mountInbox({
+    listSessions: async () => listed([
+      inboxChat('a1', { updatedAt: Date.now() }),
+      inboxChat('w1', { origin: { kind: 'worker', fromSessionId: 'a1', agentId: 'w1', task: '' }, activityExpiresAt: Date.now() + 60 * 60_000 })
+    ])
+  });
+  const doc = mounted.window.document, w = mounted.window;
+  const cardTop = () => doc.querySelector<HTMLElement>('.sess-card[data-id="a1"] > .sess-top')!;
+  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  const repaint = async () => { mounted.push(structuredClone(mounted.state)); await settle(); };
+  const before = cardTop();
+  before.focus();
+  await repaint();
+  expect(cardTop()).not.toBe(before);
+  expect(doc.activeElement).toBe(cardTop());
+  const toggle = () => doc.querySelector<HTMLElement>('.sess-card[data-id="a1"] > .worker-toggle')!;
+  toggle().focus();
+  await repaint();
+  expect(doc.activeElement).toBe(toggle());
+  const trigger = () => doc.querySelector<HTMLElement>('#chatList [data-inbox-control="picker"]')!;
+  trigger().focus();
+  await repaint();
+  expect(doc.activeElement).toBe(trigger());
+  // Typing elsewhere is never interrupted.
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  input.focus();
+  await repaint();
+  expect(doc.activeElement).toBe(input);
+  // A card opens with Enter, as a tree row does, and keeps the keyboard.
+  cardTop().focus();
+  cardTop().dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle();
+  expect(doc.querySelector('.sess-card[data-id="a1"]')!.classList.contains('is-sel')).toBe(true);
+  expect(doc.activeElement).toBe(cardTop());
+});
+
+/** The inbox's cards, top to bottom, by session id. */
+const inboxCardIds = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.inbox-cards > .sess-card')].map(row => row.dataset.id);
+/** One card's state on its meta line: its words, and the card itself for its title and accessible text. */
+const inboxCardState = (doc: Document, id: string) => {
+  const card = doc.querySelector<HTMLElement>(`.inbox-cards > .sess-card[data-id="${id}"]`)!;
+  return { card, state: card.querySelector<HTMLElement>('.sess-meta > .sess-state')!, top: card.querySelector<HTMLElement>(':scope > .sess-top')! };
+};
+
+it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked, failed, then working, a new reply and the rest', async () => {
+  const now = Date.now();
+  // Newest last-touched first would be the reverse of the ranking: recency alone must not decide it.
+  const sessions = [
+    inboxChat('rest', { updatedAt: now }),
+    inboxChat('unseen', { updatedAt: now - 1000, lastTurnOutcome: 'completed', lastTurnEndAt: now + 60_000 }),
+    inboxChat('working', { updatedAt: now - 2000, activityExpiresAt: now + 60 * 60_000 }),
+    inboxChat('failed', { updatedAt: now - 3000, lastTurnOutcome: 'failed' }),
+    inboxChat('stalled', { updatedAt: now - 3500, lastTurnOutcome: 'stalled' }),
+    inboxChat('blocked', { updatedAt: now - 4000 }),
+    inboxChat('recovery', { updatedAt: now - 5000 }),
+    // Waiting on an approval card while its turn is still open: what it needs outranks that it works.
+    inboxChat('approval', { updatedAt: now - 6000, activeTurnId: 'turn-1', activityExpiresAt: now + 60 * 60_000 })
+  ];
+  const mounted = await mountInbox({
+    listSessions: async () => listed(sessions, { blocked: ['c-blocked'], approval: ['c-approval'], recoveryStopped: ['c-recovery'] })
+  });
+  const doc = mounted.window.document;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toHaveLength(8));
+  expect(inboxCardIds(doc)).toEqual(['approval', 'recovery', 'blocked', 'failed', 'stalled', 'working', 'unseen', 'rest']);
+  // Each state in one word or two on the meta line, with its own glyph, the title and the button's own text saying it too.
+  const expected: Array<[string, string, string]> = [
+    ['approval', 'Needs approval', 'ph-lock-key'], ['recovery', 'Recovery stopped', 'ph-arrow-clockwise'],
+    ['blocked', 'Blocked', 'ph-prohibit'], ['failed', 'Failed', 'ph-warning'], ['stalled', 'Failed', 'ph-warning']
+  ];
+  for (const [id, label, glyph] of expected) {
+    const { card, state, top } = inboxCardState(doc, id);
+    expect(state.textContent, id).toBe(label);
+    expect(state.classList.contains('is-attention'), id).toBe(true);
+    expect(state.querySelector(`.ico.${glyph}`), id).not.toBeNull();
+    // The title says it in the row badge's own word ("blocked"), the meta line as a label.
+    expect(card.title.toLowerCase(), id).toContain(label.toLowerCase());
+    expect(top.textContent, id).toContain(label);
+  }
+  expect(inboxCardState(doc, 'working').state.textContent).toBe('Working');
+  expect(inboxCardState(doc, 'unseen').state.textContent).toBe('New response');
+  expect(inboxCardState(doc, 'rest').state.classList.contains('is-attention')).toBe(false);
+  // The Projects tree's own status dot says the same for a chat waiting on approval or a stopped recovery, as it does for a block.
+  expect(inboxCardState(doc, 'approval').card.title).toMatch(/^approval · Needs approval · /);
+});
+
+it('calls an unread reply a New response on its card, the word its row badge already uses', async () => {
+  const now = Date.now();
+  const mounted = await mountInbox({
+    listSessions: async () => listed([inboxChat('unseen', { updatedAt: now, lastTurnOutcome: 'completed', lastTurnEndAt: now + 60_000 })])
+  });
+  const doc = mounted.window.document;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['unseen']));
+  const { state, card } = inboxCardState(doc, 'unseen');
+  expect(state.textContent).toBe('New response');
+  expect(state.querySelector('.ico.ph-check-circle')).not.toBeNull();
+  expect(card.title).toContain('New response');
+  expect(card.textContent).not.toContain('Done');
+});
+
+it('never settles a chat waiting on approval, a stopped recovery or a block, nor a parent whose worker does; a failed one settles after a day and still says so', async () => {
+  const old = Date.now() - 3 * DAY;
+  const worker = (id: string, parent: string) => inboxChat(id, {
+    startedAt: old, updatedAt: old, origin: { kind: 'worker', fromSessionId: parent, agentId: id, task: '' }
+  });
+  const sessions = [
+    inboxChat('approval', { startedAt: old, updatedAt: old }),
+    inboxChat('recovery', { startedAt: old, updatedAt: old }),
+    inboxChat('blocked', { startedAt: old, updatedAt: old }),
+    inboxChat('failed', { startedAt: old, updatedAt: old, lastTurnOutcome: 'failed' }),
+    inboxChat('stalled', { startedAt: old, updatedAt: old, lastTurnOutcome: 'stalled' }),
+    inboxChat('parent-approval', { startedAt: old, updatedAt: old }), worker('w-approval', 'parent-approval'),
+    inboxChat('parent-recovery', { startedAt: old, updatedAt: old }), worker('w-recovery', 'parent-recovery'),
+    inboxChat('plain', { startedAt: old, updatedAt: old }),
+    // A failed turn that something followed is over: the newer turn is open.
+    inboxChat('failed-then-more', { startedAt: old, updatedAt: old - 1, lastTurnOutcome: 'interrupted' })
+  ];
+  const mounted = await mountInbox({ listSessions: async () => listed(sessions, {
+    blocked: ['c-blocked'], approval: ['c-approval', 'c-w-approval'], recoveryStopped: ['c-recovery', 'c-w-recovery']
+  }) });
+  const doc = mounted.window.document;
+  await vi.waitFor(() => expect(doc.querySelector('.inbox-settled')).not.toBeNull());
+  const settled = [...doc.querySelectorAll<HTMLElement>('.inbox-settled > .sess')].map(row => row.dataset.id);
+  // Settled chats order by recency alone: a failed turn three days old is no longer a reason to lead.
+  expect(settled).toEqual(['failed', 'stalled', 'plain', 'failed-then-more']);
+  expect(inboxCardIds(doc)).toEqual(['approval', 'parent-approval', 'recovery', 'parent-recovery', 'blocked']);
+  // A settled line that failed still says so, with the card's own glyph and word, in its title too.
+  for (const id of ['failed', 'stalled']) {
+    const row = doc.querySelector<HTMLElement>(`.inbox-settled > .sess[data-id="${id}"]`)!;
+    const state = row.querySelector<HTMLElement>('.sess-top > .sess-state.is-attention')!;
+    expect(state.querySelector('.ico.ph-warning'), id).not.toBeNull();
+    expect(state.textContent, id).toContain('Failed');
+    expect(row.title, id).toMatch(new RegExp(`^${id} · Failed · `));
+  }
+  expect(doc.querySelector('.inbox-settled > .sess[data-id="plain"] .sess-state')).toBeNull();
+  // The parent's line counts the worker that needs the person.
+  expect(inboxCardState(doc, 'parent-approval').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
+  expect(inboxCardState(doc, 'parent-recovery').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
+});
+
+it('limits a chosen project\'s inbox to its tree page across cards and settled lines, never hiding the selected chat or one that needs the person', async () => {
+  const { alpha } = inboxProjects();
+  const now = Date.now(), old = now - 3 * DAY;
+  const recent = Array.from({ length: 7 }, (_, index) => inboxChat(`p${index}`, { projectId: alpha.id, updatedAt: now - index * 1000 }));
+  const sessions = [
+    ...recent,
+    inboxChat('needs', { projectId: alpha.id, startedAt: old, updatedAt: old }),
+    inboxChat('sel', { projectId: alpha.id, startedAt: old, updatedAt: old - 1000 }),
+    inboxChat('quiet', { projectId: alpha.id, startedAt: old, updatedAt: old - 2000 })
+  ];
+  const mounted = await mountInbox({
+    listProjects: async () => ({ ok: true, data: [alpha] }),
+    listSessions: async () => listed(sessions, { blocked: ['c-needs'] })
+  });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#chatList .sess[data-id="${id}"]`);
+  const settledIds = () => [...doc.querySelectorAll<HTMLElement>('.inbox-settled > .sess')].map(entry => entry.dataset.id);
+  await vi.waitFor(() => expect(row('sel')).not.toBeNull());
+  row('sel')!.querySelector<HTMLElement>('.sess-top')!.click();
+  await settle();
+  // Five pinned chats lead the list, so the blocked one comes after a whole page of them.
+  for (const id of ['p0', 'p1', 'p2', 'p3', 'p4']) rowMenuItem(row(id)!, 'pin')!.click();
+  expect(inboxCardIds(doc).slice(0, 6)).toEqual(['p0', 'p1', 'p2', 'p3', 'p4', 'needs']);
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
+  [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(option => option.textContent === 'Alpha')!.click();
+  await settle();
+  // A page of five, cards first; the blocked chat and the selected one stay beyond it.
+  expect(inboxCardIds(doc)).toEqual(['p0', 'p1', 'p2', 'p3', 'p4', 'needs']);
+  expect(settledIds()).toEqual(['sel']);
+  // The count is the one line drawn, not the two settled chats.
+  const count = () => doc.querySelector('.inbox-settled .inbox-count')?.textContent;
+  expect(count()).toBe('1');
+  // "Show more" reads on the whole list, so a closed Settled does not hide it.
+  const box = doc.querySelector<HTMLDetailsElement>('.inbox-settled')!;
+  box.open = false; box.dispatchEvent(new mounted.window.Event('toggle'));
+  const more = doc.querySelector<HTMLButtonElement>('#chatList > [data-inbox-control="show-more"]')!;
+  expect(more).not.toBeNull();
+  expect(more.closest('.inbox-settled')).toBeNull();
+  expect(more.previousElementSibling).toBe(box);
+  more.click();
+  await settle();
+  expect(inboxCardIds(doc)).toEqual(['p0', 'p1', 'p2', 'p3', 'p4', 'needs', 'p5', 'p6']);
+  expect(doc.querySelector<HTMLDetailsElement>('.inbox-settled')!.open).toBe(false);
+  expect(settledIds()).toEqual(['sel', 'quiet']);
+  expect(count()).toBe('2');
+  expect(doc.querySelector('#chatList [data-inbox-control="show-more"]')).toBeNull();
+});
+
+it('moves a card live when the session list reports a new state, keeping keyboard focus on it', async () => {
+  const now = Date.now();
+  let approval: string[] = [];
+  let changed: () => void = () => undefined;
+  const mounted = await mountInbox({
+    listSessions: async () => listed([inboxChat('a1', { updatedAt: now - 1000 }), inboxChat('a2', { updatedAt: now })], { approval }),
+    onSessionChanged: (fn: () => void) => { changed = fn; return () => undefined; }
+  });
+  const doc = mounted.window.document;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a2', 'a1']));
+  inboxCardState(doc, 'a1').top.focus();
+  approval = ['c-a1'];
+  changed();
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1', 'a2']));
+  expect(inboxCardState(doc, 'a1').state.textContent).toBe('Needs approval');
+  expect(doc.activeElement).toBe(inboxCardState(doc, 'a1').top);
+  // Approved: the card goes back to its place by recency, the keyboard still on it.
+  approval = [];
+  changed();
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a2', 'a1']));
+  expect(inboxCardState(doc, 'a1').state.classList.contains('is-attention')).toBe(false);
+  expect(doc.activeElement).toBe(inboxCardState(doc, 'a1').top);
+});
+
+it('shows unattributed activity at the end of the inbox, as the tree does, with its Allow/Block switch', async () => {
+  const loose = inboxChat('loose', { title: 'Unattributed activity', conversationId: null, chatIds: [] });
+  let rows: unknown[] = [loose];
+  let changed: () => void = () => undefined;
+  const mounted = await mountInbox({
+    listSessions: async () => listed(rows),
+    onSessionChanged: (fn: () => void) => { changed = fn; return () => undefined; }
+  });
+  const doc = mounted.window.document;
+  const list = doc.getElementById('chatList')!;
+  const box = () => list.querySelector<HTMLDetailsElement>(':scope > details.session-diagnostics');
+  await vi.waitFor(() => expect(box()).not.toBeNull());
+  expect(box()!.querySelector('summary')?.textContent).toBe('Unattributed activity · 1');
+  // Only unattributed rows: the list is not empty, and does not say so.
+  expect(list.querySelector('.empty')).toBeNull();
+  expect(list.lastElementChild).toBe(box());
+  expect(rowMenuItem(box()!.querySelector('.sess[data-id="loose"]')!, 'block')?.textContent).toContain('Allow unattributed calls');
+  closeRowMenus(doc);
+  // With a chat beside it, the disclosure is still the last thing in the list, and never a card.
+  rows = [inboxChat('a1', { updatedAt: Date.now() }), loose];
+  changed();
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1']));
+  expect(list.lastElementChild).toBe(box());
+  expect(doc.querySelectorAll('.sess[data-id="loose"]')).toHaveLength(1);
+  // A live repaint keeps the keyboard on the disclosure it was on.
+  const before = box()!.querySelector<HTMLElement>('summary')!;
+  before.focus();
+  rows = [inboxChat('a1', { updatedAt: Date.now() + 1 }), loose];
+  changed();
+  await vi.waitFor(() => expect(box()!.querySelector('summary')).not.toBe(before));
+  expect(doc.activeElement).toBe(box()!.querySelector('summary'));
+});
+
+it('draws the inbox when the layout changes before any chat is loaded, and the tree again when it changes back', async () => {
+  const mounted = await mountChat();
+  await settle();
+  const doc = mounted.window.document;
+  const { defaultAppearance } = await import('../src/shared/appearance.js');
+  const layout = (sidebarLayout: 'inbox' | 'projects') => {
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), sidebarLayout } } };
+    mounted.push(structuredClone(mounted.state));
+  };
+  expect(doc.querySelector('#chatList .inbox-top')).toBeNull();
+  layout('inbox');
+  expect(doc.getElementById('sessionList')!.classList.contains('is-inbox')).toBe(true);
+  expect(doc.querySelector('#chatList .inbox-top [data-inbox-control="picker"]')).not.toBeNull();
+  expect(doc.querySelector('#chatList > .empty')?.textContent).toBe('No chats yet.');
+  layout('projects');
+  expect(doc.getElementById('sessionList')!.classList.contains('is-inbox')).toBe(false);
+  expect(doc.querySelector('#chatList .inbox-top')).toBeNull();
+});
+
+it('says a chosen project\'s chats are loading while its history is read, and offers Retry after a failed read', async () => {
+  const { alpha } = inboxProjects();
+  const reads: Array<(reply: unknown) => void> = [];
+  // One chat outside every project, so the list under All is drawn and not empty.
+  const listSessions = vi.fn((options?: { projectId?: string }) => options?.projectId
+    ? new Promise(resolve => reads.push(resolve)) : Promise.resolve(listed([inboxChat('loose', { updatedAt: Date.now() })])));
+  const mounted = await mountInbox({ listProjects: async () => ({ ok: true, data: [alpha] }), listSessions });
+  const doc = mounted.window.document;
+  const empty = () => doc.querySelector<HTMLElement>('#chatList > .empty');
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
+  [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(option => option.textContent === 'Alpha')!.click();
+  // Not known to be empty yet.
+  expect(empty()?.textContent).toBe('Loading chats…');
+  expect(empty()?.getAttribute('role')).toBe('status');
+  await vi.waitFor(() => expect(reads).toHaveLength(1));
+  reads[0]!({ ok: false, error: 'boom' });
+  await vi.waitFor(() => expect(doc.querySelector('#chatList [data-inbox-control="retry"]')).not.toBeNull());
+  expect(empty()?.textContent).toContain("Could not load this project's chats.");
+  expect(empty()?.textContent).not.toContain('No chats yet.');
+  const retry = doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="retry"]')!;
+  expect(retry.textContent).toBe('Retry');
+  retry.click();
+  expect(empty()?.textContent).toBe('Loading chats…');
+  await vi.waitFor(() => expect(reads).toHaveLength(2));
+  expect(listSessions.mock.calls.at(-1)?.[0]).toMatchObject({ projectId: alpha.id });
+  reads[1]!(listed([inboxChat('a1', { projectId: alpha.id, updatedAt: Date.now() })], { nextCursor: null }));
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1']));
+  expect(empty()).toBeNull();
+});
+
+it('says No chats yet. once a chosen project\'s history is read and holds none', async () => {
+  const { alpha } = inboxProjects();
+  const mounted = await mountInbox({
+    listProjects: async () => ({ ok: true, data: [alpha] }),
+    listSessions: async (options?: { projectId?: string }) =>
+      listed(options?.projectId ? [] : [inboxChat('loose', { updatedAt: Date.now() })], { nextCursor: null })
+  });
+  const doc = mounted.window.document;
+  const empty = () => doc.querySelector<HTMLElement>('#chatList > .empty');
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
+  [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(option => option.textContent === 'Alpha')!.click();
+  await vi.waitFor(() => expect(empty()?.textContent).toBe('No chats yet.'));
+});
+
 it('commits a project summary click before an immediate state repaint replaces its details node', async () => {
   const { project, session } = projectSidebarFixture();
   const mounted = await mountChat({}, [], {
