@@ -1168,6 +1168,14 @@ it('shows connection status once and keeps diagnostics out of the desktop popove
     expect(doc.getElementById('connectionAnnounce')!.textContent).toBe(title);
   }
 
+  // 2026-10-15: OpenAI's tunnel service answered with 503/504 for hours while the internet worked;
+  // "No internet" sent people to check their network for nothing.
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'offline', offlineCause: 'service' } });
+  expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe('OpenAI outage');
+  expect(label.textContent).toBe('OpenAI outage');
+  expect(doc.getElementById('connectionAnnounce')!.textContent).toBe('OpenAI outage');
+  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnected', offlineCause: null } });
+
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('pt-BR');
   expect(popover.querySelector('.connection-popover-head')!.textContent?.trim()).toBe('Não conectado');
@@ -2073,6 +2081,21 @@ it("names ChatGPT's sign-in button by the label ChatGPT shows in the app's langu
   setLanguage('en');
 });
 
+it('says a switched-off permission group is off in the app\'s language', async () => {
+  const mounted = await mountChat();
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, capabilities: {
+    ...mounted.state.config.capabilities, screen: false, control: false, clipboardRead: false, clipboardWrite: false
+  } } });
+  const doc = mounted.window.document;
+  const count = (group: string) => doc.querySelector(`[data-group="${group}"] .group-count`)?.textContent;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  // The summary of a group with nothing on was the bare English word "off" in every language.
+  expect(count('desktop')).toBe('aus');
+  setLanguage('en');
+  expect(count('desktop')).toBe('off');
+});
+
 it("keeps a worker's delivery line in the app's language when the language changes", async () => {
   const worker = { id: 'worker-1', role: 'worker', label: 'Docs', task: 'Update the docs', jobTitle: 'Docs', runId: 'run-1', reasoningEffort: null, model: null, state: 'active',
     createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
@@ -2346,7 +2369,7 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   const doc = mounted.window.document;
   const general = doc.querySelector('[data-panel="general"]')!;
   const setup = doc.querySelector('[data-panel="setup"]')!;
-  for (const id of ['followOutput', 'playfulStatus', 'mentionCore', 'privacyScreenshots', 'developerMode', 'controlApiEnabled', 'controlApiAllowActions']) {
+  for (const id of ['followOutput', 'playfulStatus', 'playfulContinue', 'mentionCore', 'privacyScreenshots', 'developerMode', 'controlApiEnabled', 'controlApiAllowActions']) {
     expect(general.contains(doc.getElementById(id)), id).toBe(true);
     expect(setup.contains(doc.getElementById(id)), id).toBe(false);
   }
@@ -2360,6 +2383,28 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   follow.checked = false;
   follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
+});
+
+// #924 / #1401: stable connector URLs for a tunnel of one's own, opt-in, only with secure storage.
+it('saves the stable connector URL option from For developers, and only with secure storage', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const box = doc.getElementById('mcpPersistentUrls') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="general"]')!.contains(box)).toBe(true);
+  expect(box.checked).toBe(false);
+  const instructions = mounted.state.config.mcp?.instructions ?? '';
+  box.checked = true;
+  box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({ instructions, persistentUrls: true }));
+  const unavailable = structuredClone(mounted.state) as any;
+  unavailable.secureStorage = { available: false };
+  unavailable.config.mcp = { instructions, persistentUrls: false };
+  mounted.push(unavailable);
+  expect(box.disabled).toBe(true);
+  // Already on without the store: it stays usable, so it can always be turned off.
+  unavailable.config.mcp = { instructions, persistentUrls: true };
+  mounted.push(structuredClone(unavailable));
+  expect(box.disabled).toBe(false);
 });
 
 it('always requires the live browser because recording is an invariant', async () => {
@@ -2472,6 +2517,16 @@ it('keeps update readiness actions stable and does not start update or connectio
   expect(w.document.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
 });
 
+it('draws the Update status disclosures with the app\'s own chevron', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  // Every other disclosure in the app uses the chevron icon; these used a text "▸" and the
+  // browser's own ▼ marker.
+  expect(doc.querySelector('#updateReadinessToggle .disclosure-chevron')).not.toBeNull();
+  expect(doc.querySelector('#updateReadinessDetails > summary .disclosure-chevron.details-chevron')).not.toBeNull();
+  expect(doc.getElementById('updateReadinessToggle')!.textContent).not.toContain('▸');
+});
+
 it('shows update failure causes and next steps without using stale connector diagnostics', async () => {
   const { window: w, state, push } = await mountChat();
   const next = structuredClone(state) as any;
@@ -2526,6 +2581,37 @@ it('shows update failure causes and next steps without using stale connector dia
   setLanguage('en');
 });
 
+it('asks in the app\'s own dialog before Update all restarts, with Keep working first', async () => {
+  // 2026-10-15: the question was a bare system message box, unlike anything else in the app.
+  const updateAll = vi.fn()
+    .mockResolvedValueOnce({ ok: true, data: 'confirm' })
+    .mockResolvedValueOnce({ ok: true, data: 'confirm' })
+    .mockResolvedValueOnce({ ok: true, data: 'restarting' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const next = structuredClone(state) as any;
+  next.update = { ...next.update, latest: '2.1.99', stage: 'ready' };
+  push(next);
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const dialog = () => w.document.getElementById('updateRestartDialog') as HTMLDialogElement | null;
+  button.click();
+  await vi.waitFor(() => expect(dialog()?.open).toBe(true));
+  expect(updateAll).toHaveBeenNthCalledWith(1);
+  expect(dialog()!.classList.contains('whats-new-dialog')).toBe(true);
+  expect(dialog()!.textContent).toContain('2.1.99');
+  expect(w.document.activeElement?.textContent).toBe('Keep working');
+  (w.document.activeElement as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+  expect(updateAll).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  button.click();
+  await vi.waitFor(() => expect(dialog()?.open).toBe(true));
+  const restart = [...dialog()!.querySelectorAll('button')].find(item => item.textContent === 'Restart and install')!;
+  restart.click();
+  await vi.waitFor(() => expect(updateAll).toHaveBeenCalledTimes(3));
+  expect(updateAll).toHaveBeenLastCalledWith('2.1.99');
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+});
+
 it.each(['reply', 'transport'])('keeps an Update all %s failure visible across pushes until explicit retry', async kind => {
   let resolve!: (reply: any) => void;
   const updateAll = vi.fn().mockImplementationOnce(() => kind === 'reply'
@@ -2555,6 +2641,38 @@ it.each(['reply', 'transport'])('keeps an Update all %s failure visible across p
   resolve({ ok: true, data: 'checking-connectors' });
   await vi.waitFor(() => expect(button.disabled).toBe(false));
   expect(error.hidden).toBe(true);
+});
+
+// One test per language: all 13 in one test took 6 s here and ran past the 30 s limit on the
+// slower macOS x64 release runner (2.1.38 publish, 2026-10-15).
+it.each(['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'] as const)(
+  'localizes updater network failures in the card, both banner paths and retained errors (%s)', async locale => {
+  const updateAll = vi.fn().mockResolvedValue({ ok: false, error: 'GitHub could not be reached' });
+  const { window: w, state, push } = await mountChat({}, [], { updateAll });
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  const button = w.document.getElementById('updateAll') as HTMLButtonElement;
+  const error = w.document.getElementById('updateAllError')!;
+  setLanguage(locale);
+  try {
+    const next = structuredClone(state);
+    next.update.stage = 'failed'; next.update.error = 'GitHub could not be reached';
+    const reason = t('GitHub could not be reached. Check your connection');
+    for (const latest of [null, '99.0.0']) {
+      next.update.latest = latest; push(structuredClone(next));
+      expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(reason);
+      for (const id of ['updateText', 'updateLine']) expect(w.document.getElementById(id)!.textContent).toContain(reason);
+    }
+    button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toContain(reason);
+    expect(error.textContent).toContain(t('Choose Update all to retry.'));
+    push(structuredClone(next));
+    expect(error.hidden).toBe(false);
+    expect(updateAll).toHaveBeenCalledTimes(1);
+    updateAll.mockResolvedValueOnce({ ok: true, data: 'checking-connectors' });
+    button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+    expect(error.hidden).toBe(true);
+  } finally { setLanguage('en'); }
 });
 
 it('translates updater reasons and retained recovery guidance when the language changes', async () => {
@@ -2736,6 +2854,21 @@ it('asks for an extension reload only when the extension is older than this app'
   mounted.push(ahead);
   expect(notice.hidden, 'a newer extension is not a downgrade prompt').toBe(true);
   expect(action.hidden).toBe(true);
+});
+
+// 2.1.39 release round: the VM's Firefox still ran the 2.1.38 add-on, and the notice told the person
+// to reload the extension from the app's folder. Firefox runs the signed add-on and updates it itself.
+it('tells a Firefox user how Firefox updates its add-on instead of pointing at the app folder', async () => {
+  const mounted = await mountChat({
+    bridge: {
+      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1',
+      externalExtension: { present: true, version: '2.0.1', lastSeenAt: Date.now(), engine: 'gecko' }
+    }
+  });
+  const text = mounted.window.document.getElementById('updateText')!.textContent!;
+  expect(text).toContain('2.0.1');
+  expect(text).toContain('about:addons');
+  expect(text).not.toContain('folder');
 });
 
 it('shows a missing-extension reminder while connected and clears it after the companion reports in', async () => {
@@ -3402,6 +3535,37 @@ it('notifies when a chat finishes unless switched off', async () => {
   notify.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
+});
+
+// #1402: long turns continue in a fresh one, every 30 minutes unless changed or off.
+it('starts a fresh turn after 30 minutes unless changed, and saves Off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const rotate = w.document.getElementById('rotateTurnMinutes') as HTMLSelectElement;
+  expect(rotate.value).toBe('30');
+  expect([...rotate.options].map(option => option.value)).toEqual(['0', '20', '30', '45', '60']);
+  rotate.value = '0';
+  rotate.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.rotateTurnMinutes).toBe(0);
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, rotateTurnMinutes: 45 } } });
+  expect(rotate.value).toBe('45');
+});
+
+// 2.1.39 release round: a value the list does not offer (1 minute, set in the config for a test)
+// became Off as soon as any other setting was saved, because the select had no such option.
+it('keeps a configured fresh-turn interval the list does not offer when another setting is saved', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, rotateTurnMinutes: 1 } } });
+  const rotate = w.document.getElementById('rotateTurnMinutes') as HTMLSelectElement;
+  expect(rotate.value).toBe('1');
+  expect(rotate.selectedOptions[0]!.textContent).toBe('1 min');
+  const notify = w.document.getElementById('turnNotifications') as HTMLInputElement;
+  notify.checked = !notify.checked;
+  notify.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.rotateTurnMinutes).toBe(1);
 });
 
 // Codex's "Follow-up behavior", in General.

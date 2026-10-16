@@ -647,7 +647,7 @@ describe('surface boundaries', () => {
     everything();
     const names = toolNames(await core('tools/list'));
     // find is absent because exec_command is present — they are mutually exclusive.
-    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'save_image', 'update_plan', 'view_image', 'write_stdin']);
+    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'save_image', 'update_plan', 'usage', 'view_image', 'write_stdin']);
     for (const name of surfaceDefinition('desktop').tools.filter(name => name !== 'exec')) expect(names, name).not.toContain(name);
   });
 
@@ -933,6 +933,27 @@ describe('surface boundaries', () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
+  it('answers usage without the identity notice, which only matters for chat-bound work', async () => {
+    everything();
+    // usage reads nothing that belongs to a chat. It answers before the page's evidence for its
+    // request arrives, so it always looked unattributed, and the notice reached the model each time.
+    const usage = JSON.stringify((await core('tools/call', { name: 'usage', arguments: {} })).body.result?.content);
+    expect(usage).toContain('ChatGPT limits');
+    expect(usage).not.toContain('Identity notice');
+    // The same harness still marks chat-bound tools, so the call above really was unattributed.
+    const read = JSON.stringify((await core('tools/call', { name: 'read', arguments: { paths: ['/workspace'] } })).body.result?.content);
+    expect(read).toContain('Identity notice');
+  });
+
+  it('describes write_stdin by what it does, never by how its output should be treated', async () => {
+    everything();
+    // ChatGPT's safety check flagged "including automatic delivery; never reruns work" as a
+    // "Suspicious Instruction" and held a long run on an approval card (VM, 2026-10-15).
+    const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'write_stdin');
+    expect(tool?.description).toBeTruthy();
+    expect(tool!.description).not.toMatch(/automatic(ally)? deliver|never reruns|delivered automatically/i);
+  });
+
   it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
     everything();
     const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'save_image');
@@ -956,7 +977,7 @@ describe('surface boundaries', () => {
     const desktopTools = toolList(await desktop('tools/list'));
 
     // Each populated surface includes code mode; find and the shell exec pair remain exclusive.
-    expect(coreTools).toHaveLength(9);
+    expect(coreTools).toHaveLength(10);
     expect(desktopTools).toHaveLength(BROWSER_TOOLS.length + (IS_WINDOWS ? 16 : process.platform === 'darwin' ? 3 : 1));
 
     // And the size, which is what a discovery pull actually costs the model on every
@@ -1230,7 +1251,7 @@ describe('capability gating', () => {
     ctx.caps = effectiveCapabilities(config);
     ctx.readOnly = true;
 
-    expect(toolNames(await core('tools/list'))).toEqual(['exec', 'find', 'read', 'view_image']);
+    expect(toolNames(await core('tools/list'))).toEqual(['exec', 'find', 'read', 'usage', 'view_image']);
   });
 
   it('offers apply_patch only when a writing permission is on', async () => {
@@ -3775,6 +3796,9 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(later)).toContain(`Exit code: ${exitCode}`);
     expect(textOf(later)).toContain('background-e2e-once');
     expect(textOf(later)).not.toContain(`write_stdin(session_id=${sessionId}`);
+    // ChatGPT's safety check read "Delivered automatically" as the tool steering how its output
+    // is treated, and stopped a long run on an approval card (VM, 2026-10-15).
+    expect(textOf(later)).not.toMatch(/delivered automatically/i);
 
     // Publication receipts require a strictly later timestamp; loopback calls can
     // otherwise share one millisecond even though this response was already read.

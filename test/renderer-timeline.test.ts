@@ -873,6 +873,21 @@ it('identifies automatic Continue without user-task editing or reordering and ke
   expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
 });
 
+// #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
+// message it is; dropped, it raises no delivery notice, because the app tries again by itself.
+it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {
+  const { w, live, append } = await boot([]);
+  const rotation: InputEntry = { id: 'fresh-turn', sessionId: summary([]).id, text: 'Continue the task from where you are.', mode: 'auto',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b', purpose: 'rotation' };
+  live.inputs.push(rotation);
+  await append([]);
+  expect(w.document.querySelector('#inputQueue [data-input-id="fresh-turn"]')?.textContent).toContain('Continue the task');
+  live.inputs[0] = { ...rotation, state: 'cancelled', error: 'Not sent: browser preparation timed out. This attempt was cancelled.' };
+  await append([]);
+  expect(w.document.querySelector('#inputQueue [data-input-id="fresh-turn"]')).toBeNull();
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Not sent');
+});
+
 it('keeps a transport-deferred immediate upload visible with cancellation instead of an invalid task editor', async () => {
   const { w, live, append } = await boot([]);
   live.inputs.push({ id: 'native-correction', sessionId: summary([]).id, text: 'Waiting upload', mode: 'after-turn', requestedMode: 'auto',
@@ -1511,6 +1526,51 @@ it('pages project tasks as complete parent/worker groups and keeps the selected 
   expect(section().querySelector('.project-show-more')).toBeNull();
   await append([]);
   expect(section().querySelectorAll(':scope > .sess')).toHaveLength(8);
+});
+it('does not allocate hidden project chat rows on each activity refresh', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Busy project', path: '/project', createdAt: 1 };
+  const tasks = Array.from({ length: 240 }, (_, index): SessionSummary => ({
+    ...summary([]), id: `task-${index}`, conversationId: `chat-${index}`,
+    title: `Task ${index}`, projectId: project.id
+  }));
+  const { w, append } = await boot([], false, [], [project], { sessions: tasks });
+  expect(w.document.querySelectorAll('.project-group .sess')).toHaveLength(5);
+
+  // Count even detached nodes: simply inspecting the live sidebar misses the hundreds of
+  // rows allocated and discarded before the five visible project tasks are appended.
+  const created: Element[] = [];
+  const create = w.document.createElement.bind(w.document);
+  const spy = vi.spyOn(w.document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+    const node = create(tag, options);
+    created.push(node);
+    return node;
+  }) as typeof w.document.createElement);
+  try { await append([]); }
+  finally { spy.mockRestore(); }
+
+  const sessionRows = created.filter(node => node.classList.contains('sess'));
+  expect(w.document.querySelectorAll('.project-group .sess')).toHaveLength(5);
+  expect(sessionRows).toHaveLength(5);
+});
+it('groups many projects without scanning the whole session list for each project', async () => {
+  let projectIdReads = 0;
+  const ids = Array.from({ length: 24 }, (_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`);
+  const projects: LocalProject[] = ids.map((id, index) => {
+    const project = { id, name: `Project ${index}`, path: `/project-${index}`, createdAt: 1 };
+    Object.defineProperty(project, 'id', { enumerable: true, get: () => { projectIdReads++; return id; } });
+    return project;
+  });
+  const tasks = Array.from({ length: 240 }, (_, index): SessionSummary => ({
+    ...summary([]), id: `session-${index}`, conversationId: `chat-${index}`,
+    projectId: ids[index % ids.length]!
+  }));
+  const { w, append } = await boot([], false, [], projects, { sessions: tasks });
+  expect(w.document.querySelectorAll('.project-group')).toHaveLength(24);
+  projectIdReads = 0;
+  await append([]);
+  // One lookup table per paint is fine; P complete scans of N rows followed by
+  // projects.find() for every comparison multiplies CPU work while the UI is busy.
+  expect(projectIdReads).toBeLessThan(tasks.length * 12);
 });
 it('shows five project chats initially and reveals eight more per click', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Paged', path: '/paged', createdAt: 1 };
@@ -4691,7 +4751,8 @@ it('retains the visible collapsed group beyond the normal resident target and st
   // One deliberate movement keeps filling the edge through collapsed batches.
   // Await the actual read result, including its animation-frame yields.
   pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
-  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 5000 });
+  // 2.7 s here; the macOS x64 release runner stopped at 300–390 of 400 rows after 5 s (2026-10-15).
+  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 20_000 });
   expect(timeline.querySelector('.tool-group')).toBe(group);
   expect(timeline.querySelectorAll('.raw')).toHaveLength(0);
   for (let i = 0; i < 14; i++) {
@@ -4736,6 +4797,25 @@ it('clears a delivered check when later model activity arrives without a timer',
   expect(receipt.hidden).toBe(true);
 });
 
+
+// 2026-10-15, the user's Mac: three fresh-turn continues that failed ("the browser did not pick up
+// this message within 60 seconds") stayed at the end of the chat as its newest messages, even after
+// the work moved on. A failed automatic continue belongs to its time, like a cancelled one.
+it('keeps a failed fresh-turn continue at its creation time, not at the end of the chat', async () => {
+  const app = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'before-rotation', message: text('Original work') },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'user_message', messageId: 'after-rotation', message: text('Later continuation') }
+  ]);
+  const { w, live } = app;
+  live.inputs.push({ id: 'failed-rotation', sessionId: summary([]).id, conversationId: 'chat-b', text: 'Continue the task from where you are.',
+    mode: 'auto', dueAt: T0 + 1000, createdAt: T0 + 1000, state: 'failed', owner: null, model: null, reasoningEffort: null, purpose: 'rotation',
+    error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+  await app.append([]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('[data-input-id="failed-rotation"]')).not.toBeNull();
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Continue the task from where you are.');
+  expect(timeline.textContent!.indexOf('Continue the task from where you are.')).toBeLessThan(timeline.textContent!.indexOf('Later continuation'));
+});
 
 it('keeps a cancelled automatic draft at its creation time as later messages arrive', async () => {
   const app = await boot([

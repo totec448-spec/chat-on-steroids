@@ -49,6 +49,7 @@ import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js'
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
 import { getConfig } from '../config.js';
+import { noteToolCall, toolOutcome } from '../diagnostics-facts.js';
 import {
   AgentError,
   IdentityLostError,
@@ -530,6 +531,9 @@ async function withBackgroundExecRecovery(
  * between a completed local operation, its unknown attribution, and an undelivered agent
  * message: none of those facts implies that completed work is about to disappear.
  */
+/** Tools whose answer does not depend on which chat called them. */
+const IDENTITY_FREE_TOOLS: ReadonlySet<string> = new Set(['usage']);
+
 function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
@@ -696,6 +700,7 @@ async function dispatchTracked(
 ): Promise<ToolResult> {
   noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
+  const callStartedAt = Date.now();
   // Recorded here rather than in `guard` because only this layer knows which server
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
@@ -1034,6 +1039,8 @@ async function dispatchTracked(
         : invokeHandler()
   );
   markTiming('handler');
+  // Nested exec children are counted under their own names, like direct calls.
+  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
   if (identityRefusals.has(result)) rememberIdentityRefusal(requestId, name);
   // Identity, once, from this call's own evidence — see callerConversation. `agents` has
   // already established its own inside the call and adopted it, and re-reading here would
@@ -1095,7 +1102,10 @@ async function dispatchTracked(
   // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
   // never visited that owner and therefore needs its own single redaction pass.
   const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
-  let delivered = nested ? baseResult : withUnattributedNotice(
+  // A tool that reads nothing belonging to a chat (usage) answers before the page's evidence
+  // for its request arrives; the attribution notice would only add noise to every such answer.
+  const identityFree = IDENTITY_FREE_TOOLS.has(name);
+  let delivered = nested ? baseResult : identityFree ? (deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish)) : withUnattributedNotice(
     context.caller.conversationId,
     deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
     context.caller.requestId,

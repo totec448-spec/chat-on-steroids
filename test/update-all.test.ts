@@ -84,7 +84,7 @@ it.each([null, newerVersion])('checks the running connectors while retaining a f
   status.latest = null;
   await expect(updateAll(quit, manual, confirmRestart)).resolves.toBe('checking-connectors');
 });
-it('waits for restart approval after downloading, joins concurrent presses and keeps working on cancel', async () => {
+it('asks the app for restart approval after downloading, joins concurrent presses and changes nothing until approved', async () => {
   owners.check.mockImplementationOnce(async () => { status.latest = newerVersion; status.stage = 'ready'; });
   const approval = faultGate();
   confirmRestart.mockImplementationOnce(async () => { await approval.hold(); return false; });
@@ -93,7 +93,8 @@ it('waits for restart approval after downloading, joins concurrent presses and k
   expect(updateAll(quit, manual, confirmRestart)).toBe(first);
   expect(confirmRestart).toHaveBeenCalledExactlyOnceWith(newerVersion);
   expect(owners.request).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
-  approval.release(); expect(await first).toBe('cancelled');
+  // Not approved yet: the app asks the person in its own dialog and calls again with that version.
+  approval.release(); expect(await first).toBe('confirm');
   expect(owners.request).not.toHaveBeenCalled(); expect(owners.mark).not.toHaveBeenCalled(); expect(quit).not.toHaveBeenCalled();
   expect(await updateAll(quit, manual, confirmRestart)).toBe('restarting');
   expect(confirmRestart).toHaveBeenCalledTimes(2); expect(quit).toHaveBeenCalledTimes(1);

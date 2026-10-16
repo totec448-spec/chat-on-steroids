@@ -151,6 +151,24 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, startAtLogin: true, autoConnect: false } });
     expect((await loadConfig()).ui).toMatchObject({ startAtLogin: true, autoConnect: false });
   });
+  it('rotates long turns after 30 minutes for fresh, legacy and malformed settings, keeping saved choices', async () => {
+    expect(defaultConfig().ui.rotateTurnMinutes).toBe(30);
+    const legacy = defaultConfig(); delete legacy.ui.rotateTurnMinutes;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.rotateTurnMinutes).toBe(30);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateTurnMinutes: 'soon', startAtLogin: true } }), 'utf8');
+    expect((await loadConfig()).ui).toMatchObject({ rotateTurnMinutes: 30, startAtLogin: true });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateTurnMinutes: 0 } });
+    expect((await loadConfig()).ui.rotateTurnMinutes).toBe(0);
+  });
+  it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
+    expect(defaultConfig().ui.localAppUsage).toBe(true);
+    const legacy = defaultConfig(); delete legacy.ui.localAppUsage;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.localAppUsage).toBe(true);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, localAppUsage: false } });
+    expect((await loadConfig()).ui.localAppUsage).toBe(false);
+  });
   it('keeps the local control API off for fresh, legacy and malformed configs while preserving explicit opt-in', async () => {
     expect(defaultConfig().controlApi).toEqual({ enabled: false, allowActions: false });
     const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>; delete legacy.controlApi;
@@ -1087,6 +1105,27 @@ describe('a settings file the app cannot read as is', () => {
     const loaded = await loadConfig();
     expect(loaded.roots.map(root => root.name)).toEqual(['project']);
     expect(await backups()).toEqual([]);
+  });
+
+  it('keeps every other setting when a preference holds a value this version does not know', async () => {
+    // VM, 2026-10-15: 2.1.37 read settings 2.1.38 had saved with Firefox as the ChatGPT browser.
+    // The one unknown value made the whole file unusable, and the app started without its folders
+    // and tunnel. A preference this version cannot read now falls back to its default alone.
+    await clearBackups();
+    const config = { ...defaultConfig(), roots: [{ name: 'project', path: dir }],
+      ui: { ...defaultConfig().ui, chatBrowser: 'netscape', theme: 'light', backgroundPlacement: 'shelf' } };
+    const content = JSON.stringify(config);
+    await fs.writeFile(file(), content, 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.roots.map(root => root.name)).toEqual(['project']);
+    expect(loaded.readOnly).toBe(config.readOnly);
+    expect(loaded.ui.theme).toBe('light');
+    expect(loaded.ui.chatBrowser).toBe('chrome');
+    expect(loaded.ui.backgroundPlacement).toBe('window');
+    // The original stays beside it, as for any file the app could not take as is.
+    const saved = await backups();
+    expect(saved).toHaveLength(1);
+    expect(await fs.readFile(path.join(dir, saved[0]!), 'utf8')).toBe(content);
   });
 
   it.each([

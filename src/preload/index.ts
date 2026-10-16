@@ -8,6 +8,7 @@ import type { BrowserPreferences } from '../shared/browser-preferences.js';
 import type { SessionControlsView } from '../main/bridge.js';
 import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
+import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
@@ -214,6 +215,8 @@ const api = {
   },
   attachText: (text: string) => call<InputAttachment>('sessions:attachText', { text }),
   getUsage: () => call<UsageOverview>('usage:get'),
+  /** Codex's and Claude Code's usage from their logs here; `fresh` skips the 30-second cache. */
+  getProviderUsage: (fresh = false) => call<ProviderUsage>('usage:providers', { fresh }),
   getState: () => call<AppState>('state:get'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
@@ -256,7 +259,7 @@ const api = {
   // there is nothing here to choose - the main process knows what is staged.
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
-  updateAll: () => call<import('../shared/types.js').UpdateAllResult>('update:all'),
+  updateAll: (restartVersion?: string) => call<import('../shared/types.js').UpdateAllResult>('update:all', restartVersion),
   downloadUpdate: () => call<boolean>('update:download'),
   /** Settings opened: re-check for an update if the last answer is older than ten minutes. */
   refreshUpdate: () => call<boolean>('update:refresh'),

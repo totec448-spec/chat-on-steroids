@@ -21,11 +21,9 @@ jobs:
       - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
         with:
           issue_message: |
-            Thanks for your first issue, and welcome! 👋 Two things help us most:
-            - the exact app and extension versions (Settings → Activity in the app shows both), and your OS and browser;
-            - the steps that lead to the problem, and what you expected instead.
-
-            If we need more details we will ask here. Screenshots are welcome; please blur names, chat text and paths.
+            Thanks for your first issue, and welcome! 👋 We read every report. If something a first answer
+            needs is missing, a comment right below says exactly what; otherwise we will reply here.
+            Screenshots are welcome; please blur names, chat text and paths.
           # v3.1.0 reads both messages as required inputs before it checks which event fired.
           # This workflow remains issue-only; pull requests are welcomed by scheduled PR triage.
           pr_message: |

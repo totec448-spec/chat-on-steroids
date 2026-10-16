@@ -1,0 +1,32 @@
+name: PR not ready
+
+# A contributor PR whose CI or checklist failed goes back to draft, so it is not reviewed while red.
+# Runs in the base repository after those workflows finish; it never checks out the PR's code.
+on:
+  workflow_run:
+    workflows: [CI, PR checklist]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  mark:
+    if: github.repository == 'totec448-spec/chat-on-steroids' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Draft a red PR
+        run: node scripts/pr-not-ready.mjs

@@ -717,6 +717,26 @@ describe('Core app mention on app-owned sends (#861)', () => {
     expect(clicked.textContent!.trim().startsWith('Exact app prompt')).toBe(true);
     expect(api.messages().find(message => message.role === 'user')?.text).toBe('Exact app prompt');
   });
+  it('clicks Send once the editor drew the token while this page\'s timers are held back', async () => {
+    // 2026-10-15, Firefox: in the minimized window that holds app-opened chats, a 0 ms timer
+    // fired 25 s late. The editor had drawn the token at once; the wait for one task was the delay.
+    (dom.window as unknown as { MessageChannel: typeof MessageChannel }).MessageChannel = MessageChannel;
+    let clicked = false;
+    button.addEventListener('click', () => {
+      clicked = true;
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    const result = api.send({ mention });
+    // Real tasks pass; no timer of this page fires.
+    for (let task = 0; task < 5 && !clicked; task++) await new Promise(resolve => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => { channel.port1.close(); resolve(null); };
+      channel.port2.postMessage(null);
+    });
+    expect(clicked).toBe(true);
+    expect(await result).toBe(true);
+  });
   it('removes its own token again when Send is not accepted', async () => {
     const result = api.send({ mention, acceptanceTimeoutMs: 1000 });
     await vi.advanceTimersByTimeAsync(1100);
@@ -1577,5 +1597,29 @@ describe('locale-independent provider composer evidence', () => {
     expect(tool.getAttribute('data-clf-native-hidden')).toBe('1');
     expect(disclosure.getAttribute('data-clf-native-hidden')).toBe('1');
     expect(action.closest('[data-clf-native-hidden]')).toBeNull();
+  });
+});
+
+// 2026-10-15: the diagnostics report says which of ChatGPT's controls the extension still finds,
+// so a report after ChatGPT changed its page says what broke without a follow-up question.
+describe('page checks for the diagnostics report', () => {
+  type Checks = { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null };
+  const checks = () => (api as unknown as { pageChecks(): Checks }).pageChecks();
+
+  it('finds the composer, its send area and the model menu on a normal page, and names the page language', () => {
+    document.documentElement.lang = 'de-DE';
+    const plus = document.createElement('button'); plus.id = 'composer-plus-btn'; document.querySelector('form')!.prepend(plus);
+    expect(checks()).toEqual({ composer: true, sendArea: true, modelMenu: true, plusMenu: true, language: 'de-DE' });
+    // Measured 2026-10-15: the current composer's + button has no id, only its navigation target.
+    plus.removeAttribute('id'); plus.setAttribute('data-composer-navigation-target', 'add-context');
+    expect(checks().plusMenu).toBe(true);
+    plus.remove();
+    expect(checks().plusMenu).toBe(false);
+  });
+
+  it('says what is missing when ChatGPT moved things, and reports no text from the page', () => {
+    document.querySelector('form')!.remove();
+    document.documentElement.lang = 'en <script>';
+    expect(checks()).toEqual({ composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
   });
 });

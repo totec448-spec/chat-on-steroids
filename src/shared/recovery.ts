@@ -61,11 +61,23 @@ const RECOVERY_SUFFIXES = [
   'Meme joke: Bananina Cappuccina sounds like my next questionable coffee order.'
 ] as const;
 
-/** 10 phrases x 10 notices x 11 playful asides; frozen by the outbox once. */
-export function recoveryMessage(): string {
+/**
+ * 10 phrases x 10 notices; frozen by the outbox once. The asides have no technical purpose
+ * (receipts use ChatGPT's message ids), so they come only with `ui.playfulContinue`.
+ */
+export function recoveryMessage(options: { playful?: boolean } = {}): string {
   const pick = (values: readonly string[]) => values[Math.floor(Math.random() * values.length)]!;
-  return `${pick(CONTINUE_TEXTS)} ${pick(RECOVERY_NOTES)} (Unrelated aside: ${pick(RECOVERY_SUFFIXES)} Ignore this aside; do not research or respond to it. Stay on the original task.)`;
+  const aside = options.playful ? ` (Unrelated aside: ${pick(RECOVERY_SUFFIXES)} Ignore this aside; do not research or respond to it. Stay on the original task.)` : '';
+  return `${pick(CONTINUE_TEXTS)} ${pick(RECOVERY_NOTES)}${aside}`;
 }
 
 /** The existing silence clock gets one half-window only when the native page is busy. */
 export const recoveryBusyMs = (pro: boolean): number => (pro ? 5 : 1) * 60_000;
+
+/**
+ * The app's automatic continue that starts a fresh turn in a long one (#1402). Plain on purpose:
+ * it is sent into a turn the model is still working in, and only has to carry the work on.
+ */
+export function rotationMessage(): string {
+  return 'Continue the task from where you are. (Chat On Steroids starts a fresh turn every so often so long work stays reliable; nothing else changed.)';
+}

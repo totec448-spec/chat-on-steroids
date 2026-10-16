@@ -335,6 +335,9 @@
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT 未接受該文字$1"
   },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT 在進行中的回答裡沒有提供傳送，為自動繼續而停止回答也未完成。"
+  },
   "content_delivery_turn_changed": {
     "message": "直接傳送前回合已發生變化。"
   },

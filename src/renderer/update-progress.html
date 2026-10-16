@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'" />
+  <link rel="stylesheet" href="./update-progress.css" />
+  <title>Chat On Steroids</title>
+</head>
+<body>
+  <main class="update-progress" aria-live="polite">
+    <h1 id="title"></h1>
+    <p class="version" id="version"></p>
+    <p class="step" id="step"></p>
+    <div class="bar" role="progressbar" aria-labelledby="step"><span></span></div>
+  </main>
+  <script type="module" src="./update-progress.ts"></script>
+</body>
+</html>

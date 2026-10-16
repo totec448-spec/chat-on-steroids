@@ -43,7 +43,7 @@ import {
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
-import { logError } from './logger.js';
+import { logError, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
@@ -283,7 +283,7 @@ const capabilitiesSchema = z
  * honour in front of the model.
  */
 export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
-const DEFAULT_MCP = { instructions: '' } as const;
+const DEFAULT_MCP = { instructions: '', persistentUrls: false } as const;
 /** Off for fresh installs and for every config written before the switches existed. */
 const DEFAULT_CONTROL_API = { enabled: false, allowActions: false } as const;
 const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, mode: 'allow', rules: [] } as const;
@@ -336,6 +336,7 @@ const configSchema = z.object({
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional().default('taskbar'),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
+    playfulContinue: z.boolean().optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),
@@ -362,6 +363,10 @@ const configSchema = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
     turnNotifications: z.boolean().optional().default(true),
+    // #1402: a fresh turn after this many minutes of one (0 = off). A malformed value keeps the default.
+    rotateTurnMinutes: z.number().int().min(0).max(120).optional().default(30).catch(30),
+    // Reading Codex's and Claude Code's own logs for the Usage page (#482). Missing means on.
+    localAppUsage: z.boolean().optional().default(true),
     keepAwake: z.boolean().optional().default(true),
     keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
@@ -535,7 +540,9 @@ const configSchema = z.object({
         .optional()
         .default(DEFAULT_MCP.instructions)
         .transform((value) => value.slice(0, MAX_MCP_INSTRUCTIONS_CHARS).trim())
-        .catch(DEFAULT_MCP.instructions)
+        .catch(DEFAULT_MCP.instructions),
+      // Opt-in only: a malformed value repairs to off, the rotating default.
+      persistentUrls: z.boolean().optional().default(false).catch(false)
     })
     .optional()
     .default({ ...DEFAULT_MCP })
@@ -578,7 +585,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, localAppUsage: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },
@@ -674,12 +681,47 @@ async function keepUnreadable(raw: string): Promise<void> {
   }
 }
 
+/**
+ * Drops the preferences this version cannot read and parses again (2.1.39). A newer app may save a
+ * value an older one does not know — 2.1.38's Firefox as the ChatGPT browser made 2.1.37 throw the
+ * whole file away, folders and tunnel included (VM, 2026-10-15). Only keys under `ui` are dropped,
+ * each falling back to its default; anything about folders, permissions or the tunnel still sends
+ * the file to the conservative recovery below.
+ */
+function withoutUnreadablePreferences(value: unknown): { config: Config; dropped: string[] } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const draft = structuredClone(value) as Record<string, unknown>;
+  const dropped: string[] = [];
+  for (let pass = 0; pass < 8; pass++) {
+    const parsed = configSchema.safeParse(draft);
+    if (parsed.success) return dropped.length ? { config: parsed.data, dropped } : null;
+    let progressed = false;
+    for (const issue of parsed.error.issues) {
+      const [section, key] = issue.path;
+      const ui = draft.ui;
+      if (section !== 'ui' || typeof key !== 'string' || !ui || typeof ui !== 'object' || Array.isArray(ui) || !(key in ui)) return null;
+      delete (ui as Record<string, unknown>)[key];
+      dropped.push(`ui.${key}`);
+      progressed = true;
+    }
+    if (!progressed) return null;
+  }
+  return null;
+}
+
 export async function loadConfig(): Promise<Config> {
   let raw: string | null = null;
   try {
     raw = await fs.readFile(configPath, 'utf8');
     // Windows PowerShell 5.1 and older Notepad start UTF-8 files with a byte-order mark; it is not JSON.
-    const parsed = configSchema.safeParse(JSON.parse(raw.replace(/^\uFEFF/, '')));
+    const value: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    let parsed = configSchema.safeParse(value);
+    const salvaged = parsed.success ? null : withoutUnreadablePreferences(value);
+    if (salvaged) {
+      logWarn(`Settings kept; these preferences held values this version does not know and use their defaults: ${salvaged.dropped.join(', ')}`);
+      await keepUnreadable(raw);
+      parsed = { success: true, data: salvaged.config } as typeof parsed;
+    }
     if (!parsed.success) {
       logError('Settings file was invalid and has been reset to defaults');
       await keepUnreadable(raw);

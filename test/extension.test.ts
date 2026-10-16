@@ -6048,3 +6048,39 @@ describe('archiving retired worker chats (#1460)', () => {
     expect(results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
   });
 });
+
+describe('a ChatGPT page that moves to a new address', () => {
+  const chat = 'bbbbbbbb-1111-4222-8333-444444444444';
+  function routeWorker() {
+    return loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      fetch: async (input) => new URL(input).pathname === '/hello'
+        ? response(200, { app: 'chat-on-steroids', paired: true }) : response(200, {})
+    });
+  }
+  const routeNotices = (worker: ReturnType<typeof routeWorker>) =>
+    worker.tabsSendMessage.mock.calls.filter(call => (call[1] as { type?: string }).type === 'clf-route-changed');
+
+  it('tells that same page at once, so a hidden tab need not wait for its own throttled timer', async () => {
+    // 2026-10-15, Firefox: an app-opened chat in a minimized window moved to /c/<id> while its
+    // own once-a-second check ran far less often, so its Send receipt came late.
+    const worker = routeWorker();
+    const documentId = 'route-document-1';
+    await worker.registerTab(5, documentId);
+    const url = `https://chatgpt.com/c/${chat}`;
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, documentId, result: url }]);
+    worker.updateTab(5, { url }, { id: 5, windowId: 7, url });
+    await vi.waitFor(() => expect(routeNotices(worker)).toEqual([[5, { type: 'clf-route-changed' }, { documentId }]]));
+  });
+
+  it('tells nothing to a page the address change did not happen in', async () => {
+    const worker = routeWorker();
+    await worker.registerTab(5, 'route-document-1');
+    const url = `https://chatgpt.com/c/${chat}`;
+    // Another document answers: the change was a new page load, not this page's own route.
+    worker.scriptingExecuteScript.mockImplementation(async () => [{ frameId: 0, documentId: 'route-document-2', result: url }]);
+    worker.updateTab(5, { url }, { id: 5, windowId: 7, url });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(routeNotices(worker)).toEqual([]);
+  });
+});
