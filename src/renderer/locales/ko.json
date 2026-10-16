@@ -2462,5 +2462,7 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server, me@server:2222 또는 ~/.ssh/config의 Host",
   "/srv/app or ~/app": "/srv/app 또는 ~/app",
   "Prefer Plugins on app-sent messages": "앱에서 보내는 메시지에 Plugins 우선 사용",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "활성화하면 Chat On Steroids에서 보내는 일반 메시지에 Core 대신 Plugins를 사용합니다. Goal, Loop, 워커 및 복구에서는 항상 Core를 사용합니다. 메시지당 한 앱만 멘션합니다. ChatGPT에서 직접 보낸 메시지는 변경되지 않습니다."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "활성화하면 Chat On Steroids에서 보내는 일반 메시지에 Core 대신 Plugins를 사용합니다. Goal, Loop, 워커 및 복구에서는 항상 Core를 사용합니다. 메시지당 한 앱만 멘션합니다. ChatGPT에서 직접 보낸 메시지는 변경되지 않습니다.",
+  "This task was sent or removed before your edit was saved.": "수정 내용을 저장하기 전에 이 작업이 전송되었거나 삭제되었습니다.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "수정 내용을 저장하기 전에 이 작업이 전송되었거나 삭제되어, 수정 내용을 입력란에 넣었습니다."
 }

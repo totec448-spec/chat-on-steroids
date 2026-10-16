@@ -2462,5 +2462,7 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "yo@servidor, yo@servidor:2222 o un Host de ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app o ~/app",
   "Prefer Plugins on app-sent messages": "Preferir Plugins en los mensajes enviados por la aplicación",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Si se activa, Chat On Steroids usa Plugins en lugar de Core para los mensajes normales enviados por la aplicación. Objetivo, Bucle, los agentes y la recuperación mantienen Core. Se menciona una sola aplicación. Los mensajes enviados directamente en ChatGPT no cambian."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Si se activa, Chat On Steroids usa Plugins en lugar de Core para los mensajes normales enviados por la aplicación. Objetivo, Bucle, los agentes y la recuperación mantienen Core. Se menciona una sola aplicación. Los mensajes enviados directamente en ChatGPT no cambian.",
+  "This task was sent or removed before your edit was saved.": "Esta tarea se envió o se eliminó antes de que se guardara tu cambio.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Esta tarea se envió o se eliminó antes de que se guardara tu cambio, así que tu cambio está en el editor."
 }
