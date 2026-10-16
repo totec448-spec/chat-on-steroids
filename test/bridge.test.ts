@@ -123,10 +123,12 @@ const {
   CONTINUATIONS_STATE,
   abortContinuation,
   attachSummary,
+  beginContinuationDestinationSendNow,
   claimContinuationNow,
   commitContinuation,
   continuationByToken,
   continuationForSession,
+  dispatchContinuationDestinationSendNow,
   openContinuationNow,
   setContinuationRecoveryHooks,
   restoreContinuations
@@ -4273,6 +4275,39 @@ describe('delivering a bootstrap', () => {
     expect(ack.body.committed).toBe(true);
     await expect(earlyObservation!).resolves.toMatchObject({ sessionId });
     expect((await getSession(sessionId))?.conversationId).toBe(destination);
+  });
+
+  it('retries a late replacement journal batch rather than acknowledging it into another local session', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-555555555551';
+    const destination = '92929292-1111-2222-3333-555555555552';
+    const { sessionId, token: continuation } = await compactedSession(from, 'keep the recorded work');
+    expect((await claimContinuationNow(continuation, 'late-replacement-page'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    const events = [{ kind: 'user_message', time: Date.now(), text: 'resume the task', messageId: 'late-resume-user' }];
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+      const pending = request('POST', '/events', { body: { conversationId: destination, events } });
+      await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(61_000);
+      const response = await pending;
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({ error: 'resume_destination_pending', retryable: true });
+      expect(await findSessionByConversation(destination)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(await commitContinuation(continuation, destination)).toBe(true);
+    const retry = await request('POST', '/events', { body: { conversationId: destination, events } });
+    expect(retry.status).toBe(200);
+    expect(retry.body.sessionId).toBe(sessionId);
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
+    const saved = await readEvents(sessionId, { kinds: ['user_message'] });
+    expect(saved.some((event) => event.kind === 'user_message' && event.messageId === 'late-resume-user')).toBe(true);
   });
 
   /**

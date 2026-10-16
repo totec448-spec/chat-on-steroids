@@ -115,6 +115,7 @@ import {
   recordRequestEvidence,
   recordNote,
   recordProgress,
+  ResumeDestinationPendingError,
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
@@ -2983,7 +2984,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           });
         }
       }
-      const result = await recordChatObservations(id, observations, agent);
+      let result;
+      try {
+        result = await recordChatObservations(id, observations, agent);
+      } catch (err) {
+        if (err instanceof ResumeDestinationPendingError) {
+          // The browser's journal owns this batch until an exact session can be
+          // proved. Never ACK an observation that was deferred by the recorder.
+          return json(res, 503, { error: 'resume_destination_pending', retryable: true }, origin);
+        }
+        throw err;
+      }
       const superseded = await conversationWasSuperseded(id);
       if (!superseded && !isChatBlocked(id) && result.activity.working && result.activity.at) {
         const woke = result.activity.startedAt !== undefined
