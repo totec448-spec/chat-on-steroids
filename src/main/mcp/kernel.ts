@@ -1302,7 +1302,14 @@ async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: st
   if (!learned) return { workspace: null, missing: null };
   // A learned folder can be deleted while its chat sleeps. Keeping it would make every
   // relative path and every command without a workdir fail with "Not found" for that folder.
-  const exists = await fs.stat(learned.real).then((stat) => stat.isDirectory(), () => false);
+  // A folder on a server (#1469) is checked there. Only a folder that is gone is forgotten: a
+  // connection that failed keeps it, and the call that needs it says why it cannot reach it.
+  const name = learned.virtual.split('/').find(part => part.length > 0)?.toLowerCase();
+  const server = getConfig().roots.find(root => root.remote !== undefined && root.name.toLowerCase() === name);
+  const exists = server
+    ? await fsForRoot(server).getMetadata(learned.real).then(meta => meta.isDirectory,
+      (error: { code?: string }) => error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR')
+    : await fs.stat(learned.real).then((stat) => stat.isDirectory(), () => false);
   if (exists) return { workspace: learned, missing: null };
   forgetMissingWorkspace(learned.real);
   return { workspace: null, missing: learned.virtual };

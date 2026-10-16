@@ -124,6 +124,22 @@ real('commands in a folder on a server', () => {
     for (const each of calls) expect(each.join(' ')).not.toMatch(/ControlMaster|ControlPath/);
   });
 
+  // A chat outside a project learns where it works from absolute paths, here as on this
+  // computer: the next command without a workdir runs in that project folder on the server, not
+  // in the first approved folder (which here is on this computer).
+  it('remembers the server folder a chat worked in for the next command', async () => {
+    const local = path.join(directory, `local ${nextId}`);
+    await fs.mkdir(local, { recursive: true });
+    ctx = { ...ctx, roots: [{ name: 'local', path: local }, ...ctx.roots] };
+    await fs.mkdir(path.join(app, 'svc', 'src'), { recursive: true });
+    await fs.writeFile(path.join(app, 'svc', 'package.json'), '{}');
+    await fs.writeFile(path.join(app, 'svc', 'src', 'main.ts'), 'x');
+    expect((await call('read', { paths: ['/app/svc/src/main.ts'] })).isError).toBe(false);
+    const reply = await call('exec_command', { cmd: 'pwd' });
+    expect(reply.text).toContain(path.join(app, 'svc'));
+    expect(reply.text).not.toContain(local);
+  });
+
   it('runs a tty command that write_stdin can answer', async () => {
     const started = await call('exec_command', { cmd: 'read line; echo "got:$line"', workdir: '/app', tty: true, yield_time_ms: 500 });
     const sessionId = started.text.match(/Process running with session ID (\d+)/)?.[1];
