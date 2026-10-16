@@ -2440,5 +2440,14 @@
   "A fuller diagnostics report": "更完整的診斷報告",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它也會顯示應用程式的安裝方式、瀏覽器、當機、常見警告以及每個聊天的狀態，仍不包含任何個人資訊。",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox 會自行更新此附加元件。若要立即更新，請在 Firefox 中開啟 about:addons，選擇「檢查更新」，然後重新整理 ChatGPT。",
-  "{0} min": "{0} 分鐘"
+  "{0} min": "{0} 分鐘",
+  "Folder on this computer…": "這部電腦上的資料夾…",
+  "Folder on a server (SSH)…": "伺服器上的資料夾（SSH）…",
+  "Test and add": "測試並新增",
+  "Add a folder on a server": "新增伺服器上的資料夾",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids 使用你自己的 SSH 設定連線：~/.ssh/config、代理程式、金鑰和已知主機。只能使用金鑰登入，伺服器上不會安裝任何東西。",
+  "SSH address": "SSH 位址",
+  "Folder on the server": "伺服器上的資料夾",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
+  "/srv/app or ~/app": "/srv/app 或 ~/app"
 }

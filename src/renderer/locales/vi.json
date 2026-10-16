@@ -2440,5 +2440,14 @@
   "A fuller diagnostics report": "Báo cáo chẩn đoán đầy đủ hơn",
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Báo cáo còn cho biết cách cài ứng dụng, trình duyệt, sự cố, cảnh báo thường gặp và trạng thái của từng chat, vẫn không có thông tin cá nhân.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox tự cập nhật tiện ích. Để cập nhật ngay, mở about:addons trong Firefox, chọn Kiểm tra cập nhật, rồi tải lại ChatGPT.",
-  "{0} min": "{0} phút"
+  "{0} min": "{0} phút",
+  "Folder on this computer…": "Thư mục trên máy tính này…",
+  "Folder on a server (SSH)…": "Thư mục trên máy chủ (SSH)…",
+  "Test and add": "Kiểm tra và thêm",
+  "Add a folder on a server": "Thêm thư mục trên máy chủ",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids kết nối bằng thiết lập SSH của riêng bạn: ~/.ssh/config, agent, khóa và các máy chủ đã biết. Chỉ đăng nhập được bằng khóa, và không có gì được cài trên máy chủ.",
+  "SSH address": "Địa chỉ SSH",
+  "Folder on the server": "Thư mục trên máy chủ",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "toi@maychu, toi@maychu:2222 hoặc một Host trong ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app hoặc ~/app"
 }
