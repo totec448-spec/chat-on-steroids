@@ -1166,3 +1166,22 @@ it('does not restart a pending code mount when the directory watcher refreshes',
   release(); await tick();
   expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe(code.text);
 });
+
+// #1469: a project on a server is browsed and previewed in Files, but v1 changes its files only
+// through ChatGPT's tools. The panel offers no action that could only fail there.
+it('offers no file changes for a project on a server, and still previews it', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update({ ...projectA, path: 'me@devbox:/srv/alpha', remote: { host: 'me@devbox', path: '/srv/alpha' } });
+  toggle.click(); await tick();
+  const action = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.file-panel-toolbar-actions button')]
+    .find(button => button.getAttribute('aria-label') === label || button.title === label);
+  for (const label of ['New file', 'New folder', 'Rename', 'Delete', 'Reveal']) expect(action(label)?.hidden, label).toBe(true);
+  host.querySelector<HTMLButtonElement>('[data-path="README.md"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-preview-markdown h1')?.textContent).toBe('hello');
+  const previewActions = [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].map(button => button.title);
+  expect(previewActions).toContain('Attach');
+  expect(previewActions).not.toContain('Edit');
+
+  panel.update(projectB); await tick();
+  for (const label of ['New file', 'New folder', 'Reveal']) expect(action(label)?.hidden, label).toBe(false);
+});

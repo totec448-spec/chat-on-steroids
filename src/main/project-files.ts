@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
@@ -8,6 +9,7 @@ import { getProject, projectWorkspace } from './projects.js';
 import { rawPromises as fs } from './rawfs.js';
 import { isContained, nativePathIdentity, resolvePath, SandboxError } from './sandbox.js';
 import { fsForRoot, type ProjectFs } from './remote/project-fs.js';
+import { MAX_ATTACHMENT_BYTES } from './session/input-attachments.js';
 import type {
   ProjectDirectoryListing,
   ProjectFileKind,
@@ -237,6 +239,37 @@ async function serverTarget(projectId: string, relativeInput: string): Promise<{
   const workspace = await projectWorkspace(projectId);
   const resolved = await resolvePath(getConfig().roots, relative ? `${workspace.virtual}/${relative}` : workspace.virtual, { remote: true });
   return { projectName: project.name, path: relative, real: resolved.real, fs: fsForRoot(resolved.root) };
+}
+
+/**
+ * A copy of a server project's file on this computer, for Attach: streamed over SFTP into a
+ * private temporary folder (never held whole in memory), named like the file, and removed by
+ * `cleanup`. Null for a project on this computer.
+ */
+export async function serverFileSnapshot(projectId: string, relativePath: string): Promise<{ file: string; cleanup(): Promise<void> } | null> {
+  const server = await serverTarget(projectId, relativePath);
+  if (!server) return null;
+  const meta = await server.fs.getMetadata(server.real);
+  if (!meta.isFile) throw new Error('Choose a regular file');
+  if (meta.size > MAX_ATTACHMENT_BYTES) throw new Error('Each attachment must be 512 MB or smaller');
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-attach-'));
+  const cleanup = () => fs.rm(folder, { recursive: true, force: true });
+  try {
+    const file = path.join(folder, path.posix.basename(server.real));
+    const output = await fs.open(file, 'wx');
+    try {
+      let bytes = 0;
+      for await (const chunk of server.fs.readFileStream(server.real)) {
+        bytes += chunk.length;
+        if (bytes > MAX_ATTACHMENT_BYTES) throw new Error('Each attachment must be 512 MB or smaller');
+        await output.write(chunk);
+      }
+    } finally { await output.close(); }
+    return { file, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }
 
 const SERVER_EDITS = 'Files in a server folder cannot be changed from the app yet; ChatGPT can still change them with its tools.';
