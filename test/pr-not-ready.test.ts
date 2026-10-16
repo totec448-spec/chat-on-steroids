@@ -59,7 +59,9 @@ it('says draft only when GitHub confirms the conversion, and reports a refused o
   expect(await applyNotReady(refused.request, input('draft'))).toBe('labeled (draft refused: Resource not accessible by integration)');
   const comment = JSON.parse(refused.calls.at(-1)!.init!.body!).body as string;
   expect(comment).toBe(NOT_READY_COMMENT_UNDRAFTED);
-  expect(comment).not.toMatch(/draft/i);
+  // It does not claim the PR is a draft already; the maintainer's job converts it shortly after.
+  expect(comment).not.toMatch(/is a draft|draft again/i);
+  expect(comment).toContain('Ready for review');
 });
 
 // Live: CI turned green while the checklist was still red, and the label came off.

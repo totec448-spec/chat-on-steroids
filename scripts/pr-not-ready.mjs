@@ -20,7 +20,8 @@ export function notReadyDecision(pr, conclusion) {
 
 export const NOT_READY_COMMENT = `A check failed, so this PR is a draft again and not in the review queue yet. The failed check's log says what is missing (see CONTRIBUTING.md). Once everything is green, click **Ready for review** and it goes back into the queue.`;
 /** When GitHub refuses the conversion, the comment must not claim one (live, #1548). */
-export const NOT_READY_COMMENT_UNDRAFTED = `A check failed, so this PR is not in the review queue yet. The failed check's log says what is missing (see CONTRIBUTING.md). Once everything is green, it goes back into the queue by itself.`;
+// A maintainer job turns such a PR into a draft a few minutes later, so the text fits both states.
+export const NOT_READY_COMMENT_UNDRAFTED = `A check failed, so this PR is not in the review queue yet and will be turned into a draft. The failed check's log says what is missing (see CONTRIBUTING.md). Once everything is green, click **Ready for review** and it goes back into the queue.`;
 
 /**
  * Carries out one decision through \`request(path, init)\`. GraphQL reports a refused mutation with
