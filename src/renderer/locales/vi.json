@@ -2441,5 +2441,10 @@
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Báo cáo còn cho biết cách cài ứng dụng, trình duyệt, sự cố, cảnh báo thường gặp và trạng thái của từng chat, vẫn không có thông tin cá nhân.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox tự cập nhật tiện ích. Để cập nhật ngay, mở about:addons trong Firefox, chọn Kiểm tra cập nhật, rồi tải lại ChatGPT.",
   "{0} min": "{0} phút",
-  "OpenAI outage": "OpenAI gặp sự cố"
+  "OpenAI outage": "OpenAI gặp sự cố",
+  "Repair permissions": "Sửa quyền",
+  "Open settings": "Mở cài đặt",
+  "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "Quyền truy cập Desktop đã ngừng hoạt động sau khi cập nhật: macOS vẫn hiển thị là đã cho phép nhưng cần được hỏi lại.",
+  "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "Quyền truy cập Desktop đang bật, nhưng macOS chưa cấp cho Chat On Steroids quyền cần thiết.",
+  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS vẫn hiển thị Chat On Steroids là đã được cho phép, nhưng quyền đó thuộc về phiên bản trước: không có chữ ký nhà phát triển, mỗi bản cập nhật là một ứng dụng mới đối với macOS. Chọn Sửa quyền, cho phép khi macOS hỏi, sau đó thoát hoàn toàn và mở lại ứng dụng."
 }
