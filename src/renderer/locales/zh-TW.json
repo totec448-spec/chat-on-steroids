@@ -2441,5 +2441,10 @@
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它也會顯示應用程式的安裝方式、瀏覽器、當機、常見警告以及每個聊天的狀態，仍不包含任何個人資訊。",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox 會自行更新此附加元件。若要立即更新，請在 Firefox 中開啟 about:addons，選擇「檢查更新」，然後重新整理 ChatGPT。",
   "{0} min": "{0} 分鐘",
-  "OpenAI outage": "OpenAI 故障"
+  "OpenAI outage": "OpenAI 故障",
+  "Repair permissions": "修復權限",
+  "Open settings": "開啟設定",
+  "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "更新後桌面存取已失效：macOS 仍顯示為已允許，但需要重新請求。",
+  "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "桌面存取已開啟，但 macOS 尚未授予 Chat On Steroids 所需的權限。",
+  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS 仍顯示 Chat On Steroids 為已允許，但該權限屬於先前的版本：由於沒有開發者簽章，每次更新在 macOS 看來都是新的應用程式。請選擇「修復權限」，在 macOS 詢問時允許，然後完全退出並重新開啟應用程式。"
 }

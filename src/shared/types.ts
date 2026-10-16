@@ -785,6 +785,12 @@ export interface MacOSDesktopAccessStatus {
   accessibility: MacOSPermissionState;
   checkedAt: number;
   error: string | null;
+  /**
+   * Which permissions this app was ever seen holding. A missing permission that was granted
+   * before usually means an update changed the app's signature (#1469 era, live 2026-10-15):
+   * System Settings still shows it on, and only resetting it lets macOS ask again.
+   */
+  grantedBefore?: { screen: boolean; accessibility: boolean };
 }
 
 /**

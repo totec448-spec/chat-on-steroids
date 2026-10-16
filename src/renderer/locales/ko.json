@@ -2441,5 +2441,10 @@
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "앱 설치 방식, 브라우저, 충돌, 자주 나오는 경고, 각 채팅의 상태도 보여 줍니다. 개인 정보는 여전히 포함하지 않습니다.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox가 부가 기능을 자동으로 업데이트합니다. 지금 하려면 Firefox에서 about:addons를 열고 업데이트 확인을 선택한 뒤 ChatGPT를 새로 고치세요.",
   "{0} min": "{0}분",
-  "OpenAI outage": "OpenAI 장애"
+  "OpenAI outage": "OpenAI 장애",
+  "Repair permissions": "권한 복구",
+  "Open settings": "설정 열기",
+  "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "업데이트 후 데스크톱 접근이 작동하지 않습니다. macOS에는 아직 허용됨으로 표시되지만 다시 요청해야 합니다.",
+  "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "데스크톱 접근이 켜져 있지만 macOS가 Chat On Steroids에 필요한 권한을 주지 않았습니다.",
+  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS에는 Chat On Steroids가 아직 허용됨으로 표시되지만, 그 권한은 이전 버전의 것입니다. 개발자 서명이 없어서 업데이트할 때마다 macOS는 새 앱으로 인식합니다. 권한 복구를 선택하고 macOS가 물으면 허용한 뒤 앱을 완전히 종료하고 다시 여세요."
 }
