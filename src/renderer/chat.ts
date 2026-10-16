@@ -6993,7 +6993,12 @@ export function initChat(next: Deps): void {
         return;
       }
       runSlashCommand(name);
-    }, commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null });
+    }, commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null,
+    listFiles: async (projectId, directory) => {
+      const result = await api.listProjectFiles(projectId, directory);
+      if (!result.ok) throw new Error(result.error);
+      return result.data;
+    } });
   skillPicker.restore();
   $('generateFinishGoal').addEventListener('click', async () => {
     const button = $<HTMLButtonElement>('generateFinishGoal'), id = selectedId, turnId = controlledTurnId;
