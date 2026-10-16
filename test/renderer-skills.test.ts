@@ -61,6 +61,9 @@ it('opens Skill completion at an inline slash while leaving paths, links and cod
   expect(skillCompletion('Use `/review` here', 12)).toBeNull();
   expect(skillCompletion('```\n/review\n```', 10)).toBeNull();
   expect(skillCompletion('Use `/review', 12)).toBeNull();
+  expect(skillCompletion('Use ``code /review', 'Use ``code /review'.length)).toBeNull();
+  expect(skillCompletion('Use ``code ` still /review', 'Use ``code ` still /review'.length)).toBeNull();
+  expect(skillCompletion('Use ``code`` then /review', 'Use ``code`` then /review'.length)).toMatchObject({ kind: 'skill' });
   expect(skillCompletion('```\n@src', 8)).toBeNull();
   expect(skillCompletion('Read [file](@src', 16)).toBeNull();
   const prompt = 'Please use /prompt plan';
@@ -122,6 +125,7 @@ it('offers exact inline Skills for deliberate selection without running app comm
   expect(f.host.querySelector('[data-skill-id="review"]')).not.toBeNull();
   expect(f.key('Enter')).toBe(true);
   expect(f.input.value).toBe('Use Review to inspect');
+  expect(f.input.selectionStart).toBe('Use Review'.length);
   expect(invokedSkills(f.picker.authoredText())).toEqual(['review']);
   expect(f.command).not.toHaveBeenCalled();
 });
@@ -134,6 +138,21 @@ it('does not browse files without a Local Project or turn email addresses into f
   expect(skillCompletion('mail@example.com', 11)).toBeNull();
   expect(skillCompletion('Contact @alice@example.com', 'Contact @alice@example.com'.length)).toBeNull();
   expect(skillCompletion('Use @/etc/passwd', 16)).toBeNull();
+});
+
+it('keeps escaped file references and email-like checks linear on long composer input', () => {
+  expect(skillCompletion('@foo\\\nbar', 9)).toBeNull();
+  expect(skillCompletion('@file\\', 6)).toMatchObject({ kind: 'file', query: 'file\\' });
+  expect(skillCompletion('@name\\\\ dir', '@name\\\\ dir'.length)).toMatchObject({ kind: 'file', query: 'name\\ dir' });
+
+  const escapedPunctuation = '@' + '\\!'.repeat(50_000);
+  const escapedPunctuationWithSuffix = escapedPunctuation + ' tail';
+  const ambiguousEmail = '@!@!.' + '!.'.repeat(50_000) + '/';
+  const started = performance.now();
+  expect(skillCompletion(escapedPunctuation, escapedPunctuation.length)).toMatchObject({ kind: 'file' });
+  expect(skillCompletion(escapedPunctuationWithSuffix, escapedPunctuationWithSuffix.length)).toBeNull();
+  expect(skillCompletion(ambiguousEmail, ambiguousEmail.length)).toMatchObject({ kind: 'file' });
+  expect(performance.now() - started).toBeLessThan(1_000);
 });
 
 it('discards a project listing that returns after the composer changes projects', async () => {
@@ -159,6 +178,16 @@ it('invalidates a pending file picker when its project is cleared', async () => 
   await settle();
   expect(f.host.hidden).toBe(true);
   expect(f.host.querySelector('[data-file-path="old.txt"]')).toBeNull();
+});
+
+it('shows project file load failures without consuming Enter', async () => {
+  const f = await fixture();
+  f.listFiles.mockRejectedValueOnce(new Error('Folder is unavailable'));
+  f.type('@'); await settle();
+  expect(f.host.textContent).toContain('Folder is unavailable');
+  expect(f.host.querySelector('[data-file-path]')).toBeNull();
+  expect(f.key('Enter')).toBe(false);
+  expect(f.input.value).toBe('@');
 });
 
 it('reloads the directory when the caret moves and refuses stale keyboard choices', async () => {
