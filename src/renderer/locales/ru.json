@@ -2441,5 +2441,10 @@
   "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Он также показывает, как установлено приложение, браузер, сбои, частые предупреждения и состояние каждого чата — по-прежнему без личных данных.",
   "Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.": "Firefox обновляет дополнение сам. Чтобы сделать это сейчас, откройте about:addons в Firefox, выберите «Проверить наличие обновлений» и обновите ChatGPT.",
   "{0} min": "{0} мин",
-  "OpenAI outage": "Сбой OpenAI"
+  "OpenAI outage": "Сбой OpenAI",
+  "Repair permissions": "Восстановить разрешения",
+  "Open settings": "Открыть настройки",
+  "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "После обновления доступ к рабочему столу перестал работать: macOS всё ещё показывает его как разрешённый, но разрешение нужно запросить заново.",
+  "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "Доступ к рабочему столу включён, но macOS не выдала Chat On Steroids нужное разрешение.",
+  "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS всё ещё показывает Chat On Steroids как разрешённое приложение, но это разрешение относится к предыдущей версии: без подписи разработчика каждое обновление для macOS — новое приложение. Выберите «Восстановить разрешения», разрешите доступ, когда macOS спросит, затем полностью закройте и снова откройте приложение."
 }
