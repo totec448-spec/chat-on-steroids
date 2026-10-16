@@ -9,7 +9,7 @@ describe('the Core usage tool’s answer', () => {
   it('names each source and age, and keeps reported limits apart from counted tokens', () => {
     const report = usageReport([
       { model: 'gpt-6-pro', scope: 'model', remaining: 12, remainingPercent: null, resetAt: NOW + 3_600_000, windowSeconds: 604800, observedAt: NOW - 120_000 },
-      { model: 'shared', scope: 'shared', remaining: null, remainingPercent: 40, resetAt: null, windowSeconds: 18000, observedAt: NOW - 120_000 }
+      { model: 'Codex', scope: 'codex', remaining: null, remainingPercent: 40, resetAt: null, windowSeconds: 18000, observedAt: NOW - 120_000 }
     ], {
       enabled: true, readAt: NOW,
       codex: { limits: [{ id: 'codex', plan: 'plus', reached: null, observedAt: NOW - 600_000, credits: null, windows: [
@@ -19,14 +19,16 @@ describe('the Core usage tool’s answer', () => {
     }, NOW);
     expect(report.text).toContain('ChatGPT (reported by ChatGPT, 2 min ago)');
     expect(report.text).toContain('gpt-6-pro: 12 remaining');
-    expect(report.text).toContain('5-hour shared limit: 40% remaining');
+    // ChatGPT's page reports Codex's limits too; they are Codex's, never a chat limit (2026-10-16).
+    expect(report.text).toContain('Codex (reported by ChatGPT, 2 min ago; Codex usage, not ChatGPT chat messages):\n- 5-hour limit: 40% remaining');
+    expect(report.text.slice(report.text.indexOf('ChatGPT (reported'), report.text.indexOf('Codex (reported by ChatGPT'))).not.toContain('40%');
     expect(report.text).toContain('Codex (reported by Codex, 10 min ago, plan plus):');
     expect(report.text).toContain('5-hour limit: 70% remaining');
     expect(report.text).toContain('weekly limit: reset since this reading');
     expect(report.text).toContain('Codex tokens counted on this computer: 1,050 today, 1,160 in 7 days');
     expect(report.text).toContain('Claude Code tokens counted on this computer: 10 today, 10 in 7 days');
     expect(report.text).toContain('Claude Code plan limits: not reported');
-    expect(report.structured).toMatchObject({ chatgpt: { limits: [expect.objectContaining({ model: 'gpt-6-pro' }), expect.anything()] },
+    expect(report.structured).toMatchObject({ chatgpt: { limits: [expect.objectContaining({ model: 'gpt-6-pro' })], codex: [expect.objectContaining({ scope: 'codex' })] },
       codex: { limits: [expect.objectContaining({ id: 'codex' })] }, claude: { days: [expect.anything()] } });
   });
 

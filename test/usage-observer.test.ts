@@ -468,10 +468,15 @@ describe('MAIN-world usage projection', () => {
     expect(h.posts).toHaveLength(1);
     expect(h.posts[0]?.observedAt).toBe(Date.parse('2026-09-05T12:00:00Z'));
   });
-  it('projects shared percentage windows without copying credentials or inventing a model balance', async () => {
+  // wham/usage is Codex's usage endpoint (the one Codex's /status and ChatGPT's sidebar panel
+  // read): its windows are Codex limits, not ChatGPT chat limits, and are labeled so (2026-10-16).
+  it('projects Codex percentage windows as Codex, without copying credentials or inventing a model balance', async () => {
     const h = harness();
-    await h.feed({ access_token: 'secret', email: 'private@example.test', rate_limit: { primary_window: { used_percent: 25, reset_at: 1900000000, limit_window_seconds: 18000 } } });
-    expect(h.posts).toEqual([{ type: 'cos-usage', observedAt: expect.any(Number), rows: [{ model: 'Shared usage', scope: 'shared', remaining: null, remainingPercent: 75, resetAt: 1900000000000, windowSeconds: 18000 }] }]);
+    await h.feed({ access_token: 'secret', email: 'private@example.test', rate_limit: { primary_window: { used_percent: 25, reset_at: 1900000000, limit_window_seconds: 18000 } },
+      additional_rate_limits: [{ limit_name: 'GPT-5.3-Codex-Spark', rate_limit: { primary_window: { used_percent: 10, limit_window_seconds: 604800 } } }] });
+    expect(h.posts).toEqual([{ type: 'cos-usage', observedAt: expect.any(Number), rows: [
+      { model: 'Codex', scope: 'codex', remaining: null, remainingPercent: 75, resetAt: 1900000000000, windowSeconds: 18000 },
+      { model: 'GPT-5.3-Codex-Spark', scope: 'codex', remaining: null, remainingPercent: 90, resetAt: null, windowSeconds: 604800 }] }]);
     expect(JSON.stringify(h.posts)).not.toMatch(/secret|private|Authorization/);
   });
 
