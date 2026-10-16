@@ -2310,7 +2310,8 @@
   "Send into the running turn now": "立即傳送到進行中的這一回合",
   "The turn ended before this message could join it. It stays queued.": "這一回合在此訊息加入前已結束。它仍在佇列中。",
   "Messages during a running turn": "進行中回合期間的訊息",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "在 ChatGPT 工作時傳送的訊息預設如何處理。⌘⇧Enter（Windows 和 Linux 上為 Ctrl+Shift+Enter）以另一種方式傳送。",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "在 ChatGPT 工作時傳送的訊息預設如何處理。{0} 以另一種方式傳送。",
+  "Shift": "Shift",
   "Join the running turn": "加入進行中的這一回合",
   "Wait until the turn ends": "等待這一回合結束",
   "Notify when a chat finishes": "聊天完成時通知",
@@ -2321,7 +2322,7 @@
   "Previous match": "上一個符合項目",
   "Next match": "下一個符合項目",
   "Send messages with": "傳送訊息的按鍵",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "用哪個鍵傳送你輸入的內容。選擇 ⌘Enter（Windows 和 Linux 上為 Ctrl+Enter）時，Enter 用於換行。",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "用哪個鍵傳送你輸入的內容。選擇 {0} 時，Enter 用於換行。",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "釘選",
@@ -2461,5 +2462,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
   "/srv/app or ~/app": "/srv/app 或 ~/app",
   "Prefer Plugins on app-sent messages": "應用程式傳送的訊息優先使用 Plugins",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "啟用後，COS 在應用程式傳送的一般訊息中使用 Plugins 而非 Core。目標、循環、工作代理及復原始終使用 Core。每則訊息僅提及一個應用程式。直接在 ChatGPT 傳送的訊息不受影響。"
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "啟用後，Chat On Steroids 在應用程式傳送的一般訊息中使用 Plugins 而非 Core。目標、循環、工作代理及復原始終使用 Core。每則訊息僅提及一個應用程式。直接在 ChatGPT 傳送的訊息不受影響。"
 }

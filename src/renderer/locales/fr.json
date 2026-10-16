@@ -2310,7 +2310,8 @@
   "Send into the running turn now": "Envoyer maintenant dans le tour en cours",
   "The turn ended before this message could join it. It stays queued.": "Le tour s'est terminé avant que ce message puisse le rejoindre. Il reste en file d'attente.",
   "Messages during a running turn": "Messages pendant un tour en cours",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "Ce que fait par défaut un message envoyé pendant que ChatGPT travaille. ⌘⇧Entrée (Ctrl+Maj+Entrée sous Windows et Linux) l'envoie dans l'autre sens.",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "Ce que fait par défaut un message envoyé pendant que ChatGPT travaille. {0} l'envoie dans l'autre sens.",
+  "Shift": "Maj",
   "Join the running turn": "Rejoindre le tour en cours",
   "Wait until the turn ends": "Attendre la fin du tour",
   "Notify when a chat finishes": "Prévenir quand un chat a terminé",
@@ -2321,7 +2322,7 @@
   "Previous match": "Résultat précédent",
   "Next match": "Résultat suivant",
   "Send messages with": "Envoyer les messages avec",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "La touche qui envoie ce que vous tapez. Avec ⌘Entrée (Ctrl+Entrée sous Windows et Linux), Entrée commence une nouvelle ligne.",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "La touche qui envoie ce que vous tapez. Avec {0}, Entrée commence une nouvelle ligne.",
   "Enter": "Entrée",
   "⌘Enter / Ctrl+Enter": "⌘Entrée / Ctrl+Entrée",
   "Pin": "Épingler",
@@ -2461,5 +2462,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "moi@serveur, moi@serveur:2222 ou un Host de ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app ou ~/app",
   "Prefer Plugins on app-sent messages": "Préférer Plugins dans les messages envoyés par l’application",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Lorsque cette option est activée, COS utilise Plugins plutôt que Core pour les messages ordinaires envoyés par l’application. Goal, Loop, les agents et la récupération conservent toujours Core. Une seule application est mentionnée. Les messages envoyés directement dans ChatGPT restent inchangés."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Lorsque cette option est activée, Chat On Steroids utilise Plugins plutôt que Core pour les messages ordinaires envoyés par l’application. Goal, Loop, les agents et la récupération conservent toujours Core. Une seule application est mentionnée. Les messages envoyés directement dans ChatGPT restent inchangés."
 }
