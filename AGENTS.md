@@ -4880,6 +4880,10 @@ unresolved requests cannot borrow observations. Headerless calls retain a separa
 anonymous context; opting out refuses indexed/coordinate input without exact identity.
 Explicit activation consumes observation state too; ordinary input already activates its target.
 Late observations and replaced principals cannot lend another call their state.
+Single-window capture includes the cursor only when ScreenCaptureKit reports the window on
+screen: requesting the current desktop cursor for an off-Space window fails with -3811.
+Observation never activates that window or substitutes current-desktop pixels.
+`test/fixtures/verify-macos-window-capture.mjs` exercises this decision with the production Swift.
 Observe → act uses exact frame/ref, target geometry and
 helper generation. Recheck those after asynchronous image work and before every local action
 in a batch. A replaced helper/window/display invalidates old coordinates and refs. Bound
