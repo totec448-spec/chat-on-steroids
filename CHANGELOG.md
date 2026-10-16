@@ -26,6 +26,7 @@ Projects can now live on a server you reach over SSH. In the composer, `/` offer
 
 ### 🛠 Fixed
 
+- **Adding a connector in ChatGPT.** On accounts where ChatGPT uses its newest connector protocol, adding a Chat On Steroids connector failed with "424 / Method not found". It works now; existing connectors were not affected.
 - **Mac permissions after an update.** If Screen Recording or Accessibility stopped working after an update while System Settings still shows them as allowed, the app now says so in the chat and repairs it with one click (**Repair permissions**). The button also appears whenever a permission is missing.
 - **The "refresh the plugin" reminder.** Automatic plugin refresh works again for connectors set up with an older version, so the reminder no longer stays while automatic refresh is on. It also opens ChatGPT's current settings page instead of sometimes landing on Home.
 - **GPT-6 answers** show `|` and `&` as the model wrote them, instead of `&#124;` and `&amp;`.
@@ -33,6 +34,7 @@ Projects can now live on a server you reach over SSH. In the composer, `/` offer
 - **Two browsers.** If one of them still has an older extension, new chats open in the up-to-date browser right away instead of waiting.
 - **"OpenAI outage" instead of "No internet"** when OpenAI's tunnel service fails, because your internet is fine then.
 - **Fresh turns.** A continue that couldn't be sent stays at the time it was made, instead of sitting at the end of the chat.
+- **Mac: windows on another Space.** Observing a window on an inactive Space works again.
 - **Windows.** A command's exit status shows as the signed number Codex shows (for example −1 instead of 4294967295), and the key hints in Settings show only Ctrl shortcuts.
 - **Firefox.** When the add-on is behind the app, the notice says how Firefox updates it.
 - **Smaller fixes.** The diagnostics report's save dialog is titled in your language, the update details in **Activity** are spaced properly again, and a normal update no longer fills the log with warnings.

@@ -2462,5 +2462,14 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
   "/srv/app or ~/app": "/srv/app 或 ~/app",
   "Prefer Plugins on app-sent messages": "应用发送的消息优先使用 Plugins",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，Chat On Steroids 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。"
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，Chat On Steroids 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "服务器上的项目、输入框中随处可用的 Skills 和文件，以及 Mac 权限修复。",
+  "Projects on a server": "服务器上的项目",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "通过 SSH 添加文件夹；ChatGPT 会用你自己的 SSH 设置在那里读取、编辑并运行命令。",
+  "/ and @ anywhere": "随处可用的 / 和 @",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "在消息的任意位置用 / 选择 Skill，用 @ 选择项目文件。",
+  "Mac permissions repaired": "Mac 权限已修复",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "如果更新导致 Mac 上的桌面访问失效，点一下即可修复。",
+  "Prefer Plugins": "优先使用 Plugins",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "如果需要，应用发送的消息会使用你的 Plugins 应用而不是 Core。"
 }

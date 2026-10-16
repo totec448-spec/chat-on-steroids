@@ -2462,5 +2462,14 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "eu@servidor, eu@servidor:2222 ou um Host do ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app ou ~/app",
   "Prefer Plugins on app-sent messages": "Preferir Plugins nas mensagens enviadas pelo aplicativo",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Quando ativado, o Chat On Steroids usa Plugins em vez de Core para mensagens comuns enviadas pelo aplicativo. Goal, Loop, workers e recuperação sempre mantêm Core. Apenas um aplicativo é mencionado. Mensagens enviadas diretamente no ChatGPT não mudam."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Quando ativado, o Chat On Steroids usa Plugins em vez de Core para mensagens comuns enviadas pelo aplicativo. Goal, Loop, workers e recuperação sempre mantêm Core. Apenas um aplicativo é mencionado. Mensagens enviadas diretamente no ChatGPT não mudam.",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Projetos em um servidor, Skills e arquivos em qualquer parte do campo de mensagem e um reparo para as permissões do Mac.",
+  "Projects on a server": "Projetos em um servidor",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Adicione uma pasta por SSH; o ChatGPT lê, edita e executa comandos lá com a sua própria configuração de SSH.",
+  "/ and @ anywhere": "/ e @ em qualquer lugar",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "Escolha um Skill com / ou um arquivo do projeto com @ em qualquer ponto de uma mensagem.",
+  "Mac permissions repaired": "Permissões do Mac reparadas",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "Se uma atualização deixou o acesso à área de trabalho quebrado no Mac, um clique o repara.",
+  "Prefer Plugins": "Preferir Plugins",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "Se quiser, as mensagens que o aplicativo envia usam o seu aplicativo Plugins em vez do Core."
 }

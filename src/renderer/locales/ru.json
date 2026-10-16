@@ -2461,6 +2461,15 @@
   "Folder on the server": "Папка на сервере",
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "я@сервер, я@сервер:2222 или Host из ~/.ssh/config",
   "/srv/app or ~/app": "/srv/app или ~/app",
-  "Prefer Plugins on app-sent messages": "Предпочитать Plugins для сообщений из COS",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, Chat On Steroids использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются."
+  "Prefer Plugins on app-sent messages": "Предпочитать Plugins для сообщений из приложения",
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, Chat On Steroids использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются.",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Проекты на сервере, Skills и файлы в любом месте поля ввода и восстановление разрешений на Mac.",
+  "Projects on a server": "Проекты на сервере",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Добавьте папку по SSH: ChatGPT читает, редактирует и выполняет там команды с вашими собственными настройками SSH.",
+  "/ and @ anywhere": "/ и @ где угодно",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "Выбирайте Skill через / или файл проекта через @ в любом месте сообщения.",
+  "Mac permissions repaired": "Разрешения на Mac восстановлены",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "Если обновление сломало доступ к рабочему столу на Mac, его восстанавливает один щелчок.",
+  "Prefer Plugins": "Предпочитать Plugins",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "При желании сообщения, которые отправляет приложение, используют приложение Plugins вместо Core."
 }
