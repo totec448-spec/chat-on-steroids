@@ -13255,9 +13255,11 @@
       // is asked again: the worker journals the receipt by input id, so a repeat is the same ACK.
       // In Firefox the background event page can answer nothing while it restarts, and the row then
       // sat in "browser" for hours with its chat and queue blocked (2026-10-16).
+      // The wait between attempts uses this script's own timer: a plain one was never seen to fire
+      // in a background Firefox window, so the second attempt never went out.
       let acknowledged = null;
       for (let attempt = 0; attempt < ACK_RETRY_DELAYS_MS.length + 1 && alive; attempt++) {
-        if (attempt > 0) await new Promise(resolve => setTimeout(resolve, ACK_RETRY_DELAYS_MS[attempt - 1]));
+        if (attempt > 0) await sleep(ACK_RETRY_DELAYS_MS[attempt - 1]);
         acknowledged = await ask({ type: 'desktop_input', id: message.id, conversationId: deliveredConversation, messageId: receipt.user?.id, owner: input.owner, lifetime: input.lifetime, ack: true });
         if (acknowledged !== null && acknowledged !== undefined) break;
       }
