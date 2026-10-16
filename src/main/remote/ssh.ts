@@ -106,9 +106,12 @@ export async function openSftp(remote: RemoteFolder, options: SshOptions = {}): 
   child.once('error', () => sftpProcesses.delete(child));
   let stderr = '';
   child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 8192) stderr += chunk.toString('utf8'); });
+  // 'close' comes after ssh's output is read to its end: 'exit', and the end of stdout, can come
+  // before ssh's error text has arrived, and the reason would be lost.
+  const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
   const exited = new Promise<never>((_resolve, reject) => {
     child.once('error', error => reject(new SftpError('ENOENT', `SSH is not available on this computer (${error.message})`)));
-    child.once('exit', () => reject(new SftpError('ECONNREFUSED', sshFailure(stderr))));
+    void closed.then(() => reject(new SftpError('ECONNREFUSED', sshFailure(stderr))));
   });
   exited.catch(() => undefined);
   try {
@@ -116,6 +119,10 @@ export async function openSftp(remote: RemoteFolder, options: SshOptions = {}): 
     child.once('exit', () => client.close());
     return client;
   } catch (error) {
+    // A handshake that failed because the stream ended waits briefly for ssh to finish saying why.
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([closed, new Promise<void>(resolve => { timer = setTimeout(resolve, 2_000); })]);
+    clearTimeout(timer);
     child.kill();
     // A start that failed because ssh exited says why; the handshake's own error does not.
     if (error instanceof SftpError && error.code !== 'ECONNREFUSED' && stderr.trim()) throw new SftpError('ECONNREFUSED', sshFailure(stderr));
