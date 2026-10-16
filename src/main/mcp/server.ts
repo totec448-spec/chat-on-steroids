@@ -360,6 +360,8 @@ export async function startMcpServer(getContext: () => ToolContext, kept: Partia
     const prmRoute = routes.find((candidate) => safeEqual(pathOnly, candidate.prmPath)) ?? null;
 
     const startedAt = Date.now();
+    // The JSON-RPC method a failed request named, so the log says which call ChatGPT made (#1557).
+    let rpcMethod: string | null = null;
     const publication = { completedAt: null as number | null, failed: false };
     res.once('close', () => { if (publication.completedAt === null) publication.failed = true; });
     res.on('finish', () => {
@@ -383,7 +385,7 @@ export async function startMcpServer(getContext: () => ToolContext, kept: Partia
       const expectedTunnelProbe = tunnelProbe && res.statusCode === 415 && route !== null && method === 'POST';
       if (optional) logInfo(`request ${line} (stream/session not offered — normal)`);
       else if (expectedTunnelProbe) logInfo(`request ${line} (probe compatibility check — normal)`);
-      else if (res.statusCode >= 400) logWarn(`request ${line}`);
+      else if (res.statusCode >= 400) logWarn(`request ${line}${rpcMethod ? ` (method ${rpcMethod})` : ''}`);
       else logInfo(`request ${line}`);
     });
 
@@ -458,6 +460,8 @@ export async function startMcpServer(getContext: () => ToolContext, kept: Partia
           jsonError(res, 400, 'invalid_json');
           return;
         }
+        const named = (parsed.body as { method?: unknown } | undefined)?.method;
+        if (typeof named === 'string' && /^[A-Za-z0-9_/.-]{1,80}$/.test(named)) rpcMethod = named;
         dispatch(parsed.body);
       });
       return;

@@ -28,14 +28,27 @@ import { toVirtualPath } from '../sandbox.js';
 import { logWarn } from '../logger.js';
 import { withManagedSkills } from '../skill-access.js';
 
+/**
+ * The resource and prompt catalogs, which no surface has, answered as empty lists (#1557).
+ * ChatGPT enrolls a new connector with MCP revision 2026-07-28 and asks for resources as well.
+ * In that revision the SDK answers a method that has no handler with HTTP 404 (-32601), and
+ * ChatGPT then fails the whole enrollment with HTTP 424, so the connector could not be added.
+ */
+function answerEmptyCatalogs(server: McpServer): void {
+  server.server.setRequestHandler('resources/list', async () => ({ resources: [] }));
+  server.server.setRequestHandler('resources/templates/list', async () => ({ resourceTemplates: [] }));
+  server.server.setRequestHandler('prompts/list', async () => ({ prompts: [] }));
+}
+
 export function buildServer(ctx: ToolContext, surface: SurfaceId, observe?: (connectorName: string, version: string, instructions: string, tools: PluginToolSchema[]) => void, liveContext: () => ToolContext = () => ctx): McpServer {
   if (surface === 'core') ctx = withManagedSkills(ctx);
   const definition = surfaceDefinition(surface);
   const instructions = serverInstructions(ctx, surface);
   const server = new McpServer(
     { name: definition.serverName, version: APP_VERSION },
-    { capabilities: { tools: {} }, instructions }
+    { capabilities: { tools: {}, resources: {}, prompts: {} }, instructions }
   );
+  answerEmptyCatalogs(server);
 
   const tools: PluginToolSchema[] = [];
   if (surface === 'plugins') {
