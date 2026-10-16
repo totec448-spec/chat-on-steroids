@@ -84,3 +84,16 @@ it('converts with the optional draft token, since the workflow token never may',
   expect(workflow).toContain('DRAFT_TOKEN: ${{ secrets.PR_DRAFT_TOKEN }}');
   expect(workflow).not.toMatch(/contents:\s*write/);
 });
+
+// Live 2026-10-16, #1558: CI and the checklist failed one after the other, each run reached the
+// bot before the PR was a draft, and the author got the same comment twice.
+it('comments once: a second failure on a labeled PR only retries the conversion', async () => {
+  const labeled = pr({ labels: [{ name: NOT_READY_LABEL }] });
+  expect(notReadyDecision(labeled, 'failure')).toBe('redraft');
+  const drafts = fake({ '/graphql': { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } } });
+  expect(await applyNotReady(drafts.request, input('redraft'))).toBe('draft');
+  expect(drafts.calls.map(call => call.path)).toEqual(['/graphql']);
+  const refused = fake({ '/graphql': { errors: [{ message: 'Resource not accessible by integration' }] } });
+  expect(await applyNotReady(refused.request, input('redraft'))).toBe('labeled (draft refused: Resource not accessible by integration)');
+  expect(refused.calls.map(call => call.path)).toEqual(['/graphql']);
+});

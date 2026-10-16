@@ -10,12 +10,17 @@ export const NOT_READY_SINCE = '2026-10-15T16:00:00Z';
 export const NOT_READY_LABEL = 'not-ready';
 const MAINTAINER = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
-/** 'draft' a red ready PR, 'clear' the label off a green ready one, else nothing. */
+/**
+ * 'draft' a red ready PR (label, comment, convert), 'redraft' one that is labeled already (only
+ * the conversion: CI and the checklist fail separately, and each must not comment again),
+ * 'clear' the label off a green ready one, else nothing.
+ */
 export function notReadyDecision(pr, conclusion) {
   const labeled = (pr.labels ?? []).some(label => label.name === NOT_READY_LABEL);
   if (conclusion === 'success') return labeled && !pr.draft ? 'clear' : 'none';
   if (conclusion !== 'failure' || pr.draft || MAINTAINER.has(pr.author_association) || pr.user?.type === 'Bot') return 'none';
-  return Date.parse(pr.created_at) >= Date.parse(NOT_READY_SINCE) ? 'draft' : 'none';
+  if (Date.parse(pr.created_at) < Date.parse(NOT_READY_SINCE)) return 'none';
+  return labeled ? 'redraft' : 'draft';
 }
 
 export const NOT_READY_COMMENT = `A check failed, so this PR is a draft again and not in the review queue yet. The failed check's log says what is missing (see CONTRIBUTING.md). Once everything is green, click **Ready for review** and it goes back into the queue.`;
@@ -31,14 +36,16 @@ export const NOT_READY_COMMENT_UNDRAFTED = `A check failed, so this PR is not in
  */
 export async function applyNotReady(request, { repository, sha, pr, decision }, draftRequest = request) {
   const path = `/repos/${repository}/issues/${pr.number}`;
-  if (decision === 'draft') {
+  if (decision === 'draft' || decision === 'redraft') {
     const reply = await draftRequest('/graphql', { method: 'POST', body: JSON.stringify({
       query: 'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
       variables: { id: pr.node_id } }) });
     const drafted = reply?.data?.convertPullRequestToDraft?.pullRequest?.isDraft === true;
+    const refused = `labeled (draft refused: ${(reply?.errors ?? []).map(error => error.message).join('; ') || 'no draft in the reply'})`;
+    if (decision === 'redraft') return drafted ? 'draft' : refused;
     await request(`${path}/labels`, { method: 'POST', body: JSON.stringify({ labels: [NOT_READY_LABEL] }) });
     await request(`${path}/comments`, { method: 'POST', body: JSON.stringify({ body: drafted ? NOT_READY_COMMENT : NOT_READY_COMMENT_UNDRAFTED }) });
-    return drafted ? 'draft' : `labeled (draft refused: ${(reply?.errors ?? []).map(error => error.message).join('; ') || 'no draft in the reply'})`;
+    return drafted ? 'draft' : refused;
   }
   if (decision === 'clear') {
     const runs = (await request(`/repos/${repository}/commits/${sha}/check-runs?per_page=100`))?.check_runs ?? [];
