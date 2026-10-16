@@ -2456,5 +2456,7 @@
   "SSH address": "SSH 주소",
   "Folder on the server": "서버의 폴더",
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server, me@server:2222 또는 ~/.ssh/config의 Host",
-  "/srv/app or ~/app": "/srv/app 또는 ~/app"
+  "/srv/app or ~/app": "/srv/app 또는 ~/app",
+  "Prefer Plugins on app-sent messages": "앱에서 보내는 메시지에 Plugins 우선 사용",
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "활성화하면 COS에서 보내는 일반 메시지에 Core 대신 Plugins를 사용합니다. Goal, Loop, 워커 및 복구에서는 항상 Core를 사용합니다. 메시지당 한 앱만 멘션합니다. ChatGPT에서 직접 보낸 메시지는 변경되지 않습니다."
 }

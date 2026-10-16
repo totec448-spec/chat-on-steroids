@@ -180,19 +180,19 @@
     } catch { return null; }
   }
   /**
-   * The Core app's identity, read from the page's own system hint list (#861).
+   * COS Core and Plugins identities, read from the page's own system hints (#861).
    *
    * On some accounts ChatGPT attaches an app to a message only when the message mentions it, so
    * prompts the app sends carry a mention of Core. Only app ids and names leave this world.
    *
-   * A computer sharing its ChatGPT account with another names its Core with a suffix
-   * ("Chat On Steroids Core (Windows)"), and this world cannot know which one is this install's:
-   * the page may load its hints before the extension has heard from the app. So every Core-like
-   * name is reported with its app id, and the content script picks its own by exact name. A name
-   * that more than one app carries is ambiguous and reported without an id.
+   * A computer sharing its ChatGPT account with another uses per-surface suffixes.
+   * This world cannot know which install owns a name: report Core/Plugins app ids
+   * by exact name, marking duplicate names ambiguous. The content script picks
+   * this computer's installed connector only from the app-reported names.
    */
   const CORE_APP_NAME = 'Chat On Steroids Core';
   const CORE_NAME = /^Chat On Steroids Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u;
+  const PLUGINS_NAME = /^Chat On Steroids Plugins(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u;
   let coreMention = null;
   async function inspectSystemHints(response) {
     if (!active) return;
@@ -216,18 +216,24 @@
       const byName = new Map();
       for (const hint of list.slice(0, 2000)) {
         const id = /^(?:plugin|connector):(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(typeof hint?.system_hint === 'string' ? hint.system_hint : '')?.[1];
-        if (!id || typeof hint.name !== 'string' || !CORE_NAME.test(hint.name)) continue;
+        if (!id || typeof hint.name !== 'string' || !(CORE_NAME.test(hint.name) || PLUGINS_NAME.test(hint.name))) continue;
         if (!byName.has(hint.name)) byName.set(hint.name, new Set());
         byName.get(hint.name).add(id);
       }
-      // The page asks for several hint lists (basic, custom agents, plugins) and only the plugins
-      // list names Core, in whatever order they answer. A list without Core says nothing about it;
-      // only two different apps with the same Core name make that name ambiguous.
-      // Only the plugins list (`mode=plugins`, measured live) is complete about plugins: there a
-      // missing Core is news. Any other list without Core still says nothing about it.
+      // ChatGPT fetches basic, custom-agent and complete plugins lists in any order.
+      // An incomplete list must not erase an earlier Core or Plugins sighting;
+      // a complete plugins list does authoritatively revoke missing entries.
       const pluginList = url.searchParams.get('mode') === 'plugins';
       if ((!byName.size && !pluginList) || byName.size > 16) return;
-      const candidates = [...byName].map(([name, ids]) => ({ name, path: ids.size === 1 ? `app://${[...ids][0]}` : null }));
+      if (coreMention?.pluginList && !pluginList) return;
+      if (!pluginList && coreMention?.candidates) {
+        for (const old of coreMention.candidates) {
+          const ids = byName.get(old.name);
+          if (!ids) byName.set(old.name, new Set(old.path ? [old.path.slice(6)] : [null]));
+          else if (old.path && !ids.has(old.path.slice(6))) ids.add(old.path.slice(6));
+        }
+      }
+      const candidates = [...byName].map(([name, ids]) => ({ name, path: ids.size === 1 && !ids.has(null) ? `app://${[...ids][0]}` : null }));
       const plain = candidates.find(candidate => candidate.name === CORE_APP_NAME);
       // `path`/`name` keep describing the plain Core for a content script from before suffixes.
       coreMention = { type: 'cos-core-mention', path: plain?.path ?? null, name: plain?.path ? CORE_APP_NAME : null, candidates, pluginList };

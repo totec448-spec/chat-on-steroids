@@ -750,6 +750,37 @@ describe('Core app identity for mentions (#861)', () => {
   const hint = (system_hint: string, name: string) => ({ system_hint, name, description: 'x', is_plugin: true });
   const url = 'https://chatgpt.com/backend-api/system_hints?mode=composer';
   const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+  it('exposes exact Core and Plugins identities, not Desktop or a lookalike, in one provider hint list', async () => {
+    const h = harness();
+    await h.feed({ system_hints: [
+      hint('plugin:asdk_app_core1111', 'Chat On Steroids Core'),
+      hint('plugin:asdk_app_plugins2222', 'Chat On Steroids Plugins (Windows)'),
+      hint('plugin:asdk_app_desktop3333', 'Chat On Steroids Desktop'),
+      hint('plugin:asdk_app_lookalike44', 'Chat On Steroids Plugins Backup')
+    ] }, url);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)?.candidates).toEqual([
+      { name: 'Chat On Steroids Core', path: 'app://asdk_app_core1111' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_plugins2222' }
+    ]);
+  });
+  it('never accepts an ambiguous Plugins name and revokes it on a complete plugins list', async () => {
+    const h = harness();
+    const pluginsUrl = 'https://chatgpt.com/backend-api/system_hints?mode=plugins';
+    await h.feed({ system_hints: [
+      hint('plugin:asdk_app_plugins1111', 'Chat On Steroids Plugins'),
+      hint('connector:asdk_app_plugins2222', 'Chat On Steroids Plugins')
+    ] }, pluginsUrl);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)?.candidates).toEqual([
+      { name: 'Chat On Steroids Plugins', path: null }
+    ]);
+    await h.feed({ system_hints: [hint('plugin:asdk_app_core1234', 'Chat On Steroids Core')] }, pluginsUrl);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)?.candidates).toEqual([
+      { name: 'Chat On Steroids Core', path: 'app://asdk_app_core1234' }
+    ]);
+  });
   it('reports the one Core app from the page\'s own system hints and repeats it on request', async () => {
     const h = harness();
     await h.feed({ system_hints: [hint('plugin:asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', 'Chat On Steroids Core'),

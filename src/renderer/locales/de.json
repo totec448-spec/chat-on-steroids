@@ -2456,5 +2456,7 @@
   "SSH address": "SSH-Adresse",
   "Folder on the server": "Ordner auf dem Server",
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "ich@server, ich@server:2222 oder ein Host aus ~/.ssh/config",
-  "/srv/app or ~/app": "/srv/app oder ~/app"
+  "/srv/app or ~/app": "/srv/app oder ~/app",
+  "Prefer Plugins on app-sent messages": "Plugins bei von der App gesendeten Nachrichten bevorzugen",
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Wenn aktiviert, verwendet COS für normale von der App gesendete Eingaben Plugins statt Core. Goal, Loop, Worker und Wiederherstellung behalten immer Core. Pro Nachricht wird nur eine App erwähnt. Direkt in ChatGPT gesendete Nachrichten bleiben unverändert."
 }
