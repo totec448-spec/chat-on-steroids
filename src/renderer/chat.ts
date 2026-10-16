@@ -92,6 +92,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
+import { initSshProjectDialog } from './ssh-project-dialog.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -1405,7 +1406,14 @@ function paintSessions(): void {
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
-    heading.append(icon('i-folder'), label); section.append(heading);
+    heading.append(icon('i-folder'), label);
+    if (project?.remote) {
+      // A folder on a server (#1469): the address is the hover text, the badge says how it is reached.
+      const badge = el('span', 'project-badge', () => 'SSH');
+      ui(badge, 'title', () => project.remote ? `${project.remote.host}${project.remote.port ? `:${project.remote.port}` : ''}` : '');
+      heading.append(badge);
+    }
+    section.append(heading);
     // Native `toggle` is queued after activation. A concurrent activity repaint can replace
     // this node first and lose the click. Commit the summary's pointer/keyboard click to the
     // one disclosure owner synchronously, then project it onto this details element.
@@ -7033,20 +7041,38 @@ export function initChat(next: Deps): void {
   $('newChat').addEventListener('click', () => {
     selectNewChat();
   });
-  $('addProject').addEventListener('click', async event => {
-    event.preventDefault();
+  // A project picked or added elsewhere published a newer durable catalog. A list refresh started
+  // before it may still return an empty catalog and otherwise erase this sidebar group.
+  const showAddedProject = (project: LocalProject, generation: number) => {
+    ++sessionsLoadGeneration;
+    projects = [...projects.filter(row => row.id !== project.id), project];
+    expandedProjects.add(project.id);
+    if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
+  };
+  const addLocalProject = async () => {
     const button = $<HTMLButtonElement>('addProject'); button.disabled = true;
     const generation = selectionGeneration;
     try {
       const project = await run(api.addProject());
-      if (!project) return;
-      // The picker published a newer durable catalog. A list refresh started before it
-      // may still return an empty catalog and otherwise erase this sidebar group.
-      ++sessionsLoadGeneration;
-      projects = [...projects.filter(row => row.id !== project.id), project];
-      expandedProjects.add(project.id);
-      if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
+      if (project) showAddedProject(project, generation);
     } finally { button.disabled = false; }
+  };
+  // The composer's Share a folder means a folder on this computer: straight to the picker.
+  $('composerFolder').addEventListener('click', () => void addLocalProject());
+  let sshDialogGeneration = 0;
+  const sshProjectDialog = initSshProjectDialog(api, project => showAddedProject(project, sshDialogGeneration));
+  // A folder on this computer, or one on a server (#1469).
+  $('addProject').addEventListener('click', event => {
+    event.preventDefault();
+    toggleRowMenu({
+      owner: 'add-project',
+      anchor: () => document.getElementById('addProject'),
+      label: () => t('Add a project folder'),
+      items: () => [
+        { action: 'add-local-project', label: () => t('Folder on this computer…'), icon: 'i-folder', run: () => void addLocalProject() },
+        { action: 'add-ssh-project', label: () => t('Folder on a server (SSH)…'), icon: 'i-terminal', run: () => { sshDialogGeneration = selectionGeneration; sshProjectDialog.open(); } }
+      ]
+    });
   });
   const composerMenus = [...document.querySelectorAll<HTMLDetailsElement>('.composer-menu, .session-controls')];
   document.addEventListener('click', (event) => {

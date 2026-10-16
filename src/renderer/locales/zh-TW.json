@@ -2448,6 +2448,15 @@
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "桌面存取已開啟，但 macOS 尚未授予 Chat On Steroids 所需的權限。",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS 仍顯示 Chat On Steroids 為已允許，但該權限屬於先前的版本：由於沒有開發者簽章，每次更新在 macOS 看來都是新的應用程式。請選擇「修復權限」，在 macOS 詢問時允許，然後完全退出並重新開啟應用程式。",
   "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "請選擇「修復權限」，在 macOS 詢問時允許，然後完全退出並重新開啟應用程式。系統設定中顯示為已允許、但更新後不再生效的權限，也能由此修復。",
+  "Folder on this computer…": "這部電腦上的資料夾…",
+  "Folder on a server (SSH)…": "伺服器上的資料夾（SSH）…",
+  "Test and add": "測試並新增",
+  "Add a folder on a server": "新增伺服器上的資料夾",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids 使用你自己的 SSH 設定連線：~/.ssh/config、代理程式、金鑰和已知主機。只能使用金鑰登入，伺服器上不會安裝任何東西。",
+  "SSH address": "SSH 位址",
+  "Folder on the server": "伺服器上的資料夾",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
+  "/srv/app or ~/app": "/srv/app 或 ~/app",
   "Prefer Plugins on app-sent messages": "應用程式傳送的訊息優先使用 Plugins",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "啟用後，COS 在應用程式傳送的一般訊息中使用 Plugins 而非 Core。目標、循環、工作代理及復原始終使用 Core。每則訊息僅提及一個應用程式。直接在 ChatGPT 傳送的訊息不受影響。"
 }

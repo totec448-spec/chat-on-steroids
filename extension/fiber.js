@@ -2083,6 +2083,18 @@
    * LaTeX. Literal brackets are escaped inside their text line and literal parentheses never are,
    * so neither is mistaken for one. An opening without its closing is plain text.
    */
+  /**
+   * Entities in the fallback's plain text (measured on GPT-6, 2026-10-16: `|` arrives as `&#124;`,
+   * `&` as `&amp;`). A literal `&` is always `&amp;` there, so one left-to-right pass is exact: a
+   * literal `&#124;` the model wrote arrives as `&amp;#124;` and comes back as `&#124;`.
+   */
+  const FALLBACK_ENTITY = /^&(amp|lt|gt|quot|apos|#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6});/;
+  const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  function fallbackEntity(name) {
+    if (name[0] !== '#') return NAMED_ENTITIES[name] ?? null;
+    const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+    return code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : null;
+  }
   function unescapeFallbackMarkdown(markdown) {
     const lines = markdown.split('\n');
     const out = [];
@@ -2109,6 +2121,11 @@
           if (close >= 0) { text += line.slice(at, close + 2); at = close + 2; continue; }
         }
         if (char === '\\' && /[!-\/:-@[-`{-~]/.test(line[at + 1] || '')) { text += line[at + 1]; at += 2; continue; }
+        if (char === '&') {
+          const entity = FALLBACK_ENTITY.exec(line.slice(at));
+          const decoded = entity && fallbackEntity(entity[1]);
+          if (decoded !== null && decoded !== undefined) { text += decoded; at += entity[0].length; continue; }
+        }
         if (char === '`') {
           const run = /^`+/.exec(line.slice(at))[0];
           const close = new RegExp(`(?<!\`)${run}(?!\`)`).exec(line.slice(at + run.length));

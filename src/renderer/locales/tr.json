@@ -2448,6 +2448,15 @@
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "Masaüstü erişimi açık, ancak macOS Chat On Steroids'e gereken izni vermedi.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS, Chat On Steroids'i hâlâ izinli gösteriyor ama bu izin önceki bir sürüme ait: geliştirici imzası olmadığından her güncelleme macOS için yeni bir uygulamadır. İzinleri onar'ı seçin, macOS sorduğunda izin verin, ardından uygulamadan tamamen çıkıp yeniden açın.",
   "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "İzinleri onar'ı seçin, macOS sorduğunda izin verin, ardından uygulamadan tamamen çıkıp yeniden açın. Bu, Sistem Ayarları'nda izinli görünen ama bir güncellemeden sonra artık geçerli olmayan bir izni de düzeltir.",
+  "Folder on this computer…": "Bu bilgisayardaki klasör…",
+  "Folder on a server (SSH)…": "Sunucudaki klasör (SSH)…",
+  "Test and add": "Test et ve ekle",
+  "Add a folder on a server": "Sunucudaki bir klasörü ekle",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids kendi SSH kurulumunuzla bağlanır: ~/.ssh/config dosyanız, ajanınız, anahtarlarınız ve bilinen ana bilgisayarlarınız. Oturum açma yalnızca anahtarla çalışır ve sunucuya hiçbir şey kurulmaz.",
+  "SSH address": "SSH adresi",
+  "Folder on the server": "Sunucudaki klasör",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "ben@sunucu, ben@sunucu:2222 veya ~/.ssh/config içindeki bir Host",
+  "/srv/app or ~/app": "/srv/app veya ~/app",
   "Prefer Plugins on app-sent messages": "Uygulamanın gönderdiği iletilerde Plugins kullan",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde COS, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez."
 }

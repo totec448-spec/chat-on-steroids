@@ -1,3 +1,4 @@
+import { getProject } from './projects.js';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { statSync, watch as watchFs, type FSWatcher } from 'node:fs';
@@ -174,6 +175,7 @@ function projectRelative(value: string, prefix: string): string | null {
 }
 
 async function repositoryContext(projectId: string): Promise<RepositoryContext | null> {
+  if ((await getProject(projectId))?.remote) throw new Error('Git changes of a project on a server are not shown in the app yet.');
   const project = await projectFileTarget(projectId, '', { allowRoot: true });
   const result = await runGit(project.real, ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);
   if (result.code !== 0) {

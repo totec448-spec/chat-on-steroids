@@ -34,6 +34,7 @@ import { currentCall } from './mcp/call-context.js';
 import { requestCorrelation } from './session/correlation.js';
 import { isSkillPath, isSkillVirtualPath } from './skill-access.js';
 import { isContained } from './sandbox.js';
+import { fsForRoot, type ProjectFs } from './remote/project-fs.js';
 import { lookupWorkerWorkspace } from './worktrees/index.js';
 import { managedWorkerAllocationIdentity, managedWorkerWorktreeRequired } from './agents.js';
 
@@ -336,11 +337,13 @@ async function hasMarker(real: string): Promise<boolean> {
  */
 export async function projectFolderOf(
   resolved: { real: string; virtual: string },
-  rootReal: string
+  rootReal: string,
+  io: FolderIo = localIo
 ): Promise<{ real: string; virtual: string }> {
-  const startReal = (await isDirectory(resolved.real)) ? resolved.real : path.dirname(resolved.real);
+  const startIsDirectory = await io.isDirectory(resolved.real);
+  const startReal = startIsDirectory ? resolved.real : io.path.dirname(resolved.real);
   const depth = path.posix.normalize(resolved.virtual).split('/').filter(Boolean).length;
-  const startVirtual = (await isDirectory(resolved.real))
+  const startVirtual = startIsDirectory
     ? path.posix.normalize(resolved.virtual)
     : path.posix.dirname(path.posix.normalize(resolved.virtual));
 
@@ -349,14 +352,40 @@ export async function projectFolderOf(
   // Bounded by the virtual depth, so a malformed pair can never spin.
   for (let step = 0; step <= depth; step++) {
     // Never above the approved root: containment is the boundary, here as everywhere.
-    if (!isContained(rootReal, currentReal)) break;
-    if (await hasMarker(currentReal)) return { real: currentReal, virtual: currentVirtual };
-    const parentReal = path.dirname(currentReal);
+    if (!io.contained(rootReal, currentReal)) break;
+    if (await io.hasMarker(currentReal)) return { real: currentReal, virtual: currentVirtual };
+    const parentReal = io.path.dirname(currentReal);
     if (parentReal === currentReal) break;
     currentReal = parentReal;
     currentVirtual = path.posix.dirname(currentVirtual);
   }
   return { real: startReal, virtual: startVirtual };
+}
+
+/** How `projectFolderOf` looks at a folder: on this computer, or on a server over SFTP (#1469). */
+interface FolderIo {
+  path: path.PlatformPath;
+  isDirectory(real: string): Promise<boolean>;
+  hasMarker(real: string): Promise<boolean>;
+  contained(rootReal: string, real: string): boolean;
+}
+const localIo: FolderIo = { path, isDirectory, hasMarker, contained: isContained };
+function serverIo(files: ProjectFs): FolderIo {
+  const isDirectoryThere = (real: string) => files.getMetadata(real).then(meta => meta.isDirectory, () => false);
+  return {
+    path: path.posix,
+    isDirectory: isDirectoryThere,
+    async hasMarker(real) {
+      for (const marker of PROJECT_MARKERS) {
+        if (await files.getMetadata(path.posix.join(real, marker)).then(() => true, () => false)) return true;
+      }
+      return false;
+    },
+    contained: (rootReal, real) => {
+      const root = rootReal.replace(/\/+$/, '');
+      return real === root || real.startsWith(`${root}/`) || root === '';
+    }
+  };
 }
 
 /**
@@ -370,6 +399,11 @@ export async function projectFolderOf(
 export async function learnWorkspace(resolved: { real: string; virtual: string; root: Root }): Promise<void> {
   if (isSkillPath(resolved.real) || isSkillVirtualPath(resolved.virtual) || resolved.root.name.toLowerCase() === 'skills') return;
   if (!workspaceKey()) return;
+  // A folder on a server (#1469) is walked there, with the server's own path rules.
+  if (resolved.root.remote) {
+    setCurrentWorkspace(await projectFolderOf(resolved, resolved.root.remote.path, serverIo(fsForRoot(resolved.root))));
+    return;
+  }
   let rootReal: string;
   try {
     rootReal = await fs.realpath(resolved.root.path);

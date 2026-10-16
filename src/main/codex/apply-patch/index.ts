@@ -13,7 +13,8 @@
 
 import nodePath from 'node:path';
 
-import { createDirectory, getMetadata, invalidInput, readFileText, remove, writeFile } from '../filesystem.js';
+import { invalidInput } from '../filesystem.js';
+import { localFs, type ProjectFs } from '../../remote/project-fs.js';
 import { ApplyPatchError, PatchParseError } from './errors.js';
 import { deriveNewContentsFromChunks } from './file-update.js';
 import { hunkPath, type Hunk } from './hunk.js';
@@ -45,9 +46,9 @@ export type PatchPathResolver = (spelledPath: string, cwd: string) => string;
 /** Patch matching holds old and reconstructed text together, so it needs its own budget. */
 export const MAX_PATCH_SOURCE_BYTES = 16 * 1024 * 1024;
 
-async function ensurePatchSourceWithinBudget(path: string, allowMissing = false): Promise<void> {
+async function ensurePatchSourceWithinBudget(fs: ProjectFs, path: string, allowMissing = false): Promise<void> {
   try {
-    const metadata = await getMetadata(path);
+    const metadata = await fs.getMetadata(path);
     if (metadata.isFile && metadata.size > MAX_PATCH_SOURCE_BYTES) {
       throw invalidInput(`file is too large to patch safely: limit is ${MAX_PATCH_SOURCE_BYTES} bytes`);
     }
@@ -67,9 +68,9 @@ async function ensurePatchSourceWithinBudget(path: string, allowMissing = false)
  * is already a directory, and a Move destination that is a directory or an oversized file. Both
  * used to pass verification and fail only after earlier hunks had already landed.
  */
-async function verifyPatchFileTarget(path: string, allowMissing: boolean): Promise<void> {
+async function verifyPatchFileTarget(fs: ProjectFs, path: string, allowMissing: boolean): Promise<void> {
   try {
-    const metadata = await getMetadata(path);
+    const metadata = await fs.getMetadata(path);
     if (!metadata.isFile) throw invalidInput('patch target is not a regular file');
     if (metadata.size > MAX_PATCH_SOURCE_BYTES) {
       throw invalidInput(`file is too large to patch safely: limit is ${MAX_PATCH_SOURCE_BYTES} bytes`);
@@ -83,10 +84,10 @@ async function verifyPatchFileTarget(path: string, allowMissing: boolean): Promi
 const defaultPathResolver: PatchPathResolver = (spelledPath, cwd) => nodePath.resolve(cwd, spelledPath);
 
 /** A move needs two distinct filesystem identities; otherwise write-then-remove deletes it. */
-function sameResolvedPath(left: string, right: string): boolean {
-  const a = nodePath.resolve(left);
-  const b = nodePath.resolve(right);
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+function sameResolvedPath(fs: ProjectFs, left: string, right: string): boolean {
+  const a = fs.path.resolve(left);
+  const b = fs.path.resolve(right);
+  return fs === localFs && process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 /** `AppliedPatchFileChange`. */
@@ -166,7 +167,8 @@ export async function applyPatch(
   cwd: string,
   stdout: Writer,
   stderr: Writer,
-  resolvePath: PatchPathResolver = defaultPathResolver
+  resolvePath: PatchPathResolver = defaultPathResolver,
+  fs: ProjectFs = localFs
 ): Promise<AppliedPatchDelta> {
   return await applyPatchWithMode(
     patch,
@@ -174,7 +176,8 @@ export async function applyPatch(
     cwd,
     stdout,
     stderr,
-    resolvePath
+    resolvePath,
+    fs
   );
 }
 
@@ -185,7 +188,8 @@ export async function applyPatchWithMode(
   cwd: string,
   stdout: Writer,
   stderr: Writer,
-  resolvePath: PatchPathResolver = defaultPathResolver
+  resolvePath: PatchPathResolver = defaultPathResolver,
+  fs: ProjectFs = localFs
 ): Promise<AppliedPatchDelta> {
   let hunks: Hunk[];
   try {
@@ -200,7 +204,7 @@ export async function applyPatchWithMode(
     throw new ApplyPatchFailure(ApplyPatchError.fromParseError(error), emptyDelta());
   }
 
-  return await applyHunksWithMode(hunks, updateFileMode, cwd, stdout, stderr, resolvePath);
+  return await applyHunksWithMode(hunks, updateFileMode, cwd, stdout, stderr, resolvePath, fs);
 }
 
 /** `apply_hunks_with_mode`. */
@@ -210,11 +214,12 @@ export async function applyHunksWithMode(
   cwd: string,
   stdout: Writer,
   stderr: Writer,
-  resolvePath: PatchPathResolver = defaultPathResolver
+  resolvePath: PatchPathResolver = defaultPathResolver,
+  fs: ProjectFs = localFs
 ): Promise<AppliedPatchDelta> {
   const delta = emptyDelta();
   try {
-    const affectedPaths = await applyHunksToFiles(hunks, updateFileMode, cwd, resolvePath, delta);
+    const affectedPaths = await applyHunksToFiles(hunks, updateFileMode, cwd, resolvePath, delta, fs);
     printSummary(affectedPaths, stdout);
     return delta;
   } catch (error) {
@@ -235,7 +240,8 @@ async function applyHunksToFiles(
   updateFileMode: ApplyPatchFileUpdateMode,
   cwd: string,
   resolvePath: PatchPathResolver,
-  delta: AppliedPatchDelta
+  delta: AppliedPatchDelta,
+  fs: ProjectFs
 ): Promise<AffectedPaths> {
   if (hunks.length === 0) throw new Error('No files were modified.');
 
@@ -259,9 +265,9 @@ async function applyHunksToFiles(
     const resolved = resolveHunkPath(hunk, cwd, resolvePath);
 
     if (hunk.kind === 'add_file') {
-      await ensurePatchSourceWithinBudget(resolved, true);
-      const overwrittenContent = await readOptionalFileTextForDelta(resolved, delta);
-      await tryWrite(writeFileWithMissingParentRetry(resolved, hunk.contents));
+      await ensurePatchSourceWithinBudget(fs, resolved, true);
+      const overwrittenContent = await readOptionalFileTextForDelta(fs, resolved, delta);
+      await tryWrite(writeFileWithMissingParentRetry(fs, resolved, hunk.contents));
       delta.changes.push({
         path: resolved,
         change: { kind: 'add', content: hunk.contents, overwrittenContent }
@@ -271,22 +277,22 @@ async function applyHunksToFiles(
     }
 
     if (hunk.kind === 'delete_file') {
-      await ensurePatchSourceWithinBudget(resolved);
-      await noteExistingPathDeltaSupport(resolved, delta);
+      await ensurePatchSourceWithinBudget(fs, resolved);
+      await noteExistingPathDeltaSupport(fs, resolved, delta);
       let deletedContent: string | null = null;
       try {
-        deletedContent = await readFileText(resolved);
+        deletedContent = await fs.readFileText(resolved);
       } catch {
         delta.exact = false;
       }
-      await withContext(ensureNotDirectory(resolved), () => `Failed to delete file ${resolved}`);
+      await withContext(ensureNotDirectory(fs, resolved), () => `Failed to delete file ${resolved}`);
       try {
         await withContext(
-          remove(resolved, { recursive: false, force: false }),
+          fs.remove(resolved, { recursive: false, force: false }),
           () => `Failed to delete file ${resolved}`
         );
       } catch (error) {
-        const sideEffectFree = await removeFailureWasSideEffectFree(resolved, deletedContent);
+        const sideEffectFree = await removeFailureWasSideEffectFree(fs, resolved, deletedContent);
         delta.exact = delta.exact && sideEffectFree;
         throw error;
       }
@@ -297,31 +303,33 @@ async function applyHunksToFiles(
       continue;
     }
 
-    await ensurePatchSourceWithinBudget(resolved);
-    await noteExistingPathDeltaSupport(resolved, delta);
+    await ensurePatchSourceWithinBudget(fs, resolved);
+    await noteExistingPathDeltaSupport(fs, resolved, delta);
     const { originalContents, newContents } = await deriveNewContentsFromChunks(
       resolved,
       hunk.chunks,
-      updateFileMode
+      updateFileMode,
+      undefined,
+      fs
     );
 
     if (hunk.movePath !== null) {
       const destination = resolvePath(hunk.movePath, cwd);
-      const overwrittenMoveContent = await readOptionalFileTextForDelta(destination, delta);
-      await tryWrite(writeFileWithMissingParentRetry(destination, newContents));
+      const overwrittenMoveContent = await readOptionalFileTextForDelta(fs, destination, delta);
+      await tryWrite(writeFileWithMissingParentRetry(fs, destination, newContents));
       const destinationChangeIndex = delta.changes.length;
       delta.changes.push({
         path: destination,
         change: { kind: 'add', content: newContents, overwrittenContent: overwrittenMoveContent }
       });
       try {
-        await withContext(ensureNotDirectory(resolved), () => `Failed to remove original ${resolved}`);
+        await withContext(ensureNotDirectory(fs, resolved), () => `Failed to remove original ${resolved}`);
         await withContext(
-          remove(resolved, { recursive: false, force: false }),
+          fs.remove(resolved, { recursive: false, force: false }),
           () => `Failed to remove original ${resolved}`
         );
       } catch (error) {
-        const sideEffectFree = await removeFailureWasSideEffectFree(resolved, originalContents);
+        const sideEffectFree = await removeFailureWasSideEffectFree(fs, resolved, originalContents);
         delta.exact = delta.exact && sideEffectFree;
         // The destination was already committed before source removal. If the source is proven
         // unchanged, restore the destination to its exact pre-move state so an EPERM/sharing
@@ -331,7 +339,7 @@ async function applyHunksToFiles(
         if (sideEffectFree) {
           let destinationStillOurs = false;
           try {
-            destinationStillOurs = (await readFileText(destination)) === newContents;
+            destinationStillOurs = (await fs.readFileText(destination)) === newContents;
           } catch {
             destinationStillOurs = false;
           }
@@ -344,9 +352,9 @@ async function applyHunksToFiles(
           }
           try {
             if (overwrittenMoveContent === null) {
-              await remove(destination, { recursive: false, force: true });
+              await fs.remove(destination, { recursive: false, force: true });
             } else {
-              await writeFile(destination, overwrittenMoveContent);
+              await fs.writeFile(destination, overwrittenMoveContent);
             }
             delta.changes.splice(destinationChangeIndex, 1);
           } catch {
@@ -370,7 +378,7 @@ async function applyHunksToFiles(
     }
 
     await tryWrite(
-      withContext(writeFile(resolved, newContents), () => `Failed to write file ${resolved}`)
+      withContext(fs.writeFile(resolved, newContents), () => `Failed to write file ${resolved}`)
     );
     delta.changes.push({
       path: resolved,
@@ -394,27 +402,28 @@ function resolveHunkPath(hunk: Hunk, cwd: string, resolvePath: PatchPathResolver
   return resolvePath(spelled, cwd);
 }
 
-async function ensureNotDirectory(path: string): Promise<void> {
-  const metadata = await getMetadata(path);
+async function ensureNotDirectory(fs: ProjectFs, path: string): Promise<void> {
+  const metadata = await fs.getMetadata(path);
   if (metadata.isDirectory) throw invalidInput('path is a directory');
 }
 
 async function removeFailureWasSideEffectFree(
+  fs: ProjectFs,
   path: string,
   expectedContent: string | null
 ): Promise<boolean> {
   if (expectedContent === null) return false;
   try {
-    return (await readFileText(path)) === expectedContent;
+    return (await fs.readFileText(path)) === expectedContent;
   } catch {
     return false;
   }
 }
 
-async function readOptionalFileTextForDelta(path: string, delta: AppliedPatchDelta): Promise<string | null> {
-  await noteExistingPathDeltaSupport(path, delta);
+async function readOptionalFileTextForDelta(fs: ProjectFs, path: string, delta: AppliedPatchDelta): Promise<string | null> {
+  await noteExistingPathDeltaSupport(fs, path, delta);
   try {
-    return await readFileText(path);
+    return await fs.readFileText(path);
   } catch (error) {
     if (errorCode(error) === 'ENOENT') return null;
     delta.exact = false;
@@ -422,30 +431,30 @@ async function readOptionalFileTextForDelta(path: string, delta: AppliedPatchDel
   }
 }
 
-async function noteExistingPathDeltaSupport(path: string, delta: AppliedPatchDelta): Promise<void> {
+async function noteExistingPathDeltaSupport(fs: ProjectFs, path: string, delta: AppliedPatchDelta): Promise<void> {
   try {
-    const metadata = await getMetadata(path);
+    const metadata = await fs.getMetadata(path);
     if (!(metadata.isFile && !metadata.isSymlink)) delta.exact = false;
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') delta.exact = false;
   }
 }
 
-async function writeFileWithMissingParentRetry(path: string, contents: string): Promise<void> {
+async function writeFileWithMissingParentRetry(fs: ProjectFs, path: string, contents: string): Promise<void> {
   try {
-    await writeFile(path, contents);
+    await fs.writeFile(path, contents);
     return;
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') {
       throw new Error(`Failed to write file ${path}`, { cause: error });
     }
   }
-  const parent = nodePath.dirname(path);
+  const parent = fs.path.dirname(path);
   await withContext(
-    createDirectory(parent, { recursive: true }),
+    fs.createDirectory(parent, { recursive: true }),
     () => `Failed to create parent directories for ${path}`
   );
-  await withContext(writeFile(path, contents), () => `Failed to write file ${path}`);
+  await withContext(fs.writeFile(path, contents), () => `Failed to write file ${path}`);
 }
 
 /** `print_summary`: the summary of changes, in git-style format. */
@@ -472,6 +481,8 @@ export async function executeApplyPatch(options: {
   cwd: string;
   updateFileMode?: ApplyPatchFileUpdateMode;
   resolvePath?: PatchPathResolver;
+  /** Where the files are: this computer by default, or a server folder's SFTP (#1469). */
+  fs?: ProjectFs;
 }): Promise<ApplyPatchExecution> {
   const startedAt = performance.now();
   const stdout: Writer = { text: '' };
@@ -485,7 +496,8 @@ export async function executeApplyPatch(options: {
       options.cwd,
       stdout,
       stderr,
-      options.resolvePath ?? defaultPathResolver
+      options.resolvePath ?? defaultPathResolver,
+      options.fs ?? localFs
     );
   } catch (error) {
     failed = true;
@@ -580,7 +592,8 @@ export async function verifyApplyPatchArgs(
   args: { patch: string; hunks: readonly Hunk[]; workdir: string | null },
   cwd: string,
   updateFileMode: ApplyPatchFileUpdateMode,
-  resolvePath: PatchPathResolver = defaultPathResolver
+  resolvePath: PatchPathResolver = defaultPathResolver,
+  fs: ProjectFs = localFs
 ): Promise<ApplyPatchAction> {
   const effectiveCwd = args.workdir === null ? cwd : resolvePath(args.workdir, cwd);
   const changes = new Map<string, ApplyPatchFileChange>();
@@ -592,7 +605,7 @@ export async function verifyApplyPatchArgs(
     // The budget guards a file this call is about to read off disk. A path an earlier hunk in
     // this patch already wrote has no such read: its content is the patch's own text, which the
     // tool layer bounded before it ever reached the parser.
-    if (before === undefined) await verifyPatchFileTarget(path, hunk.kind === 'add_file');
+    if (before === undefined) await verifyPatchFileTarget(fs, path, hunk.kind === 'add_file');
 
     if (hunk.kind === 'add_file') {
       changes.set(path, { kind: 'add', content: hunk.contents });
@@ -603,7 +616,7 @@ export async function verifyApplyPatchArgs(
       let content: string;
       if (before === undefined) {
         try {
-          content = await readFileText(path);
+          content = await fs.readFileText(path);
         } catch (error) {
           throw ApplyPatchError.io(`Failed to read ${path}`, error);
         }
@@ -623,17 +636,18 @@ export async function verifyApplyPatchArgs(
       path,
       hunk.chunks,
       updateFileMode,
-      before?.present === true ? before.content : undefined
+      before?.present === true ? before.content : undefined,
+      fs
     );
     const movePath = hunk.movePath === null ? null : resolvePath(hunk.movePath, effectiveCwd);
-    if (movePath !== null && sameResolvedPath(path, movePath)) {
+    if (movePath !== null && sameResolvedPath(fs, path, movePath)) {
       throw invalidInput('move source and destination resolve to the same file');
     }
     // A move writes its destination before removing the source. Validate a disk-backed
     // destination now, while the dry run can still refuse the *whole* patch. A destination an
     // earlier hunk already created/removed is represented by `pending` and must use that
     // simulated state instead of re-reading stale disk state.
-    if (movePath !== null && !pending.has(movePath)) await verifyPatchFileTarget(movePath, true);
+    if (movePath !== null && !pending.has(movePath)) await verifyPatchFileTarget(fs, movePath, true);
     changes.set(path, { kind: 'update', movePath, newContent: newContents });
     if (movePath === null) {
       pending.set(path, { present: true, content: newContents });

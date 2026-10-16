@@ -224,13 +224,18 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
 /** Values from the settings that the log may quote and that identify the user. */
 function configKnownValues(): string[] {
   const config = getConfig() as unknown as Record<string, any>;
-  const roots: Array<{ name?: string; path?: string }> = Array.isArray(config.roots) ? config.roots : [];
+  const roots: Array<{ name?: string; path?: string; remote?: { host?: string; path?: string } }> = Array.isArray(config.roots) ? config.roots : [];
   const tunnel = config.tunnel ?? {};
   const profiles: Array<{ name?: string }> = Array.isArray(tunnel.profiles) ? tunnel.profiles : [];
   return [
     // A computer name can be a person's ("Maxims-MacBook"); log lines may quote connector names.
     typeof config.connectorSuffix === 'string' ? config.connectorSuffix : '',
     ...roots.flatMap(root => [root.path ?? '', root.name ?? '']),
+    // A folder on a server (#1469): ssh's errors quote the address or the bare host name, and
+    // pwd and tool errors the server path, each without the saved `host:path` form.
+    ...roots.flatMap(root => root.remote
+      ? [root.remote.host ?? '', (root.remote.host ?? '').replace(/^.*@/, ''), root.remote.path ?? '']
+      : []),
     tunnel.profileName ?? '', tunnel.tunnelId ?? '', tunnel.desktopTunnelId ?? '', tunnel.pluginsTunnelId ?? '', tunnel.binaryPath ?? '',
     ...profiles.map(profile => profile.name ?? '')
   ].filter((value): value is string => typeof value === 'string');

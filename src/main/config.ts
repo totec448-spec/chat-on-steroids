@@ -216,7 +216,13 @@ const rootSchema = z.object({
     .min(1)
     .max(32)
     .regex(/^[a-z0-9][a-z0-9._-]*$/, 'Root names are lowercase letters, digits, dot, dash, underscore'),
-  path: z.string().min(2).max(4096)
+  path: z.string().min(2).max(4096),
+  // A folder on a server (#1469): the same address rules as parseRemote, and an absolute path.
+  remote: z.object({
+    host: z.string().min(1).max(255).regex(/^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9_][A-Za-z0-9._-]*|[0-9A-Fa-f:.]+)$/),
+    port: z.number().int().min(1).max(65535).optional(),
+    path: z.string().min(1).max(4096).regex(/^\//)
+  }).optional()
 });
 
 /**
