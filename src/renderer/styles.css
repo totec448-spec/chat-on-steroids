@@ -3949,6 +3949,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .project-heading[data-sort-handle] { cursor: grab; user-select: none; }
 .project-heading::-webkit-details-marker { display: none; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A project in a folder on a server (#1469). */
+.project-badge { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--soft); font-size: 10px; font-weight: 600; letter-spacing: .04em; line-height: 16px; }
 /* A project's color tints its folder; the menu (⋯ or a right click) changes it. */
 .project-group[data-project-color='blue'] > .project-heading > .ico { color: #4c7fc1; }
 .project-group[data-project-color='green'] > .project-heading > .ico { color: #3f9b68; }

@@ -2447,5 +2447,14 @@
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "O acesso ao ambiente de trabalho deixou de funcionar após a atualização: o macOS ainda o mostra como permitido, mas tem de voltar a pedir.",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "O acesso ao ambiente de trabalho está ativado, mas o macOS não deu ao Chat On Steroids a permissão de que precisa.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "O macOS ainda mostra o Chat On Steroids como permitido, mas essa permissão pertence a uma versão anterior: sem assinatura de programador, cada atualização é uma aplicação nova para o macOS. Escolha Reparar permissões, permita quando o macOS pedir e depois feche completamente a aplicação e volte a abri-la.",
-  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Escolha Reparar permissões, permita quando o macOS pedir e depois feche completamente a aplicação e volte a abri-la. Isto também corrige uma permissão que as Definições do Sistema mostram como permitida, mas que deixou de se aplicar após uma atualização."
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Escolha Reparar permissões, permita quando o macOS pedir e depois feche completamente a aplicação e volte a abri-la. Isto também corrige uma permissão que as Definições do Sistema mostram como permitida, mas que deixou de se aplicar após uma atualização.",
+  "Folder on this computer…": "Pasta neste computador…",
+  "Folder on a server (SSH)…": "Pasta num servidor (SSH)…",
+  "Test and add": "Testar e adicionar",
+  "Add a folder on a server": "Adicionar uma pasta num servidor",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "O Chat On Steroids liga-se com a sua própria configuração SSH: o seu ~/.ssh/config, agente, chaves e anfitriões conhecidos. O início de sessão funciona apenas com uma chave, e nada é instalado no servidor.",
+  "SSH address": "Endereço SSH",
+  "Folder on the server": "Pasta no servidor",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "eu@servidor, eu@servidor:2222 ou um Host do ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app ou ~/app"
 }

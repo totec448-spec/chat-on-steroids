@@ -2447,5 +2447,14 @@
   "Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.": "Quyền truy cập Desktop đã ngừng hoạt động sau khi cập nhật: macOS vẫn hiển thị là đã cho phép nhưng cần được hỏi lại.",
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.": "Quyền truy cập Desktop đang bật, nhưng macOS chưa cấp cho Chat On Steroids quyền cần thiết.",
   "macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.": "macOS vẫn hiển thị Chat On Steroids là đã được cho phép, nhưng quyền đó thuộc về phiên bản trước: không có chữ ký nhà phát triển, mỗi bản cập nhật là một ứng dụng mới đối với macOS. Chọn Sửa quyền, cho phép khi macOS hỏi, sau đó thoát hoàn toàn và mở lại ứng dụng.",
-  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Chọn Sửa quyền, cho phép khi macOS hỏi, sau đó thoát hoàn toàn và mở lại ứng dụng. Thao tác này cũng sửa một quyền mà Cài đặt hệ thống hiển thị là đã cho phép nhưng không còn hiệu lực sau khi cập nhật."
+  "Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.": "Chọn Sửa quyền, cho phép khi macOS hỏi, sau đó thoát hoàn toàn và mở lại ứng dụng. Thao tác này cũng sửa một quyền mà Cài đặt hệ thống hiển thị là đã cho phép nhưng không còn hiệu lực sau khi cập nhật.",
+  "Folder on this computer…": "Thư mục trên máy tính này…",
+  "Folder on a server (SSH)…": "Thư mục trên máy chủ (SSH)…",
+  "Test and add": "Kiểm tra và thêm",
+  "Add a folder on a server": "Thêm thư mục trên máy chủ",
+  "Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat On Steroids kết nối bằng thiết lập SSH của riêng bạn: ~/.ssh/config, agent, khóa và các máy chủ đã biết. Chỉ đăng nhập được bằng khóa, và không có gì được cài trên máy chủ.",
+  "SSH address": "Địa chỉ SSH",
+  "Folder on the server": "Thư mục trên máy chủ",
+  "me@server, me@server:2222 or a Host from ~/.ssh/config": "toi@maychu, toi@maychu:2222 hoặc một Host trong ~/.ssh/config",
+  "/srv/app or ~/app": "/srv/app hoặc ~/app"
 }

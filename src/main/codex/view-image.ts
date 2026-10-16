@@ -23,7 +23,7 @@
 
 import sharp from 'sharp';
 
-import { getMetadata, readFile } from './filesystem.js';
+import { localFs, type ProjectFs } from '../remote/project-fs.js';
 import { imageMime, validateImageStructure, formatBytes, MAX_IMAGE_BYTES, type SupportedImageMime } from '../fsops.js';
 
 export const VIEW_IMAGE_DESCRIPTION =
@@ -136,11 +136,12 @@ export async function viewImage(
   detail: ImageDetail | null,
   options: ViewImageOptions = DEFAULT_VIEW_IMAGE_OPTIONS,
   modelVisiblePath: string = path,
-  maxBytes: number = MAX_VIEW_IMAGE_BYTES
+  maxBytes: number = MAX_VIEW_IMAGE_BYTES,
+  fs: ProjectFs = localFs
 ): Promise<ViewImageResult> {
   let metadata;
   try {
-    metadata = await getMetadata(path);
+    metadata = await fs.getMetadata(path);
   } catch (error) {
     throw new ViewImageError(`unable to locate image at \`${modelVisiblePath}\`: ${describe(error, path, modelVisiblePath)}`);
   }
@@ -161,7 +162,7 @@ export async function viewImage(
     // Enforce the image transport ceiling on the opened file handle too. The metadata check above
     // gives the useful error before opening in the common case, while this closes the growth race
     // between stat and read without ever allocating up to the generic 512 MiB file-read limit.
-    fileBytes = await readFile(path, effectiveMaxBytes);
+    fileBytes = await fs.readFile(path, effectiveMaxBytes);
   } catch (error) {
     throw new ViewImageError(`unable to read image at \`${modelVisiblePath}\`: ${describe(error, path, modelVisiblePath)}`);
   }

@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
@@ -7,6 +8,8 @@ import { listDirectoryLevel, readTextFile, statInfo } from './codex/read-backend
 import { getProject, projectWorkspace } from './projects.js';
 import { rawPromises as fs } from './rawfs.js';
 import { isContained, nativePathIdentity, resolvePath, SandboxError } from './sandbox.js';
+import { fsForRoot, type ProjectFs } from './remote/project-fs.js';
+import { MAX_ATTACHMENT_BYTES } from './session/input-attachments.js';
 import type {
   ProjectDirectoryListing,
   ProjectFileKind,
@@ -144,6 +147,9 @@ async function context(projectId: string): Promise<{
 }> {
   const project = await getProject(projectId);
   if (!project) throw new Error('Project not found');
+  // Callers of this context act on this computer's disk; a server project's root (#1469) is a
+  // path on the server, so they never receive it. Files reads servers through `serverTarget`.
+  if (project.remote) throw new SandboxError('This project is in a folder on a server; this works only for projects on this computer.');
   const workspace = await projectWorkspace(projectId);
   return { projectName: project.name, ...workspace };
 }
@@ -222,13 +228,64 @@ export async function projectFileTarget(
   return { ...target, kind };
 }
 
+/**
+ * A project on a server (#1469): Files reads it over the project's SFTP session, with the same
+ * containment rules as the tools. Null for a project on this computer.
+ */
+async function serverTarget(projectId: string, relativeInput: string): Promise<{ projectName: string; path: string; real: string; fs: ProjectFs } | null> {
+  const project = await getProject(projectId);
+  if (!project?.remote) return null;
+  const relative = normaliseRelative(relativeInput);
+  const workspace = await projectWorkspace(projectId);
+  const resolved = await resolvePath(getConfig().roots, relative ? `${workspace.virtual}/${relative}` : workspace.virtual, { remote: true });
+  return { projectName: project.name, path: relative, real: resolved.real, fs: fsForRoot(resolved.root) };
+}
+
+/**
+ * A copy of a server project's file on this computer, for Attach: streamed over SFTP into a
+ * private temporary folder (never held whole in memory), named like the file, and removed by
+ * `cleanup`. Null for a project on this computer.
+ */
+export async function serverFileSnapshot(projectId: string, relativePath: string): Promise<{ file: string; cleanup(): Promise<void> } | null> {
+  const server = await serverTarget(projectId, relativePath);
+  if (!server) return null;
+  const meta = await server.fs.getMetadata(server.real);
+  if (!meta.isFile) throw new Error('Choose a regular file');
+  if (meta.size > MAX_ATTACHMENT_BYTES) throw new Error('Each attachment must be 512 MB or smaller');
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-attach-'));
+  const cleanup = () => fs.rm(folder, { recursive: true, force: true });
+  try {
+    const file = path.join(folder, path.posix.basename(server.real));
+    const output = await fs.open(file, 'wx');
+    try {
+      let bytes = 0;
+      for await (const chunk of server.fs.readFileStream(server.real)) {
+        bytes += chunk.length;
+        if (bytes > MAX_ATTACHMENT_BYTES) throw new Error('Each attachment must be 512 MB or smaller');
+        await output.write(chunk);
+      }
+    } finally { await output.close(); }
+    return { file, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+
+const SERVER_EDITS = 'Files in a server folder cannot be changed from the app yet; ChatGPT can still change them with its tools.';
+
+async function refuseServerEdit(projectId: string): Promise<void> {
+  if ((await getProject(projectId))?.remote) throw new Error(SERVER_EDITS);
+}
+
 /** Repository internals and Finder metadata, hidden in the Files tree as editors do. Core tools still see them. */
 const HIDDEN_ENTRIES = new Set(['.git', '.DS_Store']);
 
 export async function listProjectDirectory(projectId: string, relativeDirectory = ''): Promise<ProjectDirectoryListing> {
-  const target = await projectFileTarget(projectId, relativeDirectory, { allowRoot: true });
-  if (target.kind !== 'directory') throw new Error('Choose a project folder');
-  const listed = await listDirectoryLevel(target.real, target.path, MAX_DIRECTORY_ENTRIES, false);
+  const server = await serverTarget(projectId, relativeDirectory);
+  const target = server ?? await projectFileTarget(projectId, relativeDirectory, { allowRoot: true });
+  if (server ? !(await server.fs.getMetadata(server.real)).isDirectory : (target as ProjectFileTarget).kind !== 'directory') throw new Error('Choose a project folder');
+  const listed = await listDirectoryLevel(target.real, target.path, MAX_DIRECTORY_ENTRIES, false, server?.fs);
   return {
     projectId,
     projectName: target.projectName,
@@ -244,6 +301,8 @@ export async function listProjectDirectory(projectId: string, relativeDirectory 
 }
 
 export async function previewProjectFile(projectId: string, relativePath: string): Promise<ProjectFilePreview> {
+  const server = await serverTarget(projectId, relativePath);
+  if (server) return await previewServerFile(projectId, server);
   const target = await projectFileTarget(projectId, relativePath, { allowRoot: false, fileOnly: true });
   const info = await statInfo(target.real, target.path, { scanContent: true });
   if (info.type !== 'file') throw new Error('Choose a regular file');
@@ -430,12 +489,37 @@ export async function previewProjectFile(projectId: string, relativePath: string
   };
 }
 
+/** Text from a server folder, under the same bounds; images and PDFs are not previewed there yet. */
+async function previewServerFile(projectId: string, target: { projectName: string; path: string; real: string; fs: ProjectFs }): Promise<ProjectFilePreview> {
+  if (!target.path) throw new Error('Choose a regular file');
+  const info = await statInfo(target.real, target.path, { scanContent: true, fs: target.fs });
+  if (info.type !== 'file') throw new Error('Choose a regular file');
+  const base = { projectId, projectName: target.projectName, path: target.path, name: path.posix.basename(target.path), bytes: info.bytes, modifiedAt: info.modified };
+  const extension = path.posix.extname(target.path).toLowerCase();
+  if (IMAGE_MIME_BY_EXTENSION.has(extension) || extension === '.pdf' || info.binary) {
+    return { ...base, binary: true, text: null, truncated: false,
+      note: info.binary && !IMAGE_MIME_BY_EXTENSION.has(extension) && extension !== '.pdf'
+        ? 'Binary file, so there is no text preview.'
+        : 'Previews of images and PDFs in a server folder are not available yet.' };
+  }
+  try {
+    const read = await readTextFile(target.real, { maxBytes: MAX_PREVIEW_BYTES, fs: target.fs });
+    return { ...base, binary: false, text: read.text, truncated: read.truncated || read.hasMore };
+  } catch (error) {
+    if (error instanceof Error && /Line \d+ is larger than max_bytes=/.test(error.message)) {
+      return { ...base, binary: false, text: null, truncated: true, note: 'This file contains a line that is too large for the bounded preview.' };
+    }
+    throw error;
+  }
+}
+
 export async function createProjectEntry(
   projectId: string,
   relativeDirectory: string,
   nameInput: string,
   kind: 'file' | 'directory'
 ): Promise<ProjectFileMutationResult> {
+  await refuseServerEdit(projectId);
   const directory = await projectFileTarget(projectId, relativeDirectory, { allowRoot: true });
   if (directory.kind !== 'directory') throw new Error('Choose a project folder');
   const name = leafName(nameInput);
@@ -465,6 +549,7 @@ export async function renameProjectEntry(
   relativePath: string,
   nameInput: string
 ): Promise<ProjectFileMutationResult> {
+  await refuseServerEdit(projectId);
   const source = await projectFileTarget(projectId, relativePath, { allowRoot: false });
   if (source.kind !== 'file' && source.kind !== 'directory') throw new Error('Only regular files and folders can be renamed');
   const name = leafName(nameInput);
@@ -504,6 +589,7 @@ export async function saveProjectTextFile(
   expectedBytes: number,
   expectedRevision: string
 ): Promise<ProjectFileSaveResult> {
+  await refuseServerEdit(projectId);
   const encodedBytes = Buffer.byteLength(text, 'utf8');
   if (encodedBytes > MAX_PREVIEW_BYTES) {
     throw new Error(`Edited files must be ${MAX_PREVIEW_BYTES} bytes or smaller`);
