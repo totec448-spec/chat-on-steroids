@@ -2471,5 +2471,7 @@
   "Mac permissions repaired": "Đã sửa quyền trên Mac",
   "If an update left Desktop access broken on a Mac, one click repairs it.": "Nếu bản cập nhật làm hỏng quyền truy cập màn hình trên Mac, một cú nhấp sẽ sửa lại.",
   "Prefer Plugins": "Ưu tiên Plugins",
-  "If you like, messages the app sends use your Plugins app instead of Core.": "Nếu muốn, tin nhắn do ứng dụng gửi sẽ dùng ứng dụng Plugins thay cho Core."
+  "If you like, messages the app sends use your Plugins app instead of Core.": "Nếu muốn, tin nhắn do ứng dụng gửi sẽ dùng ứng dụng Plugins thay cho Core.",
+  "This task was sent or removed before your edit was saved.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu, nên bản chỉnh sửa đã được đưa vào ô soạn tin."
 }

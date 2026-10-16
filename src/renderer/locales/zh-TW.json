@@ -2471,5 +2471,7 @@
   "Mac permissions repaired": "Mac 權限已修復",
   "If an update left Desktop access broken on a Mac, one click repairs it.": "如果更新導致 Mac 上的桌面存取失效，點一下即可修復。",
   "Prefer Plugins": "優先使用 Plugins",
-  "If you like, messages the app sends use your Plugins app instead of Core.": "如果需要，應用程式傳送的訊息會使用你的 Plugins 應用程式而不是 Core。"
+  "If you like, messages the app sends use your Plugins app instead of Core.": "如果需要，應用程式傳送的訊息會使用你的 Plugins 應用程式而不是 Core。",
+  "This task was sent or removed before your edit was saved.": "在你的修改儲存之前，此任務已傳送或被移除。",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "在你的修改儲存之前，此任務已傳送或被移除，因此你的修改已放入輸入框。"
 }

@@ -2471,5 +2471,7 @@
   "Mac permissions repaired": "Mac 권한 복구",
   "If an update left Desktop access broken on a Mac, one click repairs it.": "업데이트 후 Mac의 데스크톱 접근이 작동하지 않으면 한 번의 클릭으로 복구합니다.",
   "Prefer Plugins": "Plugins 우선 사용",
-  "If you like, messages the app sends use your Plugins app instead of Core.": "원하면 앱이 보내는 메시지에 Core 대신 Plugins 앱을 사용합니다."
+  "If you like, messages the app sends use your Plugins app instead of Core.": "원하면 앱이 보내는 메시지에 Core 대신 Plugins 앱을 사용합니다.",
+  "This task was sent or removed before your edit was saved.": "수정 내용을 저장하기 전에 이 작업이 전송되었거나 삭제되었습니다.",
+  "This task was sent or removed before your edit was saved, so your edit is in the composer.": "수정 내용을 저장하기 전에 이 작업이 전송되었거나 삭제되어, 수정 내용을 입력란에 넣었습니다."
 }
