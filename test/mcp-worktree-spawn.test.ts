@@ -106,6 +106,20 @@ describe('MCP worker spawn with automatic Git isolation', () => {
     expect(allocation).not.toHaveBeenCalled();
   });
 
+  // #1469: a project on a server has no checkout on this computer to branch from. Even when a
+  // local folder of the same path happens to be a Git repository, workers share the server folder.
+  it('lets workers in a server project share its folder instead of making a local worktree', async () => {
+    const defaults = defaultConfig();
+    await saveConfig({ ...defaults, roots: [{ name: 'approved', path: temp }, { name: 'server', path: `me@devbox:${repository}`, remote: { host: 'me@devbox', path: repository } }],
+      multiAgent: { ...defaults.multiAgent, enabled: true, autoWorktrees: true } });
+    setWorkspaceFor(`chat:${primeConversation}`, { real: repository, virtual: '/server' });
+    const allocation = vi.spyOn(worktrees, 'allocWorkerWorkspace');
+    const response = await spawn([{ task: 'Work in the server project' }]);
+    expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
+    expect(response.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('share its folder') });
+    expect(allocation).not.toHaveBeenCalled();
+  });
+
   it('refuses to promote an orphaned managed worker to a new prime after broker eviction', async () => {
     // The exact session-origin/tombstone fence is resolved asynchronously at MCP admission.
     vi.spyOn(agents, 'managedWorkerIsolationRequired').mockResolvedValueOnce(true);

@@ -7,6 +7,8 @@ import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/mai
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { addRemoteProject, listProjects, projectWorkspace } from '../src/main/projects.js';
 import { closeRemoteSessions, setSftpOpenerForTests } from '../src/main/remote/ssh.js';
+import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, saveProjectTextFile } from '../src/main/project-files.js';
+import { readProjectGitSnapshot } from '../src/main/project-git.js';
 import { SftpClient } from '../src/main/remote/sftp.js';
 
 /**
@@ -73,5 +75,30 @@ real('projects on a server', () => {
     expect(await projectWorkspace(project.id)).toEqual({ virtual: '/app', real: path.join(home, 'app') });
     await fs.rm(path.join(home, 'app'), { recursive: true });
     await expect(projectWorkspace(project.id)).rejects.toThrow(/server folder is unavailable: .*not available on the server/);
+  });
+
+  // The Files panel browses a server project over the same SFTP session; editing from the app
+  // waits for a later version and says so instead of acting on this computer's disk.
+  it('lists and previews a server project in Files, and refuses editing it there', async () => {
+    setSftpOpenerForTests(connect);
+    await fs.writeFile(path.join(home, 'app', 'README.md'), '# hi\nthere\n');
+    await fs.mkdir(path.join(home, 'app', '.git'));
+    await fs.writeFile(path.join(home, 'app', 'src', 'a.ts'), 'export {};\n');
+    await fs.writeFile(path.join(home, 'app', 'pixel.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const project = await addRemoteProject('me@devbox', '~/app', { connect });
+    const top = await listProjectDirectory(project.id);
+    expect(top.entries.map(entry => entry.name).sort()).toEqual(['README.md', 'pixel.png', 'src']);
+    expect((await listProjectDirectory(project.id, 'src')).entries).toMatchObject([{ name: 'a.ts', path: 'src/a.ts', kind: 'file' }]);
+    expect(await previewProjectFile(project.id, 'README.md')).toMatchObject({ name: 'README.md', binary: false, text: '# hi\nthere' });
+    expect(await previewProjectFile(project.id, 'pixel.png')).toMatchObject({ binary: true, text: null, note: expect.stringMatching(/server/) });
+    await expect(listProjectDirectory(project.id, '../home')).rejects.toThrow();
+    await expect(createProjectEntry(project.id, '', 'new.ts', 'file')).rejects.toThrow(/server/);
+    await expect(renameProjectEntry(project.id, 'README.md', 'X.md')).rejects.toThrow(/server/);
+    await expect(saveProjectTextFile(project.id, 'README.md', 'x', '', 0, '')).rejects.toThrow(/server/);
+    expect(await fs.readFile(path.join(home, 'app', 'README.md'), 'utf8')).toBe('# hi\nthere\n');
+    // Everything that works on this computer's disk (Git, the file watcher) refuses the server
+    // project's root instead of acting on a local path that happens to have the same name.
+    await expect(projectFileTarget(project.id, '', { allowRoot: true })).rejects.toThrow(/server/);
+    expect(await readProjectGitSnapshot(project.id)).toMatchObject({ state: 'unavailable', message: expect.stringMatching(/server/) });
   });
 });
