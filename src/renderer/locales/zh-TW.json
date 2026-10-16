@@ -2456,5 +2456,7 @@
   "SSH address": "SSH 位址",
   "Folder on the server": "伺服器上的資料夾",
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server、me@server:2222 或 ~/.ssh/config 中的 Host",
-  "/srv/app or ~/app": "/srv/app 或 ~/app"
+  "/srv/app or ~/app": "/srv/app 或 ~/app",
+  "Prefer Plugins on app-sent messages": "應用程式傳送的訊息優先使用 Plugins",
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "啟用後，COS 在應用程式傳送的一般訊息中使用 Plugins 而非 Core。目標、循環、工作代理及復原始終使用 Core。每則訊息僅提及一個應用程式。直接在 ChatGPT 傳送的訊息不受影響。"
 }

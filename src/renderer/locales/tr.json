@@ -2456,5 +2456,7 @@
   "SSH address": "SSH adresi",
   "Folder on the server": "Sunucudaki klasör",
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "ben@sunucu, ben@sunucu:2222 veya ~/.ssh/config içindeki bir Host",
-  "/srv/app or ~/app": "/srv/app veya ~/app"
+  "/srv/app or ~/app": "/srv/app veya ~/app",
+  "Prefer Plugins on app-sent messages": "Uygulamanın gönderdiği iletilerde Plugins kullan",
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde COS, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez."
 }
