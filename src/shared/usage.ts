@@ -1,6 +1,10 @@
 export interface ModelUsage {
   model: string;
-  scope: 'model' | 'feature' | 'shared';
+  /**
+   * `codex`: a window from ChatGPT's `wham/usage`, which is Codex's usage (the 5-hour and weekly
+   * limits Codex's /status and ChatGPT's sidebar show), never a limit on ChatGPT chat messages.
+   */
+  scope: 'model' | 'feature' | 'codex';
   remaining: number | null;
   remainingPercent: number | null;
   resetAt: number | null;
