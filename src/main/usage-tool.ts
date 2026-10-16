@@ -15,14 +15,25 @@ const windowName = (seconds: number | null) => seconds === 604800 ? 'weekly' : s
 
 export function usageReport(chatgpt: ModelUsage[], other: ProviderUsage, now: number): { text: string; structured: Record<string, unknown> } {
   const lines: string[] = [];
+  const left = (row: ModelUsage) => row.resetAt !== null && row.resetAt <= now ? 'reset since this reading'
+    : row.remaining !== null ? `${tokens(row.remaining)} remaining` : row.remainingPercent !== null ? `${Math.round(row.remainingPercent)}% remaining` : 'not reported';
+  const resets = (row: ModelUsage) => row.resetAt && row.resetAt > now ? `, resets ${iso(row.resetAt)}` : '';
+  // ChatGPT's page also reports Codex's windows (wham/usage); they never limit chat messages.
+  const codex = chatgpt.filter(row => row.scope === 'codex');
+  chatgpt = chatgpt.filter(row => row.scope !== 'codex');
   if (!chatgpt.length) lines.push('ChatGPT limits: not reported yet (they are read when the ChatGPT page shows them).');
   else {
     lines.push(`ChatGPT (reported by ChatGPT, ${ago(Math.max(...chatgpt.map(row => row.observedAt)), now)}):`);
     for (const row of chatgpt) {
-      const name = row.scope === 'shared' ? `${windowName(row.windowSeconds) || 'shared'} shared limit`.trim() : row.model;
-      const left = row.resetAt !== null && row.resetAt <= now ? 'reset since this reading'
-        : row.remaining !== null ? `${tokens(row.remaining)} remaining` : row.remainingPercent !== null ? `${Math.round(row.remainingPercent)}% remaining` : 'not reported';
-      lines.push(`- ${name}: ${left}${row.resetAt && row.resetAt > now ? `, resets ${iso(row.resetAt)}` : ''}`);
+      const name = row.model;
+      lines.push(`- ${name}: ${left(row)}${resets(row)}`);
+    }
+  }
+  if (codex.length) {
+    lines.push(`Codex (reported by ChatGPT, ${ago(Math.max(...codex.map(row => row.observedAt)), now)}; Codex usage, not ChatGPT chat messages):`);
+    for (const row of codex) {
+      const window = row.windowSeconds === 604800 ? 'weekly limit' : row.windowSeconds ? `${windowName(row.windowSeconds)} limit` : 'limit';
+      lines.push(`- ${row.model === 'Codex' ? '' : `${row.model} `}${window}: ${left(row)}${resets(row)}`);
     }
   }
   if (!other.enabled) lines.push('Other apps: reading Codex and Claude Code usage is switched off in Settings › Usage.');
@@ -54,7 +65,7 @@ export function usageReport(chatgpt: ModelUsage[], other: ProviderUsage, now: nu
   }
   return {
     text: lines.join('\n'),
-    structured: { readAt: now, chatgpt: { source: 'reported by ChatGPT', limits: chatgpt },
+    structured: { readAt: now, chatgpt: { source: 'reported by ChatGPT', limits: chatgpt, codex },
       otherApps: other.enabled ? 'on' : 'off', codex: other.codex, claude: other.claude }
   };
 }
