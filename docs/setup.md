@@ -129,6 +129,28 @@ A read that waits on something the app cannot answer within 15 seconds gets `504
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave
 them behind, so a caller should treat a refused connection as "not running".
 
+## Projects on a server (SSH)
+
+A project can be a folder on another computer that you reach with SSH. Click **+** next to
+**Projects** in the sidebar, choose **Folder on a server (SSH)…**, then enter:
+
+- **SSH address**: `me@server`, `me@server:2222`, or a `Host` name from your `~/.ssh/config`.
+- **Folder on the server**: an absolute path such as `/srv/app`, or one in your home folder such as `~/app`.
+
+**Test and add** connects once and checks that the folder exists. Chat On Steroids uses your own
+SSH setup (`~/.ssh/config`, your agent, keys and known hosts) and installs nothing on the server.
+The server needs SSH with SFTP and a POSIX shell (Linux, macOS, BSD).
+
+- **Sign-in with a key only.** The app can't answer password prompts. If `ssh <address>` in a
+  terminal asks for a password, add your key to the server or your agent first.
+- **New servers:** connect once in a terminal and confirm the host key; until then the app says
+  "This server is not trusted yet".
+- **What works there:** reading and searching files, images, `apply_patch`, commands (each command
+  is its own SSH connection) and the workspace terminal. Files in the app lists and previews text.
+- **Not yet:** editing files from the app's Files panel, the Git panel, and separate worktrees for
+  sub-agents (they work in the server folder itself). ChatGPT can still change files and run Git
+  with its tools.
+
 ## Permissions and plugins
 
 | Plugin in ChatGPT | What it adds |
