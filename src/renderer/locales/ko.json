@@ -2310,7 +2310,8 @@
   "Send into the running turn now": "진행 중인 턴에 지금 보내기",
   "The turn ended before this message could join it. It stays queued.": "이 메시지가 합류하기 전에 턴이 끝났습니다. 대기열에 남아 있습니다.",
   "Messages during a running turn": "진행 중인 턴 동안의 메시지",
-  "What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.": "ChatGPT가 작업하는 동안 보낸 메시지의 기본 동작입니다. ⌘⇧Enter(Windows와 Linux에서는 Ctrl+Shift+Enter)를 누르면 다른 방식으로 보냅니다.",
+  "What a message you send while ChatGPT works does by default. {0} sends it the other way.": "ChatGPT가 작업하는 동안 보낸 메시지의 기본 동작입니다. {0}를 누르면 다른 방식으로 보냅니다.",
+  "Shift": "Shift",
   "Join the running turn": "진행 중인 턴에 합류",
   "Wait until the turn ends": "턴이 끝날 때까지 기다리기",
   "Notify when a chat finishes": "채팅이 끝나면 알림",
@@ -2321,7 +2322,7 @@
   "Previous match": "이전 항목",
   "Next match": "다음 항목",
   "Send messages with": "메시지 보내기 키",
-  "Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.": "입력한 내용을 보내는 키입니다. ⌘Enter(Windows와 Linux에서는 Ctrl+Enter)를 선택하면 Enter는 줄을 바꿉니다.",
+  "Which key sends what you type. With {0}, Enter starts a new line.": "입력한 내용을 보내는 키입니다. {0}를 선택하면 Enter는 줄을 바꿉니다.",
   "Enter": "Enter",
   "⌘Enter / Ctrl+Enter": "⌘Enter / Ctrl+Enter",
   "Pin": "고정",
@@ -2461,5 +2462,5 @@
   "me@server, me@server:2222 or a Host from ~/.ssh/config": "me@server, me@server:2222 또는 ~/.ssh/config의 Host",
   "/srv/app or ~/app": "/srv/app 또는 ~/app",
   "Prefer Plugins on app-sent messages": "앱에서 보내는 메시지에 Plugins 우선 사용",
-  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary prompts sent by COS. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "활성화하면 COS에서 보내는 일반 메시지에 Core 대신 Plugins를 사용합니다. Goal, Loop, 워커 및 복구에서는 항상 Core를 사용합니다. 메시지당 한 앱만 멘션합니다. ChatGPT에서 직접 보낸 메시지는 변경되지 않습니다."
+  "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "활성화하면 Chat On Steroids에서 보내는 일반 메시지에 Core 대신 Plugins를 사용합니다. Goal, Loop, 워커 및 복구에서는 항상 Core를 사용합니다. 메시지당 한 앱만 멘션합니다. ChatGPT에서 직접 보낸 메시지는 변경되지 않습니다."
 }
