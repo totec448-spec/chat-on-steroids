@@ -36,7 +36,7 @@ it('resets only the named permissions, for this app only', async () => {
 
 it('names the bundle the packaged app is built with', () => {
   const builder = readFileSync(new URL('../electron-builder.yml', import.meta.url), 'utf8');
-  expect(builder).toMatch(new RegExp(`^appId: ${MACOS_BUNDLE_ID.replace(/\./g, '\\.')}$`, 'm'));
+  expect(builder.split(/\r?\n/)).toContain(`appId: ${MACOS_BUNDLE_ID}`);
 });
 
 it('repairs only what is missing: resets it, then makes macOS ask for exactly that again', async () => {
