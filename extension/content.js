@@ -13195,7 +13195,8 @@
         : input.recovery || agent ? currentCoreMention()
           // Plugins replaces Core only on ordinary prompts, and only this computer's own Plugins app;
           // when that app is not found the message keeps Core rather than going out with no app.
-          : mentionPlugins && !input.finishOwner && !input.automation && input.purpose !== 'rotation'
+          // `automation` is 'off' on every ordinary message; only Goal and Loop sends are automated.
+          : mentionPlugins && !input.finishOwner && input.automation !== 'goal' && input.automation !== 'loop' && input.purpose !== 'rotation'
             ? currentPluginsMention() ?? (mentionCore ? currentCoreMention() : null)
             : mentionCore ? currentCoreMention() : null,
       since => sentRequestSince(since, forEpoch), intoTurn);
