@@ -491,6 +491,11 @@ export interface ConnectionStatus {
    * connected" from "we know we were connected N seconds ago".
    */
   handshakeAt: number | null;
+  /**
+   * Why an `offline` state is offline: `service` when OpenAI's tunnel service answered with errors,
+   * so this computer's internet works. Null or absent: OpenAI could not be reached at all.
+   */
+  offlineCause?: 'service' | null;
   /** Epoch ms of the last request ChatGPT sent to this app, end-to-end proof. */
   lastRequestAt: number | null;
   /**
@@ -791,6 +796,12 @@ export interface MacOSDesktopAccessStatus {
   accessibility: MacOSPermissionState;
   checkedAt: number;
   error: string | null;
+  /**
+   * Which permissions this app was ever seen holding. A missing permission that was granted
+   * before usually means an update changed the app's signature (#1469 era, live 2026-10-15):
+   * System Settings still shows it on, and only resetting it lets macOS ask again.
+   */
+  grantedBefore?: { screen: boolean; accessibility: boolean };
 }
 
 /**

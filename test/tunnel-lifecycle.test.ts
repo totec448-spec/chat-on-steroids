@@ -219,6 +219,39 @@ describe('OpenAI tunnel process ownership', () => {
     }
   });
 
+  // 2026-10-15 from 17:17 UTC on two machines: OpenAI's tunnel service answered every poll with
+  // 503/504 and the app said "No internet" while this computer's internet worked.
+  it('says OpenAI\'s tunnel service is down, not the internet, when the control plane answers with 5xx', async () => {
+    vi.useFakeTimers();
+    const reports: any[] = [];
+    const startedAt = Date.now();
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/readyz') return new Response('ok');
+      if (url.pathname === '/metrics') return new Response(`commands_poll_last_successful_timestamp_seconds ${Math.floor(startedAt / 1000)}\ncommands_poll_errors_total 4\n`);
+      if (url.pathname === '/api/status') return Response.json({ uptime_seconds: 50, channels: [] });
+      return new Response('missing', { status: 404 });
+    }));
+    const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/secret', settings, apiKey: 'test', report: r => reports.push(r) });
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      fixture.health.url = 'http://127.0.0.1:34567';
+      await vi.advanceTimersByTimeAsync(1_000);
+      const child = fixture.children[0];
+      for (let minute = 0; minute < 4; minute += 1) {
+        child.stderr.emit('data', Buffer.from('WARN poll failed; backing off: controlplane client: unexpected status 503: tunnel_transport_unavailable: Tunnel transport temporarily unavailable\n'));
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      const offline = reports.filter(r => r.state === 'offline').at(-1);
+      expect(offline).toBeDefined();
+      expect(offline.offlineCause).toBe('service');
+      expect(offline.detail).toContain('internet works');
+      expect(offline.detail).not.toContain('cannot reach OpenAI');
+    } finally {
+      await handle.stop();
+    }
+  });
+
   it('classifies structured control-plane context together with its network error', async () => {
     vi.useFakeTimers();
     const reports: any[] = [];
