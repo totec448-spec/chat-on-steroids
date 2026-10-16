@@ -13216,6 +13216,15 @@
             try { cleared = await draft.clear(); } catch { /* An unclearable draft is no proof. */ }
             if (cleared) return fail('Native Send did not take the message.');
           }
+          // The app's own automatic continue is never the person's text. A rotation that fired as
+          // the model finished collided with the turn's end: nothing was sent, ChatGPT redrew the
+          // question, and the continue sat in the composer until the person's next message failed
+          // on "an unsent draft" (2.1.40 release round). Still uncertain, so never resent, but an
+          // exact copy of it is taken out of the composer.
+          if ((input.purpose === 'rotation' || input.recovery) && onTarget() &&
+              sendText(CLF_DOM.composer()?.textContent) === submittedText) {
+            try { await draft.clear(); } catch { /* An unclearable draft stays where it is. */ }
+          }
           return fail('Native Send receipt was not confirmed.');
         }
         return false;
