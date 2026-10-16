@@ -162,6 +162,14 @@ real('projects on a server', () => {
     } finally { resetInputForTests(); }
   });
 
+  // An unreachable server stops a new chat with ssh's reason, never a vague file error.
+  it('says why a chat in a server project cannot start while the server is unreachable', async () => {
+    const project = await addRemoteProject('me@devbox', '~/app', { connect });
+    closeRemoteSessions();
+    setSftpOpenerForTests(async () => { throw new Error('The server was not found. Check the address or its Host entry in ~/.ssh/config.'); });
+    await expect(prepareSessionPrompt('Work here', { projectId: project.id })).rejects.toThrow(/server folder is unavailable: .*The server was not found/);
+  });
+
   it('refuses an AGENTS.md on the server that is a link out of the folder', async () => {
     const project = await addRemoteProject('me@devbox', '~/app', { connect });
     setSftpOpenerForTests(connect);
