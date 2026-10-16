@@ -54,14 +54,41 @@ export const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\
 const quoteFolder = (folder: string): string =>
   folder === '~' ? '~' : folder.startsWith('~/') ? `~/${shellQuote(folder.slice(2))}` : shellQuote(folder);
 
-/** The command line the server runs: in the project folder, through the person's login shell. */
-export function remoteCommand(folder: string, command: string): string {
-  return `cd -- ${quoteFolder(folder)} && exec "\${SHELL:-/bin/sh}" -lc ${shellQuote(command)}`;
+/**
+ * Characters every common login shell keeps as written inside single quotes: sh, bash, zsh, fish
+ * and csh/tcsh. sshd hands the remote part to the account's login shell, which must parse it;
+ * fish reads `\\` and `\'` inside single quotes and has no `${…}`, csh ends a quote at a newline
+ * and has no `:-`, and `%` and a leading `-` mean something to printf.
+ */
+const PORTABLE = /^[A-Za-z0-9 .,:/=_+@]$/;
+
+/**
+ * A POSIX script, as a remote command any of those login shells runs unchanged: every other byte
+ * travels as a printf octal escape, and `/bin/sh` decodes and runs it.
+ */
+export function viaPosixShell(script: string): string {
+  let format = '';
+  for (const byte of Buffer.from(script, 'utf8')) {
+    const char = String.fromCharCode(byte);
+    format += byte < 0x80 && PORTABLE.test(char) ? char : `\\${byte.toString(8).padStart(3, '0')}`;
+  }
+  return `exec /bin/sh -c 'eval "$(printf "$0")"' '${format}'`;
 }
 
-/** An interactive login shell in the project folder, for the workspace terminal. */
+/**
+ * The command line the server runs: in the project folder, in a login shell for the account's
+ * environment. As on this computer (`detectShellType`), the command runs in the account's shell only
+ * when that is bash, zsh or sh; any other (fish, csh, dash, ksh) gets bash, then zsh, then /bin/sh,
+ * since the model writes POSIX shell commands.
+ */
+export function remoteCommand(folder: string, command: string): string {
+  return viaPosixShell(`cd -- ${quoteFolder(folder)} && s=\${SHELL:-/bin/sh} && case \${s##*/} in bash|zsh|sh) ;; ` +
+    `*) s=$(command -v bash 2>/dev/null || command -v zsh 2>/dev/null) || s=/bin/sh ;; esac && exec "$s" -lc ${shellQuote(command)}`);
+}
+
+/** An interactive login shell in the project folder, for the workspace terminal: the account's own. */
 export function remoteLoginShell(folder: string): string {
-  return `cd -- ${quoteFolder(folder)} && exec "\${SHELL:-/bin/sh}" -l`;
+  return viaPosixShell(`cd -- ${quoteFolder(folder)} && exec "\${SHELL:-/bin/sh}" -l`);
 }
 
 /** What ssh's own error output means for the person, in one sentence. */
