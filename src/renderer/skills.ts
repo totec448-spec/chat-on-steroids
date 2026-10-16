@@ -11,25 +11,59 @@ function inCodeOrLink(text: string, position: number): boolean {
   const fences = [...before.matchAll(/^ {0,3}(`{3,}|~{3,})[^\n]*$/gm)];
   if (fences.length % 2) return true;
   const lastFence = fences.at(-1)?.index ?? -1;
-  const local = before.slice(lastFence < 0 ? 0 : lastFence);
-  const ticks = [...local.matchAll(/(?<!\\)`/g)].length;
-  if (ticks % 2) return true;
+  const lineEnd = lastFence < 0 ? -1 : before.indexOf('\n', lastFence);
+  const inlineStart = lastFence < 0 ? 0 : lineEnd < 0 ? before.length : lineEnd + 1;
+  const local = before.slice(inlineStart);
+  let openTicks = 0;
+  for (let i = 0; i < local.length; i++) {
+    if (local[i] !== '`' || local[i - 1] === '\\') continue;
+    let end = i + 1;
+    while (local[end] === '`') end++;
+    const length = end - i;
+    if (!openTicks) openTicks = length;
+    else if (openTicks === length) openTicks = 0;
+    i = end - 1;
+  }
+  if (openTicks) return true;
   const openLink = before.lastIndexOf('](');
   if (openLink > before.lastIndexOf(')')) return true;
   return false;
+}
+
+function emailLike(query: string): boolean {
+  const at = query.indexOf('@');
+  if (at <= 0 || at !== query.lastIndexOf('@')) return false;
+  for (let i = 0; i < query.length; i++) {
+    if (query[i] === '/' || /\s/.test(query[i]!)) return false;
+  }
+  for (let i = at + 2; i < query.length - 1; i++) if (query[i] === '.') return true;
+  return false;
+}
+
+function fileToken(before: string): string | null {
+  let start = before.startsWith('@') ? 0 : -1;
+  const whitespace = /\s/;
+  for (let i = 0; i < before.length; i++) {
+    const char = before[i]!;
+    if (!whitespace.test(char)) continue;
+    const lineTerminator = char === '\n' || char === '\r' || char === '\u2028' || char === '\u2029';
+    const escaped = before[i - 1] === '\\' && !lineTerminator;
+    if (!escaped) start = before[i + 1] === '@' ? i + 1 : -1;
+    else if (start < 0 && before[i + 1] === '@') start = i + 1;
+  }
+  return start < 0 ? null : before.slice(start);
 }
 
 /** Returns a completion only for a collapsed caret in a safe slash or project-reference token. */
 export function skillCompletion(text: string, start: number, end = start): Completion | null {
   if (start !== end || /\S/.test(text.slice(end).split(/\s/, 1)[0] ?? '')) return null;
   const before = text.slice(0, start);
-  const file = /(?:^|\s)(@(?:\\.|[^\s])*)$/i.exec(before);
-  if (file) {
+  const fileReference = fileToken(before);
+  if (fileReference) {
     if (inCodeOrLink(text, start)) return null;
-    const at = start - file[1]!.length;
-    const token = file[1]!;
-    const query = token.slice(1).replace(/\\(.)/g, '$1');
-    if (/^[^/\s@]+@[^/\s@]+(?:\.[^/\s@]+)+$/.test(query) || query.startsWith('/') || query.split('/').some(part => part === '.' || part === '..')) return null;
+    const at = start - fileReference.length;
+    const query = fileReference.slice(1).replace(/\\(.)/g, '$1');
+    if (emailLike(query) || query.startsWith('/') || query.split('/').some(part => part === '.' || part === '..')) return null;
     const slash = query.lastIndexOf('/');
     return { start: at, end, query: slash < 0 ? query.toLowerCase() : query.slice(slash + 1).toLowerCase(),
       kind: 'file', ...(slash >= 0 ? { directory: query.slice(0, slash) } : {}) };
@@ -176,7 +210,7 @@ export function initSkills(options: Options) {
     const draft = split((prefixOwner === options.owner() ? displayedPrefix : '') + text);
     const prefix = draft.ids.includes(skill.id) ? draft.prefix
       : `${draft.prefix}${draft.prefix && !/\s$/.test(draft.prefix) ? '\n' : ''}/${skill.id}\n`;
-    close(); project(prefix + draft.body, 'authored', range.start); input.focus();
+    close(); project(prefix + draft.body, 'authored', range.start + replacement.length); input.focus();
   };
   const filtered = (query: string): LibrarySkill[] => {
     const needle = query.trim().toLocaleLowerCase();
