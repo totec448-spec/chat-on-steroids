@@ -268,7 +268,9 @@ describe('Goal decision backends', () => {
       // Never sent (the browser did not take it): its size proves nothing.
       browser.request.mockImplementationOnce(unanswered(false));
       goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'unsent' });
-      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1));
+      // Fake timers do not speed up the real file work before the request: on the release runner
+      // (8 s per neighboring test on Windows x64) it took longer than waitFor's default second.
+      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
       await vi.advanceTimersByTimeAsync(180_000);
       expect(await settled(id)).toMatchObject({ stage: 'failed' });
       full = (browser.request.mock.calls[0]?.[0] as string).length;
@@ -276,7 +278,7 @@ describe('Goal decision backends', () => {
 
       browser.request.mockImplementationOnce(unanswered(true));
       goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'refused' });
-      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(2), { timeout: 15_000 });
       expect((browser.request.mock.calls[1]?.[0] as string).length).toBe(full);
       await vi.advanceTimersByTimeAsync(180_000);
       expect(await settled(id)).toMatchObject({ stage: 'failed' });

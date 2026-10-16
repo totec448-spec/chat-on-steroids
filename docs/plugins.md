@@ -29,7 +29,7 @@ Prefer Plugins on app-sent messages** optionally mentions the installed **Chat O
 app instead of Core. This is off by default; only one app is mentioned per CoS-managed
 message. Goal, Loop, worker and recovery messages always use Core, and messages typed directly in ChatGPT
 are untouched. CoS selects only the Plugins app whose exact name and ID ChatGPT lists
-for this installation; missing/ambiguous identity adds no token. The setting does not
+for this installation; when that app is missing or ambiguous, the message mentions Core instead. The setting does not
 refresh a stale ChatGPT tool catalog or guarantee that ChatGPT exposes the MCP tools.
 
 Automatic refresh compares the name, description and input schema that the provider's

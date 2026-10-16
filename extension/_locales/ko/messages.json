@@ -335,6 +335,9 @@
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT가 텍스트를 받아들이지 않았습니다$1"
   },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT가 진행 중인 답변에서 보내기를 제공하지 않았고, 자동 계속을 위한 중지도 끝나지 않았습니다."
+  },
   "content_delivery_turn_changed": {
     "message": "직접 전달하기 전에 턴이 바뀌었습니다."
   },

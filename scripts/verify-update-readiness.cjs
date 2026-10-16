@@ -136,12 +136,22 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`);
     win.setContentSize(1100,850); await open('lang=en');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.update.latest='99.0.0';next.update.stage='ready';window.fixturePush(next)})()`);
-    await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:true,data:'cancelled'})`);
+    // A ready update is asked about in the app's own dialog, Keep working first (2.1.38).
+    for (const theme of ['light','dark']) {
+      await open('lang=en&theme='+theme);
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.update.latest='99.0.0';next.update.stage='ready';window.fixturePush(next)})()`);
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:true,data:'confirm'})`);
+      await until(`!!document.getElementById('updateRestartDialog')?.open`);
+      assert.equal(await js(`document.activeElement.textContent`),'Keep working','Keep working is the focused default');
+      assert.ok(await js(`document.getElementById('updateRestartDialog').textContent.includes('Version 99.0.0')`),'The dialog names the version');
+      await pause(900); await shot('restart-dialog-'+theme+'.png');
+      if (theme === 'dark') { await js(`document.querySelector('#updateRestartDialog .update-restart-keep').click()`); break; }
+    }
     await until(`!document.getElementById('updateAll').disabled`);
     assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,'Cancelling restart is not an error');
     assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false','A postponed update is still pending');
     assert.ok(await js(`document.querySelector('.toast').textContent.includes('Update postponed. You can keep working.')`));
-    assert.deepEqual(await js('window.mutations'),['update-all'],'Cancel receipt invokes no installer or connection');
+    assert.deepEqual(await js('window.mutations'),['update-all'],'Keep working invokes no installer or connection');
     await open('lang=en');
     await js(`document.getElementById('updateAll').click();document.getElementById('updateAll').click();window.fixtureState.update.stage='checking';window.fixturePush(window.fixtureState)`);
     assert.deepEqual(await js('window.mutations'),['update-all'],'Explicit action only, with duplicate clicks joined');

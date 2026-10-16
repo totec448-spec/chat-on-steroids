@@ -2,7 +2,8 @@ name: PRs waiting on their author
 
 # Once a day: a contributor PR that has waited 3 quiet days on an answer or a fix gets one friendly
 # reminder, and is closed 3 days later if still nothing happens. Any push or reply resets the clock,
-# and a closed PR can be reopened at any time. Drafts, bots and maintainers' own PRs are never touched.
+# and a closed PR can be reopened at any time. Bots, maintainers' own PRs and drafts are never touched,
+# except a draft the PR-not-ready check made from a red PR (label not-ready).
 on:
   schedule:
     - cron: '41 5 * * *'

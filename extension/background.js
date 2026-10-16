@@ -1990,7 +1990,7 @@ async function storedBackgroundGroup() {
   } catch { await forgetBackgroundGroup(); return null; }
 }
 /**
- * Where a new group goes: the user's last-focused normal window, never the app's own background
+ * Where a new group or a chat for the user goes: the user's last-focused normal window, never the app's own background
  * window and never an incognito one. Chrome can name the app's own window as last-focused
  * (measured on macOS), so the fallback is the eligible window whose tab was used most recently,
  * then the lowest id; with none, window mode.
@@ -2010,6 +2010,22 @@ async function groupTargetWindow() {
     .filter(tab => tab.windowId === id && Number.isFinite(tab.lastAccessed)).map(tab => tab.lastAccessed));
   const [first] = candidates.sort((a, b) => used(b.id) - used(a.id) || a.id - b.id);
   return first.id;
+}
+/**
+ * A chat the user should see goes into their own window, never an incognito one (#1524): with the
+ * extension allowed in incognito, Chrome put it in whichever window was last focused, and ChatGPT
+ * is signed out there. Without a regular window it opens one.
+ */
+async function createUserWindowTab(url, active) {
+  // Firefox for Android has no windows to choose from (and no incognito window beside them).
+  if (typeof chrome.windows?.getLastFocused !== 'function' || typeof chrome.windows?.getAll !== 'function') {
+    return chrome.tabs.create({ url, active });
+  }
+  const windowId = await groupTargetWindow();
+  if (Number.isInteger(windowId)) return chrome.tabs.create({ url, windowId, active });
+  const window = await chrome.windows.create({ url, type: 'normal', incognito: false, focused: active });
+  if (!Number.isInteger(window?.id) || !window.tabs?.[0]) throw new Error('chat_window_not_ready');
+  return window.tabs[0];
 }
 /**
  * One inactive tab in the app's group, creating the group collapsed the first time. Only a group
@@ -2132,7 +2148,7 @@ async function inAppGroup(tab) {
 }
 /** Only app-owned windows are sized; no tab placement changes window focus/state. */
 async function createChatTab(url, background = false, active = !background) {
-  if (!background) return chrome.tabs.create({ url, active });
+  if (!background) return createUserWindowTab(url, active);
   return inBackgroundWindow(async () => {
     if (groupsAvailable()) {
       // A grouped tab is always inactive: selecting it would switch the user's own window.
@@ -2602,10 +2618,11 @@ function inspectRequestedPluginRefresh(publications, background, browserOnly = f
     if (!held) {
       if (browserOnly) return;
       try {
-        const tab = await createChatTab(request.appId
-          // The old hash still redirects to the app's page on the newer shell; without an App Id
-          // it now lands on the home page, so the installed list is opened by its own path.
-          ? `https://chatgpt.com/?cos-plugin-refresh=${request.id}#settings/Plugins/plugin_${request.appId}`
+        const tab = await createChatTab(request.appId && request.observeOnly !== true
+          // Open the native route directly: the retired hash can land on ChatGPT's home page
+          // instead of this app's settings, leaving the elected helper unable to inspect it.
+          ? `https://chatgpt.com/settings/plugins-settings/plugin_${request.appId}?cos-plugin-refresh=${request.id}`
+          // An observation first proves that its enrolled App Id is still visibly installed.
           : `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${request.id}`, background);
         await chrome.storage.session.set({ pluginRefreshOwner: { id: request.id, tab: tab.id } });
       }
@@ -3086,7 +3103,7 @@ async function revealChats(ids) {
     const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
     const shown = tab
       ? await chrome.tabs.update(tab.id, { active: true })
-      : await chrome.tabs.create({ url: `https://chatgpt.com/c/${conversationId}`, active: true });
+      : await createUserWindowTab(`https://chatgpt.com/c/${conversationId}`, true);
     const windowId = shown?.windowId ?? tab?.windowId;
     if (!Number.isInteger(windowId)) continue;
     // A worker tab can sit in the app's minimized background window; the user asked to see it.
@@ -4709,6 +4726,79 @@ const HANDLERS = {
   }
 };
 
+/** This browser's own name and version, for the diagnostics report; nothing else about it. */
+async function browserIdentity() {
+  const clean = (name, version) => /^[A-Za-z0-9 ._-]{1,40}$/.test(String(name || '')) && /^[0-9][0-9.]{0,30}$/.test(String(version || ''))
+    ? { name: String(name), version: String(version) } : null;
+  try {
+    // Firefox answers for itself; Chrome-family browsers have no such call.
+    if (typeof browser !== 'undefined' && typeof browser.runtime?.getBrowserInfo === 'function') {
+      const info = await browser.runtime.getBrowserInfo();
+      const named = clean(info?.name, info?.version);
+      if (named) return named;
+    }
+  } catch { /* Fall through to the Chrome-family brands. */ }
+  try {
+    const data = navigator.userAgentData;
+    const values = data && typeof data.getHighEntropyValues === 'function' ? await data.getHighEntropyValues(['fullVersionList']) : null;
+    const brands = (Array.isArray(values?.fullVersionList) ? values.fullVersionList : Array.isArray(data?.brands) ? data.brands : [])
+      .filter(entry => !/not.?a.?brand/i.test(String(entry?.brand || '')));
+    // "Chromium" is listed by every Chrome-family browser; the other brand says which one it is.
+    const entry = brands.find(item => item.brand !== 'Chromium') || brands[0];
+    const named = entry && clean(entry.brand, entry.version);
+    if (named) return named;
+  } catch { /* Unknown below. */ }
+  return { name: 'unknown', version: null };
+}
+
+/**
+ * Browser and ChatGPT tab facts for the diagnostics report (2026-10-15): the browser's name and
+ * version, ChatGPT tabs counted by state, and which of ChatGPT's controls the most recently used
+ * awake tab still has. Counts and booleans only.
+ */
+async function environmentDiagnostics() {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { tabs = []; }
+  if (!Array.isArray(tabs)) tabs = [];
+  const backgroundWindow = await storedBackgroundWindow().catch(() => null);
+  const count = test => tabs.filter(test).length;
+  const awake = tabs.filter(tab => Number.isInteger(tab.id) && tab.status === 'complete' && tab.discarded !== true && tab.frozen !== true && tab.incognito !== true)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+  let page = null;
+  if (awake.length) {
+    try {
+      const reply = await tabReply(awake[0].id, { type: 'clf-page-checks' });
+      if (reply && typeof reply === 'object') {
+        page = {
+          composer: reply.composer === true, sendArea: reply.sendArea === true, modelMenu: reply.modelMenu === true, plusMenu: reply.plusMenu === true,
+          language: typeof reply.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(reply.language) ? reply.language : null
+        };
+      }
+    } catch { page = null; }
+  }
+  return {
+    browser: await browserIdentity(),
+    tabs: {
+      open: tabs.length,
+      discarded: count(tab => tab.discarded === true),
+      frozen: count(tab => tab.frozen === true),
+      loading: count(tab => tab.status === 'loading'),
+      grouped: count(tab => Number.isInteger(tab.groupId) && tab.groupId >= 0),
+      inBackgroundWindow: Number.isInteger(backgroundWindow?.id) ? count(tab => tab.windowId === backgroundWindow.id) : 0
+    },
+    page
+  };
+}
+
+/** The snapshot is published on every maintenance pass; a page is asked at most once a minute. */
+let environmentCache = null;
+async function cachedEnvironmentDiagnostics() {
+  if (environmentCache && Date.now() - environmentCache.at < 60_000) return environmentCache.value;
+  const value = await environmentDiagnostics().catch(() => null);
+  environmentCache = { at: Date.now(), value };
+  return value;
+}
+
 /** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
 async function companionDiagnosticSnapshot(found) {
   const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
@@ -4733,7 +4823,8 @@ async function companionDiagnosticSnapshot(found) {
     preferences: { overwrite: preferences[RENDER_STREAM_KEY] !== false, durations: preferences[SHOW_TIMES_KEY] === true },
     // Defaults on a fresh install are not choices; the app keeps only values someone stored.
     preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
-    tab: await HANDLERS.tabStatus()
+    tab: await HANDLERS.tabStatus(),
+    environment: await cachedEnvironmentDiagnostics()
   };
 }
 
@@ -5331,7 +5422,7 @@ function recoverDeferredRevivals() {
       try {
         // A worker revival is background work; do not select its tab in the user's window. In
         // tab-group mode it joins the app's group like every other background tab (#128).
-        const created = groupsAvailable() ? await createChatTab(url, true) : await chrome.tabs.create({ url, active: false });
+        const created = groupsAvailable() ? await createChatTab(url, true) : await createUserWindowTab(url, false);
         if (created && typeof created.id === 'number') tabs.push({ ...created, url });
       } catch {
         // Opening authority stays spent even if Chrome rejects creation. The app's command

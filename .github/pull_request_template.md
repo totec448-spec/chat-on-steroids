@@ -19,6 +19,12 @@
 
 Release note: <!-- Optional: one sentence for users, used to draft the release notes. Write "none" for changes users never notice. Leave it out and the PR title is used. -->
 
+## Live proof
+
+<!-- Required when the app or the extension behaves differently: show it working in the real app.
+     A screenshot, a short recording, or an excerpt of the app log in a code block.
+     Otherwise write: No behavior change: <reason> -->
+
 ## Screenshots
 
 <!-- Required when the interface changes: before and after, with placeholder data. Otherwise delete this section. -->

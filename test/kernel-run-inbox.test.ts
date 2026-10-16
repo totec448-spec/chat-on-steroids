@@ -79,3 +79,20 @@ it('offers and acknowledges the worker inbox only on the outer call, outside nes
   expect(JSON.stringify(result)).toContain('private-chat-a');
   expect(JSON.stringify(result)).not.toContain('private tool value');
 });
+
+// 2026-10-15: the diagnostics report counts tool calls per tool; every dispatched call, nested
+// ones too, lands there with its outcome.
+it('counts every dispatched tool call for the diagnostics report', async () => {
+  const facts = await import('../src/main/diagnostics-facts.js');
+  facts.resetDiagnosticsFactsForTests();
+  const registrar = createRegistrar(null, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
+  registrar.register('read', { description: 'fixture', inputSchema: z.object({}) }, async () => ok('value'));
+  await dispatch('exec', {}, null, 'req-chat-a', 'core', async () => {
+    await registrar.invokeNested('read', {}, currentCall()!);
+    return { content: [{ type: 'text', text: 'Command timed out after 10 ms' }], isError: true };
+  });
+  expect(facts.toolCallLines()).toEqual([
+    expect.stringMatching(/^exec: 1 call\(s\), 0 error\(s\), 1 timeout\(s\), median \d+ ms$/),
+    expect.stringMatching(/^read: 1 call\(s\), 0 error\(s\), 0 timeout\(s\), median \d+ ms$/)
+  ]);
+});

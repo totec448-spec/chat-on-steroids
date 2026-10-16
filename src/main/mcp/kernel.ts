@@ -49,6 +49,7 @@ import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js'
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
 import { getConfig } from '../config.js';
+import { noteToolCall, toolOutcome } from '../diagnostics-facts.js';
 import {
   AgentError,
   IdentityLostError,
@@ -699,6 +700,7 @@ async function dispatchTracked(
 ): Promise<ToolResult> {
   noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
+  const callStartedAt = Date.now();
   // Recorded here rather than in `guard` because only this layer knows which server
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
@@ -1037,6 +1039,8 @@ async function dispatchTracked(
         : invokeHandler()
   );
   markTiming('handler');
+  // Nested exec children are counted under their own names, like direct calls.
+  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
   if (identityRefusals.has(result)) rememberIdentityRefusal(requestId, name);
   // Identity, once, from this call's own evidence — see callerConversation. `agents` has
   // already established its own inside the call and adopted it, and re-reading here would

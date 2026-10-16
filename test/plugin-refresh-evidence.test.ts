@@ -16,21 +16,23 @@ afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); aw
 const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
 const consumeStartup = consumeRequestedPluginRefreshStartup;
-it('preserves a legacy click across schema changes and ends a mismatched read-only migration', async () => {
+it('keeps a legacy click read-only on its own schema and starts over when the contract changes', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!; expect(await claim(request)).toBe(true);
   const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey;
   await writeDurableNow('plugin-refresh', legacy);
-  publish('2', [{ ...tools[0]!, description: 'New contract' }]);
+  // On the schema it clicked for, the outcome is unknown: observe only, never click again.
   const observation = (await pendingPluginRefreshes())[0]!;
   expect(observation).toMatchObject({ id: request.id, appId, observeOnly: true });
   expect(await claim(observation, tools)).toBe(false);
-  expect(await completePluginRefresh({ ...observation, appId, tools: observation.tools })).toBe(false);
-  expect(await failPluginRefresh({ id: observation.id, error: 'Old definitions require manual review' })).toBe(true);
-  expect(await pendingPluginRefreshes()).toEqual([]);
-  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ schemaId: request.schemaId, appId, attempted: true, failure: 'inspection' });
   expect((await readDurable('plugin-refresh') as any[])[0].tunnelKey).toBeUndefined();
-  await requestPluginRefreshes(APP_VERSION);
-  expect((await pendingPluginRefreshes(false))[0]).toMatchObject({ appId, observeOnly: true });
+  // A newer contract needs a refresh whatever that click did; the receipt starts over as an
+  // enrollment that must prove the connector on this app's own tunnel.
+  publish('2', [{ ...tools[0]!, description: 'New contract' }]);
+  const fresh = (await pendingPluginRefreshes())[0]!;
+  expect(fresh).toMatchObject({ appId: null, schemaId: pluginRefreshPublications()[0]!.schemaId });
+  expect(fresh.id).not.toBe(request.id);
+  expect(fresh.observeOnly).toBeUndefined();
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ appId: null, attempted: false, completedSchemaId: null });
 });
 it('binds a disconnected legacy recheck to its first live schema without migrating its receipt', async () => {
   publish(); const first = (await pendingPluginRefreshes())[0]!; expect(await claim(first)).toBe(true);
@@ -165,7 +167,7 @@ it('reobserves manual or already claimed refreshes without authorizing another c
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   await claim(request); await requestPluginRefreshes(APP_VERSION);
   const observation = (await pendingPluginRefreshes(false))[0]!;
-  expect(observation).toMatchObject({ appId: null, observeOnly: true });
+  expect(observation).toMatchObject({ appId, observeOnly: true });
   expect(observation.id).not.toBe(request.id);
   expect(await claim(request)).toBe(false);
   expect(await claim(observation)).toBe(false);

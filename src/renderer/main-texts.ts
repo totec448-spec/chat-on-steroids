@@ -20,13 +20,10 @@ export function mainTexts(): Record<MainText, string> {
     'Waiting for your permission in Windows…': t('Waiting for your permission in Windows…'),
     'Starting the installer. Chat On Steroids opens again by itself.':
       t('Starting the installer. Chat On Steroids opens again by itself.'),
-    'Restart to install the update?': t('Restart to install the update?'),
-    'Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.':
-      t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'),
-    'Keep working': t('Keep working'),
-    'Restart and install': t('Restart and install'),
     'Connected': t('Connected'),
     'No internet': t('No internet'),
+    'OpenAI outage': t('OpenAI outage'),
+    'Diagnostics report': t('Diagnostics report'),
     'Not connected': t('Not connected'),
     'Core connection lost': t('Core connection lost'),
     'Desktop connection lost': t('Desktop connection lost'),

@@ -335,6 +335,9 @@
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT không chấp nhận văn bản$1"
   },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT không hiển thị Gửi trong câu trả lời đang chạy, và việc dừng để tự động tiếp tục chưa hoàn tất."
+  },
   "content_delivery_turn_changed": {
     "message": "Lượt đã thay đổi trước khi gửi trực tiếp."
   },
