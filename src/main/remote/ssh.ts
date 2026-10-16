@@ -35,6 +35,11 @@ export function parseRemote(address: string, folder: string): RemoteFolder {
   return port ? { host, port, path: trimmed } : { host, path: trimmed };
 }
 
+/** The identity a server folder is stored under, in its root and project: `host[:port]:/path`. */
+export function remoteIdentity(remote: RemoteFolder): string {
+  return `${remote.host}${remote.port ? `:${remote.port}` : ''}:${remote.path}`;
+}
+
 /** Arguments for `ssh`: options, then `--`, the host and the remote part. */
 export function sshArgs(remote: RemoteFolder, options: string[], rest: string[]): string[] {
   return [
@@ -52,6 +57,11 @@ const quoteFolder = (folder: string): string =>
 /** The command line the server runs: in the project folder, through the person's login shell. */
 export function remoteCommand(folder: string, command: string): string {
   return `cd -- ${quoteFolder(folder)} && exec "\${SHELL:-/bin/sh}" -lc ${shellQuote(command)}`;
+}
+
+/** An interactive login shell in the project folder, for the workspace terminal. */
+export function remoteLoginShell(folder: string): string {
+  return `cd -- ${quoteFolder(folder)} && exec "\${SHELL:-/bin/sh}" -l`;
 }
 
 /** What ssh's own error output means for the person, in one sentence. */

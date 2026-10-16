@@ -5,7 +5,7 @@ import { rawPromises as fs } from './rawfs.js';
 import { readDurable, writeDurableNow } from './durable.js';
 import { getConfig, updateConfig } from './config.js';
 import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
-import { parseRemote, sftpFor } from './remote/ssh.js';
+import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
@@ -68,10 +68,6 @@ export function addProject(folderPath: string): Promise<LocalProject> {
   return operation;
 }
 
-/** The identity a server folder is stored under, in its root and project: `host[:port]:/path`. */
-export function remoteIdentity(remote: RemoteFolder): string {
-  return `${remote.host}${remote.port ? `:${remote.port}` : ''}:${remote.path}`;
-}
 
 /**
  * Adds a folder on a server as a project and an approved root (#1469), by its real path there.
