@@ -466,16 +466,23 @@ then acts as a package-bounded alias for that target; resource paths are revalid
 cannot traverse above the linked package. The managed root itself and linked `SKILL.md` files
 remain non-linkable. Desktop and external plugins receive no managed root.
 
-Skills open through leading `/` completion in the composer; the attachment popup's Skills button
-inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
-separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
+Skills open through `/` completion in the composer. In prose, completion offers only installed
+Skills; selecting an exact Skill id projects it into the existing leading authored directive block, while
+slash text in paths, links and code stays literal. App commands remain available only in the
+leading command block. The attachment popup's Skills button inserts that leading slash and focuses
+the input while preserving existing draft text. `@` completion browses entries under the current
+Local Project via the existing project-files listing authority and inserts a project-relative text
+reference; it does not upload a file or broaden filesystem access. Commands, Skills and project
+files are separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
 Commands: `/plan`, `/goal`, `/loop`, `/compact`, plus Codex's `/model` and `/reasoning` (open the model picker), `/new`, `/rename`, `/pin`, `/status` (the context meter's panel), `/review` and `/init` (put a review or AGENTS.md request in front of the draft, unsent), `/usage`, `/plugins`, `/pet` and `/feedback` (Settings → Activity, the diagnostics report). `/rename`, `/pin`, `/status` and `/compact` are offered only while a chat is open (`commandAvailable`); popups open after the choosing click has passed the outside-click handlers.
 A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
 into the authored draft without sending it. ChatGPT can create Markdown instructions through
 the existing permission-checked `/skills` filesystem root. Leading `/id` or `/prompt id` completion projects selected
 commands as removable chips. The existing authored draft retains those command bytes; chips and
 the visible task textarea are projections, never a separate selection ledger. Multiple commands
-preserve order and deduplicate; prose/code later in a message is literal. Empty/loading/no-match
+preserve order and deduplicate; prose/code later in a message is literal. Inline exact Skill
+selection is projected into the same leading directive block, so `skillDirectives` remains the
+authority for submitted Skill ids. Empty/loading/no-match
 states do not intercept Enter. Draft replacement, navigation, render generations and IME composition retire stale choices.
 
 `skill-library.ts` discovers repository `.agents/skills`, project `.codex/skills`, standard user,
