@@ -2257,6 +2257,22 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     const marker = `cos-input=${encodeURIComponent(input.id)}`;
     const candidates = tabs.filter(tab => matchesInput(input, tab));
     let tab = candidates.sort((a, b) => a.id - b.id)[0];
+    // A new chat's first message cancelled before Send: the tab the app opened for it shows only
+    // ChatGPT's start page and stayed open for good (2.1.40 release round). Only that exact, still
+    // owned page closes, and only when it proves nothing was typed or sent there. This entry never
+    // opens, elects or reuses a tab.
+    if (input.close === true && input.opening === true) {
+      if (!tab || target || tab.pinned || tab.pendingUrl || conversationFromUrl(tab.url)) continue;
+      const documentId = tabDocuments[String(tab.id)];
+      const source = { tab: tab.id, documentId, navigationEpoch: tabEpochs[String(tab.id)] };
+      try {
+        const proof = await tabReply(tab.id, { type: 'clf-close-cancelled-opening', id: input.id }, { documentId });
+        const current = await chrome.tabs.get(tab.id);
+        if (proof?.safe === true && ownsDocument(source) && !current.pinned && !current.pendingUrl &&
+            matchesInput(input, current) && !conversationFromUrl(current.url)) await chrome.tabs.remove(tab.id);
+      } catch { /* only the exact, still-owned, untouched opening page closes */ }
+      continue;
+    }
     let elected = elections[input.id];
     let recoveredReuse = null;
     // A fresh app offer can follow a session rebind or the user's actual return.

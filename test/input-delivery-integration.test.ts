@@ -1581,6 +1581,19 @@ it('hands a sent temporary planner back for closing with the chat ChatGPT moved 
   expect((await post('/status', { openConversations: [] })).body.inputs).toContainEqual(
     expect.objectContaining({ id: row.id, close: true, conversationId }));
 });
+it.each([false, true])('hands back the tab of a first message cancelled before Send for closing (authorized: %s)', async authorized => {
+  // 2.1.40 release round: the tab opened for a cancelled first message stayed on ChatGPT's empty
+  // start page. One cancelled before Send is handed back to close; one that Send was authorized for
+  // may already be in ChatGPT and keeps its tab.
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+  expect((await post('/input/claim', { id: row.id, owner: 'opening-page', conversationId: null })).body.input).toBeTruthy();
+  if (authorized) expect((await post('/input/claim', { id: row.id, owner: 'opening-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await handlers.get('sessions:cancelInput')!(null, { id: row.id })).ok).toBe(true);
+  const inputs = (await post('/status', { openConversations: [] })).body.inputs as Array<Record<string, unknown>>;
+  const closing = inputs.filter(entry => entry.id === row.id && entry.close === true);
+  if (authorized) expect(closing).toEqual([]);
+  else expect(closing).toEqual([expect.objectContaining({ id: row.id, opening: true, close: true, conversationId: null })]);
+});
 afterAll(async () => {
   await stopBridge(); await flushDurable(); resetSessionStoreForTests(); resetDurableForTests();
   await removeTempDir(directory);
