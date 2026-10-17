@@ -5,7 +5,7 @@ import { initDurableStore, flushDurable, resetDurableForTests } from '../src/mai
 import {
   createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
 } from '../src/main/session/store.js';
-import { findInSession, foldCase, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
+import { findInSession, foldCase, locateMessage, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
 import { positionOf } from '../src/shared/chronology.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -215,4 +215,14 @@ it('finds a phrase as the chat shows it, across bold, code and links', async () 
   // What was written stays findable too.
   expect((await findInSession(id, '**File:**')).map(location => location.seq)).toEqual([said[1]!.seq]);
   expect((await findInSession(id, 'use bold literally')).map(location => location.seq)).toEqual([said[2]!.seq]);
+});
+
+it('locates a reply by its native message id, where it first appeared (#482)', async () => {
+  // Branch in new chat links back to the exact reply it was branched from.
+  const id = await chat('Branch source', [['user', 'try one'], ['assistant', 'Approach A.'], ['user', 'go on'], ['assistant', 'Approach A, step two.']]);
+  const { readEvents } = await import('../src/main/session/store.js');
+  const replies = (await readEvents(id, { kinds: ['assistant_message'] })) as Array<{ seq: number; time: number; messageId: string; kind: string; origin?: number }>;
+  const first = replies[0]!;
+  expect(await locateMessage(id, first.messageId)).toEqual({ seq: first.seq, kind: 'assistant_message', messageId: first.messageId, position: positionOf(first) });
+  expect(await locateMessage(id, 'not-in-this-chat')).toBeNull();
 });

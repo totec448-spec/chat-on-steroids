@@ -249,6 +249,16 @@ export async function findInSession(id: string, query: string): Promise<SessionS
  * The first message of a chat holding any of the query's words: where its snippet came from, so the
  * chat can open there instead of at its end. Read only when a result is opened, from the recording.
  */
+/** Where one recorded reply is, by its native message id (#482: a branch links back to it). */
+export async function locateMessage(id: string, messageId: string): Promise<SessionSearchLocation | null> {
+  const events = await readEvents(id, { kinds: ['assistant_message'] });
+  const revisions = events.filter(event => event.kind === 'assistant_message' && event.messageId === messageId);
+  const latest = revisions.at(-1);
+  if (!latest || latest.kind !== 'assistant_message') return null;
+  // A revised message keeps the place where it first appeared.
+  return { seq: latest.seq, kind: 'assistant_message', messageId, position: Math.min(...revisions.map(event => positionOf(event))) };
+}
+
 export async function locateSearchMatch(id: string, query: string): Promise<SessionSearchLocation | null> {
   const terms = queryTerms(query);
   if (!terms.length) return null;
