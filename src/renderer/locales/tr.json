@@ -1597,7 +1597,7 @@
   "No recorded conversation is available to continue. Send a task first.": "Devam ettirilecek kayıtlı konuşma yok. Önce bir görev gönderin.",
   "No task was provided. Enter a task before starting Goal/Loop.": "Görev belirtilmedi. Hedef/Döngü'yü başlatmadan önce bir görev girin.",
   "The helper did not produce an opening message. Make the task more specific and try again.": "Yardımcı bir açılış mesajı üretmedi. Görevi daha belirgin hale getirip yeniden deneyin.",
-  "The helper says the goal is met, but that is unverified. Nothing was sent and the reply is still owed. Check the chat, then continue it yourself.": "Yardımcı hedefin tamamlandığını söylüyor, ancak bu doğrulanmış değil. Hiçbir şey gönderilmedi ve yanıt hâlâ bekleniyor. Sohbeti kontrol edin ve ardından kendiniz devam edin.",
+  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "Yardımcı hedefe ulaşıldığını söylüyor, ancak bu kontrol edilmedi. Hiçbir şey gönderilmedi. Sohbeti kontrol edin ve iş kaldıysa devam edin.",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "Yardımcı, Döngü devamı yazmak yerine durmayı seçmeye devam etti. Döngü talimatlarını gözden geçirin veya başka bir yardımcı model seçin.",
   "The answer is missing the completion marker required by offline Goal templates. Check the template instructions or choose another continuation source.": "Yanıtta çevrimdışı Hedef şablonlarının gerektirdiği tamamlama işareti eksik. Şablon talimatlarını kontrol edin veya başka bir devam kaynağı seçin.",
   "The app could not save the pending continuation. Check free disk space and the app diagnostics.": "Uygulama bekleyen devamı kaydedemedi. Boş disk alanını ve uygulama tanılamalarını kontrol edin.",
@@ -2704,5 +2704,7 @@
   "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Otomatik devam, 3 dakika boyunca göndermek için güvenli bir an bulamadı. Sürdürmek için \"Continue\" mesajını kendiniz gönderin.",
   "The Skills library supports at most 64 skills": "Beceri kitaplığı en fazla 64 beceri alır",
   "Conflict": "Çakışma",
-  "Conflicts": "Çakışmalar"
+  "Conflicts": "Çakışmalar",
+  "Goal result needs review": "Goal sonucunu gözden geçirin",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal yardımcısı işin tamamlandığını düşünüyor, ancak bu henüz kontrol edilmedi. Sohbeti gözden geçirin veya yeni bir talimat gönderin."
 }

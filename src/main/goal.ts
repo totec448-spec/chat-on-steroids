@@ -1991,7 +1991,7 @@ async function run(draft: GoalDraft): Promise<void> {
         return settle(draft, 'failed', 'loop_stop_refused');
       }
       if (getConfig().ui.finishHoldOnStop === true) {
-        logWarn(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; unverified, nothing was sent and the reply stays owed`);
+        logWarn(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; unverified, nothing was sent and the reply remains pending`);
         const { recordProgress } = await import('./session/recorder.js');
         await recordProgress(draft.sessionId, `goal-helper-stop:${draft.turnId}`, goalErrorMessage('goal_helper_stop_unverified'),
           undefined, await goalReplySourceTurn(draft.sessionId, draft.turnId), undefined, 'helper_stop_unverified');

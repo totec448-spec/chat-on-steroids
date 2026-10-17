@@ -1140,7 +1140,7 @@
     "message": "Trợ lý không tạo tin nhắn mở đầu. Hãy làm tác vụ cụ thể hơn rồi thử lại."
   },
   "content_goal_error_goal_helper_stop_unverified": {
-    "message": "Trợ lý cho biết mục tiêu đã hoàn thành, nhưng điều đó chưa được xác minh. Chưa có nội dung nào được gửi và câu trả lời vẫn còn cần hoàn tất. Hãy kiểm tra cuộc trò chuyện rồi tự tiếp tục."
+    "message": "Trợ lý cho biết mục tiêu đã hoàn thành nhưng điều đó chưa được kiểm tra. Chưa có nội dung nào được gửi. Hãy kiểm tra cuộc trò chuyện và tiếp tục nếu còn việc."
   },
   "content_goal_error_loop_stop_refused": {
     "message": "Trợ lý liên tục chọn dừng thay vì viết nội dung tiếp tục cho Loop. Hãy xem lại chỉ dẫn Loop hoặc chọn mô hình trợ lý khác."

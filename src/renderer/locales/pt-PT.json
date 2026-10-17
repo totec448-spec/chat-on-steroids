@@ -1554,7 +1554,7 @@
   "The continuation request timed out or was cancelled. Check the helper chat or provider status before trying again.": "O pedido de continuação excedeu o tempo limite ou foi cancelado. Verifique o chat do auxiliar ou o estado do fornecedor antes de tentar novamente.",
   "The custom continuation endpoint is invalid. Check its URL in Settings; use HTTPS or a local HTTP endpoint.": "O endereço de continuação personalizado é inválido. Verifique o URL nas Definições; use HTTPS ou um endereço HTTP local.",
   "The helper did not produce an opening message. Make the task more specific and try again.": "O auxiliar não produziu uma mensagem inicial. Especifique melhor a tarefa e tente novamente.",
-  "The helper says the goal is met, but that is unverified. Nothing was sent and the reply is still owed. Check the chat, then continue it yourself.": "O auxiliar diz que o objetivo foi atingido, mas isso não foi verificado. Não foi enviada nenhuma mensagem e a resposta continua pendente. Verifique a conversa e depois continue por si.",
+  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "O auxiliar diz que o objetivo foi atingido, mas isso não foi verificado. Não foi enviada nenhuma mensagem. Verifique a conversa e continue se ainda houver trabalho.",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "O auxiliar continuou a escolher parar em vez de escrever uma continuação do Ciclo. Reveja as instruções do Ciclo ou escolha outro modelo auxiliar.",
   "The helper prompt could not be delivered to ChatGPT. Open the helper chat and check its composer or visible error before trying again.": "O pedido do auxiliar não pôde ser entregue ao ChatGPT. Abra o chat do auxiliar e verifique o editor ou o erro visível antes de tentar novamente.",
   "The helper prompt could not be delivered. {0}": "O pedido do auxiliar não pôde ser entregue. {0}",
@@ -2704,5 +2704,7 @@
   "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "A continuação automática não encontrou um momento seguro para enviar durante 3 minutos. Envie \"Continue\" para prosseguir.",
   "The Skills library supports at most 64 skills": "A biblioteca de skills comporta no máximo 64 skills",
   "Conflict": "Conflito",
-  "Conflicts": "Conflitos"
+  "Conflicts": "Conflitos",
+  "Goal result needs review": "Reveja o resultado do Goal",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "O auxiliar do Goal considera o trabalho concluído, mas isso ainda não foi verificado. Verifique a conversa ou envie outra instrução."
 }

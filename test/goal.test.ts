@@ -964,7 +964,7 @@ describe('the reply', () => {
       return { sessionId, view, requests };
     };
 
-    it.each([undefined, false])('is unchanged when the setting is %s: the goal is met, nothing owed, no unverified event', async setting => {
+    it.each([undefined, false])('keeps the default completion behavior when the setting is %s', async setting => {
       const { sessionId, view, requests } = await stopOnce(`c-stop-default-${setting}`, setting);
       expect(view).toMatchObject({ stage: 'no-reply', error: null, reply: '', retryable: false });
       expect(goal.goalPendingReplyFor(`c-stop-default-${setting}`)).toBeNull();
@@ -972,10 +972,10 @@ describe('the reply', () => {
       expect(requests).toBe(1);
     });
 
-    it('when on, shows a non-retryable unverified outcome, keeps the reply owed and records a structured event', async () => {
+    it('marks a helper stop as unverified, keeps the reply pending, and records it once', async () => {
       const { sessionId, view, requests } = await stopOnce('c-stop-optin', true);
       expect(view).toMatchObject({ stage: 'failed', error: 'goal_helper_stop_unverified', reply: '', retryable: false });
-      expect(view.message).toMatch(/unverified/);
+      expect(view.message).toMatch(/has not been checked/);
       expect(goal.goalPendingReplyFor('c-stop-optin')).toMatchObject({ turnId: 'g-stop' });
       expect(await unverified(sessionId)).toHaveLength(1);
       expect(requests, 'no automatic continuation or retry was started').toBe(1);

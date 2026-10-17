@@ -1584,7 +1584,7 @@
   "No recorded conversation is available to continue. Send a task first.": "Es gibt keine aufgezeichnete Unterhaltung zum Fortsetzen. Sende zuerst eine Aufgabe.",
   "No task was provided. Enter a task before starting Goal/Loop.": "Es wurde keine Aufgabe angegeben. Gib eine Aufgabe ein, bevor du Goal/Loop startest.",
   "The helper did not produce an opening message. Make the task more specific and try again.": "Der Helfer hat keine erste Nachricht erzeugt. Formuliere die Aufgabe genauer und versuche es erneut.",
-  "The helper says the goal is met, but that is unverified. Nothing was sent and the reply is still owed. Check the chat, then continue it yourself.": "Der Helfer meldet, das Ziel sei erreicht, aber das ist nicht bestätigt. Es wurde nichts gesendet, und die Antwort steht noch aus. Prüfe den Chat und fahre dann selbst fort.",
+  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "Der Helfer sagt, das Ziel sei erreicht, aber das wurde nicht überprüft. Es wurde nichts gesendet. Prüfe den Chat und fahre fort, falls noch Arbeit offen ist.",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "Der Helfer hat immer wieder angehalten, statt eine Loop-Fortsetzung zu schreiben. Prüfe die Loop-Anweisungen oder wähle ein anderes Helfer-Modell.",
   "The answer is missing the completion marker required by offline Goal templates. Check the template instructions or choose another continuation source.": "Der Antwort fehlt der Abschlussmarker, den die Offline-Vorlagen für Goal brauchen. Prüfe die Anweisungen der Vorlage oder wähle eine andere Quelle für die Fortsetzung.",
   "The app could not save the pending continuation. Check free disk space and the app diagnostics.": "Die App konnte die ausstehende Fortsetzung nicht speichern. Prüfe den freien Speicherplatz und die Diagnose der App.",
@@ -2704,5 +2704,7 @@
   "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Automatisches Weiter fand 3 Minuten lang keinen sicheren Moment zum Senden. Sende selbst „Weiter“, um fortzufahren.",
   "The Skills library supports at most 64 skills": "Die Skill-Bibliothek fasst höchstens 64 Skills",
   "Conflict": "Konflikt",
-  "Conflicts": "Konflikte"
+  "Conflicts": "Konflikte",
+  "Goal result needs review": "Goal-Ergebnis muss geprüft werden",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Der Goal-Helfer hält die Arbeit für abgeschlossen, aber das wurde noch nicht überprüft. Prüfe den Chat oder sende eine weitere Anweisung."
 }

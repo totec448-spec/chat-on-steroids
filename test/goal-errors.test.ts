@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { goalErrorKey, goalErrorMessage } from '../src/shared/goal-errors.js';
 import de from '../src/renderer/locales/de.json';
 import es from '../src/renderer/locales/es.json';
@@ -85,12 +85,13 @@ describe('Goal failure explanations', () => {
     }
   });
 
-  it('gives the page a catalog key for every fixed explanation, in every extension language', () => {
+  it('gives the page a catalog key for the selected fixed explanations in every extension language', () => {
     const codes = [
       'out_of_credit', 'auth_rejected', 'no_api_key', 'rate_limited', 'loop_mcp_call_missing',
-      'goal_context_too_large', 'request_failed', 'request_failed: fetch failed', 'request_failed: no_api_key'
+      'goal_context_too_large', 'goal_helper_stop_unverified', 'request_failed', 'request_failed: fetch failed', 'request_failed: no_api_key'
     ];
-    const locales = ['de', 'en', 'es', 'fr', 'ja', 'tr', 'zh_CN', 'zh_TW'];
+    const locales = readdirSync(new URL('../extension/_locales/', import.meta.url), { withFileTypes: true })
+      .filter(entry => entry.isDirectory()).map(entry => entry.name);
     const catalogs = Object.fromEntries(locales.map((locale) => [
       locale,
       JSON.parse(readFileSync(new URL(`../extension/_locales/${locale}/messages.json`, import.meta.url), 'utf8')) as Record<string, { message: string }>

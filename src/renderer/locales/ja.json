@@ -1599,7 +1599,7 @@
   "No recorded conversation is available to continue. Send a task first.": "継続できる記録済みの会話がありません。まずタスクを送信してください。",
   "No task was provided. Enter a task before starting Goal/Loop.": "タスクが指定されていません。ゴール/ループを開始する前にタスクを入力してください。",
   "The helper did not produce an opening message. Make the task more specific and try again.": "ヘルパーが開始メッセージを生成しませんでした。タスクをより具体的にして、もう一度お試しください。",
-  "The helper says the goal is met, but that is unverified. Nothing was sent and the reply is still owed. Check the chat, then continue it yourself.": "ヘルパーは目標達成と判断していますが、確認はされていません。何も送信されておらず、返信はまだ必要です。チャットを確認してから、自分で続けてください。",
+  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "ヘルパーは目標達成と判断していますが、確認されていません。何も送信されていません。チャットを確認し、作業が残っていれば続けてください。",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "ヘルパーがループの継続を書く代わりに停止を選び続けました。ループの指示を見直すか、別のヘルパーモデルを選択してください。",
   "The answer is missing the completion marker required by offline Goal templates. Check the template instructions or choose another continuation source.": "回答に、オフラインのゴールテンプレートで必要な完了マーカーがありません。テンプレートの指示を確認するか、別の継続ソースを選択してください。",
   "The app could not save the pending continuation. Check free disk space and the app diagnostics.": "保留中の継続をアプリが保存できませんでした。空きディスク容量とアプリの診断を確認してください。",
@@ -2704,5 +2704,7 @@
   "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自動続行は3分間、安全に送信できるタイミングを見つけられませんでした。続けるには自分で「Continue」を送信してください。",
   "The Skills library supports at most 64 skills": "スキルライブラリに入れられるのは最大 64 個です",
   "Conflict": "競合",
-  "Conflicts": "競合"
+  "Conflicts": "競合",
+  "Goal result needs review": "Goal の結果を確認してください",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal ヘルパーは作業が完了したと判断していますが、まだ確認されていません。チャットを確認するか、次の指示を送信してください。"
 }

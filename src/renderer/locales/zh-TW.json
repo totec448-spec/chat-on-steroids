@@ -1556,7 +1556,7 @@
   "The continuation request timed out or was cancelled. Check the helper chat or provider status before trying again.": "續接請求逾時或已取消。重試前請檢查輔助聊天或供應商狀態。",
   "The custom continuation endpoint is invalid. Check its URL in Settings; use HTTPS or a local HTTP endpoint.": "自訂續接端點無效。請在設定中檢查其 URL；請使用 HTTPS 或本機 HTTP 端點。",
   "The helper did not produce an opening message. Make the task more specific and try again.": "輔助工具未產生開場訊息。請讓任務更具體後再試一次。",
-  "The helper says the goal is met, but that is unverified. Nothing was sent and the reply is still owed. Check the chat, then continue it yourself.": "輔助工具表示目標已達成，但尚未經過驗證。沒有傳送任何內容，回覆仍待完成。請檢查對話，然後自行繼續。",
+  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "輔助工具表示目標已達成，但尚未檢查。沒有傳送任何內容。請檢查對話；若仍有工作，請繼續。",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "輔助工具持續選擇停止，而不是產生循環續接內容。請檢查循環指示，或選擇其他輔助模型。",
   "The helper prompt could not be delivered to ChatGPT. Open the helper chat and check its composer or visible error before trying again.": "無法將輔助提示傳送到 ChatGPT。重試前請開啟輔助聊天，檢查其輸入框或可見錯誤。",
   "The helper prompt could not be delivered. {0}": "無法傳送輔助提示。{0}",
@@ -2704,5 +2704,7 @@
   "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自動繼續在 3 分鐘內未找到安全的傳送時機。請自行傳送「Continue」以接著進行。",
   "The Skills library supports at most 64 skills": "技能庫最多容納 64 個技能",
   "Conflict": "衝突",
-  "Conflicts": "衝突"
+  "Conflicts": "衝突",
+  "Goal result needs review": "請檢查 Goal 結果",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 輔助工具認為工作已完成，但尚未檢查。請查看對話或傳送下一項指示。"
 }
