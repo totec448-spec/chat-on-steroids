@@ -5935,6 +5935,25 @@ describe('branch in new chat (#482)', () => {
     expect(branchButton(w)).toBeNull();
   });
 
+  // History ChatGPT copied into a branch, and an adopted chat's earlier answers, are recorded
+  // without a turn: before, they had no actions at all, so nothing could branch from or copy them.
+  it('offers copy, export and branch on an answer recorded without a turn', async () => {
+    const earlierId = '6ad3a59b-0000-83eb-8bc4-8c84e68dd911';
+    const loose: SessionEvent = { kind: 'assistant_message', seq: 4, time: T0 + 3_000, source: 'extension', messageId: earlierId,
+      message: text('An earlier answer.'), final: true, state: 'final' };
+    const { w, live } = await boot([loose, ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+    const bars = [...w.document.querySelectorAll('.answer-actions')];
+    expect(bars).toHaveLength(2);
+    const bar = bars.find(node => node.closest('.said')!.textContent!.includes('An earlier answer'))!;
+    bar.querySelector<HTMLButtonElement>('.answer-action')!.click(); await settle();
+    expect(api.exportMarkdown).toHaveBeenCalledWith(expect.objectContaining({ scope: 'answer', messageId: earlierId, turnId: undefined }));
+    bar.querySelector<HTMLButtonElement>('.answer-branch')!.click(); await settle();
+    await submit(w as any, 'From the earlier answer.');
+    expect(live.sent.at(-1)).toMatchObject({ branch: { conversationId: chat, messageId: earlierId } });
+  });
+
   it('links a branched chat back to the reply it came from', async () => {
     const source = { ...summary([]), id: '2026-10-17-source01', title: 'Release plan', conversationId: chat };
     const branched = { ...summary([]), id: '2026-10-17-branch01', title: 'Other approach', conversationId: '6ad388c2-faf8-83ed-bb4f-9efff4ad92de',

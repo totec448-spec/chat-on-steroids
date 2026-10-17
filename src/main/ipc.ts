@@ -1281,6 +1281,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'session']),
       turnId: z.string().min(1).max(200).optional(),
+      messageId: z.string().min(1).max(200).optional(),
       target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());

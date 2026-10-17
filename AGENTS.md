@@ -1104,7 +1104,11 @@ is reported as `/input/claim { branchFailed: 'branch_message_missing' | 'branch_
 for that exact source chat, which fails the unclaimed opening with a translated reason
 (`BRANCH_ERRORS`); nothing was typed. The branch chat records the copied history itself, as ChatGPT
 shows it, and links back through `sessions:locate-message { id, messageId }` → the reply's
-`SessionSearchLocation`.
+`SessionSearchLocation`. The notice's Cancel opens the source chat at that reply; a source deleted
+while the branch is a draft turns the draft into a plain new chat. Final answers recorded outside any
+turn (copied branch history, an adopted chat's history, replies to messages typed in the tab) carry
+the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
+by `messageId` instead of `turnId`, and refuses a turn's own answer named that way.
 
 ## 10. Files, terminal, patches and images
 
