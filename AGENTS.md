@@ -2274,7 +2274,11 @@ precedes that navigation on a temporary `about:blank` page. Creation and attachm
 receipts: `created: true` survives an `attachmentError`, retaining the same tab handle for inspection
 or deliberate attachment. A known attachment limit fails before creating a tab. The existing
 bounded readiness wait observes document commit, not completion of every subresource, and releases
-its listeners on closure. It never opens a replacement. Tab lists include pending URL/status and
+its listeners on closure. It never opens a replacement. Chrome answers no `Page.enable` on a tab it
+discarded (`status: unloaded` or `discarded: true`, #1568), so an explicit attach first reloads that
+same tab: only with control permission and a live permission check, waiting on tab events within the
+command's deadline (at most 10 s). A loaded or frozen tab is never reloaded; a refused, stalled or
+closed reload attaches nothing and keeps no custody. Tab lists include pending URL/status and
 separate snapshot/input access hints. These are observations; live guards still own each operation.
 The root debugger session enables Chromium focus emulation while attached, so hidden pages
 continue rendering and accepting input without changing the selected tab or OS foreground.
