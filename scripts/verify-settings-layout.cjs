@@ -180,7 +180,21 @@ app.whenReady().then(async () => {
             assert.equal(autoSkill.visible, true, 'Auto-select Skills must be visible in General settings');
             assert.equal(autoSkill.inside, true, 'Auto-select Skills must fit inside the visible settings viewport');
             assert.match(autoSkill.label, /Auto-select Skills/);
-            assert.match(autoSkill.label, /exact name in the message, not by topic/);
+            assert.match(autoSkill.label, /name or distinctive task wording/);
+            // The only visible change in this PR is the hint copy. Render the previous
+            // copy in the same production layout so reviewers can compare it directly.
+            await js(`(() => {
+              const hint = document.getElementById('autoSelectSkills').closest('.setting').querySelector('em');
+              hint.textContent = 'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.';
+              hint.closest('.setting').scrollIntoView({ block: 'center' });
+            })()`);
+            await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+            fs.writeFileSync(path.join(output, `${theme}-auto-select-skills-before.png`), (await win.webContents.capturePage()).toPNG());
+            await js(`(() => {
+              const hint = document.getElementById('autoSelectSkills').closest('.setting').querySelector('em');
+              hint.textContent = 'Select one imported Skill by its name or distinctive task wording. Ambiguous matches are skipped; explicit choices win.';
+              hint.closest('.setting').scrollIntoView({ block: 'center' });
+            })()`);
             await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
             fs.writeFileSync(path.join(output, `${theme}-auto-select-skills.png`), (await win.webContents.capturePage()).toPNG());
           }

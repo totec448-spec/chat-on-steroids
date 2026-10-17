@@ -103,7 +103,7 @@ it.each([
   for (const key of [
     'Choose whether imported Skills can be matched to ordinary messages.',
     'Auto-select Skills',
-    'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.',
+    'Select one imported Skill by its name or distinctive task wording. Ambiguous matches are skipped; explicit choices win.',
     'Auto-selected Skill: /{0}'
   ]) {
     expect(catalog[key], `${locale}: ${key}`).toMatch(term);
@@ -111,8 +111,8 @@ it.each([
   }
 });
 
-it.each(languages)('explains exact-name Skill routing rather than topic matching in %s', async locale => {
-  const source = 'Match one imported Skill by its exact name in the message, not by topic. Explicit Skill choices always win.';
+it.each(languages)('explains conservative task-wording Skill routing in %s', async locale => {
+  const source = 'Select one imported Skill by its name or distinctive task wording. Ambiguous matches are skipped; explicit choices win.';
   const input = document.getElementById('autoSelectSkills') as HTMLInputElement;
   const hint = input.closest('.setting')!.querySelector('em')!;
   expect(hint.textContent).toBe(source);

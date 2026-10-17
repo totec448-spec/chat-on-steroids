@@ -159,3 +159,52 @@ it('treats multiple literal identity matches as ambiguity instead of choosing on
     candidate({ id: 'review-helper', revision: revision('b'), name: 'Review Helper', displayName: 'Code Review' })
   ])).toEqual([]);
 });
+it('routes a distinctive task phrased without a Skill name from its metadata, not a generic verb', () => {
+  const migration = candidate({
+    id: 'migrating-dagster-to-airflow', revision: revision('b'), name: 'Dagster to Airflow Migration',
+    description: 'Migrate Dagster pipelines to Airflow while preserving scheduling behavior.'
+  });
+  expect(routeSkillMetadata('Help me migrate this Dagster pipeline to Airflow.', [migration], 'task'))
+    .toEqual([{ id: migration.id, revision: migration.revision }]);
+  expect(routeSkillMetadata('Migrate my API from REST to GraphQL.', [migration], 'task')).toEqual([]);
+});
+
+it('routes a high-evidence code review task but abstains when descriptions compete', () => {
+  const review = candidate();
+  const feedback = candidate({ id: 'receiving-code-review', revision: revision('b'), name: 'Receiving Code Review',
+    description: 'Respond to code review feedback before changing a commit.' });
+  expect(routeSkillMetadata('Review the code changes in my last commit before pushing.', [review, feedback], 'task'))
+    .toEqual([{ id: review.id, revision: review.revision }]);
+  const close = candidate({ id: 'source-review', revision: revision('c'), name: 'Source Review',
+    description: 'Review all source code changes for correctness and maintainability.' });
+  expect(routeSkillMetadata('Review the code changes in my last commit before pushing.', [review, close], 'task'))
+    .toEqual([]);
+});
+
+it('does not reroute when the user names an implicitly forbidden Skill', () => {
+  const disallowed = candidate({ id: 'sql-profiling', name: 'SQL Profiling',
+    description: 'Inspect slow SQL queries and database query plans to identify bottlenecks.', allowImplicitInvocation: false });
+  const alternative = candidate({ id: 'database-debug', name: 'Database Debug',
+    description: 'Inspect slow SQL queries and database query plans to identify bottlenecks.' });
+  expect(routeSkillMetadata('Use SQL Profiling to inspect slow SQL queries and database query plans.',
+    [disallowed, alternative], 'task')).toEqual([]);
+});
+it('requires strong task evidence, excludes disallowed Skills and ignores quoted code samples', () => {
+  const profiling = candidate({ id: 'profiling-tables', name: 'Table Profiling',
+    description: 'Profile database tables to inspect slow SQL queries over large datasets.' });
+  expect(routeSkillMetadata('Optimize this slow SQL query on large database tables.', [profiling], 'task'))
+    .toEqual([{ id: profiling.id, revision: profiling.revision }]);
+  expect(routeSkillMetadata('Optimize this slow SQL query on large database tables.', [
+    { ...profiling, allowImplicitInvocation: false }
+  ])).toEqual([]);
+  expect(routeSkillMetadata('Explain SQL.', [profiling], 'task')).toEqual([]);
+  expect(routeSkillMetadata('Explain this text: ```\nOptimize this slow SQL query on large database tables.\n```', [profiling], 'task'))
+    .toEqual([]);
+});
+
+it('matches distinctive non-English metadata phrases without translating task text', () => {
+  const turkish = candidate({ id: 'veritabani-inceleme', name: 'Veritabanı İnceleme',
+    description: 'PostgreSQL sorgu planını incele ve darboğazları raporla.' });
+  expect(routeSkillMetadata('Bu PostgreSQL sorgu planını incele lütfen.', [turkish], 'task'))
+    .toEqual([{ id: turkish.id, revision: turkish.revision }]);
+});
