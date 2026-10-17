@@ -174,6 +174,11 @@ let newChatSelected = true;
 let selectedProjectId: string | null = null;
 /** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
 let newChatBranch: { sessionId: string; conversationId: string; messageId: string; title: string } | null = null;
+/**
+ * Edit & resubmit (#365): the question the composer is editing, how many messages after it ChatGPT's
+ * edit replaces, and the draft the composer held before, given back when the edit ends.
+ */
+let editingQuestion: { sessionId: string; messageId: string; later: number; previousDraft: string } | null = null;
 /** ChatGPT's own conversation and message ids; a synthetic interim id is never a branch point. */
 const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let projects: LocalProject[] = [];
@@ -2048,8 +2053,9 @@ function syncSelectedWorkspace(): void {
   workspaceTerminal?.update(selectedLocalProject());
   rightWorkspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
-  // Branch in new chat: the draft notice and the link back follow the selection in either layout.
+  // Branch in new chat and Edit: the composer notices and the link back follow the selection in either layout.
   paintBranchNotices();
+  paintEditNotice();
 }
 
 /**
@@ -2089,6 +2095,70 @@ function paintBranchNotices(): void {
   link.replaceChildren(icon('i-git-branch'), el('span', '', () => source
     ? t('Branched from “{0}”', [shownSessionTitle(source)]) : t('Branched from another chat')));
   link.onclick = source ? () => void openBranchSource(source.id, branchOf.messageId) : null;
+}
+
+/** The composer's notice while one of your questions is being edited, drawn as a dock row. */
+function paintEditNotice(): void {
+  const notice = $('editDraft');
+  const editing = editingQuestion && !newChatSelected && selectedId === editingQuestion.sessionId ? editingQuestion : null;
+  notice.hidden = !editing;
+  if (!editing) { delete notice.dataset.editFor; return; }
+  if (notice.dataset.editFor === `${editing.messageId}:${editing.later}`) return;
+  notice.dataset.editFor = `${editing.messageId}:${editing.later}`;
+  const cancel = dockAction(() => t('Cancel edit'), 'i-x', () => endEditing(true));
+  cancel.classList.add('edit-draft-cancel');
+  notice.replaceChildren(icon('i-pencil'), el('span', 'queue-label', () => editing.later
+    ? tn('Editing your message · replaces {0} later message', 'Editing your message · replaces {0} later messages', editing.later)
+    : t('Editing your message')), cancel);
+}
+
+/** Puts one of your questions into the composer to edit it, keeping the draft that was there. */
+function startEditing(event: Extract<SessionEvent, { kind: 'user_message' }>, later: number): void {
+  if (!selectedId || !event.messageId) return;
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const previousDraft = editingQuestion?.sessionId === selectedId ? editingQuestion.previousDraft : input.value;
+  editingQuestion = { sessionId: selectedId, messageId: event.messageId, later, previousDraft };
+  input.value = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  paintEditNotice();
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+/** Ends edit mode; `restore` gives the composer back the draft it held before. */
+function endEditing(restore: boolean): void {
+  const ended = editingQuestion;
+  editingQuestion = null;
+  if (ended && restore && selectedId === ended.sessionId) {
+    const input = $<HTMLTextAreaElement>('chatInput');
+    input.value = ended.previousDraft;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  }
+  paintEditNotice();
+}
+
+/** Your question in this chat, as ChatGPT can edit it: its newest version, in a chat ChatGPT knows. */
+function editableQuestion(event: SessionEvent, history: readonly SessionEvent[]): event is Extract<SessionEvent, { kind: 'user_message' }> {
+  if (event.kind !== 'user_message' || !event.messageId || !NATIVE_ID.test(event.messageId)) return false;
+  const chat = sessions.find(row => row.id === selectedId);
+  if (!chat?.conversationId || !NATIVE_ID.test(chat.conversationId) || chat.origin?.kind === 'worker' || chat.origin?.kind === 'helper') return false;
+  if (continuationMarkerOf(event.message.text)) return false;
+  // A chat Compact & Resume left has its own messages; only the current one can be edited.
+  if (event.time < Math.max(0, ...Object.values(chat.retiredChatAt ?? {}))) return false;
+  return !history.some(other => other.kind === 'user_message' && other.replaces === event.messageId);
+}
+
+/** The Edit action under one of your questions. */
+function questionActions(event: Extract<SessionEvent, { kind: 'user_message' }>, later: number): HTMLElement {
+  const bar = el('div', 'question-actions');
+  const edit = el('button', 'answer-action question-edit') as HTMLButtonElement;
+  edit.type = 'button';
+  edit.append(icon('i-pencil'));
+  ui(edit, 'title', () => t('Edit message')); ui(edit, 'aria-label', () => t('Edit message'));
+  edit.addEventListener('click', () => startEditing(event, later));
+  bar.append(edit);
+  return bar;
 }
 
 /** Opens the chat a branch came from, at the exact reply it was branched from. */
@@ -5190,6 +5260,18 @@ function paintDetail(followBottom = historyBefore === null): void {
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
+  // How many messages each question is followed by in the chat as shown: what editing it replaces.
+  const laterMessages = new Map<number, number>();
+  {
+    const counted = new Set<string>();
+    for (const item of [...items].reverse()) {
+      if (item.kind !== 'event') continue;
+      const event = item.event;
+      if (event.kind === 'user_message') laterMessages.set(event.seq, counted.size);
+      if (event.kind === 'user_message' || (event.kind === 'assistant_message' && (event.final || event.state === 'final')))
+        counted.add(`${event.kind}:${event.messageId ?? event.seq}`);
+    }
+  }
   for (const item of items) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.kind === 'earlier' ? item.fold.time : item.block.time);
@@ -5205,7 +5287,8 @@ function paintDetail(followBottom = historyBefore === null): void {
     const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
-      (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '');
+      (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '') +
+      (item.kind === 'event' && editableQuestion(item.event, events) ? `\u0000edit:${laterMessages.get(item.event.seq) ?? 0}` : '');
     keep.add(key);
     const cached = rowCache.get(key);
     const workerIds = JSON.stringify(item.kind === 'event' ? participatingWorkers(item.event, workers).map(worker => worker.id) : []);
@@ -5224,6 +5307,7 @@ function paintDetail(followBottom = historyBefore === null): void {
       : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(item.event);
     if (answerTurn || looseAnswer) row.querySelector('.said')?.append(answerActions(answerTurn,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
+    if (item.kind === 'event' && editableQuestion(item.event, events)) row.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
     row.dataset.timelineKey = key;
     row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
@@ -7266,7 +7350,12 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   if (!modelSettings) { toast(t("Model discovery could not confirm your selection. Choose an available model and thinking effort, then send again.")); return false; }
   const sessionId = selectedId;
   const generation = selectionGeneration;
-  const chosenMode = delivery ?? $<HTMLSelectElement>('sendMode').value;
+  // Edit & resubmit (#365): the composer is editing one of this chat's questions.
+  const editing = sessionId && editingQuestion?.sessionId === sessionId ? editingQuestion : null;
+  if (editing && images.length) { toast(t('An edit changes only the text. Send files in a new message.')); return false; }
+  if (editing && plan) { toast(t('An edit is sent as one message, not as a plan.')); return false; }
+  const edit = editing ? { messageId: editing.messageId } : undefined;
+  const chosenMode = edit ? 'auto' : delivery ?? $<HTMLSelectElement>('sendMode').value;
   const mode = chosenMode === 'tool' ? 'auto' : chosenMode === 'after-turn' && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledQueueAtFinish ? 'finish' : chosenMode;
   const dueAt = Date.now();
   const id = crypto.randomUUID();
@@ -7283,10 +7372,15 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     ? { sessionId: newChatBranch.sessionId, conversationId: newChatBranch.conversationId, messageId: newChatBranch.messageId }
     : reserved?.origin?.branchOf && reserved.origin.fromSessionId && !reserved.conversationId
       ? { sessionId: reserved.origin.fromSessionId, ...reserved.origin.branchOf } : undefined;
-  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
+  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
     dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
   replaceComposerDraft();
   input.value = ''; inputDrafts.delete(key);
+  // The edit is on its way; the composer gets back the draft it held before the edit began.
+  if (editing) {
+    editingQuestion = null; paintEditNotice();
+    if (editing.previousDraft) { input.value = editing.previousDraft; inputDrafts.set(key, editing.previousDraft); }
+  }
   skillPicker?.restore();
   imageDrafts.delete(key); paintComposerImages();
   if (sessionId === null) pendingNewInput = { id, generation };
@@ -7295,7 +7389,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       // A disk failure after outbox commit still owns this input. Keep its exact
@@ -7307,7 +7401,11 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
         await adoptAcceptedOpening(retained);
         return true;
       }
-      if (selectedId === sessionId && selectionGeneration === generation && !authoredComposerText()) {
+      // A refused edit stays an edit of that question, with its text back to send again.
+      if (editing && selectedId === sessionId && selectionGeneration === generation) {
+        editingQuestion = editing; paintEditNotice();
+        inputDrafts.set(key, authoredDraft); input.value = authoredDraft; skillPicker?.restore();
+      } else if (selectedId === sessionId && selectionGeneration === generation && !authoredComposerText()) {
         inputDrafts.set(key, authoredDraft); input.value = authoredDraft; skillPicker?.restore();
       }
       else if (!inputDrafts.get(key)) inputDrafts.set(key, authoredDraft);
@@ -7380,6 +7478,8 @@ function showView(name: string): void {
 
 function selectSession(id: string): void {
   newChatBranch = null;
+  // An edit belongs to its chat: leaving it gives the composer back the draft it held before.
+  if (editingQuestion) endEditing(true);
   const ownerChanged = id !== selectedId;
   rememberDraft();
   selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
@@ -7425,6 +7525,7 @@ function selectSession(id: string): void {
 }
 
 function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
+  if (editingQuestion) endEditing(true);
   newChatBranch = branch;
   rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
   inputQueueGeneration++;
