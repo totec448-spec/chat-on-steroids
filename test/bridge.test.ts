@@ -8575,6 +8575,63 @@ describe('unattributed activity recovery', () => {
   /** The chat a pass was told to repair. */
   const chatOf = (repair: { conversationId: string } | null): string | null => repair?.conversationId ?? null;
 
+  it.each(['assistant-error', 'no-tab', 'compaction'] as const)(
+    'waits before retrying %s recovery after navigation', async reason => {
+      await pair();
+      let conversationId: string;
+
+      if (reason === 'assistant-error') {
+        conversationId = OTHER;
+        await events(conversationId, [openTurn('navigation-error-turn'), {
+          kind: 'chat_error', time: Date.now(), turnId: 'navigation-error-turn',
+          text: 'Connection interrupted', recoverable: true
+        }]);
+      } else if (reason === 'no-tab') {
+        conversationId = WORKER;
+        spawn({ workers: [{ task: 'check navigation recovery' }], caller: { conversationId: PRIME } });
+        const bootstrap = await redeem();
+        await request('POST', '/commands/ack', {
+          body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+        });
+        await events(conversationId, [openTurn('navigation-missing-tab-turn')]);
+        await request('POST', '/closed', { body: { conversationId } });
+      } else {
+        conversationId = randomUUID();
+        const session = await createSession({ conversationId });
+        await compactSession(session.id);
+      }
+
+      const first = await maintenance();
+      expect(first).toMatchObject({ conversationId, reason });
+      vi.useFakeTimers();
+      try {
+        const failWhileNavigating = async (repair: { token: string }) => {
+          expect((await request('POST', '/repairs/claim', { body: { token: repair.token } })).body.allowed).toBe(true);
+          await request('GET', `/status?repairFailed=${encodeURIComponent(repair.token)}` +
+            '&repairAction=reloaded&why=changed&detail=navigating');
+        };
+        await failWhileNavigating(first!);
+
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        const retry = await maintenance();
+        expect(retry).toMatchObject({ conversationId, reason });
+        expect(retry!.token).not.toBe(first!.token);
+
+        await failWhileNavigating(retry!);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await maintenance()).toMatchObject({ conversationId, reason });
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('H2 records the machine reason and immediately offers the existing assistant-error episode', async () => {
     await pair();
     await events(OTHER, [{ kind: 'user_message', time: Date.now(), messageId: 'h2-question', text: 'Trabaja en esta tarea.' }, openTurn('h2-turn')]);
