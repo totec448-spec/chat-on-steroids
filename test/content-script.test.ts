@@ -23916,12 +23916,12 @@ describe('branch in new chat (#482)', () => {
   const text = 'Branch test, harmless. Reply with exactly: branch ok';
   const offer = (extra: Record<string, unknown> = {}) => ({ type: 'clf-desktop-input', id: inputId, conversationId: null,
     branch: { conversationId: source, messageId: reply }, ...extra });
-  async function sourcePage(options: { marker?: boolean; reply?: string; chosen?: string } = {}) {
-    const { marker = true, chosen = 'clicked' } = options;
+  async function sourcePage(options: { marker?: boolean; reply?: string; chosen?: string; refuseClaims?: boolean } = {}) {
+    const { marker = true, chosen = 'clicked', refuseClaims = false } = options;
     const claims: Array<Record<string, any>> = [];
     live = await harness(`https://chatgpt.com/c/${source}${marker ? `?cos-input=${inputId}#cos-input=${inputId}` : ''}`, {
       desktop_input: message => { claims.push(message); return { ok: true, data: message.authorize || message.ack || message.branchFailed
-        ? { ok: true } : { input: { id: inputId, owner: 'input-owner', text, model: null, reasoningEffort: null, purpose: 'user', images: [] } } }; }
+        ? { ok: true } : refuseClaims ? {} : { input: { id: inputId, owner: 'input-owner', text, model: null, reasoningEffort: null, purpose: 'user', images: [] } } }; }
     });
     const section = assistantTurn(live.document, 'source-turn', []);
     await bindFiberTurns([{ section, turn: { conversationId: source, turnId: 'source-turn', endMessageId: options.reply ?? reply,
@@ -23992,6 +23992,18 @@ describe('branch in new chat (#482)', () => {
     await vi.waitFor(() => expect(claims.find(message => message.requiresAuthorization)).toMatchObject({ id: inputId, conversationId: null }));
     expect(branchInNewChat).not.toHaveBeenCalled();
     expect(live.window.location.search).toBe(`?cos-input=${inputId}`);
+  });
+
+  it('puts the marker back when ChatGPT rewrites its draft address again', async () => {
+    // Live 2.1.41 (VM): ChatGPT replaced the draft URL after its own navigation, without the marker.
+    // The app refuses the claims here, as a still-starting app did live: each offer ends at once.
+    await sourcePage({ refuseClaims: true });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(live!.window.location.search).toBe(`?cos-input=${inputId}`);
+    live!.dom.reconfigure({ url: draft });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    await vi.waitFor(() => expect(live!.window.location.search).toBe(`?cos-input=${inputId}`));
+    expect(live!.window.location.pathname).toBe(new URL(draft).pathname);
   });
 
   it('refuses a draft that ends at another reply', async () => {

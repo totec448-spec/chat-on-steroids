@@ -3980,7 +3980,10 @@ const HANDLERS = {
       if (message.lifetime === 'temporary-planner' && (owner !== `${prefix}${source.navigationEpoch}` ||
           new URL(tab.url).searchParams.get('temporary-chat') !== 'true')) return { ok: false };
     } else {
-      if (!conversationId && !String(tab.url || '').includes(`cos-input=${id}`)) return { ok: false };
+      // A branch's draft (#482) can lose its marker when ChatGPT rewrites the URL after moving
+      // there; the tab elected for this message still owns it.
+      const branchDraft = () => { try { return inputOpenings[id]?.tab === tab.id && /^\/c\/local-chatgpt(?::|%3A)/i.test(new URL(tab.url).pathname); } catch { return false; } };
+      if (!conversationId && !String(tab.url || '').includes(`cos-input=${id}`) && !branchDraft()) return { ok: false };
       if (message.conversationId !== conversationId || !ownsDocument(source)) return { ok: false };
     }
     if (message.ack === true && message.lifetime !== 'temporary-planner') {
