@@ -2700,5 +2700,8 @@
   "Previews of images and PDFs in a server folder are not available yet.": "服务器文件夹中的图片和 PDF 暂不支持预览。",
   "This diff is too large to display.": "此更改过大，无法显示。",
   "Binary diff · preview unavailable": "二进制更改 · 无法预览",
-  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自动继续在 3 分钟内未找到安全的发送时机。请自行发送“Continue”以接着进行。"
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自动继续在 3 分钟内未找到安全的发送时机。请自行发送“Continue”以接着进行。",
+  "The Skills library supports at most 64 skills": "技能库最多容纳 64 个技能",
+  "Conflict": "冲突",
+  "Conflicts": "冲突"
 }

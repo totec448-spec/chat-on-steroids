@@ -2700,5 +2700,8 @@
   "Previews of images and PDFs in a server folder are not available yet.": "As pré-visualizações de imagens e PDF numa pasta de servidor ainda não estão disponíveis.",
   "This diff is too large to display.": "Esta alteração é demasiado grande para ser apresentada.",
   "Binary diff · preview unavailable": "Alteração binária · pré-visualização indisponível",
-  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "A continuação automática não encontrou um momento seguro para enviar durante 3 minutos. Envie \"Continue\" para prosseguir."
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "A continuação automática não encontrou um momento seguro para enviar durante 3 minutos. Envie \"Continue\" para prosseguir.",
+  "The Skills library supports at most 64 skills": "A biblioteca de skills comporta no máximo 64 skills",
+  "Conflict": "Conflito",
+  "Conflicts": "Conflitos"
 }

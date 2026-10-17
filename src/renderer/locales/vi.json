@@ -2700,5 +2700,8 @@
   "Previews of images and PDFs in a server folder are not available yet.": "Chưa hỗ trợ xem trước hình ảnh và PDF trong thư mục trên máy chủ.",
   "This diff is too large to display.": "Thay đổi này quá lớn để hiển thị.",
   "Binary diff · preview unavailable": "Thay đổi nhị phân · không thể xem trước",
-  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Continue tự động không tìm được thời điểm an toàn để gửi trong 3 phút. Hãy tự gửi \"Continue\" để tiếp tục."
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Continue tự động không tìm được thời điểm an toàn để gửi trong 3 phút. Hãy tự gửi \"Continue\" để tiếp tục.",
+  "The Skills library supports at most 64 skills": "Thư viện kỹ năng chứa tối đa 64 kỹ năng",
+  "Conflict": "Xung đột",
+  "Conflicts": "Xung đột"
 }

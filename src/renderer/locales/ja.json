@@ -2700,5 +2700,8 @@
   "Previews of images and PDFs in a server folder are not available yet.": "サーバーフォルダー内の画像と PDF のプレビューにはまだ対応していません。",
   "This diff is too large to display.": "この差分は大きすぎて表示できません。",
   "Binary diff · preview unavailable": "バイナリの差分 · プレビューできません",
-  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自動続行は3分間、安全に送信できるタイミングを見つけられませんでした。続けるには自分で「Continue」を送信してください。"
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自動続行は3分間、安全に送信できるタイミングを見つけられませんでした。続けるには自分で「Continue」を送信してください。",
+  "The Skills library supports at most 64 skills": "スキルライブラリに入れられるのは最大 64 個です",
+  "Conflict": "競合",
+  "Conflicts": "競合"
 }

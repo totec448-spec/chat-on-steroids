@@ -4351,7 +4351,9 @@ passes only a LocalProject UUID and project-relative path through fixed IPC; mai
 approved project/root and Git metadata before reading status or a diff. Git inspection is strictly
 read-only: it strips inherited Git repository/index redirects, uses optional-lock-free bounded
 subprocesses and exposes no stage, commit, reset,
-checkout or push authority. Review projects `M/A/D/R/U`, ancestor-folder markers and
+checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
+(`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
+file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
 tabs; Review does not add a second file watcher or expose file-write actions.
 Review also identifies the checked-out branch and offers a searchable, read-only comparison
