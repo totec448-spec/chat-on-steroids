@@ -5934,7 +5934,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishHoldOnStop', 'finishLeadMinutes', 'rotateTurnMinutes', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',

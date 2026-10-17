@@ -166,6 +166,8 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
+  /** Leave unverified Goal completion pending; Session finish may notify. Off by default. */
+  finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
