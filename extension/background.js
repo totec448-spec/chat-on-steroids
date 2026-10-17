@@ -2248,7 +2248,11 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     if (target) return conversationForTab(tab) === target;
     try {
       const url = new URL(tab.pendingUrl || tab.url || '');
-      return url.searchParams.get('cos-input') === input.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === input.id;
+      if (url.searchParams.get('cos-input') === input.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === input.id) return true;
+      // A branch (#482) leaves its marker behind with the source chat: the tab elected for it now
+      // shows the local draft ChatGPT made, which only that same tab can be.
+      return !!input.branch && elections[input.id]?.tab === tab.id && url.origin === 'https://chatgpt.com' &&
+        /^\/c\/local-chatgpt(?::|%3A)/i.test(url.pathname);
     } catch { return false; }
   };
   for (const input of inputs.slice(0, 50)) {
@@ -2286,6 +2290,9 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       elected = elections[input.id];
     }
     const projectInput = !target && typeof input.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(input.project) ? input.project : null;
+    // Branch in new chat (#482): its first message is sent from ChatGPT's own branch of the source chat.
+    const branchInput = !target && input.branch && /^[0-9a-f-]{36}$/i.test(input.branch.conversationId) &&
+      /^[0-9a-f-]{36}$/i.test(input.branch.messageId) ? input.branch : null;
     // An opening made for another Project (the person retried after the earlier one was gone)
     // is spent on that one; this Project gets its own tab.
     if (projectInput && elected && elected.project !== projectInput) {
@@ -2358,9 +2365,10 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       // borrowing another tab would go through ChatGPT's New chat, which is the root.
       const project = projectInput;
       const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}`
+        : branchInput ? `https://chatgpt.com/c/${encodeURIComponent(branchInput.conversationId)}?${marker}#${marker}`
         : project ? `https://chatgpt.com/g/${project}/project?${marker}#${marker}`
         : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
-      if (!target && !project && input.lifetime !== 'temporary-planner') {
+      if (!target && !project && !branchInput && input.lifetime !== 'temporary-planner') {
         const reusable = new Set(reusableConversations);
         const choices = tabs.filter(candidate => !candidate.pinned && !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
           (recoveredReuse ? candidate.id === recoveredReuse.tab :
@@ -2430,7 +2438,8 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       ...(!target && typeof input.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(input.project) ? { project: input.project } : {}),
       ...(input.recovery ? { recovery: input.recovery } : {}),
       ...(input.silenceTurnId ? { silenceTurnId: input.silenceTurnId } : {}),
-      ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}) });
+      ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}),
+      ...(branchInput ? { branch: { conversationId: branchInput.conversationId, messageId: branchInput.messageId } } : {}) });
   }
 }
 
