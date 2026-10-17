@@ -282,6 +282,8 @@ it('shows merge conflicts as conflicts, with a readable diff for every kind of c
   await git(root, 'init', '-b', 'main');
   await git(root, 'config', 'user.email', 'test@example.com');
   await git(root, 'config', 'user.name', 'CoS Test');
+  // Files Git writes during the merge keep their committed endings on Windows runners too.
+  await git(root, 'config', 'core.autocrlf', 'false');
   await fs.writeFile(path.join(root, 'both.txt'), 'base\n');
   await fs.writeFile(path.join(root, 'ours-deletes.txt'), 'base\n');
   await fs.writeFile(path.join(root, 'theirs-deletes.txt'), 'base\n');
@@ -323,6 +325,8 @@ it('shows a file renamed differently on both sides as conflicts, even with no wo
   await git(root, 'init', '-b', 'main');
   await git(root, 'config', 'user.email', 'test@example.com');
   await git(root, 'config', 'user.name', 'CoS Test');
+  // Files Git writes during the merge keep their committed endings on Windows runners too.
+  await git(root, 'config', 'core.autocrlf', 'false');
   await fs.writeFile(path.join(root, 'moved.txt'), 'shared body\n'.repeat(20));
   await git(root, 'add', '.'); await git(root, 'commit', '-m', 'base');
   await git(root, 'checkout', '-b', 'side'); await git(root, 'mv', 'moved.txt', 'side-name.txt'); await git(root, 'commit', '-m', 'side');
