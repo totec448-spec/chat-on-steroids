@@ -1,5 +1,5 @@
 import { appendEvent, getSession, readEvents, readOverflowText, upsertMessageEvent, writeOverflowText } from './store.js';
-import { positionOf } from '../../shared/chronology.js';
+import { positionOf, residenceOf } from '../../shared/chronology.js';
 import type { SessionEvent, StoredText } from '../../shared/session.js';
 
 type Copied = Extract<SessionEvent, { kind: 'user_message' | 'assistant_message' | 'page_tool' }>;
@@ -42,8 +42,10 @@ export async function seedBranchHistory(sessionId: string, conversationId: strin
   }
   const replyAt = first.get(`assistant_message\u0000${branch.messageId}`)!;
   const nextQuestion = Math.min(...[...first].filter(([key, at]) => key.startsWith('user_message\u0000') && at > replyAt).map(([, at]) => at));
+  // Written in the order the source draws them: a turn's final answer beside the turn's end,
+  // after the steps that came before it, though ChatGPT opened it first.
   const ordered = [...latest.entries()].filter(([key]) => first.get(key)! < nextQuestion)
-    .sort(([a], [b]) => first.get(a)! - first.get(b)!).map(([, event]) => event);
+    .map(([, event]) => event).sort((a, b) => residenceOf(a) - residenceOf(b));
   let copied = 0;
   for (const event of ordered) {
     if (event.kind === 'page_tool') {

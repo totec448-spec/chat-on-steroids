@@ -3228,6 +3228,29 @@ it('gives a branch the history it was branched from before its first question, w
   const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
     .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
   expect(said).toEqual(['source-ask', reply, 'source-step', 'branch-ask', 'branch-answer']);
+  // Named by its own first message, not by the question it copied.
+  expect((await getSession(row.sessionId!))?.title).toBe('Try the other approach.');
+});
+
+it('copies a branched turn in the order the source draws it, its answer after the steps (#482)', async () => {
+  // Live 2.1.41 (VM): ChatGPT opened the answer early, the step came next, the answer was filled last.
+  const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
+  const sourceSession = await createSession({ title: 'Turn source', conversationId: source });
+  await post('/events', { conversationId: source, events: [
+    { kind: 'turn_start', turnId: 'source-turn', time },
+    { kind: 'user_message', messageId: 'turn-ask', turnId: 'source-turn', text: 'Check the sites', time },
+    { kind: 'assistant_message', messageId: reply, turnId: 'source-turn', text: 'Checking', state: 'streaming', time: time + 1 },
+    { kind: 'page_tool', messageId: 'turn-step', turnId: 'source-turn', text: 'Opened the sites', time: time + 2 },
+    { kind: 'assistant_message', messageId: reply, turnId: 'source-turn', text: 'Both load.', state: 'final', final: true, time: time + 3 },
+    { kind: 'turn_end', turnId: 'source-turn', outcome: 'completed', time: time + 4 }] });
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true });
+  expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+  const store = await import('../src/main/session/store.js');
+  const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
+    .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
+  expect(said).toEqual(['turn-ask', 'turn-step', reply]);
 });
 
 it('copies a long branched message in full, from its own copy of the overflow (#482)', async () => {
