@@ -201,3 +201,18 @@ it('finds every message of one chat that holds a phrase, in order', async () => 
   expect(await findInSession(id, 'linux')).toEqual([]);
   expect(await findInSession(id, '  ')).toEqual([]);
 });
+
+it('finds a phrase as the chat shows it, across bold, code and links', async () => {
+  // Answers are recorded as Markdown: "File: /kunden" did not match "**File:** `/kunden…`" (2.1.41 pass).
+  const id = await chat('Formatting', [
+    ['user', 'Create the file'],
+    ['assistant', '- **File:** `/kundenprojekt/goal.txt`\n- See [the setup guide](https://example.com/setup) first.'],
+    ['assistant', 'Use **bold** literally: `**`']
+  ]);
+  const said = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
+  expect((await findInSession(id, 'File: /kundenprojekt')).map(location => location.seq)).toEqual([said[1]!.seq]);
+  expect((await findInSession(id, 'see the setup guide first')).map(location => location.seq)).toEqual([said[1]!.seq]);
+  // What was written stays findable too.
+  expect((await findInSession(id, '**File:**')).map(location => location.seq)).toEqual([said[1]!.seq]);
+  expect((await findInSession(id, 'use bold literally')).map(location => location.seq)).toEqual([said[2]!.seq]);
+});
