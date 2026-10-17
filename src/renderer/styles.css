@@ -2607,8 +2607,9 @@ input[readonly] {
 .sess-state.is-attention { color: var(--red); }
 .sess-state > .ico { --ico: 13px; --glyph: 13px; }
 .sess-state .session-status.is-active { width: 11px; height: 11px; border-width: 1.5px; }
+/* The model's name in the UI font, as the composer's model picker writes it; steady digits instead of monospace. */
 .sess-detail { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--mono); font-size: calc(11px * var(--text-scale, 1)); line-height: 16px; color: var(--faint); }
+  font-size: calc(11px * var(--text-scale, 1)); line-height: 16px; color: var(--faint); font-variant-numeric: tabular-nums; }
 /* Settled chats: one dim line each, under a small label. */
 .inbox-settled { margin-top: 16px; }
 .inbox-settled-heading { display: flex; align-items: center; gap: 6px; padding: 2px 10px 6px; list-style: none; cursor: pointer;
