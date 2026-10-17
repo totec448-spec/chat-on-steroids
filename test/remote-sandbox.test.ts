@@ -3,7 +3,7 @@ import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolvePath, SandboxError } from '../src/main/sandbox.js';
+import { resolvePath, SandboxError, setWindowsPathRulesForTests } from '../src/main/sandbox.js';
 import { closeRemoteSessions, setSftpOpenerForTests } from '../src/main/remote/ssh.js';
 import { SftpClient } from '../src/main/remote/sftp.js';
 import type { Root } from '../src/shared/types.js';
@@ -92,5 +92,28 @@ real('paths in a folder on a server', () => {
   it('says so when the folder is gone from the server', async () => {
     await fs.rm(app, { recursive: true, force: true });
     await expect(resolvePath([root], '/app/src/a.ts', on)).rejects.toThrow(/not available on the server/);
+  });
+});
+
+real('names on a server from a Windows computer', () => {
+  afterEach(() => setWindowsPathRulesForTests(null));
+  it('opens server files whose names Windows would not allow, and still refuses them in a local folder', async () => {
+    // 2.1.41 pass: from the Windows app, `it's "quoted".txt` on a Linux server answered
+    // "Path contains a character Windows does not allow"; such files could not be opened at all.
+    const names = ['it\'s "quoted".txt', 'a:b?.txt', 'pipe|star*<lt>.txt', 'ends with dot.', 'con.txt'];
+    for (const name of names) await fs.writeFile(path.join(app, name), 'x');
+    setWindowsPathRulesForTests(true);
+    for (const name of names) {
+      expect((await resolvePath([root], `/app/${name}`, on)).real, name).toBe(path.join(app, name));
+    }
+    // A backslash is an ordinary character in a server file name, not a separator.
+    await fs.writeFile(path.join(app, 'back\\slash.txt'), 'x');
+    expect((await resolvePath([root], '/app/back\\slash.txt', on)).real).toBe(path.join(app, 'back\\slash.txt'));
+    // The universal rules still hold on a server.
+    await expect(resolvePath([root], '/app/../outside', on)).rejects.toBeInstanceOf(SandboxError);
+    await expect(resolvePath([root], '/app/a\u0001b', on)).rejects.toThrow('control character');
+    // A folder on this (Windows) computer keeps the Windows rules.
+    const local: Root = { name: 'local', path: app };
+    await expect(resolvePath([local], '/local/a:b?.txt')).rejects.toBeInstanceOf(SandboxError);
   });
 });
