@@ -69,7 +69,8 @@ export function parseGitHubSkillUrl(input: string): GitHubSkillLocation {
 
 export function githubSkillUrl(location: GitHubSkillLocation & { ref: string }): string {
   const path = location.directory ? `/${location.directory.split('/').map(encodeURIComponent).join('/')}` : '';
-  return `https://github.com/${location.owner}/${location.repository}/tree/${encodeURIComponent(location.ref)}${path}`;
+  // Segment by segment: a branch like "dev/main" reads as GitHub shows it and parses back.
+  return `https://github.com/${location.owner}/${location.repository}/tree/${location.ref.split('/').map(encodeURIComponent).join('/')}${path}`;
 }
 
 export function validGitHubSkillOrigin(value: unknown): value is GitHubSkillOrigin {
@@ -80,8 +81,11 @@ export function validGitHubSkillOrigin(value: unknown): value is GitHubSkillOrig
       !/^[a-f0-9]{64}$/.test(source.revision ?? '') || !/^[a-f0-9]{64}$/.test(source.skillSha256 ?? '')) return false;
   try {
     const location = parseGitHubSkillUrl(source.url);
-    return location.ref === source.ref && location.directory === source.directory &&
-      githubSkillUrl({ ...location, ref: source.ref }) === source.url;
+    // A branch like "dev/main" reads from its link as branch "dev" and folder "main/…": what has
+    // to agree is the branch and folder together, and the link rebuilt from the recorded origin.
+    const joined = (ref: string | null, directory: string): string => [ref, directory].filter(Boolean).join('/');
+    return joined(location.ref, location.directory) === joined(source.ref, source.directory) &&
+      githubSkillUrl({ ...location, ref: source.ref, directory: source.directory }) === source.url;
   } catch { return false; }
 }
 
