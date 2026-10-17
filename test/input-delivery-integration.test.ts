@@ -5,6 +5,7 @@ import { finishInstruction } from '../src/shared/finish.js';
 import { initSkillsPath } from '../src/main/skills.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { positionOf } from '../src/shared/chronology.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { addProject, assignSessionProject } from '../src/main/projects.js';
@@ -3190,4 +3191,58 @@ it('lets a branch from a chat of a linked project be claimed on its draft, not o
   const claim = async (id: string) => (await post('/input/claim', { id, owner: 'a-document', conversationId: null, requiresAuthorization: true })).body.input;
   expect(await claim(plain.id)).toBeNull();
   expect(await claim(branch.id)).toMatchObject({ id: branch.id, branch: { conversationId, messageId } });
+});
+
+it('gives a branch the history it was branched from before its first question, without duplicates (#482)', async () => {
+  // Live 2.1.41 (VM): the first question was recorded at Send, the copied history only after the
+  // page knew its new id, so the question sat above the history it continues.
+  const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
+  const sourceSession = await createSession({ title: 'Branch source', conversationId: source });
+  const earlier = [
+    { kind: 'user_message', messageId: 'source-ask', text: 'Plan the release', time },
+    { kind: 'page_tool', messageId: 'source-step', text: 'Read the changelog', time: time + 1 },
+    { kind: 'assistant_message', messageId: reply, text: 'Tag first, then build.', state: 'final', final: true, time: time + 2 }
+  ];
+  await post('/events', { conversationId: source, events: [...earlier,
+    { kind: 'user_message', messageId: 'source-later', text: 'Not part of the branch', time: time + 3 }] });
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Try the other approach.',
+    branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+  expect((await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  expect((await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+  expect((await post('/input/ack', { id: row.id, owner: 'branch-page', conversationId: branched, messageId: 'branch-ask' })).body.ok).toBe(true);
+  // The page then reports everything it shows: the copied history, the question and the answer.
+  await post('/events', { conversationId: branched, events: [...earlier,
+    { kind: 'user_message', messageId: 'branch-ask', text: 'Try the other approach.', time: Date.now() },
+    { kind: 'turn_start', turnId: 'branch-turn', time: Date.now() },
+    { kind: 'assistant_message', messageId: 'branch-answer', turnId: 'branch-turn', text: 'Build first.', state: 'final', final: true, time: Date.now() },
+    { kind: 'turn_end', turnId: 'branch-turn', outcome: 'completed', time: Date.now() }] });
+  await (await import('../src/main/session/recorder.js')).flushRecorder();
+  const store = await import('../src/main/session/store.js');
+  const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
+    .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
+  expect(said).toEqual(['source-ask', 'source-step', reply, 'branch-ask', 'branch-answer']);
+});
+
+it('copies a long branched message in full, from its own copy of the overflow (#482)', async () => {
+  // Older recordings kept long messages inline up to a cap and the rest in the chat's own asset.
+  const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
+  const long = 'x'.repeat(20_000) + 'THE-END';
+  const store = await import('../src/main/session/store.js');
+  const sourceSession = await createSession({ title: 'Long source', conversationId: source });
+  const assetId = (await store.writeOverflowText(sourceSession.id, long))!;
+  await store.upsertMessageEvent(sourceSession.id, { kind: 'user_message', source: 'extension', time, messageId: 'long-ask',
+    message: { text: `${long.slice(0, 12_000)}\n…[stored in full as ${assetId}]`, truncated: true, chars: long.length, assetId } });
+  await store.upsertMessageEvent(sourceSession.id, { kind: 'assistant_message', source: 'extension', time: time + 1, messageId: reply,
+    message: { text: 'Read it.', truncated: false, chars: 8 }, state: 'final', final: true });
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true });
+  expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+  const [copied] = await store.readEvents(row.sessionId!, { kinds: ['user_message'] });
+  const stored = (copied as { message: { text: string; truncated: boolean; assetId?: string } }).message;
+  expect(stored).toMatchObject({ truncated: true, chars: long.length });
+  // Assets are named by content; the branch chat holds its own copy of it.
+  expect(stored.text).toContain(stored.assetId);
+  expect(await store.readOverflowText(row.sessionId!, stored.assetId!)).toBe(long);
 });

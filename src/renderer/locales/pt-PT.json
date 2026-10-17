@@ -2798,6 +2798,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "O ChatGPT não ofereceu “Ramificar num novo chat” para essa resposta. Abra o chat original e tente novamente.",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "Essa resposta já não está no chat original do ChatGPT, por isso não pode ser ramificada.",
   "Unblock this conversation before sending": "Desbloqueie esta conversa antes de enviar",
+  "Wait until the chat you branch from finishes its turn, then send again": "Aguarde que o chat de origem termine o turno e envie novamente",
   "{0} sub-agents": "{0} subagentes",
   "{0} sub-agents|one": "{0} subagente",
   "{0} sub-agents|many": "{0} de subagentes",

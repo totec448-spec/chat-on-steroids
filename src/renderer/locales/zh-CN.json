@@ -2724,6 +2724,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "ChatGPT 没有为该回复提供“在新聊天中创建分支”。请打开原聊天后重试。",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "该回复已不在原 ChatGPT 聊天中，因此无法创建分支。",
   "Unblock this conversation before sending": "发送前请先解除对此对话的屏蔽",
+  "Wait until the chat you branch from finishes its turn, then send again": "请等待要分支的聊天完成本轮后再发送",
   "{0} sub-agents": "{0} 个子智能体",
   "{0} active": "{0} 个活跃",
   "{0} characters": "{0} 个字符",

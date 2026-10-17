@@ -2835,6 +2835,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "ChatGPT не предложил «Ответвить в новый чат» для этого ответа. Откройте исходный чат и попробуйте ещё раз.",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "Этого ответа больше нет в исходном чате ChatGPT, поэтому его нельзя ответвить.",
   "Unblock this conversation before sending": "Разблокируйте этот разговор перед отправкой",
+  "Wait until the chat you branch from finishes its turn, then send again": "Дождитесь, пока исходный чат завершит ход, и отправьте снова",
   "{0} sub-agents": "{0} субагента",
   "{0} sub-agents|one": "{0} субагент",
   "{0} sub-agents|few": "{0} субагента",

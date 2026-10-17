@@ -2761,6 +2761,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "ChatGPT hat für diese Antwort „In neuem Chat verzweigen“ nicht angeboten. Öffne den ursprünglichen Chat und versuche es erneut.",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "Diese Antwort ist nicht mehr im ursprünglichen ChatGPT-Chat und kann daher nicht verzweigt werden.",
   "Unblock this conversation before sending": "Hebe die Blockierung dieses Chats auf, bevor du sendest",
+  "Wait until the chat you branch from finishes its turn, then send again": "Warte, bis der Chat, aus dem du verzweigst, seinen Durchlauf beendet hat, und sende dann erneut",
   "{0} sub-agents": "{0} Unteragenten",
   "{0} sub-agents|one": "{0} Unteragent",
   "{0} active": "{0} aktiv",

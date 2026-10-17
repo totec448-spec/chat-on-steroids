@@ -2724,6 +2724,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "ChatGPT không đưa ra “Tách nhánh sang cuộc trò chuyện mới” cho câu trả lời đó. Mở cuộc trò chuyện gốc rồi thử lại.",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "Câu trả lời đó không còn trong cuộc trò chuyện ChatGPT gốc nên không thể tách nhánh.",
   "Unblock this conversation before sending": "Hãy bỏ chặn cuộc trò chuyện này trước khi gửi",
+  "Wait until the chat you branch from finishes its turn, then send again": "Hãy đợi cuộc trò chuyện gốc hoàn tất lượt rồi gửi lại",
   "{0} sub-agents": "{0} tác nhân phụ",
   "{0} active": "{0} đang hoạt động",
   "{0} characters": "{0} ký tự",

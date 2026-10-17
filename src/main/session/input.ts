@@ -16,6 +16,7 @@ import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
 import { logInfo, logWarn } from '../logger.js';
 import { noteChatOrigin } from './recorder.js';
+import { seedBranchHistory } from './branch-history.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
@@ -728,6 +729,8 @@ async function assertBranchSource(input: InputArgs, requested: SessionSummary | 
   if (source.conversationId !== branch.conversationId)
     throw new Error('The chat you branched from changed; branch again from its reply');
   if (isChatBlocked(branch.conversationId)) throw new Error('Unblock this conversation before sending');
+  // Its page is opened a second time to make the branch; never beside a turn still working there.
+  if (source.activeTurnId) throw new Error('Wait until the chat you branch from finishes its turn, then send again');
 }
 async function finishInputCurrent(entry: InputEntry): Promise<boolean> {
   // Periodic generation was retired; persisted rows cannot regain delivery authority.
@@ -1713,6 +1716,9 @@ async function bindOpening(entry: InputEntry, conversationId: string): Promise<b
   if (!session.conversationId) {
     if (!await rebindSession(session.id, null, conversationId)) return false;
     boundSessionNow = true;
+    // A branch (#482) gets the history it continues before its first question is recorded.
+    if (session.origin?.branchOf) await seedBranchHistory(session.id, conversationId)
+      .catch((err: Error) => logWarn(`session ${session.id}: could not copy the branched history (${err.message})`));
   }
   // This is the first exact provider attachment that can prove the chat was opened by the CoS
   // composer: the durable outbox row is an opening, the browser proved its exact owner/id pair,
