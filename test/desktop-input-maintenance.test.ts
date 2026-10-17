@@ -762,6 +762,20 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     else expect(h.remove).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
   });
+  it.each(['untouched', 'typed-into', 'pinned', 'became-a-chat'])('closes the tab of a first message cancelled before Send (%s)', async mode => {
+    // 2.1.40 release round: cancelling a new chat's first message left the tab the app had opened
+    // for it on ChatGPT's empty start page for good. Only that exact, untouched page closes.
+    const h = await worker([{ id: firstId, conversationId: null, opening: true, close: true } as any]);
+    const url = mode === 'became-a-chat' ? `https://chatgpt.com/c/${secondId}?cos-input=${firstId}` : `https://chatgpt.com/?cos-input=${firstId}`;
+    h.tabs.push({ id: 7, url, pinned: mode === 'pinned' });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'opening', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' } : { ok: true }) as never);
+    await h.maintain();
+    if (mode === 'untouched') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalled();
+    expect(h.create).not.toHaveBeenCalled();
+  });
   it('never opens a helper for passive model observation, including repeated maintenance', async () => {
     const h = await worker([]);
     const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: false };

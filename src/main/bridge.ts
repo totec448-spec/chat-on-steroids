@@ -794,6 +794,9 @@ function takeFollow(browser: string | null): string | null {
 }
 
 /** An input goes to the browser holding its chat or, when none does, to the first one handed it. */
+/** How long after it was queued a cancelled first message's empty tab is still offered for closing. */
+const CANCELLED_OPENING_CLOSE_MS = 2 * 60 * 60_000;
+
 function inputHeldElsewhere(input: { id: string; conversationId: string | null }, browser: string | null, chosen = false): boolean {
   // The chosen built-in browser takes work over from a browser that is not chosen (#1516).
   if (chosen) { if (browser && !input.conversationId) openingCustody.set(input.id, browser); return false; }
@@ -2650,7 +2653,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             // After Send, ChatGPT moves a helper to /c/<id>?temporary-chat=true without its cos-input
             // marker; its chat is the only way a later close pass can find that tab again.
             .map(row => ({ id: row.id, owner: row.owner, lifetime: row.lifetime, close: true,
-              retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) }))],
+              retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) })),
+          // A new chat's first message ended before Send was ever authorized, so nothing reached
+          // ChatGPT. The tab opened for it showed only the start page and stayed open for good
+          // (2.1.40 release round); the extension closes it once that page proves it untouched.
+          ...(otherBrowser ? [] : inputRows.filter(row => row.opening === true && ['cancelled', 'failed'].includes(row.state) &&
+            row.sendAuthorizedAt === undefined && row.deliveredAt === undefined && !row.conversationId &&
+            Date.now() - row.createdAt < CANCELLED_OPENING_CLOSE_MS)
+            .map(row => ({ id: row.id, conversationId: null, opening: true, close: true })))],
         background: getConfig().ui.backgroundChats === true,
         // #128: where the companion puts background tabs. Unknown or absent means the window.
         backgroundPlacement: getConfig().ui.backgroundPlacement === 'group' ? 'group' : 'window',
