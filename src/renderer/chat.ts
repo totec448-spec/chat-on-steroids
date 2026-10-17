@@ -2062,12 +2062,12 @@ function paintBranchNotices(): void {
   draft.hidden = !pending;
   if (pending && draft.dataset.branchFor !== `${pending.sessionId}:${pending.messageId}`) {
     draft.dataset.branchFor = `${pending.sessionId}:${pending.messageId}`;
-    const cancel = el('button', 'branch-draft-cancel') as HTMLButtonElement;
-    cancel.type = 'button';
-    cancel.append(icon('i-x'));
-    ui(cancel, 'title', () => t('Cancel branch')); ui(cancel, 'aria-label', () => t('Cancel branch'));
-    cancel.addEventListener('click', () => { newChatBranch = null; paintBranchNotices(); $<HTMLTextAreaElement>('chatInput').focus(); });
-    draft.replaceChildren(icon('i-git-branch'), el('span', 'branch-draft-text', () => t('New chat from a reply in “{0}”', [pending.title])), cancel);
+    // A row of the composer dock, drawn like its neighbours: icon, label, then the dock's own action.
+    const cancel = dockAction(() => t('Cancel branch'), 'i-x', () => {
+      newChatBranch = null; paintBranchNotices(); $<HTMLTextAreaElement>('chatInput').focus();
+    });
+    cancel.classList.add('branch-draft-cancel');
+    draft.replaceChildren(icon('i-git-branch'), el('span', 'queue-label', () => t('New chat from a reply in “{0}”', [pending.title])), cancel);
   } else if (!pending) delete draft.dataset.branchFor;
   const link = $<HTMLButtonElement>('chatBranchOrigin');
   const selected = !newChatSelected && selectedId ? sessions.find(row => row.id === selectedId) : undefined;
