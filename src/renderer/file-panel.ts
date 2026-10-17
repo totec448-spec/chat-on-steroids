@@ -5,7 +5,7 @@ import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, Projec
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
-import { currentLanguage, t, ui } from './i18n.js';
+import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
@@ -1381,6 +1381,12 @@ export function createFilePanel(options: FilePanelOptions) {
     updateActions();
     syncWatches();
   }
+
+  // Group titles, counts and row labels are plain text; repaint them when the language changes.
+  onLanguageChange(() => {
+    renderTree();
+    if (mode === 'changes' && gitDiffPath === null) renderChangesList();
+  });
 
   function watchedDirectories(): string[] {
     if (!project) return [];

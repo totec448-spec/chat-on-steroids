@@ -206,6 +206,13 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
   expect(host.textContent).toContain('Deleted (1)');
   expect(host.textContent).toContain('Renamed (1)');
   expect(host.textContent).toContain('Untracked (1)');
+  // The list follows a language change while it is shown (it kept the old language, 2.1.41 pass).
+  try {
+    setLanguage('es');
+    expect(host.textContent).toContain("Sin seguimiento (1)");
+    expect(host.textContent).not.toContain('Untracked (1)');
+  } finally { setLanguage('en'); }
+  expect(host.textContent).toContain('Untracked (1)');
   expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-status')?.textContent).toBe('U');
   expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-stats')?.textContent).toBe('1 line');
   expect(host.querySelector('.file-change-row[data-path="src/staged.ts"] .file-change-stats')?.textContent).toContain('+1');
