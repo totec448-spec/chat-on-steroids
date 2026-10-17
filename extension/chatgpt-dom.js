@@ -2350,7 +2350,14 @@ var CLF_DOM = (() => {
    * not a reason to hold a finished Goal reply at "sending" (2026-09-03: one letter did).
    */
   function insertPrompt(value, mode = false, failure = () => undefined) {
-    const box = composer();
+    return insertIntoEditor(composer(), value, mode, failure, box => composer() === box);
+  }
+
+  /**
+   * One native insertion into a ChatGPT editor: the composer, or the inline editor ChatGPT opens to
+   * edit a question (#365). `stillOwned` says the editor is still the one this insertion was for.
+   */
+  function insertIntoEditor(box, value, mode, failure, stillOwned) {
     const reject = reason => {
       // A bounded predicate survives tab retirement without exposing authored data.
       safe(() => failure(reason), undefined);
@@ -2377,7 +2384,7 @@ var CLF_DOM = (() => {
           value = `\n${value}`;
         }
       } else selection.selectAllChildren(box);
-      if (!box.isConnected || composer() !== box) return reject('editor_replaced');
+      if (!box.isConnected || !stillOwned(box)) return reject('editor_replaced');
       if (document.activeElement !== box) return reject('composer_not_focused');
       if (!selection.rangeCount || !box.contains(selection.anchorNode) || !box.contains(selection.focusNode)) return reject('selection_changed');
       // One native HTML edit uses the actual browser selection, including on a
@@ -2402,7 +2409,7 @@ var CLF_DOM = (() => {
       if (!document.execCommand('insertHTML', false, paragraph.innerHTML)) return reject('native_edit_rejected');
       const compact = text => String(text || '').replace(/\s+/g, '');
       const expected = mode === 'append' ? existing + value : value;
-      if (!box.isConnected || composer() !== box) return reject('editor_replaced');
+      if (!box.isConnected || !stillOwned(box)) return reject('editor_replaced');
       if (compact(box.textContent) !== compact(expected)) return reject('text_mismatch');
       return true;
     } catch {
@@ -3018,6 +3025,70 @@ var CLF_DOM = (() => {
     return 'clicked';
   }
 
+  /**
+   * Edit & resubmit (#365): opens ChatGPT's own editor on one question, without reading a label.
+   *
+   * The page world marks that question's Edit control by handler (fiber.js); pressing it puts an
+   * editor into that same turn, inside a form whose submit button resubmits the question and whose
+   * other button cancels. Returns a handle once the editor is there, or 'edit_message_missing' /
+   * 'edit_unavailable' after closing anything it opened. `isCurrent` fences every wait.
+   */
+  async function openQuestionEdit(messageId, isCurrent = () => true) {
+    const shown = node => !!node && node.isConnected && node.getClientRects().length > 0;
+    const until = async (read, ms = 3000) => {
+      for (const end = Date.now() + ms; Date.now() < end; await new Promise(resolve => setTimeout(resolve, 50))) {
+        if (!isCurrent()) return null;
+        const value = read();
+        if (value) return value;
+      }
+      return null;
+    };
+    const turnOf = () => {
+      const keyed = [...document.querySelectorAll('[data-turn-key]')].filter(node => node.getAttribute('data-turn-key') === messageId);
+      const legacy = [...document.querySelectorAll('[data-message-id]')].filter(node => node.getAttribute('data-message-id') === messageId)
+        .map(node => node.closest('[data-testid^="conversation-turn"], article'));
+      const turns = [...new Set([...keyed, ...legacy].filter(Boolean))];
+      return turns.length === 1 ? turns[0] : null;
+    };
+    if (!isCurrent()) return { failure: 'edit_unavailable' };
+    const turn = turnOf();
+    if (!turn) return { failure: 'edit_message_missing' };
+    const nonce = crypto.randomUUID();
+    const marked = await new Promise(resolve => {
+      const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
+      const receive = event => {
+        const data = event.data;
+        if (event.source === window && event.origin === location.origin && data?.source === 'clf-edit-reply' && data.nonce === nonce && data.v === 1) finish(data.marked);
+      };
+      const timer = setTimeout(() => finish(0), 1500);
+      window.addEventListener('message', receive);
+      window.postMessage({ source: 'clf-edit-ask', nonce, messageId }, location.origin);
+    });
+    const control = [...turn.querySelectorAll('button')].filter(button => button.getAttribute('data-clf-edit') === nonce);
+    if (marked !== 1 || control.length !== 1 || !isCurrent()) return { failure: 'edit_unavailable' };
+    control[0].removeAttribute('data-clf-edit');
+    control[0].click();
+    const opened = await until(() => {
+      const editors = [...turn.querySelectorAll('.ProseMirror[contenteditable="true"]')].filter(node => shown(node) && node.closest('form'));
+      if (editors.length !== 1) return null;
+      const form = editors[0].closest('form');
+      const submits = [...form.querySelectorAll('button[type="submit"]')].filter(shown);
+      const cancels = [...form.querySelectorAll('button[type="button"]')].filter(shown);
+      return submits.length === 1 && cancels.length === 1 ? { editor: editors[0], form, submit: submits[0], cancel: cancels[0] } : null;
+    });
+    if (!opened) return { failure: 'edit_unavailable' };
+    return {
+      editor: opened.editor,
+      /** The editor is still the one opened here, in the same turn. */
+      current: () => opened.editor.isConnected && turn.isConnected && opened.form.contains(opened.editor) && isCurrent(),
+      write: (value, failure = () => undefined) => insertIntoEditor(opened.editor, value, true, failure,
+        box => box === opened.editor && opened.form.contains(box)),
+      submit: () => { if (!opened.submit.isConnected || opened.submit.disabled) return false; opened.submit.click(); return true; },
+      // Closing without sending restores the question as it was; a closed editor needs nothing.
+      cancel: () => { if (opened.cancel.isConnected) opened.cancel.click(); }
+    };
+  }
+
   const normalizeModelLabel = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}.]/gu, '');
   /** One bounded read through the existing MAIN-world helper; no provider API or setters. */
   function readPickerState() {
@@ -3590,6 +3661,7 @@ var CLF_DOM = (() => {
     modelPickerReadable,
     newChatControl,
     branchInNewChat,
+    openQuestionEdit,
     projectCreateControl,
     projectCreateForm,
     revealSidebar,

@@ -1282,5 +1282,11 @@
   },
   "popup_detail_total": {
     "message": "$1 au total"
+  },
+  "content_edit_message_missing": {
+    "message": "Ce message n’est plus sur la page ChatGPT, il ne peut donc pas être modifié."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT n’a pas proposé Modifier pour ce message. Ouvrez la discussion dans ChatGPT, puis réessayez."
   }
 }
