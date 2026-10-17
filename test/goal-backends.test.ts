@@ -373,7 +373,7 @@ describe('Goal decision backends', () => {
       }
       return session.id;
     }
-    it('trims the transcript to fit but never the protected original request', async () => {
+    it('shortens the transcript as needed while keeping the first request intact', async () => {
       const starter = `HEAD ${'s'.repeat(50_000)} TAIL`;
       const sessionId = await chatWithStarter('browser-starter-fits', starter);
       browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');

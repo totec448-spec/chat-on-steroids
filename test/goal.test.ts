@@ -616,37 +616,6 @@ describe('what leaves this machine', () => {
     expect(message?.content.length).toBeLessThanOrEqual(48_000);
   });
 
-  it('preserves the original first user starter verbatim in the Goal finish system prompt when context is clipped', async () => {
-    const session = await createSession({ title: 'goal starter', conversationId: 'c-goal-starter' });
-    const clause = 'REQUIRED_CLAUSE_MIDDLE_60K';
-    const pad = 'x'.repeat(29_987);
-    const starter = `${pad}${clause}${pad}`;
-    await appendEvent(session.id, {
-      source: 'extension', time: 1000, kind: 'user_message', authoredText: starter,
-      message: { text: starter, chars: starter.length, truncated: false }
-    });
-    goal.setGoalObjective('c-goal-starter', 'paraphrased objective');
-    await appendEvent(session.id, {
-      source: 'extension', time: 2000, kind: 'assistant_message', final: true,
-      message: { text: 'paraphrased objective prose', chars: 27, truncated: false }
-    });
-    await appendEvent(session.id, {
-      source: 'extension', time: 3000, kind: 'user_message',
-      message: { text: 'paraphrased objective follow-up', chars: 32, truncated: false }
-    });
-    let captured: Array<{ role: string; content: string }> = [];
-    globalThis.fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
-      captured = (JSON.parse(String(init.body)) as { messages: Array<{ role: string; content: string }> }).messages;
-      return decision('continue', 'canned reply');
-    }) as never;
-    const preparedMessages = [{ role: 'user' as const, content: 'summarized tail' }];
-    const reply = await goal.draftFastFollowup(session.id, undefined, preparedMessages, undefined, 'goal');
-    expect(reply).toBe('canned reply');
-    const system = captured.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
-    expect(system).toContain(starter);
-    expect(system).toContain(clause);
-  });
-
   it('retains the newest result when large delivered inputs follow the recorded history', async () => {
     const session = await createSession({ title: 'injected context', conversationId: 'injected-context' });
     const original = 'ORIGINAL BRIEF ' + 'x'.repeat(47_000);
@@ -3000,26 +2969,31 @@ describe('the original request reaches the helper verbatim', () => {
     return box;
   }
 
-  it('labels the first user message and sends it as typed, not JSON-escaped', async () => {
+  it('includes the first user message as user reference content in the helper prompt', async () => {
     const sessionId = await chat('c-verbatim-run', starter);
     goal.setGoalObjective('c-verbatim-run', 'ship the importer');
     const box = capture();
     goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-run', turnId: 'g-verbatim-run' });
     expect((await settled('c-verbatim-run')).stage).toBe('ready');
-    expect(box.system.some(content => content.includes('Original request (verbatim)') && content.includes(starter))).toBe(true);
+    expect(box.system.some(content => content.includes('separate user message labelled Original request (verbatim)'))).toBe(true);
+    const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
+    expect(messages.some(message => message.role === 'user' && message.content === `Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
+    expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
     // The saved objective is still sent next to it, and the later correction stays in the transcript.
     expect(box.system.some(content => content.includes('ship the importer'))).toBe(true);
     expect(box.raw).toContain('also handle empty files');
   });
 
-  it('does the same for the finish follow-up, whichever mode drives it', async () => {
+  it('includes the first user message as user reference content in a Goal finish follow-up', async () => {
     const sessionId = await chat('c-verbatim-finish', starter);
     const box = capture();
     expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('next step');
-    expect(box.system.some(content => content.includes('Original request (verbatim)') && content.includes(starter))).toBe(true);
+    const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
+    expect(messages.some(message => message.role === 'user' && message.content === `Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
+    expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
   });
 
-  it('refuses a starter over 60000 characters instead of judging on part of it, and does not retry', async () => {
+  it('fails without retry when the first request exceeds 60,000 characters', async () => {
     const long = `START-MARKER ${'x'.repeat(60_000)} END-MARKER`;
     const sessionId = await chat('c-verbatim-long', long);
     const fetch = vi.fn(async () => decision('continue', 'must not be asked'));
@@ -3033,14 +3007,28 @@ describe('the original request reaches the helper verbatim', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('sends a starter of up to 60000 characters whole, from the session, even when the caller prepared a summary', async () => {
+  it('reports a truncated saved first request even when its stored text is short', async () => {
+    const session = await createSession({ title: 'truncated original', conversationId: 'c-truncated-original' });
+    await appendEvent(session.id, { time: 1_000, source: 'extension', kind: 'user_message', message: { text: 'saved fragment', truncated: true, chars: 14 } });
+    const fetch = vi.fn(async () => decision('continue', 'must not be asked'));
+    globalThis.fetch = fetch as never;
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-truncated-original', turnId: 'g-truncated-original' });
+    const view = await settled('c-truncated-original');
+    expect(view.stage).toBe('failed');
+    expect(view.error).toMatch(/^original_request_too_large: the first message is truncated/);
+    expect(view.retryable).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('includes the full first request up to 60,000 characters when the prepared context is a summary', async () => {
     const big = `BEGIN ${'x'.repeat(58_000)} ${starter} FINISH`;
     const sessionId = await chat('c-verbatim-big', big);
     goal.setGoalObjective('c-verbatim-big', 'ship the importer');
     const box = capture();
     const prepared = [{ role: 'user' as const, content: 'Summary: importer work in progress' }];
     expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, 'goal')).toBe('next step');
-    expect(box.system.some(content => content.endsWith(`:\n\n${big}`))).toBe(true);
+    const original = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages.find(message => message.role === 'user' && message.content.includes('Original request (verbatim)'));
+    expect(original?.content).toBe(`Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${big}`);
     expect(box.system.some(content => content.includes('[… cut …]'))).toBe(false);
   });
 });

@@ -3756,9 +3756,9 @@ committed handoff provenance under the message budget; user references have a la
 allowance and explicit clipping. Exact same-session outbox `finishOwner` identities label known
 automatic messages; unknown native user-role rows do not prove human authorship. Both API and
 browser receive reference data rather than the helper's own prior assistant turns. The first
-user message also travels as a separately labelled system block, verbatim up to
-60,000 characters; a longer or already-truncated source fails with `original_request_too_large`
-instead of letting the helper judge completion from a partial request. Temporary
+user message is included in full when it fits the active helper prompt limit, up to 60,000
+characters. A truncated, over-limit, or otherwise unfit message fails with
+`original_request_too_large`. Temporary
 planners retain their staged-workflow role. Browser budgeting includes prompts and JSON escaping
 inside the complete 96,000-character envelope, or the smaller size learned for this account
 (`goal-helper-size.ts`, durable `goal-helper-size`, #1471): a helper prompt ChatGPT took (exact
