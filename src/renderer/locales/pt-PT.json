@@ -2463,6 +2463,15 @@
   "/srv/app or ~/app": "/srv/app ou ~/app",
   "Prefer Plugins on app-sent messages": "Preferir Plugins nas mensagens enviadas pela aplicação",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Quando ativado, o Chat On Steroids usa Plugins em vez de Core nas mensagens normais enviadas pela aplicação. Goal, Loop, agentes e recuperação mantêm sempre Core. É mencionada apenas uma aplicação. As mensagens enviadas diretamente no ChatGPT não mudam.",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Projetos num servidor, Skills e ficheiros em qualquer parte do campo de mensagem e uma reparação das permissões do Mac.",
+  "Projects on a server": "Projetos num servidor",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Adicione uma pasta por SSH; o ChatGPT lê, edita e executa comandos lá com a sua própria configuração de SSH.",
+  "/ and @ anywhere": "/ e @ em qualquer lado",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "Escolha um Skill com / ou um ficheiro do projeto com @ em qualquer ponto de uma mensagem.",
+  "Mac permissions repaired": "Permissões do Mac reparadas",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "Se uma atualização deixou o acesso ao ambiente de trabalho avariado no Mac, um clique repara-o.",
+  "Prefer Plugins": "Preferir Plugins",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "Se quiser, as mensagens que a aplicação envia usam a sua aplicação Plugins em vez do Core.",
   "This task was sent or removed before your edit was saved.": "Esta tarefa foi enviada ou removida antes de a sua edição ser guardada.",
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Esta tarefa foi enviada ou removida antes de a sua edição ser guardada, por isso a sua edição está no campo de mensagem."
 }
