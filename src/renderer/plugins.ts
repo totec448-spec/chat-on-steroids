@@ -152,7 +152,7 @@ function renderInstalled(): void {
     const count = plugin.tools.filter(tool => tool.enabled).length;
     const foot = el('div', 'plugin-card-foot');
     foot.append(el('span', `pill${plugin.status === 'ready' && plugin.tools.length ? ' is-live' : plugin.status === 'error' ? ' is-error' : ''}`, status));
-    if (plugin.error) foot.append(el('span', 'plugin-card-error', plugin.error));
+    if (plugin.error) foot.append(el('span', 'plugin-card-error', () => t(plugin.error!)));
     foot.append(el('span', 'plugin-tool-count', () => t(count === 1 ? '{0} tool enabled' : '{0} tools enabled', [count])));
     title.append(foot); open.append(art(recipe?.icon ?? plugin.catalogId ?? 'custom'), title);
     const menu = document.createElement('details'); menu.className = 'plugin-menu';
@@ -203,7 +203,7 @@ function renderPluginTools(parent: HTMLElement, plugin: PluginView): void {
       parent.append(auth);
     }
     parent.append(el('h3', '', () => t("Tools")), el('p', 'plugin-tools-summary', () => t("{0}/{1} enabled{2} · This plugin only · Refresh ChatGPT after changes", [plugin.tools.filter(tool => tool.enabled).length, plugin.tools.length, publication])));
-    if (plugin.error) parent.append(el('p', 'plugin-error', plugin.error));
+    if (plugin.error) parent.append(el('p', 'plugin-error', () => t(plugin.error!)));
     const tools = el('div', 'plugin-tools');
     for (const tool of plugin.tools) {
       const row = el('label', 'plugin-tool'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = tool.enabled; checkbox.disabled = !plugin.enabled;
