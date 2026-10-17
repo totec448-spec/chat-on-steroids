@@ -22,20 +22,28 @@ export async function seedBranchHistory(sessionId: string, conversationId: strin
   const kinds: Array<Copied['kind']> = ['user_message', 'assistant_message', 'page_tool'];
   const own = await readEvents(sessionId, { kinds });
   if (own.length) return 0;
-  const source = await readEvents(sourceId, { kinds }).catch(() => []) as Copied[];
+  // A source that went through Compact & Resume also holds the chat it left; ChatGPT's branch
+  // holds only the chat it was made from, which began when the session last left a chat.
+  const sourceSummary = await getSession(sourceId);
+  const since = Math.max(0, ...Object.values(sourceSummary?.retiredChatAt ?? {}));
+  const source = (await readEvents(sourceId, { kinds }).catch(() => []) as Copied[]).filter(event => event.time >= since);
   const reply = source.filter(event => event.kind === 'assistant_message' && event.messageId === branch.messageId);
   if (!reply.length) return 0;
-  // Everything that appeared up to the reply's last revision, each message in its latest revision.
-  const end = Math.max(...reply.map(event => event.seq));
-  const latest = new Map<string, Copied>();
+  // The history up to the reply is everything that first appeared before the source chat's next
+  // question, each message in its latest revision: a step row or a question revision can be
+  // recorded after the reply's final revision and still belong before it (measured live).
   const first = new Map<string, number>();
+  const latest = new Map<string, Copied>();
   for (const event of source) {
-    if (positionOf(event) > end || !event.messageId) continue;
+    if (!event.messageId) continue;
     const key = `${event.kind}\u0000${event.messageId}`;
     first.set(key, Math.min(first.get(key) ?? Infinity, positionOf(event)));
-    if (event.seq <= end) latest.set(key, event);
+    if ((latest.get(key)?.seq ?? -1) < event.seq) latest.set(key, event);
   }
-  const ordered = [...latest.entries()].sort(([a], [b]) => first.get(a)! - first.get(b)!).map(([, event]) => event);
+  const replyAt = first.get(`assistant_message\u0000${branch.messageId}`)!;
+  const nextQuestion = Math.min(...[...first].filter(([key, at]) => key.startsWith('user_message\u0000') && at > replyAt).map(([, at]) => at));
+  const ordered = [...latest.entries()].filter(([key]) => first.get(key)! < nextQuestion)
+    .sort(([a], [b]) => first.get(a)! - first.get(b)!).map(([, event]) => event);
   let copied = 0;
   for (const event of ordered) {
     if (event.kind === 'page_tool') {
