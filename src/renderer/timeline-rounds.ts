@@ -72,6 +72,9 @@ function runTurn(run: FlowRow[]): string | undefined {
   return best;
 }
 
+/** A sentence an outline already places, by its message id or its words. */
+interface Said { id?: string; text: string }
+
 function isCall(row: FlowRow): boolean {
   return row.event?.kind === 'tool_call' && row.event.call.nested !== true;
 }
@@ -239,7 +242,8 @@ function tracedParts(run: FlowRow[], trace: TurnTrace, turnId: string, live: boo
  * Rounds without an outline, from what was recorded: each interim message opens a round, and a
  * native step that ends a finished round is ChatGPT's recap of it, by position, never by wording.
  */
-function recordedParts(run: FlowRow[], turnId: string | undefined, live: boolean, finished: boolean, recaps: Set<string>): RoundPart[] {
+function recordedParts(run: FlowRow[], turnId: string | undefined, live: boolean, finished: boolean, recaps: Set<string>,
+  said: readonly Said[] = []): RoundPart[] {
   const parts: RoundPart[] = [];
   let open: Extract<RoundPart, { kind: 'work' }> | null = null;
   const prefix = turnId ?? run[0]!.key;
@@ -247,6 +251,8 @@ function recordedParts(run: FlowRow[], turnId: string | undefined, live: boolean
     const event = row.event!;
     // ChatGPT's interim messages and captions are what it said between steps: each opens a round.
     if (event.kind === 'assistant_message' || event.kind === 'progress') {
+      if (event.kind === 'assistant_message' && said.some(item => (!!item.id && (event.providerMessageId === item.id || event.messageId === item.id)) ||
+          sameSaying(event.message.text, item.text))) continue;
       open = null;
       parts.push({ kind: 'say', key: row.key, rowKey: row.key, turnId });
       continue;
@@ -338,6 +344,9 @@ export function structureTimeline(rows: readonly FlowRow[], traces: Readonly<Rec
   const recapsIn = (list: readonly TurnTrace[]) => new Set(list.flatMap(trace => trace.flatMap(item => item.kind === 'recap' ? [plain(item.text)] : [])));
   const everyRecap = recapsIn(Object.values(traces));
   const recapsOf = (turnId: string | undefined) => turnId ? recapsIn(traces[turnId] ? [traces[turnId]!] : []) : everyRecap;
+  // The same for sentences: a page scan after the turn ended can record one again without its turn,
+  // while the outline already drew it inside the turn (measured live 2026-10-17).
+  const everySaying = Object.values(traces).flatMap(trace => trace.flatMap(item => item.kind === 'say' ? [{ id: item.id, text: item.text }] : []));
   const passThrough = (row: FlowRow) => {
     // An outlined turn with no recorded work still says what it said, before its answer.
     const event = row.event;
@@ -363,7 +372,7 @@ export function structureTimeline(rows: readonly FlowRow[], traces: Readonly<Rec
       const parts = tracedParts(own.flatMap(other => other.rows), trace, turnId, own.at(-1) === liveRun, recapsOf(turnId));
       shareOut(parts, runOf, own.length).forEach((share, index) => shares.set(own[index]!, share));
     }
-    out.push(...shares.get(run) ?? recordedParts(run.rows, turnId, live, !live, recapsOf(turnId)));
+    out.push(...shares.get(run) ?? recordedParts(run.rows, turnId, live, !live, recapsOf(turnId), turnId ? [] : everySaying));
     at = run.start + run.rows.length;
   }
   while (at < rows.length) passThrough(rows[at++]!);
