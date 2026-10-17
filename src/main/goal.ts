@@ -49,7 +49,6 @@ import { planProgressText, type TaskProgressUpdate } from '../shared/task-progre
 import { TaskRequestError } from './task-request.js';
 import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
-import { createHmac, randomBytes } from 'node:crypto';
 import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
@@ -58,7 +57,7 @@ import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './d
 import { goalHelperPromptLimit, noteGoalHelperUnanswered, resetGoalHelperSizeForTests } from './goal-helper-size.js';
 export { GOAL_HELPER_SIZE_STATE, restoreGoalHelperSize } from './goal-helper-size.js';
 import { logInfo, logWarn } from './logger.js';
-import { getSecret } from './secrets.js';
+import { getSecret, secretsRevision } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
 import { modelFacingText } from '../shared/content-reference.js';
@@ -2943,15 +2942,6 @@ let modelCache: { at: number; keyScope: string; models: GoalModel[] } | null = n
  * exists than the one already chosen. Paged, because the listing is several hundred long and
  * nobody scrolls that.
  */
-/**
- * A one-way, process-local fingerprint of a provider key, only to scope the model cache: keyed
- * with a secret that never leaves this process, so not even a stable hash of the key is kept.
- */
-const KEY_FINGERPRINT_SECRET = randomBytes(32);
-function keyFingerprint(key: string): string {
-  return createHmac('sha256', KEY_FINGERPRINT_SECRET).update(key).digest('hex');
-}
-
 export async function listGoalModels(
   offset = 0,
   limit = MODEL_PAGE_SIZE,
@@ -2975,17 +2965,14 @@ export async function listGoalModels(
 async function allGoalModels(): Promise<GoalModel[]> {
   const endpoint = goalEndpoint();
   const custom = endpoint.kind === 'custom';
-  const key = await goalProviderKey(endpoint.kind);
   // OpenRouter may return a key-restricted catalogue. A cache filled under key A is therefore
-  // not valid under key B. Keep only a one-way fingerprint beside the models rather than the
-  // credential itself; replacing a key immediately changes the cache scope without retaining
-  // either secret for the five-minute listing TTL. A custom endpoint joins the scope by URL,
-  // so switching servers never serves the previous server's catalogue.
-  const keyScope = custom
-    ? `custom:${endpoint.baseUrl.trim()}:${key ? keyFingerprint(key) : 'public'}`
-    : key
-      ? keyFingerprint(key)
-      : 'public';
+  // not valid under key B. The scope names the stored secrets' revision, read before the key, so
+  // replacing a key changes it at once, without keeping the key or anything derived from it for
+  // the five-minute listing TTL. A custom endpoint joins the scope by URL, so switching servers
+  // never serves the previous server's catalogue.
+  const revision = secretsRevision();
+  const key = await goalProviderKey(endpoint.kind);
+  const keyScope = `${custom ? `custom:${endpoint.baseUrl.trim()}` : 'openrouter'}:${key ? `key@${revision}` : 'public'}`;
   if (modelCache && modelCache.keyScope === keyScope && Date.now() - modelCache.at < MODEL_CACHE_MS) {
     return modelCache.models;
   }
