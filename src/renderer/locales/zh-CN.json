@@ -2498,5 +2498,6 @@
   "Keep checkout": "保留检出目录",
   "Remove checkout; preserve Git branch": "移除检出目录，保留 Git 分支",
   "Unattributed activity": "未归属活动",
-  "ChatGPT finished.": "ChatGPT 已完成。"
+  "ChatGPT finished.": "ChatGPT 已完成。",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "此请求超过 {0} 个字符，这是生成计划的上限。请缩短它，或关闭“计划”以作为消息发送。"
 }

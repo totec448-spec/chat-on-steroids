@@ -51,3 +51,14 @@ describe('readable streamed plan progress', () => {
     expect(shown.startsWith('1. xxx')).toBe(true);
   });
 });
+
+it('says before sending when a request is too long to plan, as the app counts it', async () => {
+  // A request over the limit reached the planner and came back as the raw English validator text
+  // "Too big: expected string to have <=16000 characters", with a hint to send it again (2.1.41 pass).
+  const { MAX_TASK_REQUEST_CHARS, taskRequestProblem } = await import('../src/shared/task-progress.js');
+  expect(MAX_TASK_REQUEST_CHARS).toBe(16_000);
+  expect(taskRequestProblem('   ')).toBe('empty');
+  expect(taskRequestProblem('Plan the release.')).toBeNull();
+  expect(taskRequestProblem(`  ${'x'.repeat(MAX_TASK_REQUEST_CHARS)}  `)).toBeNull();
+  expect(taskRequestProblem('x'.repeat(MAX_TASK_REQUEST_CHARS + 1))).toBe('too_long');
+});

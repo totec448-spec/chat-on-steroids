@@ -2498,5 +2498,6 @@
   "Keep checkout": "Çalışma kopyasını koru",
   "Remove checkout; preserve Git branch": "Çalışma kopyasını kaldır, Git dalını koru",
   "Unattributed activity": "İlişkilendirilmemiş etkinlik",
-  "ChatGPT finished.": "ChatGPT tamamladı."
+  "ChatGPT finished.": "ChatGPT tamamladı.",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "Bu istek, bir plan için en fazla olan {0} karakterden uzun. Kısaltın veya mesaj olarak göndermek için Plan’ı kapatın."
 }
