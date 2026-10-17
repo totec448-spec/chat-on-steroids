@@ -115,6 +115,7 @@ import {
   recordRequestEvidence,
   recordNote,
   recordProgress,
+  ResumeDestinationPendingError,
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
@@ -221,6 +222,7 @@ import {
   openContinuationNow,
   reopenWithHandoffNow,
   releaseContinuationDestinationSendNow,
+  recoverContinuationFromRecordedBootstrap,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   sendUnattempted,
@@ -2975,6 +2977,29 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     observationWritesInFlight += 1;
     let committed: { sessionId: string | null; stored: number; wake: boolean } | undefined;
     try {
+      // /compact normally commits B's identity from the marked destination message. If that
+      // checkpoint request was lost, the service worker's independently durable journal
+      // may still carry the exact bootstrap. Prove it against the continuation's saved
+      // handoff and dispatched send BEFORE recorder admission could invent B's owner.
+      for (const observation of observations) {
+        if (observation.kind !== 'user_message' || !observation.messageId || !observation.text) continue;
+        const marker = continuationMarkerOf(observation.text);
+        if (marker?.kind !== 'RESUME') continue;
+        const outcome = await recoverContinuationFromRecordedBootstrap(id, observation.messageId, observation.text);
+        if (!outcome) continue; // An unverified marker must never select a session.
+        if (outcome.status === 'retryable' || outcome.status === 'rejected') {
+          // Do not ACK an observation with a proven continuation whose owner is still
+          // unresolved. The extension retries this entire journal batch after recovery.
+          logWarn(`bridge: journal resume recovery for ${id} is ${outcome.status} — ${outcome.reason}`);
+          return json(res, 503, { error: 'resume_recovery_pending', retryable: true }, origin);
+        }
+        const entry = continuationByToken(marker.token);
+        const resume = commands.find(command => command.spec.type === 'resume' && command.spec.token === marker.token);
+        if (resume) retire(resume, 'the recorded replacement message committed the continuation');
+        if (outcome.status === 'committed' && entry) armResumedChat(entry.sessionId, outcome.conversationId);
+        noticeMarkedReplacement(id, marker.token, 'committed from the durable journal');
+        break;
+      }
       const agent = agentForOwnedConversation(id);
       // The command acknowledgement normally supplies this origin before the worker's first
       // observation. Its pending copy lives in recorder memory until a session exists, though,
@@ -2993,7 +3018,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           });
         }
       }
-      const result = await recordChatObservations(id, observations, agent);
+      let result;
+      try {
+        result = await recordChatObservations(id, observations, agent);
+      } catch (err) {
+        if (err instanceof ResumeDestinationPendingError) {
+          // The browser's journal owns this batch until an exact session can be
+          // proved. Never ACK an observation that was deferred by the recorder.
+          return json(res, 503, { error: 'resume_destination_pending', retryable: true }, origin);
+        }
+        throw err;
+      }
       const superseded = await conversationWasSuperseded(id);
       if (!superseded && !isChatBlocked(id) && result.activity.working && result.activity.at) {
         const woke = result.activity.startedAt !== undefined

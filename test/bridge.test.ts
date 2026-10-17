@@ -123,10 +123,12 @@ const {
   CONTINUATIONS_STATE,
   abortContinuation,
   attachSummary,
+  beginContinuationDestinationSendNow,
   claimContinuationNow,
   commitContinuation,
   continuationByToken,
   continuationForSession,
+  dispatchContinuationDestinationSendNow,
   openContinuationNow,
   setContinuationRecoveryHooks,
   restoreContinuations
@@ -4273,6 +4275,193 @@ describe('delivering a bootstrap', () => {
     expect(ack.body.committed).toBe(true);
     await expect(earlyObservation!).resolves.toMatchObject({ sessionId });
     expect((await getSession(sessionId))?.conversationId).toBe(destination);
+  });
+
+  it('retries a late replacement journal batch rather than acknowledging it into another local session', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-555555555551';
+    const destination = '92929292-1111-2222-3333-555555555552';
+    const { sessionId, token: continuation } = await compactedSession(from, 'keep the recorded work');
+    expect((await claimContinuationNow(continuation, 'late-replacement-page'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    // The surviving journal identifies this as a possible Resume destination. A generic
+    // unknown chat is no longer held beyond the normal recorder admission window.
+    const events = [{ kind: 'user_message', time: Date.now(),
+      text: resumeBootstrapText('an incomplete bootstrap with this dispatched marker', continuation),
+      messageId: 'late-resume-user' }];
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+      const pending = request('POST', '/events', { body: { conversationId: destination, events } });
+      await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(61_000);
+      const response = await pending;
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({ error: 'resume_destination_pending', retryable: true });
+      expect(await findSessionByConversation(destination)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(await commitContinuation(continuation, destination)).toBe(true);
+    const retry = await request('POST', '/events', { body: { conversationId: destination, events } });
+    expect(retry.status).toBe(200);
+    expect(retry.body.sessionId).toBe(sessionId);
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
+    const saved = await readEvents(sessionId, { kinds: ['user_message'] });
+    expect(saved.some((event) => event.kind === 'user_message' && event.messageId === 'late-resume-user')).toBe(true);
+  });
+
+  it('records an unrelated chat over /events after the bounded wait despite a dispatched resume', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-5555555555e1';
+    const unrelated = '92929292-1111-2222-3333-5555555555e2';
+    const { token: continuation } = await compactedSession(from, 'keep existing work intact');
+    expect((await claimContinuationNow(continuation, 'dispatched-with-unrelated-chat'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    const events = [{ kind: 'user_message', time: Date.now(), text: 'An independent question.', messageId: 'new-independent-user' }];
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+      const pending = request('POST', '/events', { body: { conversationId: unrelated, events } });
+      await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(61_000);
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ stored: 1 });
+      expect((await findSessionByConversation(unrelated))?.id).toBe(response.body.sessionId);
+      expect(continuationByToken(continuation)?.state).toBe('claimed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers a lost resume checkpoint from the exact journalled bootstrap without making a shadow session', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-555555555561';
+    const destination = '92929292-1111-2222-3333-555555555562';
+    const brief = 'recover the same local session from the recorded destination prompt';
+    const { sessionId, token: continuation } = await compactedSession(from, brief);
+    expect((await claimContinuationNow(continuation, 'lost-checkpoint-page'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    const events = [{ kind: 'user_message', time: Date.now(), messageId: 'journalled-resume-bootstrap',
+      text: resumeBootstrapText(`${brief}\n\n${SAMPLE_BRIEF}`, continuation) }];
+
+    // Simulate the browser losing /compact's destinationMessageId request while its durable
+    // observation journal still has the exact ChatGPT-authored destination message.
+    const recovered = await request('POST', '/events', { body: { conversationId: destination, events } });
+    expect(recovered.status).toBe(200);
+    expect(recovered.body).toMatchObject({ sessionId, stored: 1 });
+    expect(continuationByToken(continuation)).toMatchObject({ state: 'committed', to: destination });
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
+    expect((await findSessionByConversation(destination))?.id).toBe(sessionId);
+    expect((await request('POST', '/events', { body: { conversationId: destination, events } })).body)
+      .toMatchObject({ sessionId, stored: 0 });
+    expect((await readEvents(sessionId, { kinds: ['user_message'] })).filter(
+      (item) => item.kind === 'user_message' && item.messageId === 'journalled-resume-bootstrap'
+    )).toHaveLength(1);
+  });
+
+  it('does not recover a resume from a forged or edited bootstrap even when its token matches', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-555555555571';
+    const destination = '92929292-1111-2222-3333-555555555572';
+    const brief = 'the authentic continuation is different from this edited transcript';
+    const { sessionId, token: continuation } = await compactedSession(from, brief);
+    expect((await claimContinuationNow(continuation, 'edited-checkpoint-page'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    const events = [{ kind: 'user_message', time: Date.now(), messageId: 'wrong-resume-bootstrap',
+      text: resumeBootstrapText('an unrelated or altered brief', continuation) }];
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+      const pending = request('POST', '/events', { body: { conversationId: destination, events } });
+      await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect((await pending).status).toBe(503);
+      expect((await getSession(sessionId))?.conversationId).toBe(from);
+      expect(await findSessionByConversation(destination)).toBeNull();
+      expect(continuationByToken(continuation)?.state).toBe('claimed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers the marked destination journal after restoring the pending continuation WAL', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-555555555581';
+    const destination = '92929292-1111-2222-3333-555555555582';
+    const brief = 'recover this claimed and dispatched continuation after a restart';
+    const { sessionId, token: continuation } = await compactedSession(from, brief);
+    expect((await claimContinuationNow(continuation, 'restarted-resume-tab'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    await flushDurable();
+    const durable = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
+    expect(durable).not.toBeNull();
+    await restoreContinuations(durable);
+    expect(continuationByToken(continuation)).toMatchObject({ state: 'claimed', destinationSend: { state: 'dispatched-unresolved' } });
+
+    const observed = await request('POST', '/events', { body: { conversationId: destination, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'recovered-after-restart',
+        text: resumeBootstrapText(`${brief}\n\n${SAMPLE_BRIEF}`, continuation) }
+    ] } });
+    expect(observed.status).toBe(200);
+    expect(observed.body).toMatchObject({ stored: 1, sessionId });
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
+  });
+
+  it('refuses journal-based reassignment if the marked replacement chat is already owned', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-555555555591';
+    const destination = '92929292-1111-2222-3333-555555555592';
+    const brief = 'the real source session must not steal an already owned destination';
+    const { sessionId, token: continuation } = await compactedSession(from, brief);
+    const other = await createSession({ conversationId: destination });
+    expect((await claimContinuationNow(continuation, 'conflicting-resume-tab'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+
+    const response = await request('POST', '/events', { body: { conversationId: destination, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'conflicted-bootstrap',
+        text: resumeBootstrapText(`${brief}\n\n${SAMPLE_BRIEF}`, continuation) }
+    ] } });
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ error: 'resume_recovery_pending', retryable: true });
+    expect((await getSession(sessionId))?.conversationId).toBe(from);
+    expect((await findSessionByConversation(destination))?.id).toBe(other.id);
+    expect((await readEvents(other.id, { kinds: ['user_message'] }))).toHaveLength(0);
+  });
+
+  it('does not corrupt the committed destination receipt when a second chat repeats the marked bootstrap', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-5555555555a1';
+    const destination = '92929292-1111-2222-3333-5555555555a2';
+    const competing = '92929292-1111-2222-3333-5555555555a3';
+    const brief = 'only the first replacement is allowed to inherit the original session';
+    const { sessionId, token: continuation } = await compactedSession(from, brief);
+    expect((await claimContinuationNow(continuation, 'first-destination-page'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    expect(await commitContinuation(continuation, destination)).toBe(true);
+
+    const rejected = await request('POST', '/events', { body: { conversationId: competing, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'second-destination-message',
+        text: resumeBootstrapText(`${brief}\n\n${SAMPLE_BRIEF}`, continuation) }
+    ] } });
+    expect(rejected.status).toBe(503);
+    expect(rejected.body).toEqual({ error: 'resume_recovery_pending', retryable: true });
+    expect(continuationByToken(continuation)).toMatchObject({
+      state: 'committed', to: destination, destinationSend: { state: 'dispatched-unresolved' }
+    });
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
+    expect(await findSessionByConversation(competing)).toBeNull();
   });
 
   /**
