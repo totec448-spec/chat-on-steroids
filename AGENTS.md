@@ -1114,8 +1114,10 @@ Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside
 the same parent, and continues from the new one. The page reports each question's place in that tree
 (`user_message.parentId`: the legacy `metadata.parent_id`, or on the shell the previous turn's last
 `turn.messageIds` entry from the thread's ordered `entries`, `root` for the first) and `parentExact`
-(always for a real parent id; on the shell only with ChatGPT's versions control, whose handler asks the
-versions endpoint). The recorder marks a question with `parentExact` as `replaces` the newest version
+(a real parent or predecessor id is proof by itself, since a thread holds one question after each message;
+`root` only with ChatGPT's versions control, whose handler asks the versions endpoint and which ChatGPT
+draws only after the page is loaded again). Only the model report carries the place, so it also reports
+a question the DOM pass already recorded as written. The recorder marks a question with `parentExact` as `replaces` the newest version
 recorded before it under that parent in the current chat (`session/edits.ts`); an edit the app delivered
 is marked at the page's acknowledgement (`noteEditReplacement`), before any versions control. The
 timeline folds the replaced question and everything after it up to the edit (and their late re-scans)

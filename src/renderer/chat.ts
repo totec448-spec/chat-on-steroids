@@ -2101,6 +2101,9 @@ function paintBranchNotices(): void {
 function paintEditNotice(): void {
   const notice = $('editDraft');
   const editing = editingQuestion && !newChatSelected && selectedId === editingQuestion.sessionId ? editingQuestion : null;
+  // The question being edited is marked in the chat, so an earlier one is easy to find.
+  for (const row of $('timeline').querySelectorAll<HTMLElement>('.ev-user_message[data-question-id]'))
+    row.classList.toggle('is-being-edited', row.dataset.questionId === editing?.messageId);
   notice.hidden = !editing;
   if (!editing) { delete notice.dataset.editFor; return; }
   if (notice.dataset.editFor === `${editing.messageId}:${editing.later}`) return;
@@ -5307,7 +5310,11 @@ function paintDetail(followBottom = historyBefore === null): void {
       : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(item.event);
     if (answerTurn || looseAnswer) row.querySelector('.said')?.append(answerActions(answerTurn,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
-    if (item.kind === 'event' && editableQuestion(item.event, events)) row.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
+    if (item.kind === 'event' && editableQuestion(item.event, events)) {
+      row.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
+      row.dataset.questionId = item.event.messageId;
+      row.classList.toggle('is-being-edited', editingQuestion?.sessionId === selectedId && editingQuestion?.messageId === item.event.messageId);
+    }
     row.dataset.timelineKey = key;
     row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
@@ -5876,10 +5883,12 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   for (let i = asks.length - 1; i >= 0; i--) {
     const { index, asked } = asks[i]!;
     const latest = i === asks.length - 1;
-    if (latest && live && (!pending || runningBefore)) { rows.splice(index + 1, 0, turnStatusLine); rows.push(turnNow); continue; }
+    // An edit's earlier versions fold right under its question (#365); the turn's line follows them.
+    const at = rows[index + 1]?.matches('.earlier-version') ? index + 2 : index + 1;
+    if (latest && live && (!pending || runningBefore)) { rows.splice(at, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
     if (seconds === undefined || (latest && live)) continue;
-    rows.splice(index + 1, 0, workedLine(asked, seconds)); used.add(String(asked));
+    rows.splice(at, 0, workedLine(asked, seconds)); used.add(String(asked));
   }
   for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
   // A long turn pushes its question out of the loaded rows: every row left is that turn's work, so its

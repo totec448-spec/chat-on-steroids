@@ -2221,8 +2221,10 @@
    * Where a shell turn's question sits in ChatGPT's message tree (Edit & resubmit, #365). The shell
    * model carries no parent ids, but the thread's ordered `entries` (a few levels up) does: the
    * question follows the previous turn's last message, and the first turn follows the root. Two
-   * questions with the same predecessor are versions of one message. The versions control (its
-   * handler asks ChatGPT's versions endpoint) is the page's own proof that this one has others.
+   * questions after the same message are versions of one: a thread holds one question after each
+   * message. "root" is weaker, since a thread list that starts later would call its first turn the
+   * root too; there only ChatGPT's versions control (its handler asks the versions endpoint) proves
+   * it. ChatGPT draws that control only once the page is loaded again after an edit (live 2.1.41).
    */
   function shellQuestionPlace(fiber, entry, section) {
     let entries = null, index = -1;
@@ -2243,7 +2245,7 @@
       const onClick = fiberOf(button)?.memoizedProps?.onClick;
       if (typeof onClick === 'function' && /usesVersionsEndpoint/.test(Function.prototype.toString.call(onClick))) { versioned = true; break; }
     }
-    return { parentId, versioned };
+    return { parentId, versioned: versioned || parentId !== 'root' };
   }
 
   function shellTurnSource(fiber, section, turnId) {
