@@ -10,6 +10,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { withoutComments } from './pr-check.mjs';
 
 const CODE = /^(src|extension|scripts|native|build)\//;
 const TEST = /^test\/.+\.test\.ts$/;
@@ -41,6 +42,11 @@ export function planFailFirst(nameStatus) {
  * Select an OS that can execute the changed native tests rather than skip their proof.
  * @param {string} nameStatus
  */
+/** Whether the description opts out of the fail-first proof, outside any HTML comment (a hidden one does not count). */
+export function optedOut(body) {
+  return OPT_OUT.test(withoutComments(String(body ?? '')));
+}
+
 export function runnerForFailFirst(nameStatus) {
   const tests = planFailFirst(nameStatus).tests;
   if (tests.some(file => /^test\/(?:windows-[^/]+|computer(?:-[^/]+)?)\.test\.ts$/.test(file))) return 'windows-2025';
@@ -58,7 +64,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.log(`runner=${runnerForFailFirst(nameStatus)}`);
     process.exit(0);
   }
-  if (OPT_OUT.test(String(pr.body ?? '').replace(/<!--[\s\S]*?-->/g, ''))) {
+  if (optedOut(pr.body)) {
     console.log('The description says this PR has no failing-first test ("Fail-first: n/a"). Nothing to prove.');
     process.exit(0);
   }
