@@ -1,4 +1,5 @@
 // Isolated Chromium layout and hit testing of the production connection popover.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,8 +11,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { sandbox: true } });
   try {
     const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
-    const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<link\b[^>]*>/gi, '');
+    const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/gi, '');
     const main = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
     const relocation = main.match(/document\.body\.append\(\$\('connectionPopover'\)\);/)?.[0];
     assert.ok(relocation, 'Production initialization must escape the sidebar containing block');

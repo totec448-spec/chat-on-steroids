@@ -1,4 +1,5 @@
 // Isolated real Electron renderer; no production userData, bridge or provider calls.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -48,8 +49,7 @@ app.whenReady().then(async () => {
   const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),
     server:{host:'127.0.0.1',port:0,hmr:false},plugins:[{name:'chat-switch-fixture',configureServer(vite) {
       vite.middlewares.use('/fixture.html',async (_request,response)=>{
-        const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8')
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
+        const html=withoutScripts(fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8'))
           .replace('</body>','<script type="module">'+fixture+'</script></body>');
         response.setHeader('Content-Type','text/html');
         response.end(await vite.transformIndexHtml('/fixture.html',html));

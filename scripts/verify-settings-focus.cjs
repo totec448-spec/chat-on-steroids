@@ -1,4 +1,5 @@
 // Isolated production CSS/markup: focus and picker repaints must not move settings.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,8 +13,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1000, height: 900,
     webPreferences: { sandbox: true, backgroundThrottling: false } });
   try {
-    const html = fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8')
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    const html = withoutScripts(fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8'))
       .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
     const fixture = path.join(output, 'fixture.html'); fs.writeFileSync(fixture, html);
     await win.loadFile(fixture);

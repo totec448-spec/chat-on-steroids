@@ -1,6 +1,7 @@
 /** Real renderer regression for dense activity paging. Synthetic data by default.
  * node scripts/verify-history-scroll.cjs [--show] [--recording /path/to/event-snapshot.json]
  * Optional recordings are read-only local evidence and never included in the repository. */
+const { withoutScripts } = require('./ui-check-page.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -26,8 +27,7 @@ app.whenReady().then(async () => {
   const code = built.outputFiles.find(file => file.path.endsWith('.js')).text;
   const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8') +
     built.outputFiles.filter(file => file.path.endsWith('.css')).map(file => file.text).join('\n');
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
+  const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
   const show = process.argv.includes('--show');
   const win = new BrowserWindow({ show, title: 'CoS history scroll verification', width: 1400, height: 1000,

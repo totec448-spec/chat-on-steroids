@@ -1,5 +1,6 @@
 // Run after npm run build. Production markup/styles in isolated Chromium; no app preload,
 // bridge or user profile. Built assets resolve Phosphor fonts exactly as the shipped UI does.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,8 +11,7 @@ const output = path.join(root, 'outputs/navigation-motion');
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
   fs.mkdirSync(output, { recursive: true });
-  const html = fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+  const html = withoutScripts(fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8'))
     .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
   const fixture = path.join(output, 'fixture.html');
   fs.writeFileSync(fixture, html);
