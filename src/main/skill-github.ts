@@ -28,7 +28,14 @@ function safeName(name: unknown): name is string {
     !/[\\/:*?"<>|\u0000-\u001f]/.test(name) && !/[. ]$/.test(name) && !WINDOWS_DEVICE.test(name);
 }
 
-async function githubJson(endpoint: string, signal: AbortSignal, limit = 1024 * 1024): Promise<unknown> {
+/** A branch or tag name git accepts, "/" included; never a path segment of its own. */
+function validRef(ref: unknown): ref is string {
+  return typeof ref === 'string' && ref.length > 0 && ref.length <= 255 && !/[\u0000-\u0020\u007f~^:?*[\\]/.test(ref) &&
+    !ref.includes('..') && !ref.includes('//') && !ref.includes('@{') && !ref.startsWith('/') && !ref.endsWith('/') &&
+    !ref.endsWith('.') && !ref.endsWith('.lock') && ref !== '@';
+}
+
+async function githubJson(endpoint: string, signal: AbortSignal, limit = 1024 * 1024, missing: 'throw' | 'null' = 'throw'): Promise<unknown> {
   let response: Response;
   try {
     response = await fetch(`https://api.github.com${endpoint}`, {
@@ -41,7 +48,10 @@ async function githubJson(endpoint: string, signal: AbortSignal, limit = 1024 * 
   if (!response.ok) {
     if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
       throw new Error('GitHub API rate limit reached. Try again later.');
-    if (response.status === 404) throw new Error('GitHub skill folder was not found or is private.');
+    if (response.status === 404) {
+      if (missing === 'null') return null;
+      throw new Error('GitHub skill folder was not found or is private.');
+    }
     throw new Error(`GitHub request failed (${response.status}). Try again later.`);
   }
   const length = Number(response.headers.get('content-length'));
@@ -68,14 +78,27 @@ function repositoryEndpoint(location: GitHubSkillLocation): string {
 async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortSignal): Promise<Snapshot> {
   const base = repositoryEndpoint(requested);
   let ref = requested.ref;
+  let directory = requested.directory;
+  let commitInfo: { sha?: unknown } | null = null;
   if (!ref) {
     const repository = await githubJson(base, signal) as { default_branch?: unknown };
-    if (typeof repository.default_branch !== 'string' || !safeName(repository.default_branch))
-      throw new Error('GitHub repository has no usable default branch');
+    if (!validRef(repository.default_branch)) throw new Error('GitHub repository has no usable default branch');
     ref = repository.default_branch;
+  } else {
+    // A link cannot show where a branch like "dev/main" ends and the folder starts. Try the first
+    // segment, then each longer prefix: git allows no branch beside one of its own prefixes, so
+    // the first that resolves is the only one, and the usual "main" costs a single request.
+    const segments = [ref, ...directory.split('/').filter(Boolean)];
+    for (let take = 1; take <= Math.min(segments.length, 6); take++) {
+      const candidate = segments.slice(0, take).join('/');
+      if (!validRef(candidate)) break;
+      const last = take === Math.min(segments.length, 6);
+      commitInfo = await githubJson(`${base}/commits/${encodeURIComponent(candidate)}`, signal, undefined, last ? 'throw' : 'null') as { sha?: unknown } | null;
+      if (commitInfo) { ref = candidate; directory = segments.slice(take).join('/'); break; }
+    }
   }
-  const location = { ...requested, ref };
-  const commitInfo = await githubJson(`${base}/commits/${encodeURIComponent(ref)}`, signal) as { sha?: unknown };
+  const location = { ...requested, ref, directory };
+  commitInfo ??= await githubJson(`${base}/commits/${encodeURIComponent(ref)}`, signal) as { sha?: unknown };
   if (typeof commitInfo.sha !== 'string' || !SHA.test(commitInfo.sha)) throw new Error('GitHub commit could not be verified');
   const commit = commitInfo.sha;
   const queue = [{ directory: location.directory, relative: '', depth: 0 }];
