@@ -5987,3 +5987,49 @@ describe('branch in new chat (#482)', () => {
     expect(live.sent.at(-1)).toMatchObject({ sessionId: pending.id, branch: { sessionId: source.id, conversationId: chat, messageId: replyId } });
   });
 });
+
+describe('edit and resubmit (#365)', () => {
+  const q = (seq: number, messageId: string, value: string, turnId: string, extra: object = {}): SessionEvent =>
+    ({ kind: 'user_message', seq, origin: seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId, message: text(value), ...extra }) as SessionEvent;
+  const a = (seq: number, messageId: string, value: string, turnId: string): SessionEvent =>
+    ({ kind: 'assistant_message', seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId, message: text(value), final: true, state: 'final' }) as SessionEvent;
+  const end = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_end', turnId, outcome: 'completed' }) as SessionEvent;
+  const said = (w: { document: Document }) => [...w.document.querySelectorAll('#timeline > .ev-user_message, #timeline > .ev-assistant_message, #timeline > .earlier-version')]
+    .map(node => node.classList.contains('earlier-version') ? `earlier:${node.querySelector('summary')!.textContent!.trim()}` : node.querySelector('.said')!.textContent!.replace(/\s+/g, ' ').trim().slice(0, 40));
+
+  it('folds the version an edit replaced, and what followed it, under the edited question', async () => {
+    const events = [q(1, 'q-1', 'First question', 't1'), a(2, 'a-1', 'First answer', 't1'), end(3, 't1'),
+      q(4, 'q-2', 'Fix the logn bug', 't2'), a(5, 'a-2', 'Which bug?', 't2'), end(6, 't2'),
+      q(7, 'q-2b', 'Fix the login bug', 't3', { replaces: 'q-2' }), a(8, 'a-3', 'Done, here is the fix.', 't3'), end(9, 't3')];
+    const { w } = await boot(events, true);
+    const rows = said(w);
+    expect(rows[0]).toContain('First question');
+    expect(rows[1]).toContain('First answer');
+    expect(rows[2]).toContain('Fix the login bug');
+    expect(rows[3]).toBe('earlier:Earlier version · 2 messages');
+    expect(rows[4]).toContain('Done, here is the fix.');
+    expect(rows).toHaveLength(5);
+    expect(w.document.querySelector('#timeline > .ev-user_message:nth-of-type(n) .message-edited, #timeline .message-edited')?.textContent).toBe('Edited version');
+    const fold = w.document.querySelector<HTMLDetailsElement>('#timeline > .earlier-version')!;
+    expect(fold.open).toBe(false);
+    fold.open = true; fold.dispatchEvent(new w.Event('toggle')); await settle();
+    const shown = [...fold.querySelectorAll('.said')].map(node => node.textContent!.replace(/\s+/g, ' ').trim());
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).toContain('Fix the logn bug');
+    expect(shown[1]).toContain('Which bug?');
+  });
+
+  it('folds every earlier version of a question edited twice into one row', async () => {
+    const events = [q(1, 'q-1', 'Ask', 't1'), a(2, 'a-1', 'Answer one', 't1'), end(3, 't1'),
+      q(4, 'q-1b', 'Ask again', 't2', { replaces: 'q-1' }), a(5, 'a-2', 'Answer two', 't2'), end(6, 't2'),
+      q(7, 'q-1c', 'Ask a third time', 't3', { replaces: 'q-1b' }), a(8, 'a-3', 'Answer three', 't3'), end(9, 't3')];
+    const { w } = await boot(events, true);
+    expect(said(w)).toEqual([expect.stringContaining('Ask a third time'), 'earlier:Earlier versions · 4 messages', expect.stringContaining('Answer three')]);
+  });
+
+  it('shows an edit whose replaced version is not in the loaded history as edited, without a fold', async () => {
+    const { w } = await boot([q(7, 'q-2b', 'Fix the login bug', 't3', { replaces: 'q-gone' }), a(8, 'a-3', 'Done.', 't3'), end(9, 't3')], true);
+    expect(said(w)).toEqual([expect.stringContaining('Fix the login bug'), expect.stringContaining('Done.')]);
+    expect(w.document.querySelector('#timeline .message-edited')?.textContent).toBe('Edited version');
+  });
+});
