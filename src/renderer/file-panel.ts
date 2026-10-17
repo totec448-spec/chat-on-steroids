@@ -103,6 +103,8 @@ function actionButton(label: () => string, glyph: string, action: () => void | P
   button.type = 'button';
   button.append(icon(glyph), el('span', '', label));
   ui(button, 'title', label);
+  // The label can be hidden when the toolbar is narrow; the name stays (fitToolbarActions).
+  ui(button, 'aria-label', label);
   button.addEventListener('click', () => void action());
   return button;
 }
@@ -228,6 +230,14 @@ export function createFilePanel(options: FilePanelOptions) {
     toolbarActions.append(newFile, newFolder, rename, remove, reveal, changes);
     toolbar.append(toolbarActions, refresh);
   }
+  // Labels that do not fit hid the last actions behind an invisible scrollbar (German: Delete,
+  // Reveal and Changes). Show icons only then; each button keeps its title and accessible name.
+  const fitToolbarActions = (): void => {
+    toolbarActions.classList.remove('is-compact');
+    toolbarActions.classList.toggle('is-compact', toolbarActions.scrollWidth > toolbarActions.clientWidth + 1);
+  };
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fitToolbarActions).observe(toolbar);
+  onLanguageChange(() => { updateChangesButton(); fitToolbarActions(); });
 
   const body = el('div', 'file-panel-body');
   const tree = el('div', 'file-tree'); tree.setAttribute('role', 'tree');
@@ -1026,6 +1036,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const label = count > 0 ? t('Changes ({0})', [count]) : t('Changes');
     changes.title = label;
     changes.setAttribute('aria-label', label);
+    fitToolbarActions();
   }
 
   function changeStats(change: ProjectGitChange): HTMLElement {
