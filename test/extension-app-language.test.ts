@@ -14,7 +14,12 @@ async function load(appLanguage: string | undefined, protocol = 'chrome-extensio
   const stored: Record<string, unknown> = appLanguage ? { appLanguage } : {};
   const sent: unknown[] = [];
   const chrome = {
-    i18n: { getMessage: (key: string) => german[key]?.message ?? '', getUILanguage: () => 'de' },
+    i18n: {
+      // As Chrome does: $1…$9 take the substitutions, given as one value or an array.
+      getMessage: (key: string, values?: unknown) => String(german[key]?.message ?? '')
+        .replace(/\$([1-9])/g, (token, index) => { const list = Array.isArray(values) ? values : values === undefined ? [] : [values]; return String(list[Number(index) - 1] ?? token); }),
+      getUILanguage: () => 'de'
+    },
     storage: {
       local: { get: async () => ({ ...stored }) },
       onChanged: { addListener: (listener: (typeof listeners)[number]) => listeners.push(listener) }
@@ -34,7 +39,7 @@ async function load(appLanguage: string | undefined, protocol = 'chrome-extensio
   const context: Record<string, unknown> = { chrome, fetch, location: { protocol }, CustomEvent: class { constructor(public type: string) {} } };
   context.globalThis = context;
   vm.runInNewContext(source, context);
-  const api = context.CLF_I18N as { t: (key: string, fallback?: string, values?: unknown) => string; ready: Promise<void>; language: () => string | null };
+  const api = context.CLF_I18N as { t: (key: string, fallback?: string, values?: unknown) => string; tn: (key: string, count: number, one: string, other: string, values?: unknown[]) => string; ready: Promise<void>; language: () => string | null };
   await api.ready;
   const change = async (language: string) => { for (const listener of listeners) listener({ appLanguage: { newValue: language } }, 'local'); await new Promise(resolve => setTimeout(resolve, 10)); };
   return { api, sent, change };
@@ -95,4 +100,20 @@ it('never overwrites preferences the extension itself stored, nor takes an unkno
   const used: Record<string, unknown> = { showStreamTimes: false, appLanguage: 'de' };
   await follower(used)({ language: 'xx', browserPreferences: { overwrite: false, durations: true } });
   expect(used).toEqual({ showStreamTimes: false, appLanguage: 'de' });
+});
+
+// Counts take the app language's plural form: Russian has three (1/21, 2–4, 5–20), and before
+// tn every count read "$1 вызовов инструментов", wrong for 1, 2–4 and 21.
+it('words a count in the app language\'s plural form, and in Chrome\'s before the app has named one', async () => {
+  const ru = await load('ru');
+  const calls = (count: number) => ru.api.tn('content_tool_calls_count', count, '$1 tool call', '$1 tool calls');
+  expect([1, 2, 5, 21, 11].map(calls)).toEqual(['1 вызов инструмента', '2 вызова инструментов', '5 вызовов инструментов', '21 вызов инструмента', '11 вызовов инструментов']);
+  const en = await load('en');
+  expect([1, 3].map(count => en.api.tn('content_tool_calls_count', count, 'x', 'y'))).toEqual(['1 tool call', '3 tool calls']);
+  // No app language yet: Chrome's German catalog and German plural rules.
+  const chrome = await load(undefined);
+  expect([1, 2].map(count => chrome.api.tn('content_tool_calls_count', count, 'x', 'y'))).toEqual(['1 Tool-Aufruf', '2 Tool-Aufrufe']);
+  // A display value differs from the count that picks the form.
+  expect(en.api.tn('content_tokens_from', 50_000, 'from $1 token', 'from $1 tokens', ['50k'])).toBe('from 50k tokens');
+  expect(ru.api.tn('content_tool_calls_count', Number.NaN, 'x', 'y', ['?'])).toBe('? вызова инструментов');
 });

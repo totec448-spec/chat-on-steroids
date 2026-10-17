@@ -59,12 +59,43 @@ export function onLanguageChange(listener: () => void): () => void {
   return () => { languageListeners.delete(listener); };
 }
 
+function fill(text: string, args: readonly unknown[]): string {
+  return text.replace(/\{(\d+)\}/g, (match, index: string) => Number(index) < args.length ? String(args[Number(index)]) : match);
+}
+
 /** Translate only app-authored copy at explicit call sites. Arguments remain verbatim. */
 export function t(source: string, args: readonly unknown[] = []): string {
   const catalog = language === 'en' ? undefined : catalogs[language];
   const key = catalog && Object.hasOwn(catalog, source) ? source : source.replace(/\s+/g, ' ').trim();
   const translated = catalog && Object.hasOwn(catalog, key) ? catalog[key]! : source;
-  return translated.replace(/\{(\d+)\}/g, (match, index: string) => Number(index) < args.length ? String(args[Number(index)]) : match);
+  return fill(translated, args);
+}
+
+const pluralRules = new Map<Language, Intl.PluralRules>();
+function pluralOf(locale: Language, count: number): Intl.LDMLPluralRule {
+  let rules = pluralRules.get(locale);
+  if (!rules) pluralRules.set(locale, rules = new Intl.PluralRules(locale));
+  return Number.isFinite(count) ? rules.select(count) : 'other';
+}
+
+/** The forms besides "other" a language words a count in, each kept in its catalog as `"<other>|<form>"`. */
+export function pluralForms(locale: Language): Intl.LDMLPluralRule[] {
+  return new Intl.PluralRules(locale).resolvedOptions().pluralCategories.filter(form => form !== 'other');
+}
+
+/**
+ * A count and what it counts, in the language's own plural form: "1 line", "2 lines"; Russian
+ * "1 строка", "2 строки", "5 строк". `one` and `other` are the English forms; a catalog keeps
+ * `other`'s translation under `other` and each further form under `"<other>|<form>"`. `count` picks
+ * the form and is `{0}` unless `args` says otherwise, so a formatted or second number can be shown.
+ */
+export function tn(one: string, other: string, count: number, args: readonly unknown[] = [count]): string {
+  const form = pluralOf(language, count);
+  if (language === 'en') return fill(form === 'one' ? one : other, args);
+  const catalog = catalogs[language];
+  const translated = form !== 'other' && Object.hasOwn(catalog, `${other}|${form}`) ? catalog[`${other}|${form}`]!
+    : Object.hasOwn(catalog, other) ? catalog[other]! : form === 'one' ? one : other;
+  return fill(translated, args);
 }
 
 type Property = 'textContent' | 'title' | 'placeholder' | 'aria-label' | 'aria-valuetext' | 'data-usage-hint';

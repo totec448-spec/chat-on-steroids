@@ -1,4 +1,4 @@
-import { currentLanguage, ui, t } from './i18n.js';
+import { currentLanguage, ui, t, tn } from './i18n.js';
 import type { Config } from '../shared/types.js';
 import type { SessionSummary } from '../shared/session.js';
 import type { ReasoningEffort } from '../shared/session.js';
@@ -41,7 +41,7 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   }
   const description = () => [t('Session context · estimated'), pro
     ? t('{0} tokens used', [tokens()])
-    : t('{0} / {1} tokens · {2}% of configured limit', [tokens(), new Intl.NumberFormat(currentLanguage()).format(limit), percent]),
+    : tn('{0} / {1} token · {2}% of configured limit', '{0} / {1} tokens · {2}% of configured limit', limit, [tokens(), new Intl.NumberFormat(currentLanguage()).format(limit), percent]),
     pro ? t('Auto-compaction off for Pro') : config.compaction.auto
       ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat(currentLanguage()).format(config.compaction.autoTokens)])
       : t('Auto-compaction off')].join('\n');

@@ -10,7 +10,7 @@
  */
 
 const $ = (id) => document.getElementById(id);
-const { t, localizeDocument } = globalThis.CLF_I18N;
+const { t, tn, localizeDocument } = globalThis.CLF_I18N;
 const RENDER_STREAM_KEY = 'renderStreamEnabled';
 const SHOW_TIMES_KEY = 'showStreamTimes';
 const POLL_MS = 1500;
@@ -98,7 +98,7 @@ function pipeline(info, ready) {
   if (!ready) {
     return {
       read: readStage,
-      sent: ['failed', pending ? t('popup_count_held', '$1 held', pending) : ''],
+      sent: ['failed', pending ? tn('popup_count_held', pending, '$1 held', '$1 held') : ''],
       proc: ['off'],
       why: ['bad', t('popup_pipeline_delivery_blocked', 'Delivery is blocked until the app is connected and protocol compatibility is confirmed.')]
     };
@@ -119,7 +119,7 @@ function pipeline(info, ready) {
   if (page.blocked) {
     return {
       read: readStage,
-      sent: ['failed', page.queued ? t('popup_count_held_in_page', '$1 held in page', page.queued) : String(page.blocked)],
+      sent: ['failed', page.queued ? tn('popup_count_held_in_page', page.queued, '$1 held in page', '$1 held in page') : String(page.blocked)],
       proc: ['off'],
       why: [
         'bad',
@@ -172,8 +172,10 @@ function pipeline(info, ready) {
             'The app could not place a call by request id — it fell back to $1.',
             ATTRIBUTION[missed[0].app] || missed[0].app
           )
-          : t(
+          : tn(
             'popup_pipeline_call_fallback_many',
+            missed.length,
+            'The app could not place $1 call by request id — it fell back to $2.',
             'The app could not place $1 calls by request id — it fell back to $2.',
             [missed.length, ATTRIBUTION[missed[0].app] || missed[0].app]
           )
@@ -187,7 +189,7 @@ function pipeline(info, ready) {
     why: ['', placed > 0
       ? placed === 1
         ? t('popup_pipeline_request_id_matched_one', '1 request ID matched to recorded tool activity.')
-        : t('popup_pipeline_request_id_matched_many', '$1 request IDs matched to recorded tool activity.', placed)
+        : tn('popup_pipeline_request_id_matched_many', placed, '$1 request ID matched to recorded tool activity.', '$1 request IDs matched to recorded tool activity.')
       : confirmed > 0 ? t('popup_pipeline_owner_confirmed_no_activity', 'Request owner confirmed. No matching tool activity recorded yet.')
         : received > 0 ? t('popup_pipeline_received_waiting_owner', 'App received the ID. Waiting for owner confirmation.')
           : t('popup_pipeline_id_found_waiting_receipt', 'ID found in the latest turn. Waiting for the app to confirm receipt.')]
@@ -357,12 +359,12 @@ function paintDetails(status, info) {
   detail(
     grid,
     t('popup_detail_observed', 'observed'),
-    page ? t('popup_detail_observed_value', '$1 events · $2 calls', [page.events, page.calls]) : null
+    page ? `${tn('popup_detail_events', page.events, '$1 event', '$1 events')} · ${tn('popup_detail_calls', page.calls, '$1 call', '$1 calls')}` : null
   );
   detail(
     grid,
     t('popup_detail_in_this_browser', 'in this browser'),
-    info ? t('popup_detail_browser_queue_value', '$1 held · $2 total', [info.pending, info.pendingAll]) : null,
+    info ? `${tn('popup_count_held', info.pending, '$1 held', '$1 held')} · ${t('popup_detail_total', '$1 total', info.pendingAll)}` : null,
     Boolean(info && info.pendingAll)
   );
   const deliveryState = sent ? (sent.ok ? t('popup_status_ok', 'ok') : sent.error || t('popup_status_failed', 'failed')) : '';
@@ -378,7 +380,7 @@ function paintDetails(status, info) {
   detail(
     grid,
     t('popup_detail_page_sends', 'page sends'),
-    page ? t('popup_detail_page_sends_value', '$1 · $2 failed', [page.sends, page.failures]) : null,
+    page ? `${page.sends} · ${tn('popup_detail_failed', page.failures, '$1 failed', '$1 failed')}` : null,
     Boolean(page && page.failures)
   );
 }

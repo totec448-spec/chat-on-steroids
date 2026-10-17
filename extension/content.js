@@ -145,6 +145,22 @@
     }
     return text;
   }
+  /**
+   * A count in the app language's plural form (CLF_I18N.tn). A helper without tn still gives the
+   * key's own (plural) translation, and no helper the English form.
+   */
+  function tn(key, count, one, other, substitutions = [count]) {
+    try {
+      const helper = globalThis.CLF_I18N;
+      if (helper && typeof helper.tn === 'function') {
+        const translated = helper.tn(key, count, one, other, substitutions);
+        if (typeof translated === 'string' && translated) return translated;
+      }
+    } catch {
+      // Presentation only; the key's translation below still reads in the right language.
+    }
+    return t(key, count === 1 ? one : other, substitutions);
+  }
   let RENDER_STREAM = TEST_MODE ? false : true;
   let SHOW_TIMES = false;
   let renderPreferenceReady = TEST_MODE;
@@ -5934,7 +5950,7 @@
     }
     if (changes.length > 12) {
       const count = changes.length - 12;
-      lines.push({ kind: 'more', text: t('content_tool_more_changed_files', '$1 more changed files', count) });
+      lines.push({ kind: 'more', text: tn('content_tool_more_changed_files', count, '$1 more changed file', '$1 more changed files') });
     }
     return lines;
   }
@@ -6006,10 +6022,11 @@
       if (value.truncated) {
         const note = document.createElement('div');
         note.className = 'clf-stream-detail-note';
-        note.textContent = t(
+        note.textContent = tn(
           'content_tool_preview_truncated',
-          'Preview truncated from $1 characters.',
-          Math.floor(value.chars)
+          Math.floor(value.chars),
+          'Preview truncated from $1 character.',
+          'Preview truncated from $1 characters.'
         );
         recorded.append(note);
       }
@@ -6259,7 +6276,7 @@
         head.replaceChildren(...[...members[members.length - 1].querySelector('summary').childNodes].map(node => node.cloneNode(true)));
         head.dataset.clfSignature = signature;
       }
-      setAttr(head, 'title', t('content_tool_calls_count', '$1 tool calls', members.length));
+      setAttr(head, 'title', tn('content_tool_calls_count', members.length, '$1 tool call', '$1 tool calls'));
       reconcileStreamChildren(group.lastElementChild, members);
       children.push(group); i = end;
     }
@@ -7452,7 +7469,7 @@
     // The app's own reason, rather than this tab's guess. Today there is exactly one: a
     // worker chat, where the prime already writes the user's turns.
     const from = threshold > 0
-      ? t('content_tokens_from', 'from $1 tokens', roundK(threshold))
+      ? tn('content_tokens_from', threshold, 'from $1 token', 'from $1 tokens', [roundK(threshold)])
       : '';
     // Is anything driving this chat at all? A saved goal is enough on its own, but only for a
     // chat that has never moved its own switch — the same rule the app applies.
@@ -9095,19 +9112,18 @@
       return frame(
         progress.tools.count === 1
           ? t('content_waiting_local_tool', 'Waiting for a local tool to finish')
-          : t('content_waiting_local_tools', 'Waiting for $1 local tools to finish', progress.tools.count)
+          : tn('content_waiting_local_tools', progress.tools.count, 'Waiting for $1 local tool to finish', 'Waiting for $1 local tools to finish')
       );
     const workers = progress?.workers;
     // Failed workers remain in history and the agent panel. Only live workers
     // explain this wait; a historical failure must not pin it across handoffs.
     if (workers?.active > 0) {
-      const summary = workers.failed
-        ? t(
-          'content_workers_summary_failed',
-          '$1 finished · $2 running · $3 failed',
-          [workers.finished, workers.active, workers.failed]
-        )
-        : t('content_workers_summary', '$1 finished · $2 running', [workers.finished, workers.active]);
+      // One counted part per number, so each takes its own plural form.
+      const summary = [
+        tn('content_workers_finished', workers.finished, '$1 finished', '$1 finished'),
+        tn('content_workers_running', workers.active, '$1 running', '$1 running'),
+        ...workers.failed ? [tn('content_workers_failed', workers.failed, '$1 failed', '$1 failed')] : []
+      ].join(' · ');
       // Running siblings are not proof that the prime is blocked on them.
       return frame(
         workers.active === 1
@@ -9116,7 +9132,7 @@
             'Worker still running: $1',
             workers.names?.[0] || t('content_worker_label', 'Worker')
           )
-          : t('content_workers_still_running', '$1 workers still running', workers.active),
+          : tn('content_workers_still_running', workers.active, '$1 worker still running', '$1 workers still running'),
         summary
       );
     }
@@ -9197,7 +9213,7 @@
       if (goal.phase === 'retrying') {
         const seconds = Math.round((goal.retryMs || GOAL_RETRY_MS) / 1000);
         return {
-          stage: t('content_goal_retrying', 'Retrying Goal in $1 seconds', seconds),
+          stage: tn('content_goal_retrying', seconds, 'Retrying Goal in $1 second', 'Retrying Goal in $1 seconds'),
           detail: failure,
           body: '',
           kind: 'goal',
