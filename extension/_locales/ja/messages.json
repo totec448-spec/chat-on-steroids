@@ -1180,5 +1180,11 @@
   },
   "popup_detail_total": {
     "message": "合計 $1 件"
+  },
+  "content_edit_message_missing": {
+    "message": "そのメッセージはもう ChatGPT のページにないため、編集できません。"
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT がそのメッセージの編集を提供しませんでした。ChatGPT でチャットを開いてから、もう一度お試しください。"
   }
 }

@@ -1180,5 +1180,11 @@
   },
   "popup_detail_total": {
     "message": "전체 $1개"
+  },
+  "content_edit_message_missing": {
+    "message": "해당 메시지가 더 이상 ChatGPT 페이지에 없어 편집할 수 없습니다."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT가 해당 메시지에 편집을 제공하지 않았습니다. ChatGPT에서 채팅을 연 다음 다시 시도하세요."
   }
 }
