@@ -2706,5 +2706,7 @@
   "Conflict": "Conflicto",
   "Conflicts": "Conflictos",
   "Goal result needs review": "Hay que revisar el resultado de Goal",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "El asistente de Goal cree que el trabajo ha terminado, pero aún no se ha comprobado. Revisa el chat o envía otra instrucción."
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "El asistente de Goal cree que el trabajo ha terminado, pero aún no se ha comprobado. Revisa el chat o envía otra instrucción.",
+  "Review Goal completion": "Revisar la finalización de Goal",
+  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "Desactivado de forma predeterminada. Los cierres de Goal quedan sin verificar y la respuesta, pendiente. Session finish también mantiene el chat abierto y puede enviar una notificación."
 }

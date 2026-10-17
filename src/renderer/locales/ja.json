@@ -2706,5 +2706,7 @@
   "Conflict": "競合",
   "Conflicts": "競合",
   "Goal result needs review": "Goal の結果を確認してください",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal ヘルパーは作業が完了したと判断していますが、まだ確認されていません。チャットを確認するか、次の指示を送信してください。"
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal ヘルパーは作業が完了したと判断していますが、まだ確認されていません。チャットを確認するか、次の指示を送信してください。",
+  "Review Goal completion": "Goal の完了を確認",
+  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "デフォルトではオフです。Goal の停止は未確認のままとなり、返信は保留されます。Session finish でもチャットは開いたままになり、通知を送ることがあります。"
 }
