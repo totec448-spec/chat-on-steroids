@@ -2848,7 +2848,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // own page, which the page names; the root or another Project is never its destination.
     if (!target) {
       const entry = (await listInputs()).find(row => row.id === body.id);
-      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime ? (await getProject(entry.projectId))?.chatgpt : undefined;
+      // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
+      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
       if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
     }
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
