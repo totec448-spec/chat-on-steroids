@@ -2705,8 +2705,8 @@
   "The Skills library supports at most 64 skills": "La biblioteca de skills admite como máximo 64 skills",
   "Conflict": "Conflicto",
   "Conflicts": "Conflictos",
-  "Goal result needs review": "Hay que revisar el resultado de Goal",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "El asistente de Goal cree que el trabajo ha terminado, pero aún no se ha comprobado. Revisa el chat o envía otra instrucción.",
-  "Review Goal completion": "Revisar la finalización de Goal",
-  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Desactivado de forma predeterminada. Si Goal informa de que ha terminado sin pruebas, el resultado sigue sin verificar y la respuesta queda pendiente. Session finish mantiene activa su espera, pide al modelo que mantenga el turno abierto y puede avisarte."
+  "Goal result needs review": "Hay que revisar el resultado de Objetivo",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "El asistente de Objetivo cree que el trabajo ha terminado, pero aún no se ha comprobado. Revisa el chat o envía otra instrucción.",
+  "Review Goal completion": "Revisar la finalización de Objetivo",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Desactivado de forma predeterminada. Si Objetivo informa de que ha terminado sin pruebas, el resultado sigue sin verificar y la respuesta queda pendiente. Session finish mantiene activa su espera, pide al modelo que mantenga el turno abierto y puede avisarte."
 }
