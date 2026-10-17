@@ -4,7 +4,7 @@ import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
-import { currentLanguage, ui, t } from './i18n.js';
+import { currentLanguage, ui, t, tn } from './i18n.js';
 import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
@@ -1468,9 +1468,9 @@ function workerSummary(workers: SessionSummary[]): HTMLElement | null {
   const count = (state: WorkerState) => states.filter(entry => entry === state).length;
   const attention = count('attention'), running = count('running'), sleeping = count('sleeping');
   const parts: HTMLElement[] = [];
-  if (attention) parts.push(el('span', 'is-failed', () => attention === 1 ? t('1 needs attention') : t('{0} need attention', [attention])));
-  if (running) parts.push(el('span', 'is-working', () => t('{0} working', [running])));
-  if (sleeping) parts.push(el('span', '', () => t('{0} sleeping', [sleeping])));
+  if (attention) parts.push(el('span', 'is-failed', () => tn('{0} needs attention', '{0} need attention', attention)));
+  if (running) parts.push(el('span', 'is-working', () => tn('{0} working', '{0} working', running)));
+  if (sleeping) parts.push(el('span', '', () => tn('{0} sleeping', '{0} sleeping', sleeping)));
   if (!parts.length) return null;
   const line = el('span', 'sess-workers');
   parts.forEach((part, index) => line.append(...(index ? [document.createTextNode(' · ')] : []), part));
@@ -1817,8 +1817,8 @@ function workerChildren(): Map<string, SessionSummary[]> {
 function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElement | undefined, target: HTMLElement[]): void {
   const button = el('button', 'worker-toggle');
   button.append(disclosureChevron());
-  ui(button, 'title', () => t("{0} sub-agents · {1} active", [workers.length, workers.filter(sessionWorking).length]));
-  ui(button, 'aria-label', () => t("{0} {1} sub-agents", [expandedWorkers.has(key) ? t("Collapse") : t("Expand"), workers.length]));
+  ui(button, 'title', () => `${tn("{0} sub-agent", "{0} sub-agents", workers.length)} · ${tn("{0} active", "{0} active", workers.filter(sessionWorking).length)}`);
+  ui(button, 'aria-label', () => tn("{0} {1} sub-agent", "{0} {1} sub-agents", workers.length, [expandedWorkers.has(key) ? t("Collapse") : t("Expand"), workers.length]));
   button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
   button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
   if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
@@ -3039,7 +3039,7 @@ function citationPill(pill: CitationPill): HTMLElement {
     card.append(nav);
   }
   card.append(site, title, detail);
-  if (pill.unrecorded) card.append(el('span', 'citation-card-note', () => t('{0} more sources were not recorded with this reply.', [pill.unrecorded])));
+  if (pill.unrecorded) card.append(el('span', 'citation-card-note', () => tn('{0} more source was not recorded with this reply.', '{0} more sources were not recorded with this reply.', pill.unrecorded)));
   let timer: number | undefined;
   let pointerInside = false;
   const show = (): void => {
@@ -3652,7 +3652,7 @@ function readTimeline(): void {
 function roundWorkers(ids: string[], button = el('button', 'activity-workers') as HTMLButtonElement): HTMLButtonElement {
   button.type = 'button';
   button.hidden = ids.length === 0;
-  const label = () => ids.length === 1 ? t('1 sub-agent in this round') : t('{0} sub-agents in this round', [ids.length]);
+  const label = () => tn('{0} sub-agent in this round', '{0} sub-agents in this round', ids.length);
   ui(button, 'title', label);
   ui(button, 'aria-label', label);
   // One pill whatever the count, in the same family as the round's action count beside it.
@@ -3749,7 +3749,7 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
     review.type = 'button';
     review.append(icon('i-git-diff'));
     const total = reviewIndices.length + unavailable.length;
-    const label = () => unavailable.length ? t('Review this edit ({0} of {1} files)', [reviewIndices.length, total]) : t('Review this edit');
+    const label = () => unavailable.length ? tn('Review this edit ({0} of {1} file)', 'Review this edit ({0} of {1} files)', total, [reviewIndices.length, total]) : t('Review this edit');
     ui(review, 'title', label);
     ui(review, 'aria-label', label);
     review.addEventListener('click', click => {
@@ -4851,7 +4851,7 @@ function roundGroup(part: Extract<RoundPart, { kind: 'work' }>, members: HTMLEle
   group.classList.toggle('has-recap', !!part.recap);
   const count = members.length;
   group.querySelector('.activity-count')!.textContent = count > 1 ? String(count) : '';
-  ui(group.querySelector('summary')!, 'title', () => t("{0} actions · {1}", [count, label]));
+  ui(group.querySelector('summary')!, 'title', () => tn("{0} action · {1}", "{0} actions · {1}", count, [count, label]));
   // A closed round wears the check; a running one, the icon of what it is doing.
   const symbol = part.recap && !part.live ? null : latestHead?.querySelector('.ico, .agent-avatar');
   const glyph = group.querySelector('.activity-symbol')!;
@@ -5076,10 +5076,10 @@ function paintDetail(followBottom = historyBefore === null): void {
 
   const facts: string[] = [];
   if (summary) {
-    facts.push(t(totalEvents === 1 ? '{0} event' : '{0} events', [totalEvents]));
+    facts.push(tn('{0} event', '{0} events', totalEvents));
     if (events.length < totalEvents) facts.push(t("showing a bounded page of {0}", [events.length]));
     if (agentFilter !== null) {
-      facts.push(t("filtered to {0} — {1} matched", [agentFilter === UNATTRIBUTED ? 'unattributed' : agentFilter, filtered.length]));
+      facts.push(tn("filtered to {0} — {1} matched", "filtered to {0} — {1} matched", filtered.length, [agentFilter === UNATTRIBUTED ? 'unattributed' : agentFilter, filtered.length]));
     }
     facts.push(t("~{0} rough current-chat context tokens", [compactNumber(summary.contextTokens)]));
     const level = pressureOf(summary.id);
@@ -5114,7 +5114,7 @@ function paintHandoff(): void {
     const saved = handoff;
     const parts: HTMLElement[] = [];
     const head = el('p', 'hint');
-    ui(head, 'textContent', () => t("{0} characters · from {1} events (~{2} tokens) · {3}", [compactNumber(saved.text.length), saved.sourceEvents, compactNumber(saved.sourceTokens), ago(saved.createdAt)]));
+    ui(head, 'textContent', () => t("{0} · {1} {2} · {3}", [tn("{0} character", "{0} characters", saved.text.length, [compactNumber(saved.text.length)]), tn("from {0} event", "from {0} events", saved.sourceEvents), tn("(~{0} token)", "(~{0} tokens)", saved.sourceTokens, [compactNumber(saved.sourceTokens)]), ago(saved.createdAt)]));
     parts.push(head);
     for (const note of handoff.notes) parts.push(el('p', 'hint is-warn', note));
     parts.push(el('pre', 'pre', handoff.text));
@@ -5356,12 +5356,12 @@ function paintBackgroundProcesses(): void {
   const command = backgroundCommand(first.command) || '#' + first.processId;
   ui(host.querySelector<HTMLElement>('.queue-label')!, 'textContent', () => rows.length === 1
     ? t('Background process running · {0}', [command])
-    : t('{0} background processes running', [rows.length]));
+    : tn('{0} background process running', '{0} background processes running', rows.length));
   // Native title tooltips reset while hovered when their text changes. Keep this attribute
   // lifecycle-stable; the visible elapsed labels still tick once per second.
   host.title = rows.map(row => '#' + row.processId + ' ' + backgroundCommand(row.command)).join('\n');
   liveStatus.hidden = !multiple;
-  liveStatus.textContent = multiple ? t('{0} background processes running', [rows.length]) : '';
+  liveStatus.textContent = multiple ? tn('{0} background process running', '{0} background processes running', rows.length) : '';
   const stop = host.querySelector<HTMLButtonElement>('.background-exec-stop')!;
   stop.hidden = multiple;
   configureBackgroundProcessStop(stop, first);
@@ -5825,21 +5825,21 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
   if (workers.length === 0) return { text: '', tone: '' };
   const count = (state: AgentState): number => workers.filter((agent) => agent.state === state).length;
   const parts: string[] = [];
-  if (count('active') > 0) parts.push(t("{0} working", [count('active')]));
+  if (count('active') > 0) parts.push(tn("{0} working", "{0} working", count('active')));
   // "invited" is a worker whose ChatGPT tab has been asked for but has not joined yet.
-  if (count('invited') > 0) parts.push(t("{0} opening", [count('invited')]));
+  if (count('invited') > 0) parts.push(tn("{0} opening", "{0} opening", count('invited')));
   // Detached is a live worker with no tab: its turn is running on OpenAI's servers and its
   // tool calls still arrive here, so it is counted among the working rather than the lost.
-  if (count('detached') > 0) parts.push(t("{0} working with no tab", [count('detached')]));
-  if (count('waking') > 0) parts.push(t("{0} waking up", [count('waking')]));
+  if (count('detached') > 0) parts.push(tn("{0} working with no tab", "{0} working with no tab", count('detached')));
+  if (count('waking') > 0) parts.push(tn("{0} waking up", "{0} waking up", count('waking')));
   // Said as "waiting" rather than counted with the finished ones: these are the run's reusable
   // chats, and the number the user wants is how much of the run is still available to it.
-  if (count('sleeping') > 0) parts.push(t("{0} sleeping", [count('sleeping')]));
-  if (count('finished') > 0) parts.push(t("{0} finished", [count('finished')]));
-  if (count('failed') > 0) parts.push(t("{0} failed", [count('failed')]));
+  if (count('sleeping') > 0) parts.push(tn("{0} sleeping", "{0} sleeping", count('sleeping')));
+  if (count('finished') > 0) parts.push(tn("{0} finished", "{0} finished", count('finished')));
+  if (count('failed') > 0) parts.push(tn("{0} failed", "{0} failed", count('failed')));
   const live = count('invited') + count('active') + count('detached') + count('waking');
   return {
-    text: `${workers.length === 1 ? t("1 worker") : t("{0} workers", [workers.length])} · ${parts.join(' · ')}`,
+    text: `${tn("{0} worker", "{0} workers", workers.length)} · ${parts.join(' · ')}`,
     tone: count('failed') > 0 ? 'is-bad' : live > 0 ? 'is-live' : ''
   };
 }
@@ -5910,7 +5910,7 @@ function paintSwarm(state: SwarmState): void {
           top.append(clear);
         }
         const sub = el('div', 'model-sub');
-        ui(sub, 'textContent', () => [t("{0} pending", [agent.pending]), t("{0} delivered", [agent.delivered]),
+        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered),
           ...(agent.conversationId ? [t("chat bound")] : [])].join(' · '));
         row.append(top, sub);
         if (agent.task) row.append(el('p', 'hint', agent.task));
@@ -5954,7 +5954,7 @@ export function paintWorktreeCleanupOffers(offers: WorkerWorktreeCleanupOffer[],
     const facts = el('div', 'worktree-checkout-facts');
     if (offer.dirty) {
       facts.append(el('span', 'chip worktree-risk', () => offer.changeCount > 1
-        ? t('{0} uncommitted changes', [offer.changeCount]) : t('Uncommitted changes')));
+        ? tn('{0} uncommitted change', '{0} uncommitted changes', offer.changeCount) : t('Uncommitted changes')));
     }
     if (offer.ignoredFiles) facts.append(el('span', 'chip worktree-risk', () => t('Ignored files')));
     if (offer.uniqueCommits) facts.append(el('span', 'chip worktree-commits', () => t('Commits only on this branch')));
@@ -6191,7 +6191,7 @@ function paintGoalModels(): void {
     list.append(row);
   }
   const shown = goalModels.length;
-  ui($('goalModelsState'), 'textContent', () => shown === 0 ? t("No models came back.") : t("Showing the {0} newest of {1}, newest release first.", [shown, goalTotal]));
+  ui($('goalModelsState'), 'textContent', () => shown === 0 ? t("No models came back.") : tn("Showing the {0} newest of {1}, newest release first.", "Showing the {0} newest of {1}, newest release first.", shown, [shown, goalTotal]));
   $<HTMLButtonElement>('goalMore').disabled = shown >= goalTotal;
   $<HTMLButtonElement>('goalMore').hidden = shown >= goalTotal;
   list.scrollTop = keep;

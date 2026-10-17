@@ -1,4 +1,4 @@
-import { currentLanguage, ui, t } from './i18n.js';
+import { currentLanguage, ui, t, tn } from './i18n.js';
 import { $, el, run } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
@@ -204,7 +204,7 @@ function paintCost(): void {
   // The last 30 days as bars, one glance instead of a long table; the table stays one click away.
   const recent = daily.slice(-30);
   const chart = el('div', 'usage-bars'); chart.setAttribute('role', 'img');
-  ui(chart, 'aria-label', () => t("Estimated cost per day, last {0} days", [recent.length]));
+  ui(chart, 'aria-label', () => tn("Estimated cost per day, last {0} day", "Estimated cost per day, last {0} days", recent.length));
   const top = Math.max(0, ...recent.map(day => day.cost));
   for (const day of recent) {
     const bar = el('span', 'usage-bar');

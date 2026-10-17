@@ -728,12 +728,6 @@
   "content_workers_still_running": {
     "message": "$1 worker vẫn đang chạy"
   },
-  "content_workers_summary": {
-    "message": "$1 đã hoàn tất · $2 đang chạy"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 đã hoàn tất · $2 đang chạy · $3 thất bại"
-  },
   "content_working": {
     "message": "đang làm việc…"
   },
@@ -821,9 +815,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · cổng $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 đang giữ · tổng $2"
-  },
   "popup_detail_chat_id": {
     "message": "ID cuộc trò chuyện"
   },
@@ -848,17 +839,11 @@
   "popup_detail_observed": {
     "message": "đã quan sát"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 sự kiện · $2 lần gọi"
-  },
   "popup_detail_ownership": {
     "message": "quyền sở hữu"
   },
   "popup_detail_page_sends": {
     "message": "lần gửi từ trang"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 thất bại"
   },
   "popup_detail_recorder": {
     "message": "trình ghi"
@@ -1174,5 +1159,26 @@
   },
   "popup_app_not_running_help": {
     "message": "Hãy chắc rằng Chat On Steroids đang mở trên máy tính này. Tiện ích sẽ tự kết nối."
+  },
+  "content_workers_finished": {
+    "message": "$1 đã hoàn tất"
+  },
+  "content_workers_running": {
+    "message": "$1 đang chạy"
+  },
+  "content_workers_failed": {
+    "message": "$1 thất bại"
+  },
+  "popup_detail_events": {
+    "message": "$1 sự kiện"
+  },
+  "popup_detail_calls": {
+    "message": "$1 lần gọi"
+  },
+  "popup_detail_failed": {
+    "message": "$1 thất bại"
+  },
+  "popup_detail_total": {
+    "message": "tổng $1"
   }
 }

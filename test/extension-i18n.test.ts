@@ -25,8 +25,15 @@ async function catalog(locale: string): Promise<Catalog> {
 function codeKeys(source: string): string[] {
   const keys = new Set<string>();
   for (const match of source.matchAll(/\bt\(\s*['"]([A-Za-z0-9_]+)['"]/g)) keys.add(match[1]!);
+  for (const key of pluralCodeKeys(source)) keys.add(key);
   return [...keys].sort();
 }
+
+/** Keys counted with `tn(key, count, …)`: each has a form per plural category of each language. */
+function pluralCodeKeys(source: string): string[] {
+  return [...new Set([...source.matchAll(/\btn\(\s*['"]([A-Za-z0-9_]+)['"]/g)].map(match => match[1]!))].sort();
+}
+const PLURAL_FORM = /__(zero|one|two|few|many)$/;
 
 function markupKeys(source: string): string[] {
   const keys = new Set<string>();
@@ -78,15 +85,16 @@ describe('extension localization catalogs', () => {
 
   it('keeps every locale key and placeholder-compatible with English', async () => {
     const english = await catalog('en');
-    const englishKeys = Object.keys(english).sort();
+    // Plural forms differ by language by design; the plural test holds each language to its own.
+    const englishKeys = Object.keys(english).filter(key => !PLURAL_FORM.test(key)).sort();
     expect(englishKeys.length).toBeGreaterThan(0);
 
     for (const locale of expectedLocales) {
       const messages = await catalog(locale);
-      expect(Object.keys(messages).sort(), locale).toEqual(englishKeys);
-      for (const key of englishKeys) {
+      expect(Object.keys(messages).filter(key => !PLURAL_FORM.test(key)).sort(), locale).toEqual(englishKeys);
+      for (const key of Object.keys(messages)) {
         const entry = messages[key]!;
-        const source = english[key]!;
+        const source = english[key.replace(PLURAL_FORM, '')]!;
         expect(entry.message.trim(), `${locale}:${key}`).not.toBe('');
         expect(Object.keys(entry.placeholders ?? {}).sort(), `${locale}:${key}:placeholders`).toEqual(
           Object.keys(source.placeholders ?? {}).sort()
@@ -95,6 +103,18 @@ describe('extension localization catalogs', () => {
           substitutionTokens(source.message)
         );
       }
+    }
+  });
+
+  it('words every counted message in each language\'s own plural forms, and keeps no form a language does not have', async () => {
+    const sources = await Promise.all(['popup.js', 'content.js'].map(file => readFile(path.join(extension, file), 'utf8')));
+    const counted = [...new Set(sources.flatMap(pluralCodeKeys))].sort();
+    expect(counted.length).toBeGreaterThan(10);
+    for (const locale of expectedLocales) {
+      const messages = await catalog(locale);
+      const forms = new Intl.PluralRules(locale.replace('_', '-')).resolvedOptions().pluralCategories.filter(form => form !== 'other');
+      expect(Object.keys(messages).filter(key => PLURAL_FORM.test(key)).sort(), locale)
+        .toEqual(counted.flatMap(key => forms.map(form => `${key}__${form}`)).sort());
     }
   });
 
