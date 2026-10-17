@@ -7,11 +7,14 @@ import { expect, it, vi } from 'vitest';
 const showSaveDialog = vi.fn(async () => ({ canceled: true, filePath: undefined }));
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp/downloads' }, dialog: { showSaveDialog }, shell: {}, screen: {} }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { language: 'de' } }) }));
-vi.mock('../src/main/main-texts.js', () => ({ mainText: (text: string) => `[${text}]` }));
+vi.mock('../src/main/main-texts.js', () => ({
+  mainText: (text: string) => `[${text}]`,
+  dialogLabel: (text: string) => ({ title: `[${text}]`, message: `[${text}]` })
+}));
 
 const { saveDiagnosticsReport } = await import('../src/main/diagnostics-report.js');
 
 it('titles the save dialog in the interface language', async () => {
   expect(await saveDiagnosticsReport('report', null)).toEqual({ saved: false });
-  expect(showSaveDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '[Diagnostics report]' }));
+  expect(showSaveDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '[Diagnostics report]', message: '[Diagnostics report]' }));
 });
