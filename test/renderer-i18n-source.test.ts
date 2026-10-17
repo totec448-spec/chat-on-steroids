@@ -107,3 +107,16 @@ it('translates every error the Files panel, projects, pets, skills and settings 
     expect([...messages].filter(message => !Object.hasOwn(catalog, message)), locale).toEqual([]);
   }
 });
+
+it('translates every note the file and diff previews can show', () => {
+  // Preview notes were shown as written, so "PDF is too large for the bounded in-app preview."
+  // stayed English in every language (2.1.41 pass).
+  const notes = new Set(['src/main/project-files.ts', 'src/main/project-git.ts'].flatMap(file =>
+    [...readFileSync(file, 'utf8').matchAll(/(?:note: |\? |: )'([A-Z][^'\\$]{8,})'/g)].map(match => match[1]!)
+      .filter(text => /preview|diff|pdf|image/i.test(text))));
+  expect(notes.size).toBeGreaterThanOrEqual(9);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect([...notes].filter(note => !Object.hasOwn(catalog, note)), locale).toEqual([]);
+  }
+});

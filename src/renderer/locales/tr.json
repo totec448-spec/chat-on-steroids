@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "Onay sırasında temizlik sorumluluğu değişti. Hiçbir dosya kaldırılmadı.",
   "Local tools are still executing. No worker files were removed.": "Yerel araçlar hâlâ çalışıyor. Hiçbir çalışan dosyası kaldırılmadı.",
   "The checkout was not removed safely. Inspect the local app logs for details.": "Çalışma kopyası güvenle kaldırılamadı. Ayrıntılar için yerel uygulama günlüğüne bakın.",
-  "The browser bridge could not start": "Tarayıcı köprüsü başlatılamadı"
+  "The browser bridge could not start": "Tarayıcı köprüsü başlatılamadı",
+  "Image is too large for the bounded preview.": "Görsel, önizleme için çok büyük.",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "Görsel önizlemesi kullanılamıyor. Dosya geçersiz, desteklenmiyor veya piksel sınırını aşıyor.",
+  "PDF is too large for the bounded in-app preview.": "PDF, uygulama içi önizleme için çok büyük.",
+  "This .pdf file does not contain a PDF header.": "Bu .pdf dosyası bir PDF başlığı içermiyor.",
+  "This file contains a line that is too large for the bounded preview.": "Bu dosyada önizleme için çok uzun bir satır var.",
+  "Binary file, so there is no text preview.": "İkili dosya, bu yüzden metin önizlemesi yok.",
+  "Previews of images and PDFs in a server folder are not available yet.": "Sunucu klasöründeki görsel ve PDF önizlemeleri henüz kullanılamıyor.",
+  "This diff is too large to display.": "Bu değişiklik gösterilemeyecek kadar büyük.",
+  "Binary diff · preview unavailable": "İkili değişiklik · önizleme kullanılamıyor"
 }

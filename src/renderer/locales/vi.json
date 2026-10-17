@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "Quyền phụ trách dọn dẹp đã thay đổi trong khi xác nhận. Không có tệp nào bị xóa.",
   "Local tools are still executing. No worker files were removed.": "Công cụ cục bộ vẫn đang chạy. Không có tệp nào của worker bị xóa.",
   "The checkout was not removed safely. Inspect the local app logs for details.": "Bản checkout không được xóa an toàn. Hãy xem chi tiết trong nhật ký cục bộ của ứng dụng.",
-  "The browser bridge could not start": "Không thể khởi động cầu nối trình duyệt"
+  "The browser bridge could not start": "Không thể khởi động cầu nối trình duyệt",
+  "Image is too large for the bounded preview.": "Hình ảnh quá lớn để xem trước.",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "Không thể xem trước hình ảnh. Tệp không hợp lệ, không được hỗ trợ hoặc vượt quá giới hạn điểm ảnh.",
+  "PDF is too large for the bounded in-app preview.": "PDF quá lớn để xem trước trong ứng dụng.",
+  "This .pdf file does not contain a PDF header.": "Tệp .pdf này không có tiêu đề PDF.",
+  "This file contains a line that is too large for the bounded preview.": "Tệp này có một dòng quá dài để xem trước.",
+  "Binary file, so there is no text preview.": "Tệp nhị phân nên không có bản xem trước văn bản.",
+  "Previews of images and PDFs in a server folder are not available yet.": "Chưa hỗ trợ xem trước hình ảnh và PDF trong thư mục trên máy chủ.",
+  "This diff is too large to display.": "Thay đổi này quá lớn để hiển thị.",
+  "Binary diff · preview unavailable": "Thay đổi nhị phân · không thể xem trước"
 }

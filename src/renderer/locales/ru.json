@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "Ответственный за очистку изменился во время подтверждения. Файлы не удалены.",
   "Local tools are still executing. No worker files were removed.": "Локальные инструменты ещё выполняются. Файлы воркера не удалены.",
   "The checkout was not removed safely. Inspect the local app logs for details.": "Рабочая копия не была безопасно удалена. Подробности — в локальном журнале приложения.",
-  "The browser bridge could not start": "Не удалось запустить мост браузера"
+  "The browser bridge could not start": "Не удалось запустить мост браузера",
+  "Image is too large for the bounded preview.": "Изображение слишком велико для предпросмотра.",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "Предпросмотр изображения недоступен. Файл недействителен, не поддерживается или превышает предел пикселей.",
+  "PDF is too large for the bounded in-app preview.": "PDF слишком велик для предпросмотра в приложении.",
+  "This .pdf file does not contain a PDF header.": "В этом файле .pdf нет заголовка PDF.",
+  "This file contains a line that is too large for the bounded preview.": "В этом файле есть строка, слишком длинная для предпросмотра.",
+  "Binary file, so there is no text preview.": "Двоичный файл, поэтому текстового предпросмотра нет.",
+  "Previews of images and PDFs in a server folder are not available yet.": "Предпросмотр изображений и PDF в папке на сервере пока недоступен.",
+  "This diff is too large to display.": "Это изменение слишком велико для показа.",
+  "Binary diff · preview unavailable": "Двоичное изменение · предпросмотр недоступен"
 }
