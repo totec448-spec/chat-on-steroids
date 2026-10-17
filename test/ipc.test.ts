@@ -902,6 +902,18 @@ describe('ChatGPT browser settings', () => {
 });
 
 describe('settings writes from more than one UI', () => {
+  it("keeps the version whose What's New was seen when a setting changes", async () => {
+    // Every settings save rebuilt \`ui\` without it, so What's New came back at the next start after
+    // any changed setting (2.1.41 pass, Windows VM).
+    const base = defaultConfig(); await saveConfig({ ...base, ui: { ...base.ui, lastSeenVersion: '2.1.40' } });
+    const current = getConfig();
+    const { lastSeenVersion: _seen, ...formUi } = current.ui;
+    expect((await save({ ...current, ui: { ...formUi, theme: 'dark' } }, { ...current, ui: formUi })).ok).toBe(true);
+    expect(getConfig().ui.theme).toBe('dark');
+    expect(getConfig().ui.lastSeenVersion).toBe('2.1.40');
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.lastSeenVersion).toBe('2.1.40');
+  });
+
   it('validates and persists the Plugins tunnel id through Settings, including explicit clearing', async () => {
     const base = defaultConfig(); await saveConfig(base);
     const tunnelId = `tunnel_${'a'.repeat(32)}`;
@@ -2316,6 +2328,40 @@ describe('native worker checkout cleanup confirmation', () => {
       }));
       expect(dispose).not.toHaveBeenCalled();
     });
+  });
+
+  it('accepts the renderer\'s whole set of main-process texts', async () => {
+    // The channel's size bound once stayed at 32 while the set grew past it, and a refused set
+    // left the tray, notices and dialogs English in every language.
+    const { MAIN_TEXTS } = await import('../src/shared/main-texts.js');
+    const { mainText, setMainTextTranslations } = await import('../src/main/main-texts.js');
+    try {
+      expect(await invoke('ui:mainTexts', Object.fromEntries(MAIN_TEXTS.map(source => [source, `«${source}»`]))))
+        .toMatchObject({ ok: true });
+      expect(mainText('Quit')).toBe('«Quit»');
+      expect(mainText('Attach files')).toBe('«Attach files»');
+    } finally { setMainTextTranslations({}); }
+  });
+
+  it('asks in the interface language before removing a worker checkout', async () => {
+    const { setMainTextTranslations } = await import('../src/main/main-texts.js');
+    setMainTextTranslations({
+      'Remove worker Git checkout?': 'Worker-Git-Checkout entfernen?',
+      'Keep checkout': 'Checkout behalten',
+      'Checkout: {0}': 'Checkout: {0}',
+      '{0} uncommitted or ignored paths would be discarded:': '{0} nicht committete oder ignorierte Pfade würden verworfen:'
+    });
+    try {
+      await withPreview(async ({ dispose }) => {
+        await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+        const options = vi.mocked(dialog.showMessageBox).mock.calls.at(-1)?.at(-1) as Electron.MessageBoxOptions;
+        expect(options.title).toBe('Worker-Git-Checkout entfernen?');
+        expect(options.buttons).toEqual(['Checkout behalten', 'Remove checkout; preserve Git branch']);
+        expect(options.detail).toContain(`Checkout: ${preview.workspace}`);
+        expect(options.detail).toContain('1 nicht committete oder ignorierte Pfade würden verworfen:');
+        expect(dispose).not.toHaveBeenCalled();
+      });
+    } finally { setMainTextTranslations({}); }
   });
 
   it('rejects a same-path, same-status and same-size content edit made while the dialog is open', async () => {

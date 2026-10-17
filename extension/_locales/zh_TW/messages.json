@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT 中已有未傳送的草稿。重試前，請先在 Chrome 中傳送或清除該草稿。"
   },
+  "content_delivery_signed_out": {
+    "message": "此瀏覽器中未登入 ChatGPT。請在其中登入 ChatGPT，然後重新傳送。"
+  },
   "content_delivery_model_unconfirmed": {
     "message": "無法確認要求的模型或推理強度"
   },

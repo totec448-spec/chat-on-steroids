@@ -18,6 +18,8 @@ import { messageReaction, withoutMessageReaction } from '../shared/message-react
 import { goalErrorMessage } from '../shared/goal-errors.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
+import { MAX_TASK_REQUEST_CHARS, taskRequestProblem } from '../shared/task-progress.js';
+import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
@@ -854,7 +856,7 @@ function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
 
 /** A row's tooltip: its name, then `state` when a card says more than its badges, then the badges and its age. */
 function sessionRowTitle(summary: SessionSummary, pinned: boolean, badges: Badge[], state: string[] = []): string {
-  return [summary.title || t("Untitled session"), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
+  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
 }
 
 function sessionRow(summary: SessionSummary): HTMLElement {
@@ -871,7 +873,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.dataset.sortHandle = '';
   if (renaming?.id === summary.id) top.append(renameField(summary));
   else {
-    const title = el('b', '', () => summary.title || t("Untitled session")); title.dir = 'auto';
+    const title = el('b', '', () => shownSessionTitle(summary)); title.dir = 'auto';
     // Double-click names the chat, like the pencil does (#1107).
     if (summary.conversationId) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
     top.append(title);
@@ -1029,7 +1031,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(more, 'title', () => t('More options'));
   ui(more, 'aria-label', () => t('More options'));
   const menu = (at?: { x: number; y: number }) => ({
-    owner, at, label: () => summary.title || t("Untitled session"), anchor: () => rowMenuButton(owner), items: () => items
+    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
   row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
@@ -2327,9 +2329,14 @@ function paintTaskPlan(): void {
   if (plan?.stages) paintPreparedPlan();
   else if (plan?.error) {
     const failure = plan.error;
-    const error = el('div', 'muted', () => failure === 'invalid_goal_decision_json' ? t("The planner response could not be read.") : localizedGoalError(failure));
-    error.title = plan.error;
-    preview.append(error, el('div', 'muted', () => t("Send again to retry, or cancel the plan.")));
+    if (failure === 'request_too_long') {
+      preview.append(el('div', 'muted', () => t("This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.",
+        [MAX_TASK_REQUEST_CHARS.toLocaleString(currentLanguage())])));
+    } else {
+      const error = el('div', 'muted', () => failure === 'invalid_goal_decision_json' ? t("The planner response could not be read.") : localizedGoalError(failure));
+      error.title = plan.error;
+      preview.append(error, el('div', 'muted', () => t("Send again to retry, or cancel the plan.")));
+    }
   } else if (plan?.requestId) {
     const progress = plan.progress;
     const label = () => !progress ? t("Creating plan…") : progress.phase === 'retrying' ? t("Provider busy · retry {0}{1}", [progress.attempt ?? '', progress.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']) : progress.phase === 'cancelled' ? t("Plan cancelled") : progress.phase === 'preparing' ? t("Preparing plan…") : progress.phase === 'ready' ? t("Plan ready") : progress.phase === 'failed' ? t("Plan failed") : t("Writing plan…");
@@ -2344,9 +2351,12 @@ async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
   cancelTaskPlan(key);
   const sessionId = selectedId, projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
   const requestId = text ? crypto.randomUUID() : null;
-  const plan: TaskPlanDraft = { text, requestId, stages: null, sending: false, progress: null, error: null };
+  // A request longer than the planner takes is said so here, in words, before anything is sent;
+  // sending it anyway came back as the validator's English text with a pointless "send again".
+  const tooLong = taskRequestProblem(text) === 'too_long';
+  const plan: TaskPlanDraft = { text, requestId: tooLong ? null : requestId, stages: null, sending: false, progress: null, error: tooLong ? 'request_too_long' : null };
   taskPlans.set(key, plan); paintTaskPlan();
-  if (!requestId) { input.focus(); return; }
+  if (!requestId || tooLong) { input.focus(); return; }
   const current = () => taskPlans.get(key) === plan;
   const unsubscribe = api.onTaskProgress?.(progress => {
     if (progress.requestId !== requestId || !current()) return;
@@ -3582,6 +3592,15 @@ async function revealSearchMatch(id: string, query: string): Promise<void> {
   await revealChatLocation(id, location);
 }
 
+/** The loaded timeline row of one recorded message, by the key the timeline gives that message. */
+function rowForLocation(location: SessionSearchLocation): HTMLElement | null {
+  const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
+    : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
+  if (!event) return null;
+  const key = itemKey({ kind: 'event', event });
+  return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
+}
+
 /** Scrolls the open chat to one recorded message, loading the history page around it when needed. */
 async function revealChatLocation(id: string, location: SessionSearchLocation): Promise<void> {
   const selection = selectionGeneration;
@@ -3592,13 +3611,7 @@ async function revealChatLocation(id: string, location: SessionSearchLocation): 
     if (Date.now() > deadline || !current()) return;
     await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
   }
-  const rowFor = (): HTMLElement | null => {
-    const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
-      : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
-    if (!event) return null;
-    const key = itemKey({ kind: 'event', event });
-    return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
-  };
+  const rowFor = (): HTMLElement | null => rowForLocation(location);
   let row = rowFor();
   if (!row) {
     // Marked as history before the read, so a live update meanwhile cannot land in this page.
@@ -4940,7 +4953,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const project = selectedLocalProject();
   $('chatProjectContext').hidden = !project;
   $('chatProjectName').textContent = project?.name ?? '';
-  ui($('chatTitle'), 'textContent', () => summary ? summary.title || t("Untitled session") : t("New chat"));
+  ui($('chatTitle'), 'textContent', () => summary ? shownSessionTitle(summary) : t("New chat"));
 
   paintDeliveryControls();
   paintAgentFilter();
@@ -7764,7 +7777,8 @@ export function initChat(next: Deps): void {
   chatFind = initChatFind({
     selectedId: () => selectedId,
     find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,
-    reveal: revealChatLocation
+    reveal: revealChatLocation,
+    row: rowForLocation
   });
   chatSearch = initChatSearch({
     select: (id, match) => {

@@ -273,3 +273,69 @@ it('does not run the macOS git stub when the Command Line Tools are missing', ()
   const brew = (candidate: string): boolean => stubOnly(candidate) || candidate === '/opt/homebrew/bin/git';
   expect(gitExecutable('darwin', `/opt/homebrew/bin:${finderPath}`, brew, () => null)).toBe('git');
 });
+
+it('shows merge conflicts as conflicts, with a readable diff for every kind of conflict', async () => {
+  // Conflicted files appeared as plain "Modified" (2.1.41 pass); both-added, modify/delete and
+  // both-deleted conflicts have no HEAD or no working file, which a diff must survive.
+  const root = path.join(approved, 'conflicts');
+  await fs.mkdir(root, { recursive: true });
+  await git(root, 'init', '-b', 'main');
+  await git(root, 'config', 'user.email', 'test@example.com');
+  await git(root, 'config', 'user.name', 'CoS Test');
+  // Files Git writes during the merge keep their committed endings on Windows runners too.
+  await git(root, 'config', 'core.autocrlf', 'false');
+  await fs.writeFile(path.join(root, 'both.txt'), 'base\n');
+  await fs.writeFile(path.join(root, 'ours-deletes.txt'), 'base\n');
+  await fs.writeFile(path.join(root, 'theirs-deletes.txt'), 'base\n');
+  await fs.writeFile(path.join(root, 'clean.txt'), 'base\n');
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'base');
+  await git(root, 'checkout', '-b', 'side');
+  await fs.writeFile(path.join(root, 'both.txt'), 'side\n');
+  await fs.writeFile(path.join(root, 'added.txt'), 'side added\n');
+  await fs.writeFile(path.join(root, 'ours-deletes.txt'), 'side change\n');
+  await fs.rm(path.join(root, 'theirs-deletes.txt'));
+  await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'side');
+  await git(root, 'checkout', 'main');
+  await fs.writeFile(path.join(root, 'both.txt'), 'main\n');
+  await fs.writeFile(path.join(root, 'added.txt'), 'main added\n');
+  await fs.rm(path.join(root, 'ours-deletes.txt'));
+  await fs.writeFile(path.join(root, 'theirs-deletes.txt'), 'main change\n');
+  await fs.writeFile(path.join(root, 'clean.txt'), 'main only\n');
+  await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'main');
+  await expect(git(root, 'merge', 'side')).rejects.toThrow();
+  const { id } = await addProject(root);
+
+  const snapshot = await readProjectGitSnapshot(id);
+  const byPath = Object.fromEntries(snapshot.changes.map(change => [change.path, change.status]));
+  expect(byPath).toMatchObject({ 'both.txt': 'C', 'added.txt': 'C', 'ours-deletes.txt': 'C', 'theirs-deletes.txt': 'C' });
+  const both = await readProjectGitDiff(id, 'both.txt', undefined, snapshot.revision);
+  expect(both).toMatchObject({ status: 'C', baseText: 'main\n' });
+  expect(both.currentText).toContain('<<<<<<<');
+  // Both added: no HEAD version before the merge's own commit on main? main has it, side has it.
+  expect((await readProjectGitDiff(id, 'added.txt', undefined, snapshot.revision)).currentText).toContain('>>>>>>>');
+  // Deleted on main, changed on side: HEAD has no file, the working tree has theirs.
+  expect(await readProjectGitDiff(id, 'ours-deletes.txt', undefined, snapshot.revision)).toMatchObject({ baseText: '', currentText: 'side change\n' });
+  // Changed on main, deleted on side: HEAD has it, the working tree keeps ours.
+  expect(await readProjectGitDiff(id, 'theirs-deletes.txt', undefined, snapshot.revision)).toMatchObject({ baseText: 'main change\n', currentText: 'main change\n' });
+});
+
+it('shows a file renamed differently on both sides as conflicts, even with no working file left', async () => {
+  const root = path.join(approved, 'renames');
+  await fs.mkdir(root, { recursive: true });
+  await git(root, 'init', '-b', 'main');
+  await git(root, 'config', 'user.email', 'test@example.com');
+  await git(root, 'config', 'user.name', 'CoS Test');
+  // Files Git writes during the merge keep their committed endings on Windows runners too.
+  await git(root, 'config', 'core.autocrlf', 'false');
+  await fs.writeFile(path.join(root, 'moved.txt'), 'shared body\n'.repeat(20));
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'base');
+  await git(root, 'checkout', '-b', 'side'); await git(root, 'mv', 'moved.txt', 'side-name.txt'); await git(root, 'commit', '-m', 'side');
+  await git(root, 'checkout', 'main'); await git(root, 'mv', 'moved.txt', 'main-name.txt'); await git(root, 'commit', '-m', 'main');
+  await expect(git(root, 'merge', 'side')).rejects.toThrow();
+  const { id } = await addProject(root);
+  const snapshot = await readProjectGitSnapshot(id);
+  const byPath = Object.fromEntries(snapshot.changes.map(change => [change.path, change.status]));
+  expect(byPath['moved.txt']).toBe('C');
+  // Deleted on both sides: no working file and no HEAD version, still a readable (empty) diff.
+  expect(await readProjectGitDiff(id, 'moved.txt', undefined, snapshot.revision)).toMatchObject({ status: 'C', currentText: '' });
+});

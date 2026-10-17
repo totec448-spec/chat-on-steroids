@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "В ChatGPT уже есть неотправленный черновик. Отправьте или очистите его в Chrome перед повтором."
   },
+  "content_delivery_signed_out": {
+    "message": "В этом браузере не выполнен вход в ChatGPT. Войдите в ChatGPT там и отправьте снова."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "Не удалось подтвердить выбранную модель или уровень рассуждений"
   },

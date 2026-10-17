@@ -188,6 +188,8 @@ export async function listDirectoryLevel(
 
 /** Distinguishes read's normal binary-file result from other filesystem failures. */
 export class BinaryReadError extends FsOpError {}
+/** A line longer than a read may return; the text is for the model, the type for everyone else. */
+export class LongLineReadError extends FsOpError {}
 
 /**
  * Every file below `realDir`, for glob expansion, over `fs/walk`.
@@ -279,7 +281,7 @@ export async function readTextFile(
       // Returning zero lines and telling the caller to resume at the same line is an infinite
       // retry loop. Make the remedy explicit when one logical line cannot fit the chosen budget.
       if (firstLine === 0) {
-        throw new FsOpError(
+        throw new LongLineReadError(
           `Line ${lineNo} is larger than max_bytes=${maxBytes}. Increase max_bytes (up to ${MAX_READ_BYTES}) or use exec_command to transform it.`
         );
       }
@@ -322,7 +324,7 @@ export async function readTextFile(
       index = carry.indexOf('\n');
     }
     if (carry.length > MAX_DECODED_LINE_CHARS) {
-      throw new FsOpError(
+      throw new LongLineReadError(
         `A line exceeds the safe decoded-line limit (${formatBytes(MAX_DECODED_LINE_CHARS)}). Narrow or transform the file before reading it.`
       );
     }

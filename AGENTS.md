@@ -452,7 +452,10 @@ internal length and closing boundary; authored whitespace after the frame remain
 ### Text Skills
 
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
-bounded UTF-8 import/read and metadata catalog. Valid YAML name/description fields use the
+bounded to 128 valid packages with fail-closed overflow, UTF-8 import/read and metadata catalog.
+Its Core connector projection omits the redundant per-skill path, trims descriptions to 160
+characters and caps catalog rows at 7,000 characters, ending with the omitted count and `/skills`
+listing hint instead of expanding connector instructions without bound. Valid YAML name/description fields use the
 shared bounded parser before publication, including folded/literal multiline descriptions;
 catalog fields are normalized to one bounded line without rewriting the source body. Legacy
 plain Markdown or invalid/incomplete headers keep the existing heading/prose fallback.
@@ -2303,7 +2306,11 @@ precedes that navigation on a temporary `about:blank` page. Creation and attachm
 receipts: `created: true` survives an `attachmentError`, retaining the same tab handle for inspection
 or deliberate attachment. A known attachment limit fails before creating a tab. The existing
 bounded readiness wait observes document commit, not completion of every subresource, and releases
-its listeners on closure. It never opens a replacement. Tab lists include pending URL/status and
+its listeners on closure. It never opens a replacement. Chrome answers no `Page.enable` on a tab it
+discarded (`status: unloaded` or `discarded: true`, #1568), so an explicit attach first reloads that
+same tab: only with control permission and a live permission check, waiting on tab events within the
+command's deadline (at most 10 s). A loaded or frozen tab is never reloaded; a refused, stalled or
+closed reload attaches nothing and keeps no custody. Tab lists include pending URL/status and
 separate snapshot/input access hints. These are observations; live guards still own each operation.
 The root debugger session enables Chromium focus emulation while attached, so hidden pages
 continue rendering and accepting input without changing the selected tab or OS foreground.
@@ -3468,6 +3475,10 @@ An exact caller without its own family receives a successful empty `agents statu
 of other active primes. A permitted unresolved request can likewise inspect its own state and
 start its own family. Missing both exact proof and permitted request identity refuses only that
 operation. Sleeping-worker measurement remains scoped to the caller's actual history.
+A worker whose chat shows ChatGPT's tool approval card (`approvalCardWaiting`) is marked in the
+status table ("needs the user to answer a tool approval in its chat"), named in one sentence below
+it, and carries `needs_user_approval: true` in the structured agents list, so a prime tells the
+person instead of reading the wait as a stuck runtime.
 
 Spawn validates both per-family and optional global capacity, objective/context, account-observed model/effort, workspace and role,
 then durably reserves the worker before handing out browser work. Model checks precede every
@@ -4182,9 +4193,11 @@ catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,ko,tr,fr,pt-PT,pt-BR,de,ru,vi}.
 `cos.ui.language`. The main process has no catalogs: the renderer translates the allowlisted
 stopped-chat notice texts (`shared/stop-notice.ts`) and publishes them over `ui:stopNoticeTexts`
 at startup and on each language change; unknown keys are refused and untranslated notices stay English.
-The tray menu, its tooltip, the Session finish notice with its buttons and tunnel-loss notices work
-the same way: the allowlisted `shared/main-texts.ts` over `ui:mainTexts`, kept by
-`main/main-texts.ts`, which repaints the tray.
+The tray menu, its tooltip, the Session finish notice with its buttons, tunnel-loss notices and the
+main process's native dialogs (file dialog titles and filter names, the worker checkout removal
+confirmation) work the same way: the allowlisted `shared/main-texts.ts` over `ui:mainTexts`, kept by
+`main/main-texts.ts`, which repaints the tray. The channel accepts at most `MAIN_TEXTS.length` keys;
+counts and paths are filled into `{0}` after translation, with a function replacement.
 The renderer also reports the language over `ui:language`; the main process keeps it as `ui.language`
 and hands it to the extension in the `/status` reply (`language`). The extension stores it as
 `appLanguage` and `i18n.js` then reads that catalog itself (content scripts get it from the service
@@ -4387,7 +4400,9 @@ passes only a LocalProject UUID and project-relative path through fixed IPC; mai
 approved project/root and Git metadata before reading status or a diff. Git inspection is strictly
 read-only: it strips inherited Git repository/index redirects, uses optional-lock-free bounded
 subprocesses and exposes no stage, commit, reset,
-checkout or push authority. Review projects `M/A/D/R/U`, ancestor-folder markers and
+checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
+(`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
+file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
 tabs; Review does not add a second file watcher or expose file-write actions.
 Review also identifies the checked-out branch and offers a searchable, read-only comparison
@@ -4904,6 +4919,10 @@ and enforcement while preserving stored preferences. Windows uses the bounded Po
 UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
 standalone CLI probe does not prove Screen Recording/Accessibility permission for the app.
+
+The permission self-test reports native preflight results, not a completed capture or input.
+An actual screenshot and AX query remain separate evidence; the existing grant-history and
+Repair permissions guidance are preserved.
 
 macOS keeps those grants per code signature, and releases are ad-hoc signed, so after an update
 System Settings still shows a grant that no longer applies. `computer/macos-grants.ts` records

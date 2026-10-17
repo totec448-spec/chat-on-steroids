@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT ya contiene un borrador sin enviar. Envía o borra ese borrador en Chrome antes de volver a intentarlo."
   },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT no tiene una sesión iniciada en este navegador. Inicia sesión en ChatGPT allí y vuelve a enviar."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "No se pudo confirmar el modelo o el razonamiento solicitado"
   },

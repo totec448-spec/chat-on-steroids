@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT에 보내지 않은 초안이 이미 있습니다. 다시 시도하기 전에 Chrome에서 그 초안을 보내거나 지우세요."
   },
+  "content_delivery_signed_out": {
+    "message": "이 브라우저에서 ChatGPT에 로그인되어 있지 않습니다. 그 브라우저에서 ChatGPT에 로그인한 다음 다시 보내세요."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "요청한 모델 또는 추론 수준을 확인할 수 없습니다"
   },

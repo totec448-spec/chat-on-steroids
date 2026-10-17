@@ -238,8 +238,9 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     now = firstRelease + input.RECOVERY_WITHDRAW_LIMIT_MS;
     expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
     expect(await input.failBrowserInput(row.id, 'a-document', withdrawn, 'page-unreadable')).toBe(true);
+    // The chat shows one translated sentence that says what to do; the code stays in the log (#1586).
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed',
-      error: 'Automatic Continue was not sent: page-unreadable' });
+      error: input.RECOVERY_WITHDRAWN_ERROR });
     expect(getLog().some(entry => entry.message.includes('automatic Continue ended') && entry.message.includes('page-unreadable'))).toBe(true);
     input.resetInputForTests();
     expect((await input.pendingBrowserInputs()).filter(item => item.id === row.id)).toEqual([]);
@@ -1580,6 +1581,19 @@ it('hands a sent temporary planner back for closing with the chat ChatGPT moved 
   expect(await answer).toBe('Routed plan answer');
   expect((await post('/status', { openConversations: [] })).body.inputs).toContainEqual(
     expect.objectContaining({ id: row.id, close: true, conversationId }));
+});
+it.each([false, true])('hands back the tab of a first message cancelled before Send for closing (authorized: %s)', async authorized => {
+  // 2.1.40 release round: the tab opened for a cancelled first message stayed on ChatGPT's empty
+  // start page. One cancelled before Send is handed back to close; one that Send was authorized for
+  // may already be in ChatGPT and keeps its tab.
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+  expect((await post('/input/claim', { id: row.id, owner: 'opening-page', conversationId: null })).body.input).toBeTruthy();
+  if (authorized) expect((await post('/input/claim', { id: row.id, owner: 'opening-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await handlers.get('sessions:cancelInput')!(null, { id: row.id })).ok).toBe(true);
+  const inputs = (await post('/status', { openConversations: [] })).body.inputs as Array<Record<string, unknown>>;
+  const closing = inputs.filter(entry => entry.id === row.id && entry.close === true);
+  if (authorized) expect(closing).toEqual([]);
+  else expect(closing).toEqual([expect.objectContaining({ id: row.id, opening: true, close: true, conversationId: null })]);
 });
 afterAll(async () => {
   await stopBridge(); await flushDurable(); resetSessionStoreForTests(); resetDurableForTests();

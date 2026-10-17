@@ -90,3 +90,33 @@ it('translates every delivery error a queued message can show', () => {
     expect(shown.filter(text => !Object.hasOwn(catalog, text)), locale).toEqual([]);
   }
 });
+
+it('translates every error the Files panel, projects, pets, skills and settings actions can show', () => {
+  // These reach the window as the toast of a failed action, which looks each text up in the
+  // catalog; none were there, so a German Files panel said "A file or folder with that name
+  // already exists" in English (2.1.41 pass).
+  const literal = /throw new Error\('([^'\\$]{8,})'\)/g;
+  const sources = ['src/main/project-files.ts', 'src/main/projects.ts', 'src/main/pet-library.ts', 'src/main/skills.ts',
+    'src/main/skill-github.ts', 'src/main/skill-metadata.ts', 'src/main/skill-package.ts', 'src/shared/skills.ts', 'src/main/ipc.ts'];
+  // A snake_case code ("task_settings_changed") is translated where it is mapped, not as text.
+  const messages = new Set(sources.flatMap(file => [...readFileSync(file, 'utf8').matchAll(literal)].map(match => match[1]!))
+    .filter(message => !/^[a-z0-9_]+$/.test(message)));
+  expect(messages.size).toBeGreaterThan(150);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect([...messages].filter(message => !Object.hasOwn(catalog, message)), locale).toEqual([]);
+  }
+});
+
+it('translates every note the file and diff previews can show', () => {
+  // Preview notes were shown as written, so "PDF is too large for the bounded in-app preview."
+  // stayed English in every language (2.1.41 pass).
+  const notes = new Set(['src/main/project-files.ts', 'src/main/project-git.ts'].flatMap(file =>
+    [...readFileSync(file, 'utf8').matchAll(/(?:note: |\? |: )'([A-Z][^'\\$]{8,})'/g)].map(match => match[1]!)
+      .filter(text => /preview|diff|pdf|image/i.test(text))));
+  expect(notes.size).toBeGreaterThanOrEqual(9);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect([...notes].filter(note => !Object.hasOwn(catalog, note)), locale).toEqual([]);
+  }
+});
