@@ -2318,6 +2318,40 @@ describe('native worker checkout cleanup confirmation', () => {
     });
   });
 
+  it('accepts the renderer\'s whole set of main-process texts', async () => {
+    // The channel's size bound once stayed at 32 while the set grew past it, and a refused set
+    // left the tray, notices and dialogs English in every language.
+    const { MAIN_TEXTS } = await import('../src/shared/main-texts.js');
+    const { mainText, setMainTextTranslations } = await import('../src/main/main-texts.js');
+    try {
+      expect(await invoke('ui:mainTexts', Object.fromEntries(MAIN_TEXTS.map(source => [source, `«${source}»`]))))
+        .toMatchObject({ ok: true });
+      expect(mainText('Quit')).toBe('«Quit»');
+      expect(mainText('Attach files')).toBe('«Attach files»');
+    } finally { setMainTextTranslations({}); }
+  });
+
+  it('asks in the interface language before removing a worker checkout', async () => {
+    const { setMainTextTranslations } = await import('../src/main/main-texts.js');
+    setMainTextTranslations({
+      'Remove worker Git checkout?': 'Worker-Git-Checkout entfernen?',
+      'Keep checkout': 'Checkout behalten',
+      'Checkout: {0}': 'Checkout: {0}',
+      '{0} uncommitted or ignored paths would be discarded:': '{0} nicht committete oder ignorierte Pfade würden verworfen:'
+    });
+    try {
+      await withPreview(async ({ dispose }) => {
+        await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+        const options = vi.mocked(dialog.showMessageBox).mock.calls.at(-1)?.at(-1) as Electron.MessageBoxOptions;
+        expect(options.title).toBe('Worker-Git-Checkout entfernen?');
+        expect(options.buttons).toEqual(['Checkout behalten', 'Remove checkout; preserve Git branch']);
+        expect(options.detail).toContain(`Checkout: ${preview.workspace}`);
+        expect(options.detail).toContain('1 nicht committete oder ignorierte Pfade würden verworfen:');
+        expect(dispose).not.toHaveBeenCalled();
+      });
+    } finally { setMainTextTranslations({}); }
+  });
+
   it('rejects a same-path, same-status and same-size content edit made while the dialog is open', async () => {
     await withPreview(async ({ list, dispose }) => {
       // A fingerprint is the sole differing field; Git status/path/count and file sizes

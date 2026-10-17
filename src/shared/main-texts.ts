@@ -1,7 +1,8 @@
 /**
  * English source of the texts the main process shows outside the window: the tray menu and its
  * tooltip, the Session finish desktop notice with its buttons, tunnel-loss notices, and the
- * one-time notice that the CoS browser hid to the tray, the window that says an update is installing.
+ * one-time notice that the CoS browser hid to the tray, the window that says an update is installing,
+ * native file dialogs and the worker checkout removal confirmation.
  *
  * Same contract as STOP_NOTICE_TEXTS (#855): the main process has no interface catalogs, so the
  * renderer translates exactly these strings and publishes them; anything else is refused, and a
@@ -33,7 +34,34 @@ export const MAIN_TEXTS = [
   'Write Directly',
   'The Chat On Steroids browser is still running',
   'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.',
-  'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'
+  'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
+  // Native file dialogs and the worker checkout removal confirmation.
+  'Export as Markdown',
+  'Import CoS Pet folder',
+  'Import SKILL.md',
+  'Markdown files',
+  'Text files',
+  'Approve a folder for ChatGPT',
+  'Import Skill folder',
+  'Markdown skills',
+  'Choose a project folder for ChatGPT',
+  'Select the tunnel executable',
+  'Programs',
+  'Attach files',
+  'Import MCP bundle',
+  'MCP bundles',
+  'Remove worker Git checkout?',
+  'Review the worker checkout before removing it',
+  'Checkout: {0}',
+  '{0} uncommitted or ignored paths would be discarded:',
+  'No uncommitted or ignored paths were detected.',
+  'Additional paths are not shown; review the checkout before confirming.',
+  'Ignored files are included in the removal.',
+  'Commits made only on this branch will remain in Git.',
+  'This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.',
+  'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
+  'Keep checkout',
+  'Remove checkout; preserve Git branch'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];
