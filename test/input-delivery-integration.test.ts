@@ -3167,3 +3167,27 @@ it('fails a branch the source page could not make, and gives its reserved chat t
   expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, branchFailed: 'branch_message_missing' })).body.ok).toBe(true);
   expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed', error: input.BRANCH_ERRORS.branch_message_missing });
 });
+
+it('lets a branch from a chat of a linked project be claimed on its draft, not on the Project page (#482)', async () => {
+  // Live 2.1.41 (VM): ChatGPT makes the branch where its source chat lives; the rule that a new chat
+  // of a linked project is claimed only on that Project's page left the branch queued for good.
+  const folder = path.join(directory, 'branch-project-' + randomUUID());
+  await fs.mkdir(folder);
+  const config = defaultConfig();
+  await saveConfig({ ...config, roots: [{ name: 'project', path: folder }] });
+  const projects = await import('../src/main/projects.js');
+  const project = await addProject(folder);
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await projects.claimProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.armProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.completeProjectCreate(request, 'page-a', `g-p-${'a'.repeat(32)}`)).toBe(true);
+  const conversationId = randomUUID(), messageId = randomUUID();
+  const source = await createSession({ title: 'Linked source', conversationId });
+  await assignSessionProject(source.id, project.id);
+  const branch = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id,
+    branch: { sessionId: source.id, conversationId, messageId } });
+  const plain = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id });
+  const claim = async (id: string) => (await post('/input/claim', { id, owner: 'a-document', conversationId: null, requiresAuthorization: true })).body.input;
+  expect(await claim(plain.id)).toBeNull();
+  expect(await claim(branch.id)).toMatchObject({ id: branch.id, branch: { conversationId, messageId } });
+});
