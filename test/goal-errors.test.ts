@@ -25,6 +25,8 @@ describe('Goal failure explanations', () => {
 
   it('distinguishes oversized input from oversized helper output, including wrapped failures', () => {
     expect(goalErrorMessage('request_failed: goal_context_too_large')).toContain('Shorten the task');
+    expect(goalErrorMessage('original_request_too_large: first message cannot fit')).toContain('Shorten the task');
+    expect(goalErrorKey('original_request_too_large: first message cannot fit')).toBe('goal_context_too_large');
     expect(goalErrorMessage('reply_too_long')).toContain('helper wrote a continuation');
     expect(goalErrorMessage('stream_record_too_long')).not.toContain('Shorten the task');
     expect(goalErrorMessage('request_failed: fetch failed')).not.toContain('too long');
@@ -61,7 +63,7 @@ describe('Goal failure explanations', () => {
   it('keeps every fixed Goal explanation localizable in every renderer catalog', () => {
     const catalogs: Record<string, Record<string, string>> = { de, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, fr, 'pt-BR': ptBR, 'pt-PT': ptPT };
     const codes = [
-      'loop_mcp_call_missing', 'goal_reply_not_pending', 'goal_context_too_large', 'reply_too_long',
+      'loop_mcp_call_missing', 'goal_reply_not_pending', 'goal_context_too_large', 'original_request_too_large', 'reply_too_long',
       'stream_record_too_long', 'response_body_too_large', 'no_api_key', 'auth_rejected', 'out_of_credit',
       'unknown_model', 'invalid_provider', 'rate_limited', 'timeout_or_cancelled', 'request_failed',
       'goal_browser_busy', 'goal_browser_cancelled', 'goal_browser_send_failed', 'goal_browser_send_unconfirmed',
