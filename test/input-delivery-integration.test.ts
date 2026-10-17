@@ -3227,7 +3227,8 @@ it('gives a branch the history it was branched from before its first question, w
   const store = await import('../src/main/session/store.js');
   const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
     .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
-  expect(said).toEqual(['source-ask', reply, 'source-step', 'branch-ask', 'branch-answer']);
+  // As ChatGPT draws the exchange: its step above its answer, whatever order they were recorded in.
+  expect(said).toEqual(['source-ask', 'source-step', reply, 'branch-ask', 'branch-answer']);
   // Named by its own first message, not by the question it copied.
   expect((await getSession(row.sessionId!))?.title).toBe('Try the other approach.');
 });
@@ -3243,6 +3244,9 @@ it('copies a branched turn in the order the source draws it, its answer after th
     { kind: 'page_tool', messageId: 'turn-step', turnId: 'source-turn', text: 'Opened the sites', time: time + 2 },
     { kind: 'assistant_message', messageId: reply, turnId: 'source-turn', text: 'Both load.', state: 'final', final: true, time: time + 3 },
     { kind: 'turn_end', turnId: 'source-turn', outcome: 'completed', time: time + 4 }] });
+  // A later page scan recorded the turn's interim text only after its final (measured live).
+  await post('/events', { conversationId: source, events: [
+    { kind: 'assistant_message', messageId: 'turn-interim', turnId: 'source-turn', text: 'I will check both.', state: 'streaming', time: time + 1 }] });
   const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
   await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true });
   await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true });
@@ -3250,7 +3254,7 @@ it('copies a branched turn in the order the source draws it, its answer after th
   const store = await import('../src/main/session/store.js');
   const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
     .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
-  expect(said).toEqual(['turn-ask', 'turn-step', reply]);
+  expect(said).toEqual(['turn-ask', 'turn-step', 'turn-interim', reply]);
 });
 
 it('copies a long branched message in full, from its own copy of the overflow (#482)', async () => {
