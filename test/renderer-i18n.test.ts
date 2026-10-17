@@ -130,6 +130,10 @@ it('translates known IPC failures and keeps provider errors and successful repli
   const { run } = await import('../src/renderer/dom.js');
   expect(await run(Promise.resolve({ ok: false, error: 'Secure credential storage is unavailable.' }))).toBeNull();
   expect(document.querySelector('.toast')!.textContent).toBe(catalogs.ja!['Secure credential storage is unavailable.']);
+  const limitError = 'The Skills library supports at most 128 skills';
+  expect(catalogs.ja).toHaveProperty(limitError);
+  expect(await run(Promise.resolve({ ok: false, error: limitError }))).toBeNull();
+  expect(document.querySelector('.toast')!.textContent).toBe(catalogs.ja![limitError]);
   const error = 'PROVIDER: /Save/<img src=x> {0}\n  details';
   expect(await run(Promise.resolve({ ok: false, error }))).toBeNull();
   expect(document.querySelector('.toast')!.textContent).toBe(error);
