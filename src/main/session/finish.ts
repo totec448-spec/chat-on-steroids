@@ -180,7 +180,9 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
         result = 'Goal found no remaining requested work. The finish hold was released; ChatGPT may complete its answer.';
       }
     } catch (error) {
-      result = `${notification} Goal follow-up was not available: ${(error as Error).message}. ${REMAINING}`;
+      const detail = (error as Error).message;
+      result = detail === 'loop_stalled' ? `Loop stalled. No local tool call was recorded for the last reply. Answer any question or check the tool connection. Automatic continuation is paused; Loop remains enabled. ${REMAINING}`
+        : `${notification} Goal follow-up was not available: ${detail}. ${REMAINING}`;
     } finally { stopInput(); stopSession(); stopGoal(); }
     await recordProgress(sessionId, progressId, result, anchor, turnId);
     return result;

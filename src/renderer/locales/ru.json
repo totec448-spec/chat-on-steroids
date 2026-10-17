@@ -1775,7 +1775,7 @@
   "Context limit": "Лимит контекста",
   "Filled": "Заполнено",
   "Compacts automatically at": "Автосжатие при",
-  "No MCP tool call was recorded in the last response. ChatGPT may be asking you something, or the tool connection may have been lost. Answer it, or check the tunnel if tools stopped working. Automatic continuation is paused; Loop remains enabled.": "В последнем ответе не было зафиксировано вызовов MCP-инструментов. Возможно, ChatGPT задаёт вам вопрос или соединение с инструментами было потеряно. Ответьте ему или проверьте туннель, если инструменты перестали работать. Автоматическое продолжение приостановлено; Цикл остаётся включён.",
+  "No local tool call was recorded for the last reply. ChatGPT may be asking you something, or the tool connection may have been lost. Answer it, or check the tool connection. Automatic continuation is paused; Loop remains enabled.": "Для последнего ответа не был записан локальный вызов инструмента. Возможно, ChatGPT задаёт вопрос или соединение с инструментами потеряно. Ответьте или проверьте соединение. Автоматическое продолжение приостановлено; Цикл остаётся включён.",
   "A chat stopped": "Чат остановился",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Последний ход ничего не выдал, и продолжения не последовало. Отправьте сообщение в этом чате, чтобы начать новый ход.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Последний ход завершился с ошибкой, и продолжения не последовало. Отправьте сообщение в этом чате, чтобы начать новый ход.",

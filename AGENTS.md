@@ -1732,7 +1732,10 @@ restored legacy inputs without one represent the old Loop policy and cannot be d
 
 Finish decision generation deduplicates by actual recorded work/input revision, not a new
 request timestamp or repeated hold call. User input, changed settings, turn release, block or
-replacement invalidates the old attempt. Progress uses the existing mutable timeline row;
+replacement invalidates the old attempt. The one Loop recovery after a reply without a
+recorded local tool call uses a persisted unique Loop activation ID. Missing or evicted per-chat
+switch state keeps that recovery spent until Loop is explicitly turned Off and On in that chat;
+delivery-setting changes preserve the ID. Progress uses the existing mutable timeline row;
 notifications are scoped to that exact turn and may be suppressed when the app is open.
 No periodic generated-input daemon is part of this design; old periodic rows are retired.
 
@@ -3674,6 +3677,12 @@ decision is generated from silence or a failed response.
 **User decision, 2026-09-13:** every automatic Loop continuation requires at least one recorded,
 exactly attributed local MCP call in the source turn, including ordinary completed finals and
 finish follow-ups. Native page tools, another turn's calls and unattributed work do not qualify.
+**Exception:** one recovery is allowed for the exact turn held by the finish tool or the latest completed
+reply without a recorded local tool call. It is recorded as `finishControl.state='redraft'` (`finishTurn.noToolRedraftAt`,
+`noToolRedraftTurn`) and remains spent across restarts until a verified local tool call is recorded for
+that turn, or Loop is turned off and on. A further reply without a recorded local tool call stalls visibly.
+The saved per-chat Loop revision changes on a real activation or master stop, not when its delivery preference changes;
+it survives while the chat inherits the app-wide switch, and recovery receipts keep it across restarts.
 The proof is existence in the exact source turn, not a requirement that its call be the latest
 stored row. Late attribution backfill without a turn must not erase earlier exact proof.
 Explicit user activation may proceed without that proof after the existing idle gate. Only the
@@ -3787,9 +3796,9 @@ bounded receipt journal distinguishes pre-send busy cancellation from successful
 lost deferral response cannot resurrect the old text. App/web name this wait explicitly.
 
 Goal/Loop/planner failures retain machine codes for retry/ownership but publish a separate readable
-explanation in app and browser. Missing MCP evidence explains that the previous response made no
-local tool call, so lost tool connectivity cannot be established; Loop remains enabled. Do not
-claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
+explanation in app and browser. Missing local tool-call evidence explains that the previous response
+had no recorded local tool call, so lost tool connectivity cannot be established; Loop remains enabled. Do not
+claim login is missing or the tool connection is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
 
 Provider progress updates one existing timeline row and is never sendable text. Validate the

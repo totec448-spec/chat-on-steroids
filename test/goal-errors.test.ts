@@ -20,7 +20,7 @@ describe('Goal failure explanations', () => {
     expect(message).toContain('Answer it');
     expect(message).toContain('Loop remains enabled');
     expect(message).not.toMatch(/logged out|sign in|tunnel is off/i);
-    expect(goalErrorMessage('goal_reply_not_pending')).not.toContain('No MCP tool call');
+    expect(goalErrorMessage('goal_reply_not_pending')).not.toContain('No local tool call');
   });
 
   it('distinguishes oversized input from oversized helper output, including wrapped failures', () => {

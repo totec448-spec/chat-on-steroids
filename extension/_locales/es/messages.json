@@ -1050,7 +1050,7 @@
     "message": "sí"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "No se registró ninguna llamada a una herramienta MCP en la última respuesta. Puede que ChatGPT te esté haciendo una pregunta o que se haya perdido la conexión con las herramientas. Respóndele o comprueba el túnel si las herramientas han dejado de funcionar. La continuación automática está en pausa; Bucle sigue activado."
+    "message": "No se registró ninguna llamada a una herramienta local para la última respuesta. Puede que ChatGPT te esté preguntando algo o que se haya perdido la conexión con las herramientas. Responde o comprueba la conexión. La continuación automática está en pausa; Bucle sigue activado."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "No hay una continuación pendiente para esta respuesta. Puede que ya se haya procesado o que un trabajo más reciente la haya sustituido. Revisa la actividad más reciente del chat antes de volver a intentarlo."
