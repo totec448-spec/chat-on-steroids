@@ -728,12 +728,6 @@
   "content_workers_still_running": {
     "message": "仍有 $1 個子代理在執行"
   },
-  "content_workers_summary": {
-    "message": "$1 個已完成 · $2 個執行中"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 個已完成 · $2 個執行中 · $3 個失敗"
-  },
   "content_working": {
     "message": "正在處理…"
   },
@@ -821,9 +815,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · 連線埠 $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "保留 $1 個 · 共 $2 個"
-  },
   "popup_detail_chat_id": {
     "message": "聊天 ID"
   },
@@ -848,17 +839,11 @@
   "popup_detail_observed": {
     "message": "已觀察到"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 個事件 · $2 次呼叫"
-  },
   "popup_detail_ownership": {
     "message": "擁有權"
   },
   "popup_detail_page_sends": {
     "message": "頁面傳送次數"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 次失敗"
   },
   "popup_detail_recorder": {
     "message": "記錄器"
@@ -1174,5 +1159,26 @@
   },
   "popup_app_not_running_help": {
     "message": "請確認 Chat On Steroids 已在這台電腦上開啟。擴充功能會自動連線。"
+  },
+  "content_workers_finished": {
+    "message": "$1 個已完成"
+  },
+  "content_workers_running": {
+    "message": "$1 個執行中"
+  },
+  "content_workers_failed": {
+    "message": "$1 個失敗"
+  },
+  "popup_detail_events": {
+    "message": "$1 個事件"
+  },
+  "popup_detail_calls": {
+    "message": "$1 次呼叫"
+  },
+  "popup_detail_failed": {
+    "message": "$1 次失敗"
+  },
+  "popup_detail_total": {
+    "message": "共 $1 個"
   }
 }

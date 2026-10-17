@@ -1865,7 +1865,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const details = [
       mainText('Checkout: {0}').replace('{0}', () => workspace),
       candidate.changes.length
-        ? mainText('{0} uncommitted or ignored paths would be discarded:').replace('{0}', () => discarded)
+        ? mainText('Uncommitted or ignored paths that would be discarded ({0}):').replace('{0}', () => discarded)
         : mainText('No uncommitted or ignored paths were detected.'),
       ...changedFiles,
       candidate.changes.length > changedFiles.length || candidate.changesTruncated

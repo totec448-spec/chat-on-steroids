@@ -4211,7 +4211,14 @@ accessible labels; Appearance retains the named language dropdown. Both controls
 same persisted preference. `translate="no"` protects text and attributes, including native
 language names. Japanese has its own system-font fallbacks and CJK wrapping. Changing language
 repaints owned labels while retaining drafts/selections; never translate authored messages,
-provider text or file paths. Catalog checks cover all source keys and numbered placeholders;
+provider text or file paths. Counts go through `tn(one, other, count, args?)` (renderer) and
+`tn(key, count, one, other, substitutions?)` (extension), which pick the form with `Intl.PluralRules`
+for the selected language: a catalog keeps the plural ("other") text under its key and each further
+form the language has under `"<other>|<form>"` (renderer) or `<key>__<form>` (extension), e.g. Russian
+one/few/many, German one, Japanese none. Tests require exactly those forms per language. A text with
+several counts is split into one counted part per number; main-process texts cannot pick a form, so
+their counts stay in a count-free label ("… ({0}):").
+Catalog checks cover all source keys and numbered placeholders;
 `dom.run()` translates catalogued IPC errors before displaying a toast; unknown error strings
 and successful payloads stay literal.
 Settings search folds both query and labels with the selected locale, including Turkish İ/ı.

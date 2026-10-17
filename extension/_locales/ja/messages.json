@@ -728,12 +728,6 @@
   "content_workers_still_running": {
     "message": "$1 個のワーカーがまだ実行中です"
   },
-  "content_workers_summary": {
-    "message": "$1 完了 · $2 実行中"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 完了 · $2 実行中 · $3 失敗"
-  },
   "content_working": {
     "message": "作業中…"
   },
@@ -821,9 +815,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · ポート $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 件を保持 · 合計 $2 件"
-  },
   "popup_detail_chat_id": {
     "message": "チャット ID"
   },
@@ -848,17 +839,11 @@
   "popup_detail_observed": {
     "message": "観測済み"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 件のイベント · $2 件の呼び出し"
-  },
   "popup_detail_ownership": {
     "message": "帰属"
   },
   "popup_detail_page_sends": {
     "message": "ページからの送信回数"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 件失敗"
   },
   "popup_detail_recorder": {
     "message": "記録機能"
@@ -1174,5 +1159,26 @@
   },
   "popup_app_not_running_help": {
     "message": "このコンピューターで Chat On Steroids が開いていることを確認してください。拡張機能は自動的に接続します。"
+  },
+  "content_workers_finished": {
+    "message": "$1 完了"
+  },
+  "content_workers_running": {
+    "message": "$1 実行中"
+  },
+  "content_workers_failed": {
+    "message": "$1 失敗"
+  },
+  "popup_detail_events": {
+    "message": "$1 件のイベント"
+  },
+  "popup_detail_calls": {
+    "message": "$1 件の呼び出し"
+  },
+  "popup_detail_failed": {
+    "message": "$1 件失敗"
+  },
+  "popup_detail_total": {
+    "message": "合計 $1 件"
   }
 }

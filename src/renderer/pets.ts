@@ -2,7 +2,7 @@ import type { AppApi } from '../preload/index.js';
 import type { PetLibraryState, PetRecord } from '../shared/pets.js';
 import type { PetController } from './pet.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
-import { t, ui } from './i18n.js';
+import { t, tn, ui } from './i18n.js';
 
 const builtinAtlas = new URL('./pet-assets/atlas.png', import.meta.url).href;
 const PET_FORMAT_INSTRUCTIONS = `<describe your character here>
@@ -253,9 +253,9 @@ export function initPets(api: AppApi, runtime: PetController): void {
     const favorites = visible.filter(pet => pet.favorite), library = visible.filter(pet => !pet.favorite);
     const libraryCount = state.pets.filter(pet => !pet.favorite).length;
     const favoriteCount = state.pets.length - libraryCount;
-    ui($('petsCount'), 'textContent', () => t(libraryCount === 1 ? '{0} pet' : '{0} pets', [libraryCount]));
+    ui($('petsCount'), 'textContent', () => tn('{0} pet', '{0} pets', libraryCount));
     const favoritesSection = $('petsFavoritesSection'); favoritesSection.hidden = favorites.length === 0;
-    ui($('petsFavoritesCount'), 'textContent', () => t(favoriteCount === 1 ? '{0} pet' : '{0} pets', [favoriteCount]));
+    ui($('petsFavoritesCount'), 'textContent', () => tn('{0} pet', '{0} pets', favoriteCount));
     for (const pet of favorites) favoritesList.append(renderCard(pet));
     for (const pet of library) libraryList.append(renderCard(pet));
     if (!library.length && visible.length) libraryList.append(el('p', 'plugin-no-results muted', () => t('All matching pets are in Favorites.')));
