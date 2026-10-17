@@ -145,3 +145,16 @@ it('translates every note the file and diff previews can show', () => {
     expect([...notes].filter(note => !Object.hasOwn(catalog, note)), locale).toEqual([]);
   }
 });
+
+it('translates every message a branch in a new chat can end with (#482)', async () => {
+  // The page reports only a code; admission refusals come back from main as their English text.
+  const { BRANCH_ERRORS } = await import('../src/main/session/input.js');
+  const source = readFileSync('src/main/session/input.ts', 'utf8');
+  const start = source.indexOf('async function assertBranchSource');
+  const refusals = [...source.slice(start, source.indexOf('\n}\n', start)).matchAll(/new Error\('([^']+)'\)/g)].map(match => match[1]!);
+  expect(refusals.length).toBeGreaterThanOrEqual(5);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect([...Object.values(BRANCH_ERRORS), ...refusals].filter(text => !Object.hasOwn(catalog, text)), locale).toEqual([]);
+  }
+});

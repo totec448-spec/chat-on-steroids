@@ -2465,6 +2465,23 @@ input[readonly] {
 }
 .chat-project-context[hidden] { display: none; }
 #chatProjectName { overflow: hidden; text-overflow: ellipsis; }
+/* Branch in new chat (#482): a branched chat's link back to the reply it came from. */
+.chat-branch-origin { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 32%; flex: 0 1 auto; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--soft); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; cursor: pointer; }
+.chat-branch-origin[hidden] { display: none; }
+.chat-branch-origin span { overflow: hidden; text-overflow: ellipsis; }
+.chat-branch-origin .ico { --ico: 14px; --glyph: 14px; flex: none; }
+.chat-branch-origin:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.chat-branch-origin:disabled { cursor: default; }
+.chat-branch-origin:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* The new chat being written starts from a reply: said above the composer, with a way out. */
+.branch-draft { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 7px 8px 7px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
+.branch-draft[hidden] { display: none; }
+.branch-draft > .ico { --ico: 15px; --glyph: 15px; flex: none; color: var(--accent); }
+.branch-draft-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-draft-cancel { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--faint); cursor: pointer; }
+.branch-draft-cancel .ico { --ico: 14px; --glyph: 14px; }
+.branch-draft-cancel:hover { background: var(--hover); color: var(--ink); }
+.branch-draft-cancel:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 #chatTitle {
   text-transform: none;
   letter-spacing: 0;
