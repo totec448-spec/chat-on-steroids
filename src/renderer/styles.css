@@ -3467,8 +3467,14 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   background: var(--ink);
   color: var(--page);
   font-size: calc(12.5px * var(--text-scale, 1));
+  max-width: min(560px, calc(100vw - 32px));
+  width: max-content;
+  text-align: center;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   padding: 9px 16px;
-  border-radius: var(--pill);
+  /* A rounded rectangle, not a pill: a message that wraps to two lines turned the pill's ends into blobs. */
+  border-radius: 12px;
   box-shadow: 0 8px 24px -8px rgb(0 0 0 / 45%);
   z-index: 10;
 }
@@ -4333,11 +4339,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock .queue-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Plan stages are read before they run; show up to three lines instead of one. */
 .composer-dock .queued-input .queue-label, .plan-stage-heading .queue-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
+/* No reserved scrollbar strip in the dock: it cut every row and divider short of the dock's
+   edge while nothing scrolled. A thin bar takes room only when a list really overflows. */
 #finishQueue {
   max-height: min(240px, 30vh);
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 .composer-dock button { flex-shrink: 0; }
 .composer-dock .dock-action { border: 0; border-radius: 5px; background: transparent; color: var(--soft); padding: 4px; display: inline-flex; align-items: center; cursor: pointer; }
@@ -4351,7 +4359,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   /* A crowded dock can contain plan, process, recovery, queue and Goal rows simultaneously.
      Bound the whole surface on narrow/short viewports, while keeping the process row pinned
      and the two large sublists independently scrollable. Wide desktop layouts are unchanged. */
-  .composer-dock-body { max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .composer-dock-body { max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   .background-exec-status { position: sticky; top: 0; z-index: 2; background: var(--card); }
   .agent-plan-body, #finishQueue { max-height: 22vh; }
   #taskPlanPreview { max-height: 28vh; }
