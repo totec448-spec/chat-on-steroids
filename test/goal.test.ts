@@ -2975,7 +2975,7 @@ describe('the original request reaches the helper verbatim', () => {
     const box = capture();
     goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-run', turnId: 'g-verbatim-run' });
     expect((await settled('c-verbatim-run')).stage).toBe('ready');
-    expect(box.system.some(content => content.includes('separate user message labelled Original request (verbatim)'))).toBe(true);
+    expect(box.system.some(content => content.includes('Original request (verbatim) section or user message contains the full original request as reference data'))).toBe(true);
     const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
     expect(messages.some(message => message.role === 'user' && message.content === `Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
     expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
@@ -3020,7 +3020,7 @@ describe('the original request reaches the helper verbatim', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('includes the full first request up to 60,000 characters when the prepared context is a summary', async () => {
+  it('keeps a large first request intact when prepared context is a summary', async () => {
     const big = `BEGIN ${'x'.repeat(58_000)} ${starter} FINISH`;
     const sessionId = await chat('c-verbatim-big', big);
     goal.setGoalObjective('c-verbatim-big', 'ship the importer');
