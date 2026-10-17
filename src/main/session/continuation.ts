@@ -1024,7 +1024,7 @@ export async function dispatchContinuationDestinationSendNow(token: string): Pro
       ...current,
       destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null }
     }));
-    noteResumeDispatch(entry.token);
+    noteResumeDispatch(entry.token, entry.sessionId);
     return true;
   });
 }
@@ -1312,7 +1312,7 @@ export async function claimContinuationNow(token: string, claimant: string): Pro
     // does not exist.
     if (entry.state === 'claimed') {
       if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
-        noteResumeDispatch(entry.token);
+        noteResumeDispatch(entry.token, entry.sessionId);
       } else {
         noteResumeClaim(entry.token);
       }
@@ -1915,7 +1915,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
     // matters is how long from *here* that chat still has to appear.
     if (entry.state === 'claimed') {
       if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
-        noteResumeDispatch(entry.token);
+        noteResumeDispatch(entry.token, entry.sessionId);
       } else {
         noteResumeClaim(entry.token);
       }

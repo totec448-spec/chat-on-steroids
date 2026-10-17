@@ -45,9 +45,19 @@ import {
   UNIFIED_EXEC_ENV
 } from './unified-exec-constants.js';
 import { terminateProcessTree } from '../exec.js';
-import { prefixPowershellScriptWithUtf8, type ShellType } from './shell.js';
+import { prefixPowershellScriptWithUtf8, withPowershellExitStatus, type ShellType } from './shell.js';
 
 // --------------------------------------------------------------------------- errors
+
+
+/**
+ * An exit status as the signed 32-bit number Codex reports (Rust's `ExitStatus::code()` is an
+ * i32). Windows hands a process's DWORD over unsigned, so a program exiting with -1 (ssh.exe on a
+ * dropped connection) arrived as 4294967295.
+ */
+export function signedExitCode(code: number | null): number | null {
+  return code !== null && code > 0x7fffffff && code <= 0xffffffff ? code - 0x100000000 : code;
+}
 
 export type UnifiedExecErrorKind =
   | 'create_process'
@@ -446,7 +456,8 @@ class UnifiedExecProcess {
     this.outputClosedNotify.notifyWaiters();
   }
 
-  private signalExit(exitCode: number | null): void {
+  private signalExit(raw: number | null): void {
+    const exitCode = signedExitCode(raw);
     if (!this.exited) {
       this.exited = true;
       this.exit = exitCode;
@@ -795,8 +806,9 @@ export class UnifiedExecProcessManager {
     try {
       // `UnifiedExecRuntime::run` prefixes every PowerShell script before it reaches the
       // process launcher so pipe-mode output is UTF-8 just like PTY output.
+      // The app also ends it with the exit status of its last statement (see withPowershellExitStatus).
       const command =
-        request.shellType === 'powershell' ? prefixPowershellScriptWithUtf8(request.command) : request.command;
+        request.shellType === 'powershell' ? withPowershellExitStatus(prefixPowershellScriptWithUtf8(request.command)) : request.command;
       process = await UnifiedExecProcess.spawn({
         batchMarker: request.batchMarker,
         command,

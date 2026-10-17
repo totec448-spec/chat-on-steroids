@@ -42,8 +42,10 @@ export function planFailFirst(nameStatus) {
  * @param {string} nameStatus
  */
 export function runnerForFailFirst(nameStatus) {
-  return planFailFirst(nameStatus).tests.some(file => /^test\/(?:windows-[^/]+|computer(?:-[^/]+)?)\.test\.ts$/.test(file))
-    ? 'windows-2025' : 'ubuntu-24.04';
+  const tests = planFailFirst(nameStatus).tests;
+  if (tests.some(file => /^test\/(?:windows-[^/]+|computer(?:-[^/]+)?)\.test\.ts$/.test(file))) return 'windows-2025';
+  if (tests.some(file => /^test\/macos-[^/]+\.test\.ts$/.test(file))) return 'macos-15';
+  return 'ubuntu-24.04';
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

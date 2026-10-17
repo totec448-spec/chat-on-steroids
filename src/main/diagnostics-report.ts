@@ -18,7 +18,7 @@ import { chatLines, crashLines, errorSummaryLines, installKind, installLines, sy
 import type { CompanionEnvironment, UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
-import { mainText } from './main-texts.js';
+import { dialogLabel, mainText } from './main-texts.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
 
 /** Enough log for a long run, small enough to attach anywhere. */
@@ -224,13 +224,18 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
 /** Values from the settings that the log may quote and that identify the user. */
 function configKnownValues(): string[] {
   const config = getConfig() as unknown as Record<string, any>;
-  const roots: Array<{ name?: string; path?: string }> = Array.isArray(config.roots) ? config.roots : [];
+  const roots: Array<{ name?: string; path?: string; remote?: { host?: string; path?: string } }> = Array.isArray(config.roots) ? config.roots : [];
   const tunnel = config.tunnel ?? {};
   const profiles: Array<{ name?: string }> = Array.isArray(tunnel.profiles) ? tunnel.profiles : [];
   return [
     // A computer name can be a person's ("Maxims-MacBook"); log lines may quote connector names.
     typeof config.connectorSuffix === 'string' ? config.connectorSuffix : '',
     ...roots.flatMap(root => [root.path ?? '', root.name ?? '']),
+    // A folder on a server (#1469): ssh's errors quote the address or the bare host name, and
+    // pwd and tool errors the server path, each without the saved `host:path` form.
+    ...roots.flatMap(root => root.remote
+      ? [root.remote.host ?? '', (root.remote.host ?? '').replace(/^.*@/, ''), root.remote.path ?? '']
+      : []),
     tunnel.profileName ?? '', tunnel.tunnelId ?? '', tunnel.desktopTunnelId ?? '', tunnel.pluginsTunnelId ?? '', tunnel.binaryPath ?? '',
     ...profiles.map(profile => profile.name ?? '')
   ].filter((value): value is string => typeof value === 'string');
@@ -263,9 +268,9 @@ export async function saveDiagnosticsReport(text: string, owner: BrowserWindow |
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   const options = {
     // In the interface language, like the tray (2.1.39: English title in a German app).
-    title: mainText('Diagnostics report'),
+    ...dialogLabel('Diagnostics report'),
     defaultPath: path.join(app.getPath('downloads'), `chat-on-steroids-diagnostics-${stamp}.txt`),
-    filters: [{ name: 'Text', extensions: ['txt'] }]
+    filters: [{ name: mainText('Text files'), extensions: ['txt'] }]
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { saved: false };

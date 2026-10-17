@@ -1984,13 +1984,16 @@ var CLF_DOM = (() => {
    */
   function composerActions() {
     return safe(() => {
-      // The current provider microphone has no stable button test id; its sprite and
-      // composer trailing parent identify it without interpreting a translated label.
+      // The current provider microphone has no stable button test id; its sprite inside the
+      // composer's own form identifies it without interpreting a translated label. Neither the
+      // trailing row marker nor the sprite's weight is stable: on 2026-10-17 the row had no
+      // marker and the glyph was microphone-light-20, so an empty German composer had no anchor
+      // and the app's composer control never appeared.
       const anchor = sendButton() || stopButton() || nativeComposerControls(SPEECH)[0] ||
-        [...(composerBox()?.querySelectorAll(`${TRAILING} button`) || [])]
+        nativeComposerControls('button')
         .find(button => !button.closest(OWN_SURFACES) && [...button.querySelectorAll('svg use')].some(use => {
           const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
-          return href.slice(href.lastIndexOf('#')) === '#microphone-regular-24';
+          return href.slice(href.lastIndexOf('#')).startsWith('#microphone-');
         }));
       const explicit = anchor ? anchor.closest(TRAILING) : [...(composerBox() || document).querySelectorAll(TRAILING)].find(renderedComposerNode);
       if (!anchor) return explicit ? { host: explicit, before: null } : null;

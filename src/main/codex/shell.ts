@@ -327,6 +327,24 @@ export function prefixPowershellScriptWithUtf8(command: readonly string[]): stri
   return [...command.slice(0, command.length - 1), script];
 }
 
+/**
+ * Ends a PowerShell script with the exit status of its last statement.
+ *
+ * Windows PowerShell 5.1 ends `-Command` with exit 1 whenever the last statement failed, so a
+ * native program's own code was lost: `cmd /c exit 5` and git's 128 both came back as 1, and
+ * ripgrep's error 2 read as its benign "no matches" (measured on Windows, 2026-10-16). Appended to
+ * the script text, `$?` is that of the script's own last statement; `exit` inside the script and
+ * a terminating error still end it first, as before. PowerShell 7 reports the same codes either way.
+ */
+export const POWERSHELL_EXIT_STATUS_SUFFIX =
+  '\n$__cos_ok = $?; if ($__cos_ok) { exit 0 }; if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; exit 1';
+
+export function withPowershellExitStatus(command: readonly string[]): string[] {
+  const extracted = extractPowershellCommand(command);
+  if (!extracted || extracted.script.endsWith(POWERSHELL_EXIT_STATUS_SUFFIX)) return [...command];
+  return [...command.slice(0, command.length - 1), `${extracted.script}${POWERSHELL_EXIT_STATUS_SUFFIX}`];
+}
+
 // --------------------------------------------------------------------------- shlex
 
 /** The shlex crate's "safe without quoting" set. */

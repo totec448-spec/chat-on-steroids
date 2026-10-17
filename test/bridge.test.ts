@@ -4285,7 +4285,11 @@ describe('delivering a bootstrap', () => {
     expect((await claimContinuationNow(continuation, 'late-replacement-page'))?.summary).toBeTruthy();
     expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
     expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
-    const events = [{ kind: 'user_message', time: Date.now(), text: 'resume the task', messageId: 'late-resume-user' }];
+    // The surviving journal identifies this as a possible Resume destination. A generic
+    // unknown chat is no longer held beyond the normal recorder admission window.
+    const events = [{ kind: 'user_message', time: Date.now(),
+      text: resumeBootstrapText('an incomplete bootstrap with this dispatched marker', continuation),
+      messageId: 'late-resume-user' }];
 
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     try {
@@ -4308,6 +4312,32 @@ describe('delivering a bootstrap', () => {
     expect((await getSession(sessionId))?.conversationId).toBe(destination);
     const saved = await readEvents(sessionId, { kinds: ['user_message'] });
     expect(saved.some((event) => event.kind === 'user_message' && event.messageId === 'late-resume-user')).toBe(true);
+  });
+
+  it('records an unrelated chat over /events after the bounded wait despite a dispatched resume', async () => {
+    await pair();
+    const from = '92929292-1111-2222-3333-5555555555e1';
+    const unrelated = '92929292-1111-2222-3333-5555555555e2';
+    const { token: continuation } = await compactedSession(from, 'keep existing work intact');
+    expect((await claimContinuationNow(continuation, 'dispatched-with-unrelated-chat'))?.summary).toBeTruthy();
+    expect((await beginContinuationDestinationSendNow(continuation))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(continuation)).toBe(true);
+    const events = [{ kind: 'user_message', time: Date.now(), text: 'An independent question.', messageId: 'new-independent-user' }];
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+      const pending = request('POST', '/events', { body: { conversationId: unrelated, events } });
+      await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(61_000);
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ stored: 1 });
+      expect((await findSessionByConversation(unrelated))?.id).toBe(response.body.sessionId);
+      expect(continuationByToken(continuation)?.state).toBe('claimed');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('recovers a lost resume checkpoint from the exact journalled bootstrap without making a shadow session', async () => {

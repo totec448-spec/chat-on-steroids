@@ -1,11 +1,12 @@
 import { spawn, type IPty } from 'node-pty';
 import { defaultUserShell } from './codex/shell.js';
 import { normalizeEnvironment, deleteEnvValue } from './env.js';
-import { projectWorkspace } from './projects.js';
+import { getProject, projectWorkspace } from './projects.js';
+import { remoteIdentity, remoteLoginShell, sshArgs, sshProgram } from './remote/ssh.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 
-type Entry = { projectId: string | null; cwd: string; pty: IPty; unacked: number; paused: boolean; exited: Promise<void> };
+type Entry = { projectId: string | null; cwd: string; remote?: string; pty: IPty; unacked: number; paused: boolean; exited: Promise<void> };
 
 /**
  * Exits still owed by shells this app closed. On Windows, ConPTY reports a killed shell's exit
@@ -39,16 +40,20 @@ export class WorkspaceTerminals {
     const ticket = Symbol(); this.pending.set(id, ticket);
     try {
       const cwd = projectId === null ? this.homeCwd : (await projectWorkspace(projectId)).real;
+      // A project on a server (#1469) opens its shell there; ssh itself runs from the app's folder.
+      const remote = projectId === null ? undefined : (await getProject(projectId))?.remote;
       this.allowed();
       if (this.pending.get(id) !== ticket) throw new Error('Terminal opening was cancelled');
-      const shell = defaultUserShell();
+      const shell = remote ? { shellType: 'sh' as const, shellPath: sshProgram() } : defaultUserShell();
       const env = normalizeEnvironment(); deleteEnvValue(env, 'ELECTRON_RUN_AS_NODE');
-      const pty = spawn(shell.shellPath, shell.shellType === 'powershell' ? ['-NoLogo'] : [], {
-        name: 'xterm-256color', cols, rows, cwd, env, useConpty: true
-      });
+      const pty = remote
+        ? spawn(shell.shellPath, sshArgs(remote, ['-tt'], [remoteLoginShell(cwd)]), { name: 'xterm-256color', cols, rows, cwd: this.homeCwd, env, useConpty: true })
+        : spawn(shell.shellPath, shell.shellType === 'powershell' ? ['-NoLogo'] : [], {
+          name: 'xterm-256color', cols, rows, cwd, env, useConpty: true
+        });
       let markExited!: () => void;
       const exited = new Promise<void>(resolve => { markExited = resolve; });
-      const entry: Entry = { projectId, cwd, pty, unacked: 0, paused: false, exited };
+      const entry: Entry = { projectId, cwd, ...(remote ? { remote: remoteIdentity(remote) } : {}), pty, unacked: 0, paused: false, exited };
       this.entries.set(id, entry);
       pty.onData(data => {
         if (this.entries.get(id) !== entry) return;
@@ -71,9 +76,13 @@ export class WorkspaceTerminals {
   async write(id: string, data: string): Promise<void> {
     this.allowed();
     const entry = this.entries.get(id); if (!entry) throw new Error('Terminal is closed');
-    const current = entry.projectId === null ? null : await projectWorkspace(entry.projectId);
+    // A server project is checked by its address in the local config: asking the server for the
+    // folder on every key would add a round trip to each keystroke.
+    const changed = entry.projectId === null ? false
+      : entry.remote ? await getProject(entry.projectId).then(project => !project?.remote || remoteIdentity(project.remote) !== entry.remote)
+      : (await projectWorkspace(entry.projectId)).real !== entry.cwd;
     this.allowed();
-    if (this.entries.get(id) !== entry || (current && current.real !== entry.cwd)) throw new Error('Terminal project changed');
+    if (this.entries.get(id) !== entry || changed) throw new Error('Terminal project changed');
     entry.pty.write(data);
   }
   resize(id: string, cols: number, rows: number): void { this.entries.get(id)?.pty.resize(cols, rows); }
