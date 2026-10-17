@@ -2699,5 +2699,6 @@
   "Binary file, so there is no text preview.": "Binärdatei, daher gibt es keine Textvorschau.",
   "Previews of images and PDFs in a server folder are not available yet.": "Vorschauen von Bildern und PDFs in einem Server-Ordner sind noch nicht verfügbar.",
   "This diff is too large to display.": "Diese Änderung ist zu groß für die Anzeige.",
-  "Binary diff · preview unavailable": "Binäre Änderung · keine Vorschau verfügbar"
+  "Binary diff · preview unavailable": "Binäre Änderung · keine Vorschau verfügbar",
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Automatisches Weiter fand 3 Minuten lang keinen sicheren Moment zum Senden. Sende selbst „Weiter“, um fortzufahren."
 }

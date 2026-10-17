@@ -12933,7 +12933,10 @@
         CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
       if ((sourceQuiet || message.directTurn) && !sendAttempted && newUser) return 'new-user-message';
       if ((sourceQuiet || message.directTurn) && !sendAttempted && turnId && turnId !== sourceTurn) return 'turn-changed';
-      if (sourceQuiet && !sendAttempted && turnProgressRevision !== sourceActivity) return 'turn-progressed';
+      // Named with what moved it: a pickup withdrawn for minutes otherwise cannot say by what (#1586).
+      if (sourceQuiet && !sendAttempted && turnProgressRevision !== sourceActivity) {
+        return turnProgressSource ? `turn-progressed by ${turnProgressSource}` : 'turn-progressed';
+      }
       return 'off-target';
     };
     if (!onTarget()) return false;

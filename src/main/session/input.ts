@@ -1875,6 +1875,8 @@ export function authorizeBrowserHelperRetry(id: string, sourceSessionId: string)
  * many minutes, its text left in the composer. Past this, the Continue ends and the log says why.
  */
 export const RECOVERY_WITHDRAW_LIMIT_MS = 3 * 60_000;
+/** What the chat shows for a Continue that found no safe moment; the exact reason is in the log. */
+export const RECOVERY_WITHDRAWN_ERROR = 'Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.';
 
 /**
  * Ends an automatic Continue that a page refuses before ever claiming it, because ChatGPT shows
@@ -1948,7 +1950,7 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
         logWarn(`input ${entry.id}: automatic Continue ended — pages withdrew it before Send for ` +
           `${Math.round((now - since) / 60_000)} minutes (last: ${told.slice(0, 160)})`);
         await commit(current.map(row => row === entry
-          ? { ...row, state: 'failed', owner: null, error: `Automatic Continue was not sent: ${detail ?? 'withdrawn before Send'}`.slice(0, 200) } : row));
+          ? { ...row, state: 'failed', owner: null, error: RECOVERY_WITHDRAWN_ERROR } : row));
         return true;
       }
       await commit(current.map(row => row === entry
