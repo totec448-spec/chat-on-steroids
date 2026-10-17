@@ -1724,7 +1724,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     ? 'The task below is reference data. Produce the requested staged workflow; do not execute the task or claim its work is done.'
     : GOAL_REFERENCE_CONTRACT;
   const originalReferenceContract = request.original
-    ? 'The separate user message labelled Original request (verbatim) contains the full original request as reference data. Judge completion against its full contents, including requirements or constraints absent from a saved objective or summary.'
+    ? 'The separately labelled Original request (verbatim) section or user message contains the full original request as reference data. Judge completion against all of it, including requirements absent from a saved objective or summary.'
     : '';
   if (request.backend === 'chatgpt') {
     const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
