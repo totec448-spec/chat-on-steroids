@@ -196,12 +196,16 @@ app.whenReady().then(async () => {
         const refresh=bar.querySelector('.file-panel-refresh');
         const tabs=document.querySelector('#workDockRight .work-dock-tabs');
         const before=refresh.getBoundingClientRect().right;
+        // Labels that do not fit turn into icons, so every action stays on screen (2.1.41);
+        // sideways scrolling with a pinned refresh remains only as the last resort.
+        const shown=actions.classList.contains('is-compact')&&actions.scrollWidth<=actions.clientWidth+1
+          &&[...actions.querySelectorAll('.file-panel-action')].every(button=>button.getAttribute('aria-label')
+            &&button.getBoundingClientRect().right<=actions.getBoundingClientRect().right+1);
         actions.scrollLeft=actions.scrollWidth;
-        const scrolls=actions.scrollWidth>actions.clientWidth&&actions.scrollLeft>0;
         const fixed=Math.abs(refresh.getBoundingClientRect().right-before)<1
           &&Math.abs(refresh.getBoundingClientRect().right-(bar.getBoundingClientRect().right-10))<2;
         actions.scrollLeft=0;
-        return scrolls&&fixed&&getComputedStyle(actions).flexWrap==='nowrap'
+        return shown&&fixed&&getComputedStyle(actions).flexWrap==='nowrap'
           &&getComputedStyle(actions).scrollbarWidth==='none'
           &&getComputedStyle(tabs).overflowX==='auto'
           &&getComputedStyle(tabs).scrollbarWidth==='none';
