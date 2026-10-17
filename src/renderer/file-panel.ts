@@ -5,7 +5,7 @@ import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, Projec
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
-import { currentLanguage, t, ui } from './i18n.js';
+import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
@@ -604,6 +604,7 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function gitStatusLabel(status: ProjectGitStatus): string {
+    if (status === 'C') return t('Conflict');
     if (status === 'U') return t('Untracked');
     if (status === 'A') return t('Added');
     if (status === 'D') return t('Deleted');
@@ -644,6 +645,8 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function folderGitStatus(statuses: ReadonlySet<ProjectGitStatus>): ProjectGitStatus {
+    // A folder holding a conflict says so, whatever else changed in it.
+    if (statuses.has('C')) return 'C';
     return statuses.size === 1 ? [...statuses][0]! : 'M';
   }
 
@@ -1073,7 +1076,7 @@ export function createFilePanel(options: FilePanelOptions) {
       return;
     }
     const groups: Array<[ProjectGitStatus, string]> = [
-      ['M', t('Modified')], ['A', t('Added')], ['D', t('Deleted')],
+      ['C', t('Conflicts')], ['M', t('Modified')], ['A', t('Added')], ['D', t('Deleted')],
       ['R', t('Renamed')], ['U', t('Untracked')]
     ];
     for (const [status, label] of groups) {
@@ -1378,6 +1381,12 @@ export function createFilePanel(options: FilePanelOptions) {
     updateActions();
     syncWatches();
   }
+
+  // Group titles, counts and row labels are plain text; repaint them when the language changes.
+  onLanguageChange(() => {
+    renderTree();
+    if (mode === 'changes' && gitDiffPath === null) renderChangesList();
+  });
 
   function watchedDirectories(): string[] {
     if (!project) return [];

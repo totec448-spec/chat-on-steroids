@@ -2700,5 +2700,8 @@
   "Previews of images and PDFs in a server folder are not available yet.": "Sunucu klasöründeki görsel ve PDF önizlemeleri henüz kullanılamıyor.",
   "This diff is too large to display.": "Bu değişiklik gösterilemeyecek kadar büyük.",
   "Binary diff · preview unavailable": "İkili değişiklik · önizleme kullanılamıyor",
-  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Otomatik devam, 3 dakika boyunca göndermek için güvenli bir an bulamadı. Sürdürmek için \"Continue\" mesajını kendiniz gönderin."
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Otomatik devam, 3 dakika boyunca göndermek için güvenli bir an bulamadı. Sürdürmek için \"Continue\" mesajını kendiniz gönderin.",
+  "The Skills library supports at most 64 skills": "Beceri kitaplığı en fazla 64 beceri alır",
+  "Conflict": "Çakışma",
+  "Conflicts": "Çakışmalar"
 }
