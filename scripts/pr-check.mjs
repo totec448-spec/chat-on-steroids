@@ -36,10 +36,19 @@ const HEADINGS = {
   proof: ['live proof', 'proof', 'live test', 'manual test']
 };
 
+
+/** The text without HTML comments, removed until none is left: one pass can join the pieces of a
+ * split comment (`<!<!-- -->-- … -->`) into a new one that readers still cannot see. */
+export function withoutComments(text) {
+  let previous;
+  do { previous = text; text = text.replace(/<!--[\s\S]*?-->/g, ''); } while (text !== previous);
+  return text;
+}
+
 /** Text of the first `##` section with one of these headings, without HTML comments; empty when missing. */
 function section(body, key) {
   const names = HEADINGS[key];
-  const lines = body.replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/);
+  const lines = withoutComments(body).split(/\r?\n/);
   const start = lines.findIndex((line) => {
     const heading = /^##\s+(.+?)\s*#*\s*$/.exec(line.trim());
     return !!heading && names.includes(heading[1].toLowerCase().replace(/[:.]$/, ''));

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The planner is a plain Node script without type declarations.
-import { planFailFirst, runnerForFailFirst } from '../scripts/pr-fail-first.mjs';
+import { optedOut, planFailFirst, runnerForFailFirst } from '../scripts/pr-fail-first.mjs';
 
 const plan = planFailFirst as (nameStatus: string) => { tests: string[]; restore: string[]; remove: string[] };
 const runner = runnerForFailFirst as (nameStatus: string) => string;
@@ -60,5 +60,15 @@ describe('fail-first proof plan', () => {
       'R087\tsrc/main/a.ts\tsrc/main/b.ts',
       'M\ttest/helpers.ts'
     ].join('\n'))).toEqual({ tests: [], restore: ['src/main/a.ts'], remove: ['src/main/b.ts'] });
+  });
+});
+
+describe('opting out of the fail-first proof', () => {
+  const opt = optedOut as (body: string) => boolean;
+  it('counts only an opt-out readers can see (code scanning)', () => {
+    expect(opt('Fail-first: n/a the tests only follow a rename')).toBe(true);
+    expect(opt('<!-- Fail-first: n/a the tests only follow a rename -->')).toBe(false);
+    // One pass of comment removal turned a split comment into a new, still hidden one.
+    expect(opt('<!<!-- x -->--\nFail-first: n/a the tests only follow a rename\n-->')).toBe(false);
   });
 });
