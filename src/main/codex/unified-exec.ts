@@ -18,6 +18,7 @@
  *     control event cannot be delivered to a child that owns no console.
  */
 
+import { randomInt } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { HeadTailBuffer } from './head-tail-buffer.js';
 import { CommandBatchDisplay } from './command-batch.js';
@@ -762,10 +763,13 @@ export class UnifiedExecProcessManager {
     this.processChangeListener?.();
   }
 
-  /** `rand::rng().random_range(1_000..100_000)`, retried against the reservations. */
-  allocateProcessId(): number {
+  /**
+   * `rand::rng().random_range(1_000..100_000)`, retried against the reservations. A process id is
+   * what later calls name to write to or read a running command, so it is not guessable either.
+   */
+  allocateProcessId(draw: () => number = () => randomInt(1_000, 100_000)): number {
     for (;;) {
-      const processId = 1_000 + Math.floor(Math.random() * (100_000 - 1_000));
+      const processId = draw();
       if (this.reservedProcessIds.has(processId) || this.completed.has(processId)) continue;
       this.reservedProcessIds.add(processId);
       return processId;

@@ -34,6 +34,13 @@ describe('pull request checklist', () => {
     expect(problems.join('\n')).toMatch(/Add or update a test/);
   });
 
+  it('does not count text a split HTML comment hides from readers (code scanning)', () => {
+    // One pass of comment removal turned `<!<!-- -->-- … -->` into a new, still hidden comment.
+    const hidden = good.replace('React remounts the composer before Send, so the draft lease is lost.',
+      '<!<!-- x -->-- React remounts the composer before Send, so the draft lease is lost. -->');
+    expect(check({ body: hidden, files: [{ path: 'extension/content.js', changes: 40 }, { path: 'test/content-script.test.ts', changes: 60 }] }).join('\n')).toMatch(/## Why/);
+  });
+
   it('needs no issue: the description carries the why and the what', () => {
     expect(check({ body: good.replace('Fixes #744\n\n', ''), files: [{ path: 'extension/content.js', changes: 40 }, { path: 'test/content-script.test.ts', changes: 60 }] })).toEqual([]);
   });

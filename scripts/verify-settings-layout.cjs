@@ -1,5 +1,6 @@
 // Run after npm run build. Isolated production markup/styles, real Usage renderer;
 // permission and connector rows below are explicit layout fixtures, not live settings.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,8 +16,7 @@ app.whenReady().then(async () => {
   const bundle = await build({ configFile: false, logLevel: 'silent', build: { write: false,
     lib: { entry: path.join(root, 'src/renderer/usage.ts'), name: 'usageFixture', formats: ['iife'] } } });
   const code = (Array.isArray(bundle) ? bundle[0] : bundle).output.find(item => item.type === 'chunk').code;
-  const html = fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+  const html = withoutScripts(fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8'))
     .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
   const file = path.join(output, 'fixture.html'); fs.writeFileSync(file, html);
   const win = new BrowserWindow({ show: false, width: 1440, height: 950,

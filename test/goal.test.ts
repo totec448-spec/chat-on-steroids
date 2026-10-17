@@ -1550,6 +1550,29 @@ describe('the model catalogue', () => {
     expect(seenAuth).toEqual(['Bearer key-a', 'Bearer key-b']);
   });
 
+  it('keeps no catalogue fetched with a key replaced while it loaded, and reuses one while the key stays', async () => {
+    const seenAuth: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      const authorization = String((init?.headers as Record<string, string> | undefined)?.authorization ?? '');
+      seenAuth.push(authorization);
+      if (authorization.endsWith('key-a')) await held;
+      const id = authorization.endsWith('key-b') ? 'only-for-b' : 'only-for-a';
+      return new Response(JSON.stringify({ data: [{ id, name: id, created: 1 }] }), { status: 200 });
+    }) as never;
+
+    await setSecret('openRouterApiKey', 'key-a');
+    const loading = goal.listGoalModels();
+    await vi.waitFor(() => expect(seenAuth).toEqual(['Bearer key-a']));
+    await setSecret('openRouterApiKey', 'key-b');
+    release();
+    expect((await loading).models.map((model) => model.id)).toEqual(['only-for-a']);
+    expect((await goal.listGoalModels()).models.map((model) => model.id)).toEqual(['only-for-b']);
+    expect((await goal.listGoalModels()).models.map((model) => model.id)).toEqual(['only-for-b']);
+    expect(seenAuth).toEqual(['Bearer key-a', 'Bearer key-b']);
+  });
+
   it('says the listing failed rather than pretending the catalogue is empty', async () => {
     globalThis.fetch = (async () => new Response('nope', { status: 500 })) as never;
     await expect(goal.listGoalModels(0, 20)).rejects.toThrow('HTTP 500');
