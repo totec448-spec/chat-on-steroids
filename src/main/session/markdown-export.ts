@@ -7,7 +7,7 @@ import {
 } from '../../shared/markdown-export.js';
 import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
-import { mainText } from '../main-texts.js';
+import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
 
 export type MarkdownExportRequest = {
@@ -53,7 +53,7 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     return { done: 'copied' };
   }
   const options = {
-    title: mainText('Export as Markdown'),
+    ...dialogLabel('Export as Markdown'),
     defaultPath: path.join(app.getPath('downloads'), name),
     filters: [{ name: mainText('Markdown files'), extensions: ['md'] }]
   };

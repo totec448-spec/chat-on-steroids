@@ -5,7 +5,7 @@ import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { mainText, setMainTextTranslations } from './main-texts.js';
+import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
 import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
@@ -837,7 +837,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, {
-      title: mainText('Approve a folder for ChatGPT'),
+      ...dialogLabel('Approve a folder for ChatGPT'),
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
@@ -879,7 +879,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return setPetOverlayVisible(visible);
   });
   handle('pets:import', async () => {
-    const options: Electron.OpenDialogOptions = { title: mainText('Import CoS Pet folder'), properties: ['openDirectory'] };
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Import CoS Pet folder'), properties: ['openDirectory'] };
     const owner = getWindow();
     const selected = owner && !owner.isDestroyed()
       ? await dialog.showOpenDialog(owner, options)
@@ -916,8 +916,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:import', async payload => {
     const { kind } = z.object({ kind: z.enum(['folder', 'file']) }).strict().parse(payload);
     const options: Electron.OpenDialogOptions = kind === 'folder'
-      ? { title: mainText('Import Skill folder'), properties: ['openDirectory'] }
-      : { title: mainText('Import SKILL.md'), properties: ['openFile'], filters: [{ name: mainText('Markdown skills'), extensions: ['md'] }] };
+      ? { ...dialogLabel('Import Skill folder'), properties: ['openDirectory'] }
+      : { ...dialogLabel('Import SKILL.md'), properties: ['openFile'], filters: [{ name: mainText('Markdown skills'), extensions: ['md'] }] };
     const owner = getWindow();
     const selected = owner && !owner.isDestroyed()
       ? await dialog.showOpenDialog(owner, options)
@@ -966,7 +966,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('projects:add', async () => {
     const window = getWindow();
     if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { title: mainText('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return null;
     const folder = result.filePaths[0];
     try { await resolvePath(getConfig().roots, folder); }
@@ -1187,7 +1187,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, {
-      title: mainText('Select the tunnel executable'),
+      ...dialogLabel('Select the tunnel executable'),
       properties: ['openFile'],
       ...(process.platform === 'win32' ? { filters: [{ name: mainText('Programs'), extensions: ['exe'] }] } : {})
     });
@@ -1410,7 +1410,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return stageInputAttachments(sources, retained);
   };
   handle('sessions:files', async () => {
-    const chosen = await dialog.showOpenDialog({ title: mainText('Attach files'), properties: ['openFile', 'multiSelections'] });
+    const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
     return stageFiles(chosen.filePaths);
