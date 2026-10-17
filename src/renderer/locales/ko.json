@@ -2699,5 +2699,6 @@
   "Binary file, so there is no text preview.": "바이너리 파일이라 텍스트 미리 보기가 없습니다.",
   "Previews of images and PDFs in a server folder are not available yet.": "서버 폴더의 이미지와 PDF 미리 보기는 아직 지원되지 않습니다.",
   "This diff is too large to display.": "이 변경 사항은 너무 커서 표시할 수 없습니다.",
-  "Binary diff · preview unavailable": "바이너리 변경 · 미리 보기를 사용할 수 없음"
+  "Binary diff · preview unavailable": "바이너리 변경 · 미리 보기를 사용할 수 없음",
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "자동 Continue가 3분 동안 안전하게 보낼 때를 찾지 못했습니다. 계속하려면 직접 \"Continue\"를 보내세요."
 }

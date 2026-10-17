@@ -238,8 +238,9 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     now = firstRelease + input.RECOVERY_WITHDRAW_LIMIT_MS;
     expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
     expect(await input.failBrowserInput(row.id, 'a-document', withdrawn, 'page-unreadable')).toBe(true);
+    // The chat shows one translated sentence that says what to do; the code stays in the log (#1586).
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed',
-      error: 'Automatic Continue was not sent: page-unreadable' });
+      error: input.RECOVERY_WITHDRAWN_ERROR });
     expect(getLog().some(entry => entry.message.includes('automatic Continue ended') && entry.message.includes('page-unreadable'))).toBe(true);
     input.resetInputForTests();
     expect((await input.pendingBrowserInputs()).filter(item => item.id === row.id)).toEqual([]);
