@@ -639,7 +639,8 @@ describe('desktop input delivery and helper ownership', () => {
     expect(sends()).toBe(change === 'accepted' ? 1 : 0);
     if (change !== 'accepted') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ error: 'After-turn pickup was withdrawn before Send.' }));
     // The release names the condition that ended it, so a report can tell a moving page from a lost lease (#882).
-    if (change === 'interim') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ detail: 'turn-progressed' }));
+    // …and what moved the page, so a pickup withdrawn for minutes says by what (#1586).
+    if (change === 'interim') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ detail: 'turn-progressed by app-assistant_message' }));
     if (change === 'refused') expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({ detail: 'app-refused' }));
   });
   it('names a turn that moved while its silence pickup was being claimed', async () => {
@@ -662,7 +663,7 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, silenceTurnId })).toEqual({ ok: false });
     expect(sends()).toBe(0);
     expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({
-      error: 'After-turn pickup was withdrawn before Send.', detail: 'turn-progressed' }));
+      error: 'After-turn pickup was withdrawn before Send.', detail: 'turn-progressed by app-assistant_message' }));
   });
   // ChatGPT takes a message while it works and folds it into the running turn (#1231): nothing is stopped.
   it.each(['accepted', 'refused', 'new-question', 'draft'])('direct delivery sends into the claimed running turn without stopping it (%s)', async change => {
