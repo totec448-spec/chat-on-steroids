@@ -5897,11 +5897,30 @@ describe('branch in new chat (#482)', () => {
       branch: { sessionId: summary([]).id, conversationId: chat, messageId: replyId } });
   });
 
-  it('drops the branch when the person cancels it or starts an ordinary new chat', async () => {
+  it('goes back to the reply it came from when the person cancels the branch', async () => {
     const { w, live } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
     branchButton(w)!.click(); await settle();
     w.document.querySelector<HTMLButtonElement>('#branchDraft .branch-draft-cancel')!.click(); await settle();
     expect(w.document.getElementById('branchDraft')!.hidden).toBe(true);
+    expect(w.document.querySelector(`.sess.is-sel[data-id="${summary([]).id}"]`)).not.toBeNull();
+    expect(api.locateMessage).toHaveBeenCalledWith(summary([]).id, replyId);
+    // An ordinary new chat afterwards carries no branch.
+    w.document.getElementById('newChat')!.click(); await settle();
+    await submit(w as any, 'Just a new chat.');
+    expect(live.sent.at(-1)).not.toHaveProperty('branch');
+  });
+
+  it('drops the branch and stays a plain new chat when the chat it came from is deleted', async () => {
+    const { w, live, notifySession } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    branchButton(w)!.click(); await settle();
+    // The source chat is deleted while the branch is still a draft.
+    (w as any).api.listSessions = async () => ({ ok: true, data: { sessions: [], activeId: null, pressure: [] } });
+    notifySession(); await settle(700);
+    // The notice no longer names a chat that is gone, and the first message starts a plain chat.
+    expect(w.document.getElementById('branchDraft')!.hidden).toBe(true);
+    expect(w.document.getElementById('chatTitle')!.textContent).toBe('New chat');
     await submit(w as any, 'Just a new chat.');
     expect(live.sent.at(-1)).not.toHaveProperty('branch');
   });

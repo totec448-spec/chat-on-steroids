@@ -2058,13 +2058,20 @@ function syncSelectedWorkspace(): void {
  */
 function paintBranchNotices(): void {
   const draft = $('branchDraft');
+  // A source chat deleted while its branch is a draft: the draft becomes a plain new chat.
+  if (newChatBranch && !sessions.some(row => row.id === newChatBranch!.sessionId)) newChatBranch = null;
   const pending = newChatSelected && selectedId === null ? newChatBranch : null;
   draft.hidden = !pending;
   if (pending && draft.dataset.branchFor !== `${pending.sessionId}:${pending.messageId}`) {
     draft.dataset.branchFor = `${pending.sessionId}:${pending.messageId}`;
     // A row of the composer dock, drawn like its neighbours: icon, label, then the dock's own action.
+    // Cancel undoes the Branch click: back to the reply it was made from. A source chat deleted
+    // meanwhile leaves a plain new chat, with whatever was typed still in it.
     const cancel = dockAction(() => t('Cancel branch'), 'i-x', () => {
-      newChatBranch = null; paintBranchNotices(); $<HTMLTextAreaElement>('chatInput').focus();
+      const back = newChatBranch;
+      newChatBranch = null;
+      if (back && sessions.some(row => row.id === back.sessionId)) { void openBranchSource(back.sessionId, back.messageId); return; }
+      paintBranchNotices(); $<HTMLTextAreaElement>('chatInput').focus();
     });
     cancel.classList.add('branch-draft-cancel');
     draft.replaceChildren(icon('i-git-branch'), el('span', 'queue-label', () => t('New chat from a reply in “{0}”', [pending.title])), cancel);
