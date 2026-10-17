@@ -2690,6 +2690,39 @@ describe('desktop input delivery and helper ownership', () => {
     expect(attachment.isConnected).toBe(true);
   });
 
+  it.each([
+    ['signed out', { ok: true, body: {} }, false],
+    ['signed in', { ok: true, body: { user: { id: 'user-1' }, accessToken: 'token' } }, true],
+    ['unknown', { ok: false, body: null }, true]
+  ] as const)('sends an app message only where ChatGPT is not signed out (%s)', async (_name, session, sends) => {
+    // The built-in browser opened signed out (2.1.41 pass, Windows VM): the app's message went into
+    // an anonymous ChatGPT chat that is never saved, and the input timed out as "not confirmed".
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } })
+    });
+    const asked: string[] = [];
+    (live.window as any).fetch = vi.fn(async (url: string) => {
+      asked.push(String(url));
+      return { ok: session.ok, json: async () => session.body };
+    });
+    const sent = vi.fn(() => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'signed-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', sent);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null });
+    expect(asked).toContain('/api/auth/session');
+    expect(sent).toHaveBeenCalledTimes(sends ? 1 : 0);
+    const failure = live.sent.find(message => message.type === 'desktop_input' && message.fail);
+    if (sends) expect(failure).toBeUndefined();
+    else {
+      expect(failure?.error).toContain('not signed in');
+      expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+    }
+  });
+
   it('preserves a user draft when an unavailable model cannot be confirmed', async () => {
     let page: Document;
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
@@ -16951,6 +16984,26 @@ describe('the fresh chat the app opened', () => {
     expect(proof).toMatchObject({ safe: true, conversationId: source });
     expect(await live.runtimeMessage({ type: 'clf-tab-close-check', conversationId: source,
       failedCommand: { id: 'foreign-command', client: 'foreign-client' } })).toMatchObject({ safe: false });
+  });
+
+  it('does not type a worker or Resume prompt into a signed-out ChatGPT', async () => {
+    const edit = vi.fn(() => true);
+    const send = vi.fn();
+    let release!: (value: any) => void;
+    live = await harness('https://chatgpt.com/?clf=cmd-signed-out', {
+      redeem: () => new Promise(resolve => { release = resolve; }),
+      ack: () => ({ ok: true })
+    });
+    (live.window as any).fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    live.document.execCommand = edit;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', send);
+    release({ ok: true, command: { id: 'cmd-signed-out', type: 'resume', text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nPrivate test brief', agent: null } });
+    await settle(400);
+    const failed = live.sent.find(message => message.type === 'ack' && message.status === 'failed');
+    expect(edit).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(failed?.error).toContain('not signed in');
+    expect(composerText(live.document)).toBe('');
   });
 
   it('keeps a failed bootstrap edit predicate in its durable ACK without authored content', async () => {

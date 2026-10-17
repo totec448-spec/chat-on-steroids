@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "In ChatGPT steht bereits ein ungesendeter Entwurf. Sende oder leere ihn in Chrome, bevor du es erneut versuchst."
   },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT ist in diesem Browser nicht angemeldet. Melde dich dort bei ChatGPT an und sende dann erneut."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "Das gewünschte Modell oder die Denkstufe ließ sich nicht bestätigen"
   },
