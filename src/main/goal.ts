@@ -47,7 +47,7 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
-import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
+import { GOAL_MARKER_INSTRUCTION, GOAL_MARKER_RECOVERY_TAG, templateGoalDecision } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
 import { createHash } from 'node:crypto';
 import { defaultConfig, getConfig } from './config.js';
@@ -1941,7 +1941,7 @@ async function run(draft: GoalDraft): Promise<void> {
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
   try {
-    const decision = draft.backend === 'templates' ? templateGoalDecision(messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
+    const decision = draft.backend === 'templates' ? templateGoalDecision(messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200), messages.filter((message) => message.role === 'user').at(-1)?.content ?? '') : await requestDrivingDecision({
       backend: draft.backend,
       endpoint,
       reasoning,
@@ -2002,11 +2002,16 @@ async function run(draft: GoalDraft): Promise<void> {
     // A Goal whose chat keeps giving the same visible answer cannot be satisfied by asking again:
     // it sees answers, not tool results. On 2026-10-14 one got thirteen "verify it" follow-ups to
     // "done" in ten minutes. Loop is exempt; repeating is its job.
-    const repeated = draft.mode === 'goal' ? goalRepeatsItself(messages) : null;
+    // A one-time status check does not re-execute the task and should not be treated as
+    // a repeated work instruction by the ordinary Goal repetition guard.
+    const markerCheck = draft.backend === 'templates' && decision.reply.startsWith(GOAL_MARKER_RECOVERY_TAG);
+    if (markerCheck) logWarn(`goal: offline answer has no completion marker in ${draft.conversationId}; requesting one status-only check`);
+    const repeated = draft.mode === 'goal' && !markerCheck ? goalRepeatsItself(messages) : null;
     if (repeated !== null) return pauseRepeatingGoal(draft, repeated);
-    // Typed rather than written. See humanReply: the em dashes go, and a couple of the
-    // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
-    draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
+    // Non-template drafts use humanReply for natural phrasing, but offline templates are
+    // protocol instructions, not natural-language helper drafts:
+    // do not inject the intentional human-like typos into safety-critical status checks.
+    draft.reply = draft.backend === 'templates' ? decision.reply : humanReply(decision.reply);
     logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
     settle(draft, 'ready');
   } catch (err) {
@@ -2068,7 +2073,7 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   if (!objective && !messages.some(message => message.role === 'user')) throw new Error('No recorded user request is available for Goal');
   const prompt = mode === 'loop' ? settings.loopPrompt : objective ? settings.objectivePrompt : settings.prompt;
   const decision = backend === 'templates'
-    ? templateGoalDecision(messages.filter(message => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
+    ? templateGoalDecision(messages.filter(message => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200), messages.filter(message => message.role === 'user').at(-1)?.content ?? '')
     : await requestDrivingDecision({ sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
     system: objective ? [prompt, goalObjectiveMessage(objective)] : [prompt],
     messages,
