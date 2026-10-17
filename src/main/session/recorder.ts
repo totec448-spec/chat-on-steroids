@@ -76,7 +76,7 @@ import {
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
-import { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } from './resume-gate.js';
+import { RESUME_CLAIM_WINDOW_MS, dispatchedResumeFromSession, dispatchedResumeMarkerIn, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 
 interface LiveConversation {
@@ -203,9 +203,11 @@ export function recordingEnabled(): boolean {
  */
 export async function sessionForConversation(
   conversationId: string | null,
-  title?: string
+  title?: string,
+  /** An observed authored user message, not a guessed route or page label. */
+  openingUserMessage?: string
 ): Promise<string | null> {
-  if (!conversationId) return initializeSessionForConversation(conversationId, title);
+  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage);
 
   const pending = sessionInitializations.get(conversationId);
   if (pending) {
@@ -220,7 +222,7 @@ export async function sessionForConversation(
     return sessionId;
   }
 
-  const initializing = initializeSessionForConversation(conversationId, title);
+  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage);
   sessionInitializations.set(conversationId, initializing);
   try {
     const sessionId = await initializing;
@@ -287,7 +289,8 @@ export class ResumeDestinationPendingError extends Error {
 
 async function initializeSessionForConversation(
   conversationId: string | null,
-  title?: string
+  title?: string,
+  openingUserMessage?: string
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   if (!conversationId) return ensureUnattributedSession();
@@ -315,13 +318,14 @@ async function initializeSessionForConversation(
       return moved.sessionId;
     }
     known = await findSessionByConversation(conversationId);
-    if (!known && resumeOpeningChat()) {
-      // An already-dispatched handoff can remain unresolved longer than this bounded
-      // wait. The deadline limits how long an unrelated chat must wait; it cannot
-      // prove this unknown chat is unrelated. Do not mint a second local session for
-      // a possible resume destination. Throw an exact retry reason: returning null
-      // would let a later gate transition turn the bridge's response into HTTP 200
-      // and ACK an observation that was never stored.
+    const origin = pendingOrigins.get(conversationId);
+    const exactResumeCommand = origin?.kind === 'resume' && !!origin.fromSessionId &&
+      dispatchedResumeFromSession(origin.fromSessionId);
+    if (!known && resumeOpeningChat() && (dispatchedResumeMarkerIn(openingUserMessage) || exactResumeCommand)) {
+      // Only an observed marker or the ACK of this app's exact Resume command may
+      // defer admission after the ordinary claim window. An unrelated new chat
+      // must not be held hostage by a handoff that can remain open for hours.
+      // Neither hint grants rebind authority; /events validates the full bootstrap.
       throw new ResumeDestinationPendingError();
     }
   }
@@ -2007,7 +2011,8 @@ export async function recordRequestEvidence(
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
-  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations));
+  const firstUser = observations.find((item) => item.kind === 'user_message' && item.messageId && item.text);
+  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text);
   if (!sessionId) return null;
   // Proof identifies even a retired caller; kernel/recorder attachment checks then refuse it
   // as superseded. Never turn an exact historical owner into anonymous executable authority.
@@ -2176,7 +2181,8 @@ async function recordChatObservationsNow(
   }
   const sessionId = await sessionForConversation(
     conversationId,
-    pageTitle?.text?.trim() || observedUserTitle(firstUser?.text)
+    pageTitle?.text?.trim() || observedUserTitle(firstUser?.text),
+    firstUser?.messageId ? firstUser.text : undefined
   );
   if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
