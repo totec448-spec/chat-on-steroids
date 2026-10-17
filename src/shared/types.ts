@@ -166,7 +166,7 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
-  /** Opt-in. Keep the finish hold when the Goal helper says the goal is met; off by default. */
+  /** Config-only opt-in; keep Goal stops unverified and finish holds open; off by default. */
   finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;

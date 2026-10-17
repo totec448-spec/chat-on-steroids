@@ -1550,7 +1550,7 @@
   "The continuation request timed out or was cancelled. Check the helper chat or provider status before trying again.": "继续请求超时或已取消。重试前请检查辅助聊天或提供者状态。",
   "The custom continuation endpoint is invalid. Check its URL in Settings; use HTTPS or a local HTTP endpoint.": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。",
   "The helper did not produce an opening message. Make the task more specific and try again.": "辅助工具未生成开场消息。请让任务更具体后再试。",
-  "The helper says the goal is met, but that is unverified. Nothing was sent and the reply is still owed. Check the chat, then continue it yourself.": "辅助工具称目标已达成，但尚未得到验证。没有发送任何内容，回复仍待完成。请检查聊天，然后自行继续。",
+  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "辅助工具称目标已达成，但尚未检查。没有发送任何内容。请检查聊天；如果还有工作未完成，请继续。",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "辅助工具一直选择停止，而不是编写循环继续内容。请检查循环指令，或选择其他辅助模型。",
   "The helper prompt could not be delivered to ChatGPT. Open the helper chat and check its composer or visible error before trying again.": "无法将辅助提示发送到 ChatGPT。重试前请打开辅助聊天，检查其输入框或可见错误。",
   "The helper prompt could not be delivered. {0}": "无法发送辅助提示。{0}",
@@ -2704,5 +2704,7 @@
   "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "自动继续在 3 分钟内未找到安全的发送时机。请自行发送“Continue”以接着进行。",
   "The Skills library supports at most 64 skills": "技能库最多容纳 64 个技能",
   "Conflict": "冲突",
-  "Conflicts": "冲突"
+  "Conflicts": "冲突",
+  "Goal result needs review": "请检查 Goal 结果",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 辅助工具认为工作已完成，但尚未检查。请查看聊天或发送下一条指示。"
 }

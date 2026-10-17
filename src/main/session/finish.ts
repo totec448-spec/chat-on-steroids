@@ -182,7 +182,7 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
         notification = 'Desktop notification is unavailable.';
         if (notify) {
           try {
-            notification = notify('Astra: Goal says done (unverified)', 'The Goal helper thinks the work is complete, but that was not verified. The turn is still held; check it or send the next instruction.', sessionId, turnId) === false
+            notification = notify('Goal result needs review', 'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.', sessionId, turnId) === false
               ? 'The app is open; no desktop notification was shown.'
               : 'The user has been notified.';
           } catch { notification = 'The desktop notification could not be shown.'; }

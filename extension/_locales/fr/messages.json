@@ -1140,7 +1140,7 @@
     "message": "L’assistant n’a pas produit de message d’ouverture. Rendez la tâche plus précise et réessayez."
   },
   "content_goal_error_goal_helper_stop_unverified": {
-    "message": "L’assistant indique que l’objectif est atteint, mais cela n’est pas vérifié. Aucun message n’a été envoyé et la réponse reste due. Vérifiez la conversation, puis poursuivez vous-même."
+    "message": "L’assistant indique que l’objectif est atteint, mais cela n’a pas été vérifié. Aucun message n’a été envoyé. Vérifiez la conversation et poursuivez s’il reste du travail."
   },
   "content_goal_error_loop_stop_refused": {
     "message": "L’assistant a continué à choisir l’arrêt au lieu de rédiger une continuation Loop. Vérifiez les instructions Loop ou choisissez un autre modèle d’assistant."

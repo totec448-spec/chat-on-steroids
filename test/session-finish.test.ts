@@ -34,6 +34,16 @@ async function announceSessionFinish(sessionId: string, summary: string, deadlin
 let directory: string;
 let sessionId: string;
 const notify = vi.fn();
+const configureUnverifiedHelperStop = async (setting: boolean | undefined) => {
+  await saveConfig({
+    ...defaultConfig(),
+    ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', ...(setting === undefined ? {} : { finishHoldOnStop: setting }) },
+    goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
+  });
+  hooks.hasInput = false;
+  hooks.followup.mockResolvedValueOnce(null);
+  await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+};
 beforeAll(async () => {
   directory = await makeTempDir('clf-session-finish-');
   initConfigPath(directory); initSessionStore(directory);
@@ -207,33 +217,25 @@ describe('session finish turn identity', () => {
     await announceSessionFinish(sessionId, 'Repeated finish');
     expect(hooks.followup).toHaveBeenCalledOnce();
   });
-  it('holds the finish turn and notifies on helper stop when finishHoldOnStop is opted in', async () => {
-    await saveConfig({
-      ...defaultConfig(),
-      ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', finishHoldOnStop: true },
-      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
-    });
-    hooks.hasInput = false;
-    hooks.followup.mockResolvedValueOnce(null);
-    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+  it('keeps the finish hold and notifies when the Goal helper stops without checking the work', async () => {
+    await configureUnverifiedHelperStop(true);
     expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
     expect(hooks.followup).toHaveBeenCalledOnce();
     expect(hooks.enqueue).not.toHaveBeenCalled();
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
     expect((await getSession(sessionId))?.activeTurnId).toBe('turn-one');
     expect(notify).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith(
+      'Goal result needs review',
+      'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.',
+      sessionId,
+      'turn-one'
+    );
     const events = await readRecentEvents(sessionId, 10);
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'helper_stop_unverified' })]));
   });
   it.each([undefined, false])('still releases the finish hold on helper stop when finishHoldOnStop is %s (default unchanged)', async setting => {
-    await saveConfig({
-      ...defaultConfig(),
-      ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', ...(setting === undefined ? {} : { finishHoldOnStop: setting }) },
-      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
-    });
-    hooks.hasInput = false;
-    hooks.followup.mockResolvedValueOnce(null);
-    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+    await configureUnverifiedHelperStop(setting);
     expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('RELEASED:');
     expect(hooks.followup).toHaveBeenCalledOnce();
     expect(hooks.enqueue).not.toHaveBeenCalled();
@@ -243,14 +245,8 @@ describe('session finish turn identity', () => {
     expect(events.some(event => 'reason' in event && event.reason === 'helper_stop_unverified')).toBe(false);
   });
   it('does not repeat the unverified notification when the held turn checks in again without new work', async () => {
-    await saveConfig({
-      ...defaultConfig(),
-      ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', finishHoldOnStop: true },
-      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
-    });
-    hooks.hasInput = false;
+    await configureUnverifiedHelperStop(true);
     hooks.followup.mockResolvedValue(null);
-    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
     expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
     expect(await announceSessionFinish(sessionId, 'Still complete', Date.now() + 1500)).toContain('HELD:');
     expect(hooks.followup).toHaveBeenCalledOnce();
