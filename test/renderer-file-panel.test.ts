@@ -145,6 +145,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('keeps every Files action on screen as icons when the labels do not fit', async () => {
+  // German labels pushed Delete, Reveal and Changes past a hidden scrollbar (2.1.41 pass).
+  const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
+  panel.update(projectA); toggle.click(); await tick();
+  const actions = host.querySelector<HTMLElement>('.file-panel-toolbar-actions')!;
+  // jsdom has no layout: the labels need 627 px, the icons alone 180 px, the toolbar has 294 px.
+  Object.defineProperty(actions, 'clientWidth', { configurable: true, get: () => 294 });
+  Object.defineProperty(actions, 'scrollWidth', { configurable: true, get: () => actions.classList.contains('is-compact') ? 180 : 627 });
+  const buttons = [...actions.querySelectorAll<HTMLButtonElement>('.file-panel-action')];
+  expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['New file', 'New folder', 'Rename', 'Delete', 'Reveal', 'Changes']);
+  try {
+    setLanguage('de');
+    expect(actions.classList.contains('is-compact')).toBe(true);
+    // Icons only, and each still names its action for screen readers and on hover.
+    expect(buttons.every(button => button.getAttribute('aria-label') === button.title && button.title)).toBe(true);
+    Object.defineProperty(actions, 'clientWidth', { configurable: true, get: () => 700 });
+    setLanguage('en');
+    expect(actions.classList.contains('is-compact')).toBe(false);
+  } finally { setLanguage('en'); }
+});
+
 it('is unavailable without a local project and lazily expands only the chosen directory', async () => {
   const onShow = vi.fn();
   const panel = createFilePanel({ host, toggle, onShow, onAttach: file => attached.push(file.name) });
@@ -226,6 +247,10 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
     expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Diferencias');
     expect(host.querySelector('.file-changes-back')?.getAttribute('aria-label')).toBe('Volver a cambios');
     expect(host.querySelector('.file-panel-refresh')?.getAttribute('aria-label')).toBe('Actualizar cambios');
+    // The Changes button keeps its count through a language change.
+    const changesButton = host.querySelector('.file-panel-changes-toggle')!;
+    expect(changesButton.getAttribute('title')).toMatch(/^Cambios \(\d+\)$/);
+    expect(changesButton.getAttribute('aria-label')).toBe(changesButton.getAttribute('title'));
   } finally { setLanguage('en'); }
   expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('# old\n---\n# new');
   expect(host.querySelector('.file-preview-title > strong')?.textContent).toBe('README.md');
