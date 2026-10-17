@@ -270,7 +270,7 @@ export async function saveDiagnosticsReport(text: string, owner: BrowserWindow |
     // In the interface language, like the tray (2.1.39: English title in a German app).
     title: mainText('Diagnostics report'),
     defaultPath: path.join(app.getPath('downloads'), `chat-on-steroids-diagnostics-${stamp}.txt`),
-    filters: [{ name: 'Text', extensions: ['txt'] }]
+    filters: [{ name: mainText('Text files'), extensions: ['txt'] }]
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { saved: false };
