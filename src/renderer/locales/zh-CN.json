@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git 分支及其提交会保留。未提交的文件无法从 Git 恢复。",
   "Keep checkout": "保留检出目录",
   "Remove checkout; preserve Git branch": "移除检出目录，保留 Git 分支",
-  "Unattributed activity": "未归属活动"
+  "Unattributed activity": "未归属活动",
+  "ChatGPT finished.": "ChatGPT 已完成。"
 }

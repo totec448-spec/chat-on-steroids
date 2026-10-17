@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Ветка Git и её коммиты сохранятся. Незакоммиченные файлы нельзя восстановить из Git.",
   "Keep checkout": "Оставить рабочую копию",
   "Remove checkout; preserve Git branch": "Удалить рабочую копию, сохранить ветку Git",
-  "Unattributed activity": "Активность без привязки"
+  "Unattributed activity": "Активность без привязки",
+  "ChatGPT finished.": "ChatGPT закончил."
 }

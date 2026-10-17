@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Der Git-Branch und seine Commits bleiben erhalten. Nicht committete Dateien lassen sich aus Git nicht wiederherstellen.",
   "Keep checkout": "Checkout behalten",
   "Remove checkout; preserve Git branch": "Checkout entfernen, Git-Branch behalten",
-  "Unattributed activity": "Nicht zugeordnete Aktivität"
+  "Unattributed activity": "Nicht zugeordnete Aktivität",
+  "ChatGPT finished.": "ChatGPT ist fertig."
 }
