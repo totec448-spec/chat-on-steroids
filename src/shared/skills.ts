@@ -153,7 +153,7 @@ export interface SkillLibrary {
 }
 export interface SkillsDraftScope { sessionId?: string | null; projectId?: string | null }
 
-export const MAX_SKILLS = 64;
+export const MAX_SKILLS = 128;
 export const SKILL_ORIGIN_FILENAME = '.cos-github.json';
 export const MAX_SKILL_BYTES = 128_000;
 export const MAX_SKILL_CHARS = 96_000;

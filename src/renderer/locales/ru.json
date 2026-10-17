@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "Управляемая папка навыков не является безопасной папкой",
   "The managed Skills folder was redirected": "Управляемая папка навыков была перенаправлена",
   "The Skills library has too many entries": "В библиотеке навыков слишком много записей",
-  "The Skills library supports at most 64 skills": "Библиотека вмещает не больше 64 навыков",
+  "The Skills library supports at most 128 skills": "Библиотека вмещает не больше 128 навыков",
   "The managed Skills folder changed while being read": "Управляемая папка навыков изменилась во время чтения",
   "Skills storage requires an absolute user-data path": "Хранилищу навыков нужен абсолютный путь к данным приложения",
   "Auto-selected Skill revision is invalid": "Автоматически выбранная версия навыка недействительна",

@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "La carpeta de skills administrada no es una carpeta segura",
   "The managed Skills folder was redirected": "La carpeta de skills administrada fue redirigida",
   "The Skills library has too many entries": "La biblioteca de skills tiene demasiadas entradas",
-  "The Skills library supports at most 64 skills": "La biblioteca de skills admite como máximo 64 skills",
+  "The Skills library supports at most 128 skills": "La biblioteca de skills admite como máximo 128 skills",
   "The managed Skills folder changed while being read": "La carpeta de skills administrada cambió mientras se leía",
   "Skills storage requires an absolute user-data path": "El almacenamiento de skills necesita una ruta absoluta de datos de usuario",
   "Auto-selected Skill revision is invalid": "La revisión de skill seleccionada automáticamente no es válida",

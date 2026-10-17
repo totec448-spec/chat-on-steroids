@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "受管理的技能資料夾不是安全的資料夾",
   "The managed Skills folder was redirected": "受管理的技能資料夾已被重新導向",
   "The Skills library has too many entries": "技能庫的項目過多",
-  "The Skills library supports at most 64 skills": "技能庫最多容納 64 個技能",
+  "The Skills library supports at most 128 skills": "技能庫最多容納 128 個技能",
   "The managed Skills folder changed while being read": "讀取時受管理的技能資料夾已變更",
   "Skills storage requires an absolute user-data path": "技能儲存空間需要應用程式資料的絕對路徑",
   "Auto-selected Skill revision is invalid": "自動選擇的技能版本無效",
