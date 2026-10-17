@@ -3075,6 +3075,15 @@ async function revealSearchMatch(id: string, query: string): Promise<void> {
   await revealChatLocation(id, location);
 }
 
+/** The loaded timeline row of one recorded message, by the key the timeline gives that message. */
+function rowForLocation(location: SessionSearchLocation): HTMLElement | null {
+  const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
+    : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
+  if (!event) return null;
+  const key = itemKey({ kind: 'event', event });
+  return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
+}
+
 /** Scrolls the open chat to one recorded message, loading the history page around it when needed. */
 async function revealChatLocation(id: string, location: SessionSearchLocation): Promise<void> {
   const selection = selectionGeneration;
@@ -3085,13 +3094,7 @@ async function revealChatLocation(id: string, location: SessionSearchLocation): 
     if (Date.now() > deadline || !current()) return;
     await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
   }
-  const rowFor = (): HTMLElement | null => {
-    const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
-      : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
-    if (!event) return null;
-    const key = itemKey({ kind: 'event', event });
-    return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
-  };
+  const rowFor = (): HTMLElement | null => rowForLocation(location);
   let row = rowFor();
   if (!row) {
     // Marked as history before the read, so a live update meanwhile cannot land in this page.
@@ -7255,7 +7258,8 @@ export function initChat(next: Deps): void {
   chatFind = initChatFind({
     selectedId: () => selectedId,
     find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,
-    reveal: revealChatLocation
+    reveal: revealChatLocation,
+    row: rowForLocation
   });
   chatSearch = initChatSearch({
     select: (id, match) => {
