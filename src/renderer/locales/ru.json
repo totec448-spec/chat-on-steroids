@@ -2705,8 +2705,8 @@
   "The Skills library supports at most 64 skills": "Библиотека вмещает не больше 64 навыков",
   "Conflict": "Конфликт",
   "Conflicts": "Конфликты",
-  "Goal result needs review": "Проверьте результат Goal",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Помощник Goal считает, что работа завершена, но это ещё не проверено. Проверьте чат или отправьте следующую инструкцию.",
-  "Review Goal completion": "Проверять завершение Goal",
-  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "По умолчанию выключено. Если Goal сообщает о завершении без подтверждений, результат остаётся непроверенным, а ответ — ожидающим. Session finish сохраняет текущую паузу, просит модель оставить ход открытым и может отправить уведомление."
+  "Goal result needs review": "Проверьте результат функции «Цель»",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Помощник «Цель» считает, что работа завершена, но это ещё не проверено. Проверьте чат или отправьте следующую инструкцию.",
+  "Review Goal completion": "Проверять завершение функции «Цель»",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "По умолчанию выключено. Если функция «Цель» сообщает о завершении без подтверждений, результат остаётся непроверенным, а ответ — ожидающим. Session finish сохраняет текущую паузу, просит модель оставить ход открытым и может отправить уведомление."
 }

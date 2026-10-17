@@ -2705,8 +2705,8 @@
   "The Skills library supports at most 64 skills": "スキルライブラリに入れられるのは最大 64 個です",
   "Conflict": "競合",
   "Conflicts": "競合",
-  "Goal result needs review": "Goal の結果を確認してください",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal ヘルパーは作業が完了したと判断していますが、まだ確認されていません。チャットを確認するか、次の指示を送信してください。",
-  "Review Goal completion": "Goal の完了を確認",
-  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "デフォルトではオフです。Goal が証拠なしに完了を報告した場合、結果は未確認のままで返信は保留されます。Session finish は現在の保留を維持し、モデルにターンを開いたままにするよう求め、通知を送ることがあります。"
+  "Goal result needs review": "ゴールの結果を確認してください",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "ゴールヘルパーは作業が完了したと判断していますが、まだ確認されていません。チャットを確認するか、次の指示を送信してください。",
+  "Review Goal completion": "ゴールの完了を確認",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "デフォルトではオフです。ゴールが証拠なしに完了を報告した場合、結果は未確認のままで返信は保留されます。Session finish は現在の保留を維持し、モデルにターンを開いたままにするよう求め、通知を送ることがあります。"
 }
