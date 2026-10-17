@@ -2318,6 +2318,19 @@ describe('native worker checkout cleanup confirmation', () => {
     });
   });
 
+  it('accepts the renderer\'s whole set of main-process texts', async () => {
+    // The channel's size bound once stayed at 32 while the set grew past it, and a refused set
+    // left the tray, notices and dialogs English in every language.
+    const { MAIN_TEXTS } = await import('../src/shared/main-texts.js');
+    const { mainText, setMainTextTranslations } = await import('../src/main/main-texts.js');
+    try {
+      expect(await invoke('ui:mainTexts', Object.fromEntries(MAIN_TEXTS.map(source => [source, `«${source}»`]))))
+        .toMatchObject({ ok: true });
+      expect(mainText('Quit')).toBe('«Quit»');
+      expect(mainText('Attach files')).toBe('«Attach files»');
+    } finally { setMainTextTranslations({}); }
+  });
+
   it('asks in the interface language before removing a worker checkout', async () => {
     const { setMainTextTranslations } = await import('../src/main/main-texts.js');
     setMainTextTranslations({

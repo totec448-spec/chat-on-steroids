@@ -6,6 +6,7 @@ import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { mainText, setMainTextTranslations } from './main-texts.js';
+import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -866,8 +867,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     setStopNoticeTranslations(z.record(z.string().max(200), z.string().max(400)).refine(value => Object.keys(value).length <= 16).parse(payload));
   });
   handle('ui:mainTexts', async payload => {
-    // The tray menu and Session finish notice in the interface language; bounded and allowlisted.
-    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200)).refine(value => Object.keys(value).length <= 32).parse(payload));
+    // The tray menu, notices and native dialogs in the interface language; bounded and allowlisted.
+    // The bound follows the list: a fixed 32 refused the whole set once it grew past that.
+    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200))
+      .refine(value => Object.keys(value).length <= MAIN_TEXTS.length).parse(payload));
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
