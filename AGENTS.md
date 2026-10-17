@@ -3435,6 +3435,10 @@ An exact caller without its own family receives a successful empty `agents statu
 of other active primes. A permitted unresolved request can likewise inspect its own state and
 start its own family. Missing both exact proof and permitted request identity refuses only that
 operation. Sleeping-worker measurement remains scoped to the caller's actual history.
+A worker whose chat shows ChatGPT's tool approval card (`approvalCardWaiting`) is marked in the
+status table ("needs the user to answer a tool approval in its chat"), named in one sentence below
+it, and carries `needs_user_approval: true` in the structured agents list, so a prime tells the
+person instead of reading the wait as a stuck runtime.
 
 Spawn validates both per-family and optional global capacity, objective/context, account-observed model/effort, workspace and role,
 then durably reserves the worker before handing out browser work. Model checks precede every
