@@ -200,7 +200,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Automatic worker worktrees | Off. | `multiAgent.autoWorktrees` requires explicit opt-in on fresh and migrated configs. Existing isolated worker leases retain their own workspace when the setting is disabled. |
 | Wait for sub-agents | Off. | When on, a Goal/Loop chat's next automatic step waits for the workers that exact chat started. A chat with no run, or a run with no workers, waits either way. See §16. |
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
-| Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Ambiguous or unnamed input selects none; explicit `/id` or `/prompt id` always wins. |
+| Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Ambiguous or unnamed input selects none, except the local `etd-sports-market-engine` project preselects its managed `etd-external-skill-router` preflight when that Skill permits implicit invocation. Explicit `/id` or `/prompt id` always wins. |
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
 | Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460. Worker chats the broker retires for good (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days; never a run that is merely parked) queue in `worker-archive.ts` (`state/worker-archive.json`). The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
@@ -574,6 +574,14 @@ input with no explicit Skill directive compares only the already-published manag
 identity metadata plus bounded `agents/openai.yaml` policy. It never calls `listSkills()`/`listSkillLibrary()`
 or reads every `SKILL.md` to make the routing decision; discovered repo/user/system/admin Skills
 remain explicit-only in this first slice because their descriptive metadata lives in `SKILL.md`.
+Before the generic matcher, the main-process routing wrapper has one project-identity exception:
+when the resolved local project's folder basename is `etd-sports-market-engine`, an enabled managed
+`etd-external-skill-router` whose policy permits implicit invocation is frozen as the one automatic
+selection. If that router is missing, disabled or forbids implicit invocation, the ETD preflight
+freezes no automatic Skill instead of falling through to another implicit choice. This exception
+does not infer task intent or change `shared/skill-routing.ts`; the shared matcher remains the
+precision-first exact-name mechanism below, while the selected router decides which engineering
+techniques are relevant inside its existing Skill instructions.
 The matcher uses only complete `id`, `name` or `display_name` phrases, case-folded with hyphens
 and whitespace treated as the same name separators. Canonically equivalent Unicode is normalized
 to NFC, but diacritics and other punctuation remain literal. Descriptions, partial identity words,
