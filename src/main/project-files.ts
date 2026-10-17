@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import sharp from 'sharp';
 import { getConfig } from './config.js';
-import { listDirectoryLevel, readTextFile, statInfo } from './codex/read-backend.js';
+import { listDirectoryLevel, LongLineReadError, readTextFile, statInfo } from './codex/read-backend.js';
 import { getProject, projectWorkspace } from './projects.js';
 import { rawPromises as fs } from './rawfs.js';
 import { isContained, nativePathIdentity, resolvePath, SandboxError } from './sandbox.js';
@@ -460,7 +460,8 @@ export async function previewProjectFile(projectId: string, relativePath: string
   try {
     read = await readTextFile(target.real, { maxBytes: MAX_PREVIEW_BYTES });
   } catch (error) {
-    if (error instanceof Error && /Line \d+ is larger than max_bytes=/.test(error.message)) {
+    // Either line limit (a minified bundle, a JSON export): a note, never the model's read error.
+    if (error instanceof LongLineReadError) {
       return {
         projectId,
         projectName: target.projectName,
@@ -506,7 +507,7 @@ async function previewServerFile(projectId: string, target: { projectName: strin
     const read = await readTextFile(target.real, { maxBytes: MAX_PREVIEW_BYTES, fs: target.fs });
     return { ...base, binary: false, text: read.text, truncated: read.truncated || read.hasMore };
   } catch (error) {
-    if (error instanceof Error && /Line \d+ is larger than max_bytes=/.test(error.message)) {
+    if (error instanceof LongLineReadError) {
       return { ...base, binary: false, text: null, truncated: true, note: 'This file contains a line that is too large for the bounded preview.' };
     }
     throw error;

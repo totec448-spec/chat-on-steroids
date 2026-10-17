@@ -980,9 +980,9 @@ export function createFilePanel(options: FilePanelOptions) {
       surfaceClass = 'has-pdf-viewer';
       content = pdfHost;
     } else if (value.binary) {
-      content = el('p', 'file-preview-empty', value.note ?? (() => t('Binary file · preview unavailable')));
+      content = el('p', 'file-preview-empty', () => value.note ? t(value.note) : t('Binary file · preview unavailable'));
     } else if (value.text === null) {
-      content = el('p', 'file-preview-empty', value.note ?? t('Preview unavailable'));
+      content = el('p', 'file-preview-empty', () => value.note ? t(value.note) : t('Preview unavailable'));
     } else if (/\.(?:md|markdown)$/i.test(value.name)) {
       content = markdownPreview(value.text);
     } else {
@@ -1210,7 +1210,7 @@ export function createFilePanel(options: FilePanelOptions) {
     meta.append(el('span', '', status), language);
     if (('binary' in value && (value.binary || value.tooLarge)) || value.baseText === null || value.currentText === null) {
       language.remove();
-      replacePreview(head, meta, el('p', 'file-preview-empty', 'note' in value ? value.note ?? (() => t('Diff preview unavailable')) : () => t('Diff preview unavailable')));
+      replacePreview(head, meta, el('p', 'file-preview-empty', () => 'note' in value && value.note ? t(value.note) : t('Diff preview unavailable')));
       preview.hidden = false;
       return;
     }

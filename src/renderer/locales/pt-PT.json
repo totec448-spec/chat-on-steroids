@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "A responsabilidade pela limpeza mudou durante a confirmação. Nenhum ficheiro foi removido.",
   "Local tools are still executing. No worker files were removed.": "Ainda há ferramentas locais em execução. Nenhum ficheiro do trabalhador foi removido.",
   "The checkout was not removed safely. Inspect the local app logs for details.": "O checkout não foi removido em segurança. Consulte os detalhes no registo local da aplicação.",
-  "The browser bridge could not start": "Não foi possível iniciar a ponte do navegador"
+  "The browser bridge could not start": "Não foi possível iniciar a ponte do navegador",
+  "Image is too large for the bounded preview.": "A imagem é demasiado grande para a pré-visualização.",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "Pré-visualização da imagem indisponível. O ficheiro é inválido, não é suportado ou excede o limite de píxeis.",
+  "PDF is too large for the bounded in-app preview.": "O PDF é demasiado grande para a pré-visualização na aplicação.",
+  "This .pdf file does not contain a PDF header.": "Este ficheiro .pdf não contém um cabeçalho PDF.",
+  "This file contains a line that is too large for the bounded preview.": "Este ficheiro contém uma linha demasiado longa para a pré-visualização.",
+  "Binary file, so there is no text preview.": "Ficheiro binário, por isso não há pré-visualização de texto.",
+  "Previews of images and PDFs in a server folder are not available yet.": "As pré-visualizações de imagens e PDF numa pasta de servidor ainda não estão disponíveis.",
+  "This diff is too large to display.": "Esta alteração é demasiado grande para ser apresentada.",
+  "Binary diff · preview unavailable": "Alteração binária · pré-visualização indisponível"
 }

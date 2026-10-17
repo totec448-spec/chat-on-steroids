@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "확인하는 동안 정리 담당이 바뀌었습니다. 파일은 제거되지 않았습니다.",
   "Local tools are still executing. No worker files were removed.": "로컬 도구가 아직 실행 중입니다. 워커 파일은 제거되지 않았습니다.",
   "The checkout was not removed safely. Inspect the local app logs for details.": "체크아웃이 안전하게 제거되지 않았습니다. 자세한 내용은 로컬 앱 로그를 확인하세요.",
-  "The browser bridge could not start": "브라우저 브리지를 시작할 수 없습니다"
+  "The browser bridge could not start": "브라우저 브리지를 시작할 수 없습니다",
+  "Image is too large for the bounded preview.": "이미지가 너무 커서 미리 볼 수 없습니다.",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "이미지를 미리 볼 수 없습니다. 파일이 잘못되었거나 지원되지 않거나 픽셀 한도를 넘습니다.",
+  "PDF is too large for the bounded in-app preview.": "PDF가 너무 커서 앱에서 미리 볼 수 없습니다.",
+  "This .pdf file does not contain a PDF header.": "이 .pdf 파일에는 PDF 헤더가 없습니다.",
+  "This file contains a line that is too large for the bounded preview.": "이 파일에는 미리 보기에는 너무 긴 줄이 있습니다.",
+  "Binary file, so there is no text preview.": "바이너리 파일이라 텍스트 미리 보기가 없습니다.",
+  "Previews of images and PDFs in a server folder are not available yet.": "서버 폴더의 이미지와 PDF 미리 보기는 아직 지원되지 않습니다.",
+  "This diff is too large to display.": "이 변경 사항은 너무 커서 표시할 수 없습니다.",
+  "Binary diff · preview unavailable": "바이너리 변경 · 미리 보기를 사용할 수 없음"
 }

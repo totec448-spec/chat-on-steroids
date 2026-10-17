@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "確認中に後片付けの担当が変わりました。ファイルは削除されていません。",
   "Local tools are still executing. No worker files were removed.": "ローカルツールがまだ実行中です。ワーカーのファイルは削除されていません。",
   "The checkout was not removed safely. Inspect the local app logs for details.": "チェックアウトは安全に削除されませんでした。詳細はローカルのアプリログを確認してください。",
-  "The browser bridge could not start": "ブラウザーブリッジを開始できませんでした"
+  "The browser bridge could not start": "ブラウザーブリッジを開始できませんでした",
+  "Image is too large for the bounded preview.": "画像が大きすぎてプレビューできません。",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "画像をプレビューできません。ファイルが無効か、未対応か、ピクセル数の上限を超えています。",
+  "PDF is too large for the bounded in-app preview.": "PDF が大きすぎてアプリ内でプレビューできません。",
+  "This .pdf file does not contain a PDF header.": "この .pdf ファイルには PDF ヘッダーがありません。",
+  "This file contains a line that is too large for the bounded preview.": "このファイルにはプレビューするには長すぎる行があります。",
+  "Binary file, so there is no text preview.": "バイナリファイルのため、テキストのプレビューはありません。",
+  "Previews of images and PDFs in a server folder are not available yet.": "サーバーフォルダー内の画像と PDF のプレビューにはまだ対応していません。",
+  "This diff is too large to display.": "この差分は大きすぎて表示できません。",
+  "Binary diff · preview unavailable": "バイナリの差分 · プレビューできません"
 }
