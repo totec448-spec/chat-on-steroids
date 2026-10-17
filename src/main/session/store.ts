@@ -3376,7 +3376,7 @@ export async function renameSession(id: string, title: string, source: SessionSu
     }
     if (source !== 'manual') {
       if (conversationId && entry.summary.conversationId !== conversationId) return;
-      if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values()))) return;
+      if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values(), entry.summary.origin?.branchOf))) return;
       if (source === 'fallback' && entry.summary.titleSource === 'provider') return;
       if (source === 'provider' && (providerTitleIgnored(entry.summary) || projectPageTitle(title))) return;
     }
@@ -3396,7 +3396,7 @@ export async function clearSessionName(id: string): Promise<void> {
   await enqueueSessionOperation(entry, 'rename', async () => {
     if (entry.summary.titleSource !== 'manual') return;
     const auto = entry.summary.autoTitle;
-    const first = firstTitleMessage(entry.messages.values());
+    const first = firstTitleMessage(entry.messages.values(), entry.summary.origin?.branchOf);
     entry.summary.title = auto?.title || (first ? userTitle(first.message.text, first.authoredText) : '') || 'ChatGPT session';
     entry.summary.titleSource = auto?.source ?? 'fallback';
     delete entry.summary.autoTitle;
