@@ -7,6 +7,7 @@ import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connec
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
 import { MAIN_TEXTS } from '../shared/main-texts.js';
+import { MAX_TASK_REQUEST_CHARS } from '../shared/task-progress.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -1451,7 +1452,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return setSessionAutomation(id, automation, afterTurn);
   });
   handle('sessions:objective', async (payload) => {
-    const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(16000), mode: z.enum(['goal', 'loop']) }).parse(payload);
+    const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(MAX_TASK_REQUEST_CHARS), mode: z.enum(['goal', 'loop']) }).parse(payload);
     return setSessionObjective(id, text, mode);
   });
   handle('sessions:compact', async (payload) => compactSession(sessionIdArg.parse(payload).id));
@@ -1461,7 +1462,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:cancelCompaction', async (payload) => cancelSessionCompaction(sessionIdArg.parse(payload).id));
   handle('sessions:plan', async (payload) => {
-    const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(16000), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
+    const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(MAX_TASK_REQUEST_CHARS), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
     const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => {
       const target = getWindow();
       if (requestId && target && !target.isDestroyed()) target.webContents.send('task:progress', { requestId, ...progress });
@@ -2040,7 +2041,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onGoalChange(() => push('session:changed'));
   handle('tasks:cancel', async payload => cancelTaskRequest(z.object({ requestId: z.string().uuid() }).parse(payload).requestId));
   handle('sessions:goalOpening', async payload => {
-    const { text, mode, requestId } = z.object({ text: z.string().trim().min(1).max(16000),
+    const { text, mode, requestId } = z.object({ text: z.string().trim().min(1).max(MAX_TASK_REQUEST_CHARS),
       mode: z.enum(['goal', 'loop']), requestId: z.string().uuid() }).parse(payload);
     const backend = goalBackendFor(mode);
     const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => push('task:progress', { requestId, ...progress });

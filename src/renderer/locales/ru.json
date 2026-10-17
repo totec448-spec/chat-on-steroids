@@ -2498,5 +2498,6 @@
   "Keep checkout": "Оставить рабочую копию",
   "Remove checkout; preserve Git branch": "Удалить рабочую копию, сохранить ветку Git",
   "Unattributed activity": "Активность без привязки",
-  "ChatGPT finished.": "ChatGPT закончил."
+  "ChatGPT finished.": "ChatGPT закончил.",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "Этот запрос длиннее {0} символов — это максимум для плана. Сократите его или выключите «План», чтобы отправить как сообщение."
 }

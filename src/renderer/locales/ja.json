@@ -2498,5 +2498,6 @@
   "Keep checkout": "チェックアウトを残す",
   "Remove checkout; preserve Git branch": "チェックアウトを削除し、Git ブランチを残す",
   "Unattributed activity": "帰属未確定のアクティビティ",
-  "ChatGPT finished.": "ChatGPT の回答が完了しました。"
+  "ChatGPT finished.": "ChatGPT の回答が完了しました。",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "このリクエストは、プランにできる上限の {0} 文字を超えています。短くするか、プランをオフにしてメッセージとして送信してください。"
 }
