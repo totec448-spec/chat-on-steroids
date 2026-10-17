@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
@@ -2180,7 +2180,7 @@ describe('branch in new chat (#482)', () => {
   });
 
   it.each([
-    ['into an existing chat', { sessionId }, {}, /new chat/],
+    ['into an existing chat', { sessionId }, {}, /only start at the reply/],
     ['from a chat that moved on to another ChatGPT conversation', { sessionId: null }, { conversationId: randomUUID() }, /changed/],
     ['from a reply without a native id', { sessionId: null }, { messageId: 'assistant:interim:1' }, /./],
     ['from a malformed chat id', { sessionId: null }, { conversationId: 'conversation-a' }, /./]
@@ -2205,6 +2205,29 @@ describe('branch in new chat (#482)', () => {
     const entry = await enqueueInput(input({ sessionId: null, branch: branch() }));
     expect((await pendingBrowserInputs()).find(row => row.id === entry.id)).toEqual({ id: entry.id, conversationId: null,
       branch: { conversationId: source, messageId: reply } });
+  });
+
+  it('ends a branch the page could not make with a reason the person can act on', async () => {
+    const entry = await enqueueInput(input({ sessionId: null, branch: branch() }));
+    // Only the page showing that exact source chat may say so, and only before any claim.
+    expect(await failBranchInput(entry.id, randomUUID(), 'branch_unavailable')).toBe(false);
+    expect(await failBranchInput(randomUUID(), source, 'branch_unavailable')).toBe(false);
+    expect(await failBranchInput(entry.id, source, 'branch_message_missing')).toBe(true);
+    expect((await listInputs()).find(row => row.id === entry.id)).toMatchObject({ state: 'failed', error: BRANCH_ERRORS.branch_message_missing });
+    expect(await failBranchInput(entry.id, source, 'branch_unavailable')).toBe(false);
+    const plain = await enqueueInput(input({ sessionId: null }));
+    expect(await failBranchInput(plain.id, source, 'branch_unavailable')).toBe(false);
+  });
+
+  it('retries a failed branch in its own reserved chat, at the same reply only', async () => {
+    const first = await enqueueInput(input({ sessionId: null, branch: branch() }));
+    await failBranchInput(first.id, source, 'branch_unavailable');
+    // A plain message or another reply would quietly turn this branch into an unrelated new chat.
+    await expect(enqueueInput(input({ sessionId: first.id }))).rejects.toThrow(/branch/i);
+    await expect(enqueueInput(input({ sessionId: first.id, branch: branch({ messageId: randomUUID() }) }))).rejects.toThrow(/branch/i);
+    const retry = await enqueueInput(input({ sessionId: first.id, branch: branch() }));
+    expect(retry).toMatchObject({ opening: true, sessionId: first.id, branch: branch() });
+    expect((await pendingBrowserInputs()).find(row => row.id === retry.id)?.branch).toEqual({ conversationId: source, messageId: reply });
   });
 
   it('keeps a branch to one plain first message', async () => {

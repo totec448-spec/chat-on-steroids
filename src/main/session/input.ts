@@ -711,9 +711,15 @@ async function target(entry: InputEntry): Promise<string | null> {
  * A branch is the first plain message of a new chat, from a chat that still shows that ChatGPT
  * conversation. Whether the reply exists there is the page's to prove, just before Send.
  */
-async function assertBranchSource(input: InputArgs): Promise<void> {
-  const branch = input.branch!;
-  if (input.sessionId) throw new Error('A branch starts a new chat');
+async function assertBranchSource(input: InputArgs, requested: SessionSummary | null, retryOpening: boolean): Promise<void> {
+  const branch = input.branch;
+  // A branch that has not started yet retries only in its own reserved chat, at the same reply:
+  // anything else would quietly turn it into an unrelated new chat.
+  const reserved = requested?.origin?.branchOf;
+  if (input.sessionId && (!reserved || !retryOpening || !branch || reserved.conversationId !== branch.conversationId ||
+      reserved.messageId !== branch.messageId || requested?.origin?.fromSessionId !== branch.sessionId))
+    throw new Error('This branch can only start at the reply it was made from');
+  if (!branch) throw new Error('This branch can only start at the reply it was made from');
   if (input.mode !== 'auto' || input.stages?.length || input.delivery || input.attachmentDelivery)
     throw new Error('Start a branch with one plain message');
   const source = await getSession(branch.sessionId);
@@ -868,7 +874,8 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
       entry.opening = true;
       entry.sessionId = input.id;
     }
-    if (input.branch) await assertBranchSource(input);
+    if (input.branch || (requestedSession?.origin?.branchOf && !requestedSession.conversationId))
+      await assertBranchSource(input, requestedSession, retryOpening);
     if (finishOwner && !(await finishInputCurrent(entry))) throw new Error('The automatic follow-up no longer belongs to an active turn');
     if (injectionOwner) {
       policy = await sessionInputPolicy(input.sessionId!);
@@ -1930,6 +1937,28 @@ export function endRecoveryInput(id: string, conversationId: string): Promise<bo
     logWarn(`input ${row.id}: ${error}`);
     await commit(current.map(entry => entry === row
       ? { ...entry, state: 'cancelled', owner: null, error, recovery: { ...row.recovery!, ended: 'page-final' } } : entry));
+    return true;
+  });
+}
+
+/** Why a page could not make a branch, as the chat shows it; the page sends only the code. */
+export const BRANCH_ERRORS = {
+  branch_unavailable: 'ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.',
+  branch_message_missing: 'That reply is no longer in the original ChatGPT chat, so it cannot be branched.'
+} as const;
+/**
+ * The page showing the exact source chat could not make the branch, before any claim or Send.
+ * Nothing was typed or sent; the new chat keeps the message so it can be sent again.
+ */
+export function failBranchInput(id: string, conversationId: string, reason: keyof typeof BRANCH_ERRORS): Promise<boolean> {
+  return serial(async () => {
+    if (!Object.hasOwn(BRANCH_ERRORS, reason)) return false;
+    const current = await load();
+    const row = current.find(entry => entry.id === id && entry.opening && entry.branch?.conversationId === conversationId &&
+      entry.state === 'queued' && entry.offeredAt === undefined && entry.sendAuthorizedAt === undefined);
+    if (!row) return false;
+    logWarn(`input ${row.id}: the page could not branch the chat (${reason})`);
+    await commit(current.map(entry => entry === row ? { ...entry, state: 'failed', owner: null, error: BRANCH_ERRORS[reason] } : entry));
     return true;
   });
 }

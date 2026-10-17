@@ -3153,3 +3153,17 @@ it('keeps a message for the running turn that the page could not take, for after
     expect(kept?.error).toMatch(/after the running answer/);
   } finally { vi.useRealTimers(); }
 });
+
+it('fails a branch the source page could not make, and gives its reserved chat the branch point', async () => {
+  // Branch in new chat (#482): the page showing the source chat reports why it made no branch.
+  const conversationId = randomUUID(), messageId = randomUUID();
+  const source = await createSession({ title: 'Branch source', conversationId });
+  const row = await input.enqueueInput({ id: randomUUID(), sessionId: null, text: 'Try the other approach.', mode: 'auto', dueAt: 0,
+    model: null, reasoningEffort: null, branch: { sessionId: source.id, conversationId, messageId } });
+  const branched = await getSession(row.sessionId!);
+  expect(branched?.origin).toMatchObject({ kind: 'desktop', fromSessionId: source.id, branchOf: { conversationId, messageId } });
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId: randomUUID(), branchFailed: 'branch_unavailable' })).body.ok).toBe(false);
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, branchFailed: 'not-a-reason' })).body.ok).toBe(false);
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, branchFailed: 'branch_message_missing' })).body.ok).toBe(true);
+  expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed', error: input.BRANCH_ERRORS.branch_message_missing });
+});
