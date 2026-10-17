@@ -1,5 +1,7 @@
 import type { SessionSummary } from '../shared/session.js';
 import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
+import { markdownVisibleText } from '../shared/markdown-text.js';
+import { mainText } from './main-texts.js';
 
 /**
  * A notification when a chat finishes a turn while the window is in the background, like Codex's
@@ -11,17 +13,17 @@ import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
  * does not either: the chat itself says so.
  */
 
-const FALLBACK = 'ChatGPT finished.';
 const MAX_BODY = 140;
 
-/** The start of the answer as plain text, short enough for a notification. */
+/**
+ * The start of the answer as plain text, short enough for a notification: drawn as the chat draws
+ * it, so underscores, "#1590" and "a > b" in the words stay (stripping those characters everywhere
+ * turned "goal_r40.txt" into "goalr40.txt"). Code blocks are skipped; the first paragraph is shown.
+ */
 export function noticeText(answer: string | null): string {
-  const plain = providerEntitiesAsMarkdown(answer ?? '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*_~>#]/g, '')
+  const plain = markdownVisibleText(providerEntitiesAsMarkdown(answer ?? ''), { codeBlocks: false })
     .split(/\n\s*\n/).map(part => part.replace(/\s+/g, ' ').trim()).find(Boolean) ?? '';
-  if (!plain) return FALLBACK;
+  if (!plain) return mainText('ChatGPT finished.');
   return plain.length <= MAX_BODY ? plain : `${plain.slice(0, MAX_BODY - 1).trimEnd()}…`;
 }
 

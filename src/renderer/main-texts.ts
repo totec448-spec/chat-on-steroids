@@ -65,6 +65,7 @@ export function mainTexts(): Record<MainText, string> {
     'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.': t('The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'),
     'Keep checkout': t('Keep checkout'),
     'Remove checkout; preserve Git branch': t('Remove checkout; preserve Git branch'),
+    'ChatGPT finished.': t('ChatGPT finished.'),
   };
 }
 

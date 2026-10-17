@@ -61,7 +61,9 @@ export const MAIN_TEXTS = [
   'This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.',
   'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
   'Keep checkout',
-  'Remove checkout; preserve Git branch'
+  'Remove checkout; preserve Git branch',
+  // The turn-completion notice when an answer has no text to show.
+  'ChatGPT finished.'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

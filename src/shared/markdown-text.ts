@@ -16,7 +16,7 @@ const BLOCKS = new Set(['paragraph', 'heading', 'blockquote', 'code', 'list_item
  * The words a Markdown message shows once drawn: no emphasis markers, backticks, link targets or
  * HTML tags. Find in chat matches what the person reads ("File: /src" in "**File:** `/src`").
  */
-export function markdownVisibleText(markdown: string): string {
+export function markdownVisibleText(markdown: string, options: { codeBlocks?: boolean } = {}): string {
   let tokens: Token[];
   try { tokens = new Lexer({ gfm: true }).lex(markdown); } catch { return markdown; }
   const parts: string[] = [];
@@ -25,7 +25,8 @@ export function markdownVisibleText(markdown: string): string {
     switch (token.type) {
       case 'html': case 'image': break;
       case 'br': parts.push('\n'); break;
-      case 'code': case 'codespan': parts.push((token as Tokens.Code | Tokens.Codespan).text); break;
+      case 'code': if (options.codeBlocks !== false) parts.push((token as Tokens.Code).text); break;
+      case 'codespan': parts.push((token as Tokens.Codespan).text); break;
       case 'list': for (const item of (token as Tokens.List).items) visit(item); break;
       case 'table': {
         const table = token as Tokens.Table;
