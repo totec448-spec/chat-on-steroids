@@ -4144,9 +4144,11 @@ catalogs (`i18n.ts`, `locales/{es,zh-CN,zh-TW,ja,ko,tr,fr,pt-PT,pt-BR,de,ru,vi}.
 `cos.ui.language`. The main process has no catalogs: the renderer translates the allowlisted
 stopped-chat notice texts (`shared/stop-notice.ts`) and publishes them over `ui:stopNoticeTexts`
 at startup and on each language change; unknown keys are refused and untranslated notices stay English.
-The tray menu, its tooltip, the Session finish notice with its buttons and tunnel-loss notices work
-the same way: the allowlisted `shared/main-texts.ts` over `ui:mainTexts`, kept by
-`main/main-texts.ts`, which repaints the tray.
+The tray menu, its tooltip, the Session finish notice with its buttons, tunnel-loss notices and the
+main process's native dialogs (file dialog titles and filter names, the worker checkout removal
+confirmation) work the same way: the allowlisted `shared/main-texts.ts` over `ui:mainTexts`, kept by
+`main/main-texts.ts`, which repaints the tray. The channel accepts at most `MAIN_TEXTS.length` keys;
+counts and paths are filled into `{0}` after translation, with a function replacement.
 The renderer also reports the language over `ui:language`; the main process keeps it as `ui.language`
 and hands it to the extension in the `/status` reply (`language`). The extension stores it as
 `appLanguage` and `i18n.js` then reads that catalog itself (content scripts get it from the service
