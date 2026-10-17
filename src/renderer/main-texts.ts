@@ -38,7 +38,33 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.'),
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
-      t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.')
+      t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
+    'Export as Markdown': t('Export as Markdown'),
+    'Import CoS Pet folder': t('Import CoS Pet folder'),
+    'Import SKILL.md': t('Import SKILL.md'),
+    'Markdown files': t('Markdown files'),
+    'Text files': t('Text files'),
+    'Approve a folder for ChatGPT': t('Approve a folder for ChatGPT'),
+    'Import Skill folder': t('Import Skill folder'),
+    'Markdown skills': t('Markdown skills'),
+    'Choose a project folder for ChatGPT': t('Choose a project folder for ChatGPT'),
+    'Select the tunnel executable': t('Select the tunnel executable'),
+    'Programs': t('Programs'),
+    'Attach files': t('Attach files'),
+    'Import MCP bundle': t('Import MCP bundle'),
+    'MCP bundles': t('MCP bundles'),
+    'Remove worker Git checkout?': t('Remove worker Git checkout?'),
+    'Review the worker checkout before removing it': t('Review the worker checkout before removing it'),
+    'Checkout: {0}': t('Checkout: {0}'),
+    '{0} uncommitted or ignored paths would be discarded:': t('{0} uncommitted or ignored paths would be discarded:'),
+    'No uncommitted or ignored paths were detected.': t('No uncommitted or ignored paths were detected.'),
+    'Additional paths are not shown; review the checkout before confirming.': t('Additional paths are not shown; review the checkout before confirming.'),
+    'Ignored files are included in the removal.': t('Ignored files are included in the removal.'),
+    'Commits made only on this branch will remain in Git.': t('Commits made only on this branch will remain in Git.'),
+    'This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.': t('This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.'),
+    'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.': t('The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'),
+    'Keep checkout': t('Keep checkout'),
+    'Remove checkout; preserve Git branch': t('Remove checkout; preserve Git branch'),
   };
 }
 

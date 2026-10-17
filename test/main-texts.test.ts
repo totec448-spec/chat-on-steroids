@@ -23,6 +23,25 @@ it('has every tray and notice text in every interface catalog', () => {
   }
 });
 
+it('gives every native dialog of the main process its texts in the interface language', () => {
+  // Windows shows a file dialog's title, filter names and a message box's whole text; they used
+  // to be English in every language (2.1.41 pass: "Export as Markdown" in a German app).
+  const files = (readdirSync('src/main', { recursive: true }) as string[])
+    .filter(name => name.endsWith('.ts')).map(name => `src/main/${name.replaceAll('\\', '/')}`);
+  const literals: string[] = [];
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    for (const call of source.matchAll(/show(?:Open|Save)Dialog\(|showMessageBox\(/g)) {
+      // The options object is written in the call or declared just above it.
+      const around = source.slice(Math.max(0, call.index - 600), call.index + 900);
+      for (const match of around.matchAll(/\b(?:title|message|name):\s*['`][^'`]+['`]|\bbuttons:\s*\[\s*['`][^'`]+['`]/g)) {
+        literals.push(`${file}: ${match[0]}`);
+      }
+    }
+  }
+  expect([...new Set(literals)]).toEqual([]);
+});
+
 it('publishes every tray and notice text in the selected language, and again after a language change', async () => {
   window.localStorage.setItem('cos.ui.language', 'de');
   const { initLanguage, setLanguage } = await import('../src/renderer/i18n.js');
