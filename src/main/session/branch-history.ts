@@ -1,5 +1,5 @@
 import { appendEvent, getSession, readEvents, readOverflowText, upsertMessageEvent, writeOverflowText } from './store.js';
-import { positionOf, residenceOf } from '../../shared/chronology.js';
+import { positionOf } from '../../shared/chronology.js';
 import type { SessionEvent, StoredText } from '../../shared/session.js';
 
 type Copied = Extract<SessionEvent, { kind: 'user_message' | 'assistant_message' | 'page_tool' }>;
@@ -42,10 +42,17 @@ export async function seedBranchHistory(sessionId: string, conversationId: strin
   }
   const replyAt = first.get(`assistant_message\u0000${branch.messageId}`)!;
   const nextQuestion = Math.min(...[...first].filter(([key, at]) => key.startsWith('user_message\u0000') && at > replyAt).map(([, at]) => at));
-  // Written in the order the source draws them: a turn's final answer beside the turn's end,
-  // after the steps that came before it, though ChatGPT opened it first.
-  const ordered = [...latest.entries()].filter(([key]) => first.get(key)! < nextQuestion)
-    .map(([, event]) => event).sort((a, b) => residenceOf(a) - residenceOf(b));
+  // Written in the order the source draws each exchange: its question, then its steps and interim
+  // text, then its final answer, as a turn shows them. The copies carry no turn, and ChatGPT opens
+  // the answer first while a later page scan can record steps after it (measured live).
+  const kept = [...latest.entries()].filter(([key]) => first.get(key)! < nextQuestion);
+  const questions = kept.filter(([key]) => key.startsWith('user_message\u0000')).map(([key]) => first.get(key)!).sort((a, b) => a - b);
+  const exchange = (at: number) => questions.filter(question => question <= at).length;
+  const rank = (event: Copied) => event.kind === 'user_message' ? 0
+    : event.kind === 'assistant_message' && (event.final || event.state === 'final') ? 2 : 1;
+  const ordered = kept.map(([key, event]) => ({ event, at: first.get(key)! }))
+    .sort((a, b) => exchange(a.at) - exchange(b.at) || rank(a.event) - rank(b.event) || a.at - b.at)
+    .map(({ event }) => event);
   let copied = 0;
   for (const event of ordered) {
     if (event.kind === 'page_tool') {
