@@ -115,7 +115,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
         const chunk = data.slice(at, at + 16_384);
         tab.writes = tab.writes.then(async () => {
           if (!tabs.has(id) || tab.exited) return;
-          const result = await window.api.terminalWrite(id, chunk); if (!result.ok) toast(result.error);
+          const result = await window.api.terminalWrite(id, chunk); if (!result.ok) toast(t(result.error));
         }).catch(error => toast(String(error))).finally(() => { tab.queued -= chunk.length; });
       }
     });
