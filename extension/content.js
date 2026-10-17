@@ -12948,7 +12948,12 @@
   async function prepareBranchPage(message) {
     const branch = message.branch;
     if (!branch || message.conversationId || !NATIVE_ID.test(branch.conversationId || '') || !NATIVE_ID.test(branch.messageId || '')) return false;
-    if (branchDraft) return branchDraft.inputId === message.id && location.pathname === branchDraft.path;
+    if (branchDraft) {
+      const ours = branchDraft.inputId === message.id && location.pathname === branchDraft.path;
+      // ChatGPT can rewrite the draft's address once more after moving there, dropping the marker.
+      if (ours) markBranchDraft(message.id);
+      return ours;
+    }
     if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy || stopRequestedAt) return false;
     // ChatGPT's draft of this exact reply, after this document forgot it made it (an extension or
     // page reload). Only the tab elected for this message is offered it; the draft itself proves

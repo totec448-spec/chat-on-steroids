@@ -441,6 +441,20 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
       expect(h.create).not.toHaveBeenCalled();
     });
 
+    it.each([[7, true], [8, false]] as const)('lets only the elected tab claim from a draft whose marker ChatGPT dropped (tab %s)', async (tabId, allowed) => {
+      // Live 2.1.41 (VM): ChatGPT rewrote the draft's URL after its own navigation, without the marker.
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      const url = 'https://chatgpt.com/c/local-chatgpt%3A18dba412-03e9-4b2d-a284-6ac4d6d4e5ac';
+      h.tabs.push({ id: tabId, url } as never);
+      const sender = { tab: { id: tabId }, documentId: 'draft', frameId: 0, url };
+      const owner = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+      h.fetch.mockClear();
+      const reply = await h.desktopInput({ id: firstId, conversationId: null, requiresAuthorization: true }, sender, owner);
+      const claimed = h.fetch.mock.calls.some(([target]) => new URL(target).pathname === '/input/claim');
+      expect(claimed).toBe(allowed);
+      if (!allowed) expect(reply).toEqual({ ok: false });
+    });
+
     it("never takes another tab's local draft for this branch", async () => {
       const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
       h.tabs.push({ id: 8, url: 'https://chatgpt.com/c/local-chatgpt:4754b9e6-4fd8-4c76-87b2-731ee7a8cde0', status: 'complete' } as never);
