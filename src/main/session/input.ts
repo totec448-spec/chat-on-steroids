@@ -30,6 +30,8 @@ import { SKILL_ID_PATTERN } from '../../shared/skills.js';
 import { autoSelectManagedSkills } from '../skill-routing.js';
 import { asksForImage } from './image-request.js';
 
+/** ChatGPT's own conversation and message ids; synthetic interim ids never name a branch point. */
+const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const inputArgs = z.object({
   projectId: z.string().uuid().nullable().optional(),
   automation: z.enum(['off', 'goal', 'loop']).optional(),
@@ -50,7 +52,16 @@ export const inputArgs = z.object({
   afterTurn: z.boolean().optional(),
   dueAt: z.number().int().nonnegative(),
   model: z.string().max(80).nullable(),
-  reasoningEffort: z.enum(REASONING_EFFORTS).nullable()
+  reasoningEffort: z.enum(REASONING_EFFORTS).nullable(),
+  /**
+   * Branch in new chat (#482): this first message of a new chat is sent into ChatGPT's own branch
+   * of `conversationId` at the exact native reply `messageId`, made by the page just before Send.
+   */
+  branch: z.object({
+    sessionId: z.string().min(8).max(64),
+    conversationId: z.string().regex(NATIVE_ID),
+    messageId: z.string().regex(NATIVE_ID)
+  }).strict().optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
@@ -696,6 +707,22 @@ async function target(entry: InputEntry): Promise<string | null> {
   if (isChatBlocked(session.conversationId)) throw new Error('Unblock this conversation before sending');
   return session.conversationId;
 }
+/**
+ * A branch is the first plain message of a new chat, from a chat that still shows that ChatGPT
+ * conversation. Whether the reply exists there is the page's to prove, just before Send.
+ */
+async function assertBranchSource(input: InputArgs): Promise<void> {
+  const branch = input.branch!;
+  if (input.sessionId) throw new Error('A branch starts a new chat');
+  if (input.mode !== 'auto' || input.stages?.length || input.delivery || input.attachmentDelivery)
+    throw new Error('Start a branch with one plain message');
+  const source = await getSession(branch.sessionId);
+  if (!source || source.origin?.kind === 'worker' || source.origin?.kind === 'helper')
+    throw new Error('This chat cannot be branched');
+  if (source.conversationId !== branch.conversationId)
+    throw new Error('The chat you branched from changed; branch again from its reply');
+  if (isChatBlocked(branch.conversationId)) throw new Error('Unblock this conversation before sending');
+}
 async function finishInputCurrent(entry: InputEntry): Promise<boolean> {
   // Periodic generation was retired; persisted rows cannot regain delivery authority.
   if (!entry.finishOwner || entry.finishOwner.periodic || !entry.sessionId) return false;
@@ -718,7 +745,10 @@ async function materializeOpening(entry: InputEntry): Promise<void> {
     existing.origin?.kind !== 'worker' && existing.origin?.kind !== 'helper';
   const session = recoveredExactOwner ? existing : await createSession({ reservedId: entry.sessionId,
     title: userTitle(entry.text, entry.text), titleSource: 'fallback',
-    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
+    origin: entry.branch
+      ? { kind: 'desktop', fromSessionId: entry.branch.sessionId, agentId: null, task: '',
+        branchOf: { conversationId: entry.branch.conversationId, messageId: entry.branch.messageId } }
+      : { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
   if (session.conversationId && session.conversationId !== entry.conversationId)
     throw new Error('Reserved opening session belongs to another ChatGPT conversation');
   if (entry.projectId && session.projectId !== entry.projectId) await assignSessionProject(session.id, entry.projectId);
@@ -838,6 +868,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
       entry.opening = true;
       entry.sessionId = input.id;
     }
+    if (input.branch) await assertBranchSource(input);
     if (finishOwner && !(await finishInputCurrent(entry))) throw new Error('The automatic follow-up no longer belongs to an active turn');
     if (injectionOwner) {
       policy = await sessionInputPolicy(input.sessionId!);
@@ -1529,9 +1560,9 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return turnId;
 }
-export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string }>> {
+export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string } }>> {
   return serial(async () => {
-    const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string }> = [];
+    const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string } }> = [];
     const current = await load();
     for (const entry of ordered(current)) {
       if (companionOf(current, entry)) continue;
@@ -1542,7 +1573,8 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const conversationId = await target(entry);
         // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
         // else: it waits while the Project is being created or could not be, never the root.
-        const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime
+        // A branch is made where its source chat lives in ChatGPT, never on a Project's page.
+        const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
           ? (await getProject(entry.projectId))?.chatgpt : undefined;
         if (chatgptProject && chatgptProject.state !== 'linked') continue;
         const [end] = !entry.silenceBoundary && manualInput(entry) && entry.sessionId
@@ -1556,7 +1588,8 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
           ...(entry.state === 'queued' && entry.purpose !== 'decision' && entry.sessionId && entry.conversationId && entry.conversationId !== conversationId
             ? { supersededConversationId: entry.conversationId } : {}),
           ...(entry.lifetime ? { lifetime: entry.lifetime } : {}),
-          ...(chatgptProject?.state === 'linked' ? { project: chatgptProject.id } : {}) });
+          ...(chatgptProject?.state === 'linked' ? { project: chatgptProject.id } : {}),
+          ...(entry.branch && !conversationId ? { branch: { conversationId: entry.branch.conversationId, messageId: entry.branch.messageId } } : {}) });
       } catch { /* blocked/deleted stays user-visible */ }
     }
     return result;
