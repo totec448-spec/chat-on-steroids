@@ -26,8 +26,8 @@ const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleS
 const { setGoalSwitchNow, automaticFinishEnabled, snapshotGoalSwitches, restoreGoalSwitches, registerGoalDecisionChat } = await import('../src/main/goal.js');
 const { resetAgentsForTests, spawn, bindConversation, finishAgent, waitingForSubAgents } = await import('../src/main/agents.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
-async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
-  const result = await announceTransport(sessionId, summary);
+async function announceSessionFinish(sessionId: string, summary: string, deadline?: number): Promise<string> {
+  const result = await announceTransport(sessionId, summary, deadline);
   await settleSessionFinishForTests();
   return result;
 }
@@ -206,6 +206,56 @@ describe('session finish turn identity', () => {
     expect(await readRecentEvents(sessionId, 10, { kinds: ['turn_end'] })).toEqual([]);
     await announceSessionFinish(sessionId, 'Repeated finish');
     expect(hooks.followup).toHaveBeenCalledOnce();
+  });
+  it('holds the finish turn and notifies on helper stop when finishHoldOnStop is opted in', async () => {
+    await saveConfig({
+      ...defaultConfig(),
+      ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', finishHoldOnStop: true },
+      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
+    });
+    hooks.hasInput = false;
+    hooks.followup.mockResolvedValueOnce(null);
+    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+    expect((await getSession(sessionId))?.activeTurnId).toBe('turn-one');
+    expect(notify).toHaveBeenCalledOnce();
+    const events = await readRecentEvents(sessionId, 10);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'helper_stop_unverified' })]));
+  });
+  it.each([undefined, false])('still releases the finish hold on helper stop when finishHoldOnStop is %s (default unchanged)', async setting => {
+    await saveConfig({
+      ...defaultConfig(),
+      ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', ...(setting === undefined ? {} : { finishHoldOnStop: setting }) },
+      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
+    });
+    hooks.hasInput = false;
+    hooks.followup.mockResolvedValueOnce(null);
+    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('RELEASED:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(true);
+    expect(notify).not.toHaveBeenCalled();
+    const events = await readRecentEvents(sessionId, 10);
+    expect(events.some(event => 'reason' in event && event.reason === 'helper_stop_unverified')).toBe(false);
+  });
+  it('does not repeat the unverified notification when the held turn checks in again without new work', async () => {
+    await saveConfig({
+      ...defaultConfig(),
+      ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', finishHoldOnStop: true },
+      goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
+    });
+    hooks.hasInput = false;
+    hooks.followup.mockResolvedValue(null);
+    await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
+    expect(await announceSessionFinish(sessionId, 'Still complete', Date.now() + 1500)).toContain('HELD:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledOnce();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
   });
   it.each(['goal', 'loop'] as const)('revokes an in-flight %s decision across a mode switch and switch back', async mode => {
     await setGoalSwitchNow(hooks.caller.conversationId, mode, true);

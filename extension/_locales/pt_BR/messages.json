@@ -1139,6 +1139,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "O helper não gerou uma mensagem inicial. Deixe a tarefa mais específica e tente de novo."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "O helper diz que a meta foi atingida, mas isso não foi verificado. Nada foi enviado e a resposta ainda está pendente. Confira o chat e depois continue por conta própria."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "O helper continuou escolhendo parar em vez de escrever uma continuação do Loop. Revise as instruções do Loop ou escolha outro modelo de helper."
   },

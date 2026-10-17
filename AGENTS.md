@@ -3792,6 +3792,14 @@ local tool call, so lost tool connectivity cannot be established; Loop remains e
 claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
 
+With `ui.finishHoldOnStop` enabled, a Goal helper's `stop` is shown as unverified rather than
+treated as verified completion. In the ordinary Goal reply path, the turn stays owed and the
+failure is settled and non-retryable; in the `session_finish` path, the exact finish hold stays
+active, the user is notified once and the existing progress row carries
+`reason: 'helper_stop_unverified'`. Missing/false keeps the prior behavior, and Loop's refusal
+handling is unchanged. The optional progress `reason` is a typed `SessionEvent` field, not
+completion evidence.
+
 Provider progress updates one existing timeline row and is never sendable text. Validate the
 final bounded decision schema before publication. Goal may return stop/no reply. Loop requires
 a continuation and has a bounded three-retry invalid-stop policy. API SSE is used when publishing

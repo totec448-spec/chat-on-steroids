@@ -1139,6 +1139,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "O auxiliar não produziu uma mensagem inicial. Especifique melhor a tarefa e tente novamente."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "O auxiliar diz que o objetivo foi atingido, mas isso não foi verificado. Não foi enviada nenhuma mensagem e a resposta continua pendente. Verifique a conversa e depois continue por si."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "O auxiliar continuou a escolher parar em vez de escrever uma continuação do Ciclo. Reveja as instruções do Ciclo ou escolha outro modelo auxiliar."
   },
