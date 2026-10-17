@@ -1596,7 +1596,7 @@
   "No recorded conversation is available to continue. Send a task first.": "Нет записанного диалога для продолжения. Сначала отправьте задачу.",
   "No task was provided. Enter a task before starting Goal/Loop.": "Задача не указана. Введите задачу перед запуском «Цели»/«Цикла».",
   "The helper did not produce an opening message. Make the task more specific and try again.": "Помощник не создал первое сообщение. Уточните задачу и повторите попытку.",
-  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "Помощник сообщает, что цель достигнута, но это не проверено. Ничего не отправлено. Проверьте чат и продолжите, если осталась работа.",
+  "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.": "Помощник сообщает, что цель достигнута, но это не проверено. Ответ с дальнейшими инструкциями не отправлен. Проверьте чат и продолжите, если осталась работа.",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "Помощник снова выбирает остановку вместо продолжения «Цикла». Проверьте инструкции «Цикла» или выберите другую модель помощника.",
   "The answer is missing the completion marker required by offline Goal templates. Check the template instructions or choose another continuation source.": "В ответе нет маркера завершения, обязательного для офлайн-шаблонов «Цели». Проверьте инструкции шаблона или выберите другой источник продолжения.",
   "The app could not save the pending continuation. Check free disk space and the app diagnostics.": "Не удалось сохранить ожидающее продолжение. Проверьте свободное место на диске и диагностику приложения.",
@@ -2708,5 +2708,5 @@
   "Goal result needs review": "Проверьте результат Goal",
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Помощник Goal считает, что работа завершена, но это ещё не проверено. Проверьте чат или отправьте следующую инструкцию.",
   "Review Goal completion": "Проверять завершение Goal",
-  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "По умолчанию выключено. Остановка Goal считается непроверенной, а ответ остаётся ожидающим. Session finish также оставляет чат открытым и может отправить уведомление."
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "По умолчанию выключено. Если Goal сообщает о завершении без подтверждений, результат остаётся непроверенным, а ответ — ожидающим. Session finish сохраняет текущую паузу, просит модель оставить ход открытым и может отправить уведомление."
 }

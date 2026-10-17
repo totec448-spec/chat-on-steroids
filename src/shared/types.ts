@@ -166,7 +166,7 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
-  /** Keep Goal stops unverified and Session finish holds open. Off by default. */
+  /** Leave unverified Goal completion pending; Session finish may notify. Off by default. */
   finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;

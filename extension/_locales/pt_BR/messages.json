@@ -1140,7 +1140,7 @@
     "message": "O helper não gerou uma mensagem inicial. Deixe a tarefa mais específica e tente de novo."
   },
   "content_goal_error_goal_helper_stop_unverified": {
-    "message": "O helper diz que a meta foi atingida, mas isso não foi verificado. Nada foi enviado. Confira o chat e continue se ainda houver trabalho."
+    "message": "O assistente diz que a meta foi atingida, mas isso não foi verificado. Nenhuma resposta de acompanhamento foi enviada. Confira o chat e continue se ainda houver trabalho."
   },
   "content_goal_error_loop_stop_refused": {
     "message": "O helper continuou escolhendo parar em vez de escrever uma continuação do Loop. Revise as instruções do Loop ou escolha outro modelo de helper."
