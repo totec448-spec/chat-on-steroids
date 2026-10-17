@@ -68,13 +68,19 @@ function Release-AppCom($value) {
   }
 }
 
+# AppsFolder identifiers are shell IDs, not always paths; Windows PowerShell 5.1 throws from
+# IsPathRooted on characters such as "<", and one such item aborted the whole catalog (#1590).
+function Test-RootedPath([string]$path) {
+  try { return [IO.Path]::IsPathRooted($path) } catch { return $false }
+}
+
 function Get-AppCatalogIdentity($item) {
   $launchId = [string]$item.Path
   $nativeId = ''; $targetPath = ''
   try { $value = $item.ExtendedProperty('System.AppUserModel.ID'); if ($value -is [string]) { $nativeId = $value } } catch { }
   try { $value = $item.ExtendedProperty('System.Link.TargetParsingPath'); if ($value -is [string]) { $targetPath = $value } } catch { }
-  if (!$targetPath -and [IO.Path]::IsPathRooted($launchId) -and $launchId.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { $targetPath = $launchId }
-  if ($targetPath -and $targetPath.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::IsPathRooted($targetPath)) {
+  if (!$targetPath -and (Test-RootedPath $launchId) -and $launchId.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { $targetPath = $launchId }
+  if ($targetPath -and $targetPath.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase) -and (Test-RootedPath $targetPath)) {
     try { $targetPath = [IO.Path]::GetFullPath($targetPath) } catch { $targetPath = '' }
   } else { $targetPath = '' }
   $id = if ($nativeId) { $nativeId } elseif ($targetPath) { $targetPath.ToLowerInvariant() } else { $launchId }
