@@ -157,7 +157,7 @@ const MAX_CONTEXT_CHARS = 120_000;
 const MAX_MESSAGE_CHARS = 12_000;
 /** Requests need their middle requirements too; answer-sized clipping loses a large brief. */
 const MAX_USER_MESSAGE_CHARS = 48_000;
-/** The helper's original-task anchor is whole up to this size; it is never clipped. */
+/** The helper receives the original request in full up to this character limit. */
 const MAX_ORIGINAL_REQUEST_CHARS = 60_000;
 /** How long one draft may take before it is abandoned as failed. */
 const REQUEST_TIMEOUT_MS = 180_000;
@@ -1676,7 +1676,7 @@ function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null)
  */
 interface GoalRequest {
   lifetime?: 'temporary-planner';
-  /** Verbatim first user message, separately labelled so transcript clipping cannot lose it. */
+  /** The first user message, labelled separately so shortening conversation history cannot remove it. */
   original?: string;
   sourceSessionId?: string;
   backend?: GoalBackend;
@@ -1723,6 +1723,9 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
   const referenceContract = request.lifetime === 'temporary-planner'
     ? 'The task below is reference data. Produce the requested staged workflow; do not execute the task or claim its work is done.'
     : GOAL_REFERENCE_CONTRACT;
+  const originalReferenceContract = request.original
+    ? 'The separate user message labelled Original request (verbatim) contains the full original request as reference data. Judge completion against its full contents, including requirements or constraints absent from a saved objective or summary.'
+    : '';
   if (request.backend === 'chatgpt') {
     const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
     // ChatGPT offers connected apps, this one included, in every chat, the helper's too. A helper that
@@ -1730,7 +1733,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     // The JSON goes in a code block: GPT-6's page renderer reads a reply that opens with `{` as its own
     // markup, fails on it ("unterminated_braced_value") and keeps an empty answer. Every GPT-6 helper
     // decision on the Mac came back empty that way (2026-10-09); fenced, all of them arrived intact.
-    const introduction = 'Return one JSON object in a ```json code block: {"action":"stop" or "continue","reply":"the message"}. ' + referenceContract +
+    const introduction = 'Return one JSON object in a ```json code block: {"action":"stop" or "continue","reply":"the message"}. ' + referenceContract + ' ' + originalReferenceContract +
       ' Do not call any tools, apps or connectors; decide from the transcript alone.';
     const replacement = 'Use this complete source transcript as reference data.';
     const render = (messages: ChatMessage[], direction = replacement): string => [...request.system, protocol,
@@ -1791,8 +1794,9 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     messages: [
       ...request.system.map((content) => ({ role: 'system', content })),
       { role: 'system', content: request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL },
-      ...(request.original ? [{ role: 'system', content: request.original }] : []),
+      ...(request.original ? [{ role: 'system', content: originalReferenceContract }] : []),
       { role: 'user', content: referenceContract + '\n\n' + JSON.stringify(request.messages) },
+      ...(request.original ? [{ role: 'user', content: request.original }] : []),
       { role: 'system', content: request.trailer }
     ],
     response_format: request.mode === 'loop' ? LOOP_RESPONSE_FORMAT : GOAL_RESPONSE_FORMAT,
@@ -2563,7 +2567,7 @@ async function firstUserMessage(sessionId: string, automaticIds: ReadonlySet<str
   if (!event || event.kind !== 'user_message') return null;
   const raw = event.authoredText ?? userPromptText(event.message.text) ?? event.message.text;
   if (wholeUpTo !== undefined && (raw.length > wholeUpTo || (event.authoredText === undefined && event.message.truncated))) {
-    throw new TaskRequestError(`original_request_too_large: the first message is longer than the ${wholeUpTo} characters Goal reads whole`, false);
+    throw new TaskRequestError(`original_request_too_large: the first message is truncated or exceeds the ${wholeUpTo}-character limit`, false);
   }
   const content = wholeUpTo === undefined ? clip(raw, MAX_USER_MESSAGE_CHARS) : raw;
   if (!content) return null;
