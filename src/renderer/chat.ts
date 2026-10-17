@@ -4066,6 +4066,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       // complete instruction frame validates; keep the authored suffix exact.
       const userText = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
       if (userText) box.append(textBlock('msg user-message-text', userText, event.authoredText === undefined && event.message.truncated, event.authoredText?.length ?? event.message.chars));
+      // Edit & resubmit (#365): a later version of one of your questions; the earlier one folds below.
+      if (event.replaces) box.append(el('span', 'message-edited', () => t('Edited version')));
       paintMessageReaction(box, event.reaction);
       if (event.inputDelivery) {
         box.classList.add('has-input-receipt');
@@ -4474,7 +4476,52 @@ interface CompactionBlock {
   notes: Array<Extract<SessionEvent, { kind: 'note' }>>;
 }
 
-type TimelineItem = { kind: 'event'; event: SessionEvent } | { kind: 'compaction'; block: CompactionBlock };
+/** Edit & resubmit (#365): the versions an edit replaced, and what followed them, as one row. */
+interface EarlierVersions { replacing: string; versions: number; time: number; events: SessionEvent[] }
+
+type TimelineItem = { kind: 'event'; event: SessionEvent } | { kind: 'compaction'; block: CompactionBlock } | { kind: 'earlier'; fold: EarlierVersions };
+
+/**
+ * Where edits fold the conversation they replaced (#365). ChatGPT keeps an edited question as a new
+ * version beside the old one; the old question, its answer and everything after it up to the edit
+ * belong to the version it replaced. They are hidden from the flow and drawn as one row right under
+ * the newest version, chains of edits included. Late re-observations of the folded messages (a page
+ * re-scan) belong to them too. A replaced question outside the loaded history folds nothing.
+ */
+function earlierVersions(source: readonly SessionEvent[]): { hidden: Set<number>; after: Map<number, EarlierVersions> } {
+  const firstAt = new Map<string, number>(), replaces = new Map<string, string>();
+  source.forEach((event, index) => {
+    if (event.kind !== 'user_message' || !event.messageId) return;
+    if (!firstAt.has(event.messageId)) firstAt.set(event.messageId, index);
+    if (event.replaces && event.replaces !== event.messageId) replaces.set(event.messageId, event.replaces);
+  });
+  const replaced = new Set(replaces.values());
+  const hidden = new Set<number>(), after = new Map<number, EarlierVersions>();
+  for (const [current, previous] of replaces) {
+    // Only the newest version anchors a fold; the versions before it are inside it.
+    if (replaced.has(current)) continue;
+    let start = firstAt.get(previous), version = previous, versions = 1;
+    const seen = new Set([current, previous]);
+    while (replaces.has(version) && firstAt.has(replaces.get(version)!) && !seen.has(replaces.get(version)!)) {
+      version = replaces.get(version)!; seen.add(version); versions++;
+      start = Math.min(start ?? Infinity, firstAt.get(version)!);
+    }
+    const end = firstAt.get(current)!;
+    if (start === undefined || start >= end) continue;
+    const anchor = source[end]!;
+    const ownTurn = anchor.turnId;
+    // Chronology puts the edit's own turn start just before it; that turn is the edit's, not the fold's.
+    const folded = source.slice(start, end).filter(event => !(ownTurn && event.turnId === ownTurn));
+    const ids = new Set(folded.flatMap(event => 'messageId' in event && event.messageId ? [event.messageId] : []));
+    const turns = new Set(folded.flatMap(event => event.turnId ? [event.turnId] : []));
+    const late = source.slice(end + 1).filter(event => !(ownTurn && event.turnId === ownTurn) &&
+      ((('messageId' in event) && event.messageId && ids.has(event.messageId)) || (event.turnId && turns.has(event.turnId))));
+    const events = [...folded, ...late];
+    for (const event of events) hidden.add(event.seq);
+    after.set(anchor.seq, { replacing: current, versions, time: anchor.time, events });
+  }
+  return { hidden, after };
+}
 
 function continuationMarker(event: SessionEvent): { kind: 'HANDOFF' | 'RESUME'; token: string } | null {
   if (event.kind !== 'user_message') return null;
@@ -4499,6 +4546,7 @@ function continuationMarker(event: SessionEvent): { kind: 'HANDOFF' | 'RESUME'; 
  */
 function timelineItems(source: SessionEvent[]): TimelineItem[] {
   const items: TimelineItem[] = [];
+  const folds = earlierVersions(source);
   const blocks = new Map<string, CompactionBlock>();
   let open: CompactionBlock | null = null;
   const blockFor = (token: string, event: SessionEvent): CompactionBlock => {
@@ -4522,6 +4570,7 @@ function timelineItems(source: SessionEvent[]): TimelineItem[] {
     return block;
   };
   for (const event of source) {
+    if (folds.hidden.has(event.seq)) continue;
     const marker = continuationMarker(event);
     if (marker && event.kind === 'user_message') {
       const block = blockFor(marker.token, event);
@@ -4587,6 +4636,8 @@ function timelineItems(source: SessionEvent[]): TimelineItem[] {
       if (event.kind === 'user_message') open = null;
     }
     items.push({ kind: 'event', event });
+    const fold = folds.after.get(event.seq);
+    if (fold) items.push({ kind: 'earlier', fold });
   }
   return items;
 }
@@ -4712,8 +4763,42 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement, latest = 
   return row;
 }
 
+/** Folds opened by the reader, by the edit they belong to; kept across repaints. */
+const openEarlierVersions = new Set<string>();
+
+/**
+ * The row an edit's earlier versions fold into, drawn like an activity disclosure. Its messages,
+ * each at its latest revision, are drawn only once it is opened.
+ */
+function earlierVersionsRow(fold: EarlierVersions, key: string): HTMLElement {
+  const latest = new Map<string, SessionEvent>();
+  for (const event of fold.events) {
+    if (event.kind === 'user_message' || (event.kind === 'assistant_message' && (event.final || event.state === 'final'))) {
+      const id = `${event.kind}:${event.messageId ?? event.seq}`;
+      if ((latest.get(id)?.seq ?? -1) < event.seq) latest.set(id, event);
+    }
+  }
+  const messages = [...latest.values()].sort((a, b) => fold.events.indexOf(a) - fold.events.indexOf(b));
+  const group = document.createElement('details');
+  group.className = 'tool-group earlier-version';
+  const summary = document.createElement('summary');
+  const symbol = el('span', 'activity-symbol');
+  symbol.append(icon('i-clock'));
+  summary.append(symbol, el('span', 'activity-title', () => fold.versions > 1
+    ? tn('Earlier versions · {0} message', 'Earlier versions · {0} messages', messages.length)
+    : tn('Earlier version · {0} message', 'Earlier version · {0} messages', messages.length)), disclosureChevron('ico activity-chevron'));
+  const body = el('div', 'tool-group-body');
+  group.append(summary, body);
+  const fill = () => { if (group.open && !body.childElementCount) body.append(...messages.map(event => eventRow(event))); };
+  group.open = openEarlierVersions.has(key);
+  fill();
+  group.addEventListener('toggle', () => { if (group.open) openEarlierVersions.add(key); else openEarlierVersions.delete(key); fill(); });
+  return group;
+}
+
 /** What a row was drawn from; a different signature is a different row. */
 function itemSignature(item: TimelineItem): string {
+  if (item.kind === 'earlier') return `earlier|${item.fold.versions}|${item.fold.events.map(event => `${event.seq}:${'message' in event ? event.message.chars : ''}`).join(',')}`;
   if (item.kind === 'compaction') {
     const { block } = item;
     return [
@@ -4779,6 +4864,7 @@ function itemSignature(item: TimelineItem): string {
 }
 
 function itemKey(item: TimelineItem): string {
+  if (item.kind === 'earlier') return `earlier:${item.fold.replacing}`;
   if (item.kind === 'compaction') return `compaction:${item.block.token}`;
   if (item.event.kind === 'user_message' && item.event.inputId) return `input:${item.event.inputId}`;
   // A canonical revision advances the update cursor, not the identity of the row
@@ -5106,7 +5192,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
   for (const item of items) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
-    appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
+    appendRetiredInputs(item.kind === 'event' ? item.event.time : item.kind === 'earlier' ? item.fold.time : item.block.time);
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind) &&
         !stoppedTurnEnd(item.event, events)) continue;
@@ -5134,7 +5220,8 @@ function paintDetail(followBottom = historyBefore === null): void {
       timelineRows.push(cached.row);
       continue;
     }
-    const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction) : eventRow(item.event);
+    const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction)
+      : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(item.event);
     if (answerTurn || looseAnswer) row.querySelector('.said')?.append(answerActions(answerTurn,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
     row.dataset.timelineKey = key;
