@@ -10020,6 +10020,11 @@ async function failRepairAttempt(
     if (repairsInFlight.get(conversationId) !== repair) return;
     if (repair.reason === 'assistant-error' && turnRepairSpent.get(conversationId)?.token === token)
       turnRepairSpent.delete(conversationId);
+    if (why === 'changed' && changeDetail === 'navigating' &&
+        (repair.reason === 'assistant-error' || repair.reason === 'no-tab' || repair.reason === 'compaction')) {
+      // Navigation is transient; keep the same repair episode and retry after the shared recovery cooldown.
+      repair.notBefore = Math.max(repair.notBefore, Date.now() + BROWSER_RECOVERY_COOLDOWN_MS);
+    }
     if (repair.reason === 'unattributed') repair.state = 'done';
     else {
       repair.state = 'queued';
