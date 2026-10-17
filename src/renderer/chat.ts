@@ -38,7 +38,7 @@ import { sanitizeHtmlTree } from './sanitize-html.js';
 import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
-import { answerAnchors } from '../shared/markdown-export.js';
+import { answerAnchors, messageAnswerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
@@ -4246,12 +4246,14 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
  * builds the text from the log, reading back answers that were cut there, so a long answer
  * copies and exports whole; the timeline only decides where the actions appear.
  */
-function answerActions(turnId: string, messageId?: string): HTMLElement {
+function answerActions(turnId: string | null, messageId?: string): HTMLElement {
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
+  // A turn's answer is named by its turn; one recorded outside any turn by its message.
   const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file') => {
     if (!sessionId || selectedId !== sessionId) return null;
-    return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' ? turnId : undefined, target }));
+    return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' && turnId ? turnId : undefined,
+      messageId: scope === 'answer' && !turnId ? messageId : undefined, target }));
   };
   const copy = el('button', 'answer-action') as HTMLButtonElement;
   copy.type = 'button';
@@ -5097,6 +5099,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const duplicateErrors = duplicateChatErrors(events);
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
+  const looseAnchors = messageAnswerAnchors(events);
   const workedSeconds = exchangeDurations(events);
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
@@ -5110,8 +5113,11 @@ function paintDetail(followBottom = historyBefore === null): void {
     const key = itemKey(item);
     const answerTurn = item.kind === 'event' && item.event.kind === 'assistant_message' && item.event.turnId &&
       anchors.get(item.event.turnId) === item.event.seq ? item.event.turnId : null;
+    // A final answer recorded outside any turn (copied branch history, an adopted chat) has the same actions.
+    const looseAnswer = !answerTurn && item.kind === 'event' && item.event.kind === 'assistant_message' && !item.event.turnId &&
+      !!item.event.messageId && looseAnchors.get(item.event.messageId) === item.event.seq;
     const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '') +
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '');
     keep.add(key);
@@ -5129,7 +5135,7 @@ function paintDetail(followBottom = historyBefore === null): void {
       continue;
     }
     const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction) : eventRow(item.event);
-    if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn,
+    if (answerTurn || looseAnswer) row.querySelector('.said')?.append(answerActions(answerTurn,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
     row.dataset.timelineKey = key;
     row.dataset.workerSessions = workerIds;

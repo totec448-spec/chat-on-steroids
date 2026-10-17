@@ -255,7 +255,7 @@ const api = {
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
-  exportMarkdown: (request: { id: string; scope: 'answer' | 'session'; turnId?: string; target: 'clipboard' | 'file' }) =>
+  exportMarkdown: (request: { id: string; scope: 'answer' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
   // `external`: the system's own browser even for a page the CoS browser would open.
   openLink: (url: string, options: { external?: boolean } = {}) => call<boolean>('link:open', { url, ...(options.external ? { external: true } : {}) }),
