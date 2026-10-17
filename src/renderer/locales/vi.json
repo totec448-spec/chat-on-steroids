@@ -2498,5 +2498,6 @@
   "Keep checkout": "Giữ bản checkout",
   "Remove checkout; preserve Git branch": "Xóa bản checkout, giữ nhánh Git",
   "Unattributed activity": "Hoạt động chưa gán",
-  "ChatGPT finished.": "ChatGPT đã trả lời xong."
+  "ChatGPT finished.": "ChatGPT đã trả lời xong.",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "Yêu cầu này dài hơn {0} ký tự, mức tối đa để tạo kế hoạch. Hãy rút ngắn hoặc tắt Kế hoạch để gửi dưới dạng tin nhắn."
 }

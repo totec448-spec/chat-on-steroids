@@ -2498,5 +2498,6 @@
   "Keep checkout": "Conserver l’espace de travail",
   "Remove checkout; preserve Git branch": "Supprimer l’espace de travail ; conserver la branche Git",
   "Unattributed activity": "Activité non attribuée",
-  "ChatGPT finished.": "ChatGPT a terminé."
+  "ChatGPT finished.": "ChatGPT a terminé.",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "Cette demande dépasse {0} caractères, le maximum pour créer un plan. Raccourcissez-la ou désactivez Plan pour l’envoyer comme message."
 }

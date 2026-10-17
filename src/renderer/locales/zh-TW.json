@@ -2498,5 +2498,6 @@
   "Keep checkout": "保留簽出目錄",
   "Remove checkout; preserve Git branch": "移除簽出目錄，保留 Git 分支",
   "Unattributed activity": "未歸屬活動",
-  "ChatGPT finished.": "ChatGPT 已完成。"
+  "ChatGPT finished.": "ChatGPT 已完成。",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "此請求超過 {0} 個字元，這是產生計畫的上限。請縮短它，或關閉「計畫」以作為訊息傳送。"
 }

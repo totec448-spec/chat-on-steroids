@@ -2498,5 +2498,6 @@
   "Keep checkout": "체크아웃 유지",
   "Remove checkout; preserve Git branch": "체크아웃 제거, Git 브랜치 유지",
   "Unattributed activity": "귀속되지 않은 활동",
-  "ChatGPT finished.": "ChatGPT가 답변을 마쳤습니다."
+  "ChatGPT finished.": "ChatGPT가 답변을 마쳤습니다.",
+  "This request is longer than {0} characters, the most a plan can be made from. Shorten it, or turn off Plan to send it as a message.": "이 요청은 계획으로 만들 수 있는 최대 길이인 {0}자를 넘습니다. 요청을 줄이거나 계획을 끄고 메시지로 보내세요."
 }
