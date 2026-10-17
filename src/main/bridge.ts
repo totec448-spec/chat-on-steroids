@@ -113,6 +113,7 @@ import {
   recordAgentMessage,
   recordChatObservations,
   recordRequestEvidence,
+  notifyChanged,
   recordNote,
   recordProgress,
   ResumeDestinationPendingError,
@@ -6910,7 +6911,9 @@ export const GOAL_QUIET_MS = 60_000;
 const approvalWaitDeps: ApprovalWaitDeps = {
   record: (sessionId, progressId, text, anchor) => recordProgress(sessionId, progressId, text, anchor),
   notify: noticeApprovalWaiting,
-  log: logInfo
+  log: logInfo,
+  // The session list's `approval`; a catalog-only push, since no transcript changed.
+  changed: () => notifyChanged()
 };
 /**
  * How long tool calls of no known chat may hold one silent chat's recovery (#1086).
@@ -7416,6 +7419,39 @@ export function unattributedRepairEta(now = Date.now(), requestId?: string | nul
     incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS)) - now) / 1000));
   const count = pendingSuspects(null).length;
   return count ? (count === 1 ? UNATTRIBUTED_SINGLE_WINDOW_MS : UNATTRIBUTED_FIRST_WINDOW_MS) / 1000 : null;
+}
+
+/**
+ * Chats whose recovery stopped after its last pickup reload while the obligation it was collecting
+ * is still owed: exactly the chats whose own countdown below reads `pickup-stopped`, so the
+ * sidebar and the composer can never disagree. ChatGPT conversation ids, like `blocked`.
+ *
+ * Every `pickup-stopped` comes from a durable stop mark (a pending input row's `pickupRecovery`,
+ * or a pending Goal reply's `pickupStoppedAt`), so only sessions holding one are asked, and a list
+ * poll with none reads nothing more. `rows` is the outbox the caller already listed.
+ */
+export async function recoveryStoppedChats(rows?: readonly import('./session/input.js').InputEntry[]): Promise<string[]> {
+  const inputs = rows ?? await listInputs();
+  const pending = new Set(inputs.flatMap(row => row.sessionId && ['queued', 'browser', 'tool'].includes(row.state) ? [row.sessionId] : []));
+  const candidates = new Set<string>();
+  for (const row of inputs) {
+    if (row.sessionId && pending.has(row.sessionId) && (row.pickupRecovery?.stoppedAt ||
+        (row.pickupRecovery?.attempts ?? 0) >= BROWSER_PICKUP_MAX_ATTEMPTS)) candidates.add(row.sessionId);
+  }
+  for (const reply of pendingGoalReplies()) if (reply.pickupStoppedAt) candidates.add(reply.sessionId);
+  const stopped: string[] = [];
+  for (const sessionId of candidates) {
+    // One unreadable recovery journal must not take the whole sidebar list down with it, nor
+    // hide the other stopped chats: that chat is left out, and its composer still says why.
+    try {
+      const conversationId = (await getSession(sessionId))?.conversationId;
+      if (!conversationId || stopped.includes(conversationId)) continue;
+      if ((await sessionRecoveryCountdowns(sessionId, conversationId)).some(row => row.kind === 'pickup-stopped')) stopped.push(conversationId);
+    } catch (error) {
+      logWarn(`bridge: could not read the recovery state of a stopped chat: ${(error as Error).message}`);
+    }
+  }
+  return stopped;
 }
 
 /** Project the actual owners; reading controls cannot file, extend or spend recovery. */
@@ -9087,6 +9123,10 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     watch.dueAt = reserved.nextAt ?? reserved.stoppedAt ?? now;
     watch.stoppedAt = reserved.stoppedAt;
     if (reply.goalReplyId && reply.queued) await syncGoalPickupRecoveryNow(reply.conversationId, reply.goalReplyId, reserved);
+    // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
+    // its last reload can still be queued. A queued input's stop already pushed with its outbox
+    // write; a Goal reply's ledger has no push of its own.
+    if (watch.stoppedAt) notifyChanged();
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;

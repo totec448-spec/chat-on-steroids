@@ -54,6 +54,7 @@ const {
   bridgePort,
   bridgeStatus,
   companionDiagnostics,
+  recoveryStoppedChats,
   sessionControlsFor,
   cancelAssistantRecovery,
   onBridgeChange,
@@ -118,6 +119,7 @@ const sessionStoreModule = await import('../src/main/session/store.js');
 const { noteServedRequest, resetConnectorIdentityForTests } = await import('../src/main/connector-identity.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { requestCorrelation, resetCorrelationRegistryForTests, restoreRequestCorrelations } = await import('../src/main/session/correlation.js');
+const { readSessionList } = await import('../src/main/session/read-model.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const {
   CONTINUATIONS_STATE,
@@ -9663,6 +9665,7 @@ describe('unattributed activity recovery', () => {
       for (let pass = 0; pass < 3; pass++) {
         await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS / 2);
         expect((await request('GET', `/activity?conversationId=${chat}&approval=1`)).status).toBe(200);
+        expect((await readSessionList({ limit: 60 })).approval).toEqual([chat]);
         await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS / 2);
         await sweepStaleSwarm(Date.now());
         expect(await maintenance(), 'a reload was queued over the approval card').toBeNull();
@@ -9670,6 +9673,7 @@ describe('unattributed activity recovery', () => {
       const why = getLog().filter(entry => entry.message.includes(`silence recovery for ${chat}`)).map(entry => entry.message);
       expect(why).toEqual([expect.stringContaining('waiting: ChatGPT asks the user to allow or deny a tool call')]);
       expect((await request('GET', `/activity?conversationId=${chat}&approval=0`)).status).toBe(200);
+      expect((await readSessionList({ limit: 60 })).approval).toEqual([]);
       await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
@@ -15250,6 +15254,12 @@ describe('the goal loop over the bridge', () => {
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
         kind: 'pickup-stopped', deadline: Date.now(), attempts: 3, next: 'queue'
       });
+      // The session list says the same for every chat, not only the open one: the Inbox reads it.
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
+      // A chat whose recovery state cannot be read is left out; the list and the other stopped
+      // chats stay readable.
+      const unreadable = { ...row!, id: 'abca0175-0000-4000-8000-0000000001ff', sessionId: 'not/a/session' };
+      expect(await recoveryStoppedChats([unreadable, ...await input.listInputs()])).toEqual([chat]);
       const stoppedAt = Date.now();
       await request('POST', '/events', { body: { conversationId: chat, events: [{
         kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
@@ -15275,6 +15285,11 @@ describe('the goal loop over the bridge', () => {
       expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat)).toBe(false);
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', attempts: 3, next: 'queue' }));
       expect(recoveryBrowserWake).toHaveBeenCalledTimes(3);
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
+      // The person acting on it ends it: the countdown and the list agree it is gone.
+      expect(await input.cancelInput(row!.id)).toBe(true);
+      expect((await sessionControlsFor(session.id)).recovery?.some(entry => entry.kind === 'pickup-stopped')).toBe(false);
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([]);
     } finally {
       await writeDurableNow('session-input', []);
       resetInputForTests();
@@ -15542,6 +15557,7 @@ describe('the goal loop over the bridge', () => {
       expect((await sessionControlsFor(sessionId)).recovery).toContainEqual(expect.objectContaining({
         kind: 'pickup-stopped', attempts: 3, next: 'goal'
       }));
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
       expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: Date.now() });
       expect(await goal.setGoalReplyActiveNow(chat, false)).toBe(true);
       expect(await goal.setGoalReplyActiveNow(chat, true)).toBe(true);
@@ -15560,7 +15576,70 @@ describe('the goal loop over the bridge', () => {
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       expect(await takeRepair()).toBeNull();
       expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toBeNull();
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([]);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The stop of a Goal reply is recorded on its third reload. Its push used to come only after that
+  // reload was queued, so a chat that could no longer take it never told the session list.
+  it('pushes a Goal reply\'s recovery stop even when its last reload cannot be queued', async () => {
+    vi.useFakeTimers();
+    const fsModule = await import('node:fs');
+    const { onSessionChange } = await import('../src/main/session/recorder.js');
+    const realRename = fsModule.promises.rename.bind(fsModule.promises);
+    const chat = 'cafe0073-0000-4000-8000-000000000273';
+    const pushes: unknown[] = [];
+    const stopListening = onSessionChange(change => { pushes.push(change); });
+    let blockedDuringStop = false;
+    const goal = await import('../src/main/goal.js');
+    // While the stop is being written, the chat stops taking browser recovery.
+    const rename = vi.spyOn(fsModule.promises, 'rename').mockImplementation(async (from, to) => {
+      if (!blockedDuringStop && String(to).includes(GOAL_REPLIES_STATE) && goal.goalPendingReplyFor(chat)?.pickupStoppedAt) {
+        blockedDuringStop = true;
+        setChatBlocked(chat, true);
+      }
+      return realRename(from, to);
+    });
+    try {
+      await pair();
+      await goal.setGoalSwitchNow(chat, 'goal', true);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-stop-push' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-stop-push' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-stop-push', outcome: 'completed' }
+      ] } });
+      await request('POST', '/events', { body: { conversationId: chat, events: [{
+        kind: 'assistant_message', time: Date.now(), messageId: 'a-stop-push', turnId: 'g-stop-push',
+        text: 'Done with that part.', state: 'final', final: true, goalEligible: true, activeNow: true
+      }] } });
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
+      const takeRepair = async (): Promise<{ token: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      await vi.advanceTimersByTimeAsync(2 * 60_000 - 1_000);
+      // The first two reloads, each claimed and confirmed as the extension does.
+      for (const gap of [1_000, 5 * 60_000]) {
+        await vi.advanceTimersByTimeAsync(gap);
+        const handout = await takeRepair();
+        expect(handout).not.toBeNull();
+        expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+        expect((await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`)).status).toBe(200);
+      }
+      await vi.advanceTimersByTimeAsync(1_000);
+      pushes.length = 0;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(await takeRepair()).toBeNull();
+      expect(blockedDuringStop).toBe(true);
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: expect.any(Number) });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(pushes.length).toBeGreaterThan(0);
+    } finally {
+      rename.mockRestore();
+      stopListening();
+      setChatBlocked(chat, false);
       vi.useRealTimers();
     }
   });
