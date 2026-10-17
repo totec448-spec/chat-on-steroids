@@ -1360,15 +1360,25 @@ function sidebarLayout(): 'projects' | 'inbox' {
 /** The layout the sidebar was last drawn in; the page's own markup is the project tree's. */
 let paintedLayout: 'projects' | 'inbox' = 'projects';
 
-/** "now", "4m", "5h", "2d", "3w": one short token that fits beside a title. */
+type AgeUnit = 'minute' | 'hour' | 'day' | 'week';
+const ageFormats = new Map<string, Intl.NumberFormat>();
+/** A count in the app language's own narrow unit, as the platform writes it ("5h" in English). */
+function ageIn(value: number, unit: AgeUnit): string {
+  const key = `${currentLanguage()}|${unit}`;
+  let format = ageFormats.get(key);
+  if (!format) ageFormats.set(key, format = new Intl.NumberFormat(currentLanguage(), { style: 'unit', unit, unitDisplay: 'narrow' }));
+  return format.format(value);
+}
+
+/** "now", "4m", "5h", "2d", "3w" in English: one short token that fits beside a title. */
 function compactAge(at: number): string {
   const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
   if (minutes < 1) return t('now');
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return ageIn(minutes, 'minute');
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return ageIn(hours, 'hour');
   const days = Math.round(hours / 24);
-  return days < 7 ? `${days}d` : `${Math.round(days / 7)}w`;
+  return days < 7 ? ageIn(days, 'day') : ageIn(Math.round(days / 7), 'week');
 }
 
 /** A chat quiet this long, not needing the person, running, unread or pinned, settles into the compact list below. */
