@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
 import type { SessionEvent } from '../src/shared/session.js';
 import {
-  answerAnchors, answerMarkdown, completedTurnIds, markdownFileName, sessionMarkdown, transcriptEntries, turnAnswerEntries
+  answerAnchors, answerMarkdown, completedTurnIds, markdownFileName, messageAnswerAnchors, messageAnswerEntries, sessionMarkdown,
+  transcriptEntries, turnAnswerEntries
 } from '../src/shared/markdown-export.js';
 
 const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
@@ -52,6 +53,27 @@ it('offers actions only for turns the page reported as completed, on their last 
   expect([...anchors.keys()]).toEqual(['t1']);
   expect(anchors.get('t1')).toBe(events.find(event => event.kind === 'assistant_message' && event.messageId === 'a2')!.seq);
   expect(turnAnswerEntries(events, 't1').map(entry => entry.stored.text)).toEqual(['First part', 'Second part']);
+});
+
+// Answers recorded outside any turn: the history ChatGPT copied into a branch, an adopted chat's
+// earlier answers, replies to messages typed in the ChatGPT tab. Each final one carries actions too.
+it('offers actions on each final answer recorded without a turn, by its message id', () => {
+  seq = 0;
+  const loose = (messageId: string, value: string, final = true) =>
+    ({ ...answer('x', messageId, value, final), turnId: undefined }) as SessionEvent;
+  const events = [
+    { ...user('x', 'Earlier question'), turnId: undefined } as SessionEvent,
+    loose('b1', 'Earlier answer, first draft'), loose('b1', 'Earlier answer'),
+    loose('b2', 'Still streaming', false),
+    user('t1', 'Now'), answer('t1', 'a1', 'Turn answer'), end('t1')
+  ];
+  const anchors = messageAnswerAnchors(events);
+  expect([...anchors.keys()]).toEqual(['b1']);
+  expect(anchors.get('b1')).toBe(events.filter(event => event.kind === 'assistant_message' && event.messageId === 'b1').at(-1)!.seq);
+  expect(messageAnswerEntries(events, 'b1').map(entry => entry.stored.text)).toEqual(['Earlier answer']);
+  // A turn's own answer keeps its turn's actions, never a second set.
+  expect(messageAnswerEntries(events, 'a1')).toEqual([]);
+  expect([...answerAnchors(events).keys()]).toEqual(['t1']);
 });
 
 it('formats an answer and a session transcript as Markdown', () => {

@@ -23906,3 +23906,123 @@ describe('archiving a retired worker chat', () => {
     expect(calls).toEqual(['https://chatgpt.com/api/auth/session']);
   });
 });
+
+describe('branch in new chat (#482)', () => {
+  const inputId = 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const source = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const branched = 'dddddddd-cccc-dddd-eeee-ffffffffffff';
+  const reply = '2b06482d-0dc6-4847-bf7a-2e1a0f671e89';
+  const draft = 'https://chatgpt.com/c/local-chatgpt:4754b9e6-4fd8-4c76-87b2-731ee7a8cde0';
+  const text = 'Branch test, harmless. Reply with exactly: branch ok';
+  const offer = (extra: Record<string, unknown> = {}) => ({ type: 'clf-desktop-input', id: inputId, conversationId: null,
+    branch: { conversationId: source, messageId: reply }, ...extra });
+  async function sourcePage(options: { marker?: boolean; reply?: string; chosen?: string; refuseClaims?: boolean } = {}) {
+    const { marker = true, chosen = 'clicked', refuseClaims = false } = options;
+    const claims: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/c/${source}${marker ? `?cos-input=${inputId}#cos-input=${inputId}` : ''}`, {
+      desktop_input: message => { claims.push(message); return { ok: true, data: message.authorize || message.ack || message.branchFailed
+        ? { ok: true } : refuseClaims ? {} : { input: { id: inputId, owner: 'input-owner', text, model: null, reasoningEffort: null, purpose: 'user', images: [] } } }; }
+    });
+    const section = assistantTurn(live.document, 'source-turn', []);
+    await bindFiberTurns([{ section, turn: { conversationId: source, turnId: 'source-turn', endMessageId: options.reply ?? reply,
+      messages: [{ messageId: options.reply ?? reply, rawMessageId: options.reply ?? reply, stable: true, rawText: 'Done.', renderedHtml: '<p>Done.</p>' }] } }]);
+    live.hook.observe(); await settle();
+    const branchInNewChat = vi.fn(async (scope: Element) => {
+      expect(scope).toBe(section);
+      if (chosen === 'clicked') live!.dom.reconfigure({ url: draft });
+      return chosen;
+    });
+    live.window.CLF_DOM.branchInNewChat = branchInNewChat;
+    return { claims, branchInNewChat, section };
+  }
+
+  it('makes ChatGPT\'s branch at the exact reply, then sends the first message from that draft', async () => {
+    const { claims, branchInNewChat } = await sourcePage();
+    const questionId = '6ac024bb-486c-83e8-bf8e-4be1147847d9';
+    let clicked!: () => void;
+    const click = new Promise<void>(resolve => { clicked = resolve; });
+    live!.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.window.dispatchEvent(new live!.window.MessageEvent('message', { source: live!.window as unknown as Window, origin: 'https://chatgpt.com',
+        data: { type: 'cos-send-request', messageIds: [questionId], observedAt: Date.now() } }));
+      clicked();
+    });
+    const delivered = live!.runtimeMessage(offer());
+    await click; await settle();
+    expect(branchInNewChat).toHaveBeenCalledTimes(1);
+    // The draft carries this message's marker again, so the extension keeps owning that tab.
+    expect(live!.window.location.search).toBe(`?cos-input=${inputId}`);
+    expect(live!.window.location.hash).toBe(`#cos-input=${inputId}`);
+    // The claim happened on the draft, after the branch, as an ordinary new chat.
+    expect(claims.find(message => message.requiresAuthorization)).toMatchObject({ id: inputId, conversationId: null });
+    live!.dom.reconfigure({ url: `https://chatgpt.com/c/${branched}` });
+    expect(await live!.runtimeMessage({ type: 'clf-route-changed' })).toEqual({ ok: true });
+    expect(await delivered).toEqual({ ok: true });
+    expect(claims.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: questionId, conversationId: branched })]);
+    expect(claims.some(message => message.branchFailed)).toBe(false);
+  });
+
+  it('says the reply is gone when the source chat no longer shows it, and types nothing', async () => {
+    const { claims, branchInNewChat } = await sourcePage({ reply: '11111111-2222-4333-8444-555555555555' });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(branchInNewChat).not.toHaveBeenCalled();
+    expect(claims).toEqual([expect.objectContaining({ id: inputId, conversationId: source, branchFailed: 'branch_message_missing' })]);
+    expect(live!.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
+  it('says ChatGPT offered no branch, and types nothing', async () => {
+    const { claims } = await sourcePage({ chosen: 'branch_unavailable' });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(claims).toEqual([expect.objectContaining({ id: inputId, conversationId: source, branchFailed: 'branch_unavailable' })]);
+    expect(live!.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
+  it('continues on a draft of that exact reply after its page lost the branch it made', async () => {
+    // A reloaded extension or document forgets which draft it made; the draft itself still proves
+    // it continues from that reply. Only the tab elected for this message is offered it.
+    const claims: Array<Record<string, any>> = [];
+    live = await harness(draft, { desktop_input: message => { claims.push(message); return { ok: true, data: message.authorize || message.ack
+      ? { ok: true } : { input: { id: inputId, owner: 'input-owner', text, model: null, reasoningEffort: null, purpose: 'user', images: [] } } }; } });
+    const section = assistantTurn(live.document, 'draft-turn', []);
+    await bindFiberTurns([{ section, turn: { conversationId: null, turnId: 'draft-turn', endMessageId: reply,
+      messages: [{ messageId: reply, rawMessageId: reply, stable: true, rawText: 'Done.', renderedHtml: '<p>Done.</p>' }] } }]);
+    live.hook.observe(); await settle();
+    const branchInNewChat = vi.fn(async () => 'clicked');
+    live.window.CLF_DOM.branchInNewChat = branchInNewChat;
+    void live.runtimeMessage(offer());
+    await vi.waitFor(() => expect(claims.find(message => message.requiresAuthorization)).toMatchObject({ id: inputId, conversationId: null }));
+    expect(branchInNewChat).not.toHaveBeenCalled();
+    expect(live.window.location.search).toBe(`?cos-input=${inputId}`);
+  });
+
+  it('puts the marker back when ChatGPT rewrites its draft address again', async () => {
+    // Live 2.1.41 (VM): ChatGPT replaced the draft URL after its own navigation, without the marker.
+    // The app refuses the claims here, as a still-starting app did live: each offer ends at once.
+    await sourcePage({ refuseClaims: true });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(live!.window.location.search).toBe(`?cos-input=${inputId}`);
+    live!.dom.reconfigure({ url: draft });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    await vi.waitFor(() => expect(live!.window.location.search).toBe(`?cos-input=${inputId}`));
+    expect(live!.window.location.pathname).toBe(new URL(draft).pathname);
+  });
+
+  it('refuses a draft that ends at another reply', async () => {
+    const claims: Array<Record<string, any>> = [];
+    live = await harness(draft, { desktop_input: message => { claims.push(message); return { ok: true, data: {} }; } });
+    const section = assistantTurn(live.document, 'draft-turn', []);
+    await bindFiberTurns([{ section, turn: { conversationId: null, turnId: 'draft-turn', endMessageId: '11111111-2222-4333-8444-555555555555',
+      messages: [] } }]);
+    live.hook.observe(); await settle();
+    expect(await live.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(claims).toEqual([]);
+  });
+
+  it('never branches a chat the person opened themselves', async () => {
+    // Only the tab the app opened for this exact message (its marker) may act on the source chat.
+    const { claims, branchInNewChat } = await sourcePage({ marker: false });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(await live!.runtimeMessage(offer({ branch: { conversationId: source, messageId: 'assistant:interim:1' } }))).toEqual({ ok: false });
+    expect(branchInNewChat).not.toHaveBeenCalled();
+    expect(claims).toEqual([]);
+  });
+});

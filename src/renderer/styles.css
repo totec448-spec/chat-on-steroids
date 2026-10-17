@@ -2465,6 +2465,17 @@ input[readonly] {
 }
 .chat-project-context[hidden] { display: none; }
 #chatProjectName { overflow: hidden; text-overflow: ellipsis; }
+/* Branch in new chat (#482): a branched chat's link back to the reply it came from. */
+.chat-branch-origin { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 32%; flex: 0 1 auto; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--soft); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; cursor: pointer; }
+.chat-branch-origin[hidden] { display: none; }
+.chat-branch-origin span { overflow: hidden; text-overflow: ellipsis; }
+.chat-branch-origin .ico { --ico: 14px; --glyph: 14px; flex: none; }
+.chat-branch-origin:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.chat-branch-origin:disabled { cursor: default; }
+.chat-branch-origin:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* The new chat being written starts from a reply: one row of the composer dock, drawn like its
+   neighbours (the dock draws the frame, the row adds none of its own). */
+.branch-draft[hidden] { display: none; }
 #chatTitle {
   text-transform: none;
   letter-spacing: 0;
@@ -4405,7 +4416,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock { display: none; }
 .composer-dock-body { display: flow-root; }
 @media (prefers-reduced-motion: reduce) { .composer-dock { transition: none; animation: none !important; } }
-.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
+.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
 .background-exec-status[hidden] { display: none; }
 .background-exec-status .ico { color: var(--ink); }
 .background-exec-status.is-expandable { cursor: pointer; }

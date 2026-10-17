@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary> } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -214,6 +214,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     update: { current: '2.0.3', latest: null, stage: 'idle', error: null, checkedAt: null }
   };
   const ok = (data: any) => Promise.resolve({ ok: true, data });
+  const bootOptions = options;
   const live = { events: [...events], inputs: [] as InputEntry[], sent: [] as InputArgs[], automation: 'off', controlCalls: [] as Array<{ id: string; action: string }>, compacting: false, finishHeld: true };
   let sessionListener: (change?: unknown) => void = () => undefined;
   let writeSessionListener: (id: string) => void = () => undefined;
@@ -248,7 +249,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         return () => undefined;
       },
       listSessions: () => {
-        const sessions = options.sessions ?? [{ ...summary(live.events), ...(options.origin ? { origin: options.origin } : {}), ...(projects[0] ? { projectId: projects[0].id } : {}) }];
+        const sessions = options.sessions ?? [{ ...summary(live.events), ...options.summary, ...(options.origin ? { origin: options.origin } : {}), ...(projects[0] ? { projectId: projects[0].id } : {}) }];
         const known = new Set(sessions.map(row => row.id));
         const openings = live.inputs.filter(row => row.opening && row.sessionId && !known.has(row.sessionId)).map(row => ({
           ...summary(live.events), id: row.sessionId!, title: row.text, conversationId: null, chatIds: []
@@ -312,7 +313,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
           ? eligible.slice(0, limit) : eligible.slice(-limit);
         const opening = live.inputs.find(row => row.opening && row.sessionId === _id);
         return ok({
-          summary: opening ? { ...summary(live.events), id: _id, title: opening.text, conversationId: null, chatIds: [] } : summary(live.events),
+          summary: opening ? { ...summary(live.events), id: _id, title: opening.text, conversationId: null, chatIds: [] }
+            : { ...summary(live.events), ...bootOptions.summary, ...(bootOptions.sessions?.find(row => row.id === _id) ?? {}) },
           events: page,
           total: live.events.length,
           nextFrom: page.reduce((max, e) => Math.max(max, e.seq + 1), from)
@@ -5866,4 +5868,122 @@ it.each([true, false])('runs the highlighted slash command with Enter whatever E
   expect(app.live.sent).toHaveLength(0);
   expect(app.w.document.getElementById('contextMeterButton')!.getAttribute('aria-expanded')).toBe('true');
   expect(input.value).toBe('');
+});
+
+describe('branch in new chat (#482)', () => {
+  const chat = '6ad337fe-47a4-83ed-a21f-c2e24d5829a4';
+  const replyId = '2b06482d-0dc6-4847-bf7a-2e1a0f671e89';
+  const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Plan the release') };
+  const reply = (messageId = replyId): SessionEvent => ({ kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId, message: text('Tag first, then build.'), final: true, state: 'final' });
+  const end: SessionEvent = { seq: 3, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' };
+  const branchButton = (w: { document: Document }) => w.document.querySelector<HTMLButtonElement>('.answer-actions .answer-branch');
+  const submit = async (w: Window & typeof globalThis, value: string) => {
+    (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = value;
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+  };
+
+  it('starts a new chat from a completed answer and sends its first message at that reply', async () => {
+    const { w, live } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const button = branchButton(w)!;
+    expect(button.getAttribute('aria-label')).toBe('Branch in new chat');
+    button.click(); await settle();
+    expect(w.document.getElementById('chatTitle')!.textContent).toBe('New chat');
+    const notice = w.document.getElementById('branchDraft')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Loop under test');
+    await submit(w as any, 'Try the other approach.');
+    expect(live.sent.at(-1)).toMatchObject({ sessionId: null, text: 'Try the other approach.',
+      branch: { sessionId: summary([]).id, conversationId: chat, messageId: replyId } });
+  });
+
+  it('goes back to the reply it came from when the person cancels the branch', async () => {
+    const { w, live } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    branchButton(w)!.click(); await settle();
+    w.document.querySelector<HTMLButtonElement>('#branchDraft .branch-draft-cancel')!.click(); await settle();
+    expect(w.document.getElementById('branchDraft')!.hidden).toBe(true);
+    expect(w.document.querySelector(`.sess.is-sel[data-id="${summary([]).id}"]`)).not.toBeNull();
+    expect(api.locateMessage).toHaveBeenCalledWith(summary([]).id, replyId);
+    // An ordinary new chat afterwards carries no branch.
+    w.document.getElementById('newChat')!.click(); await settle();
+    await submit(w as any, 'Just a new chat.');
+    expect(live.sent.at(-1)).not.toHaveProperty('branch');
+  });
+
+  it('drops the branch and stays a plain new chat when the chat it came from is deleted', async () => {
+    const { w, live, notifySession } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    branchButton(w)!.click(); await settle();
+    // The source chat is deleted while the branch is still a draft.
+    (w as any).api.listSessions = async () => ({ ok: true, data: { sessions: [], activeId: null, pressure: [] } });
+    notifySession(); await settle(700);
+    // The notice no longer names a chat that is gone, and the first message starts a plain chat.
+    expect(w.document.getElementById('branchDraft')!.hidden).toBe(true);
+    expect(w.document.getElementById('chatTitle')!.textContent).toBe('New chat');
+    await submit(w as any, 'Just a new chat.');
+    expect(live.sent.at(-1)).not.toHaveProperty('branch');
+  });
+
+  it.each([
+    ['a reply without a native id', { reply: 'assistant:interim:1', summary: { conversationId: chat } }],
+    ['a chat without a native ChatGPT id', { reply: replyId, summary: {} }],
+    ['a worker chat', { reply: replyId, summary: { conversationId: chat, origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'x' } } }]
+  ] as const)('offers no branch for %s', async (_name, setup) => {
+    const { w } = await boot([ask, reply(setup.reply), end], true, [], [], { summary: setup.summary as Partial<SessionSummary> });
+    expect(w.document.querySelector('.answer-actions')).not.toBeNull();
+    expect(branchButton(w)).toBeNull();
+  });
+
+  // History ChatGPT copied into a branch, and an adopted chat's earlier answers, are recorded
+  // without a turn: before, they had no actions at all, so nothing could branch from or copy them.
+  it('offers copy, export and branch on an answer recorded without a turn', async () => {
+    const earlierId = '6ad3a59b-0000-83eb-8bc4-8c84e68dd911';
+    const loose: SessionEvent = { kind: 'assistant_message', seq: 4, time: T0 + 3_000, source: 'extension', messageId: earlierId,
+      message: text('An earlier answer.'), final: true, state: 'final' };
+    const { w, live } = await boot([loose, ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+    const bars = [...w.document.querySelectorAll('.answer-actions')];
+    expect(bars).toHaveLength(2);
+    const bar = bars.find(node => node.closest('.said')!.textContent!.includes('An earlier answer'))!;
+    bar.querySelector<HTMLButtonElement>('.answer-action')!.click(); await settle();
+    expect(api.exportMarkdown).toHaveBeenCalledWith(expect.objectContaining({ scope: 'answer', messageId: earlierId, turnId: undefined }));
+    bar.querySelector<HTMLButtonElement>('.answer-branch')!.click(); await settle();
+    await submit(w as any, 'From the earlier answer.');
+    expect(live.sent.at(-1)).toMatchObject({ branch: { conversationId: chat, messageId: earlierId } });
+  });
+
+  it('links a branched chat back to the reply it came from', async () => {
+    const source = { ...summary([]), id: '2026-10-17-source01', title: 'Release plan', conversationId: chat };
+    const branched = { ...summary([]), id: '2026-10-17-branch01', title: 'Other approach', conversationId: '6ad388c2-faf8-83ed-bb4f-9efff4ad92de',
+      origin: { kind: 'desktop' as const, fromSessionId: source.id, agentId: null, task: '', branchOf: { conversationId: chat, messageId: replyId } } };
+    const { w } = await boot([ask, reply(), end], false, [], [], { sessions: [branched, source] });
+    const api = (w as any).api;
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    (w.document.querySelector(`#sessionList [data-id="${branched.id}"]`) as HTMLElement).click(); await settle();
+    const link = w.document.getElementById('chatBranchOrigin') as HTMLButtonElement;
+    expect(link.hidden).toBe(false);
+    expect(link.textContent).toContain('Release plan');
+    link.click(); await settle();
+    expect(w.document.querySelector(`.sess.is-sel[data-id="${source.id}"]`)).not.toBeNull();
+    expect(api.locateMessage).toHaveBeenCalledWith(source.id, replyId);
+    expect(link.hidden).toBe(true);
+  });
+
+  it('sends a retry from a branch that has not started yet at the same reply', async () => {
+    const source = { ...summary([]), id: '2026-10-17-source01', title: 'Release plan', conversationId: chat };
+    const pending = { ...summary([]), id: '2026-10-17-branch01', title: 'Other approach', conversationId: null, chatIds: [], selectedModel: undefined,
+      origin: { kind: 'desktop' as const, fromSessionId: source.id, agentId: null, task: '', branchOf: { conversationId: chat, messageId: replyId } } };
+    const { w, live } = await boot([], false, [], [], { sessions: [pending, source] });
+    (w.document.querySelector(`#sessionList [data-id="${pending.id}"]`) as HTMLElement).click(); await settle();
+    // Its failed first message left no observed model: the person picks one, as for any resend.
+    for (const [id, value] of [['composerModel', 'gpt-5.6-sol'], ['composerReasoning', 'high']] as const) {
+      const select = w.document.getElementById(id) as HTMLSelectElement;
+      select.value = value; select.dispatchEvent(new w.Event('change', { bubbles: true }));
+    }
+    await settle();
+    await submit(w as any, 'Again, please.');
+    expect(live.sent.at(-1)).toMatchObject({ sessionId: pending.id, branch: { sessionId: source.id, conversationId: chat, messageId: replyId } });
+  });
 });

@@ -32,7 +32,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -2822,6 +2822,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (ended) changed();
       return json(res, 200, { ok: ended }, origin);
     }
+    // Branch in new chat (#482): the page showing the source chat could not make the branch.
+    if (typeof body.branchFailed === 'string') {
+      const failed = !!target && (body.branchFailed === 'branch_unavailable' || body.branchFailed === 'branch_message_missing') &&
+        await failBranchInput(body.id, target, body.branchFailed);
+      if (failed) changed();
+      return json(res, 200, { ok: failed }, origin);
+    }
     if (typeof body.silenceBusyTurnId === 'string') {
       const deferred = !!target && await deferSilenceInput(body.id, target, body.silenceBusyTurnId);
       if (deferred) changed();
@@ -2841,7 +2848,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // own page, which the page names; the root or another Project is never its destination.
     if (!target) {
       const entry = (await listInputs()).find(row => row.id === body.id);
-      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime ? (await getProject(entry.projectId))?.chatgpt : undefined;
+      // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
+      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
       if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
     }
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
