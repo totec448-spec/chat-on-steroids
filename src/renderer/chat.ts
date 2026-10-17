@@ -2387,6 +2387,19 @@ function currentPreparedPlan(): (TaskPlanDraft & { stages: string[] }) | null {
   const plan = taskPlans.get(draftKey());
   return plan?.stages ? plan as TaskPlanDraft & { stages: string[] } : null;
 }
+/**
+ * The person's own Cancel plan, or deleting a ready plan's last stage. A ready plan already took
+ * its request out of the composer, so the request goes back there; anything typed since stays.
+ */
+function dismissTaskPlan(): void {
+  const plan = taskPlans.get(draftKey());
+  cancelTaskPlan();
+  if (!plan?.stages || plan.sending || !plan.text.trim() || authoredComposerText().trim()) return;
+  const input = $<HTMLTextAreaElement>('chatInput');
+  input.value = plan.text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
+}
 function cancelTaskPlan(key = draftKey()): void {
   const plan = taskPlans.get(key);
   taskPlans.delete(key);
@@ -2483,7 +2496,7 @@ function paintPreparedPlan(): void {
     const remove = dockAction(() => t("Delete stage {0}", [index + 1]), 'i-trash', () => {
       if (plan.sending) return;
       plan.stages.splice(index, 1);
-      if (plan.stages.length) { paintPreparedPlan(); paintDeliveryControls(); } else cancelTaskPlan();
+      if (plan.stages.length) { paintPreparedPlan(); paintDeliveryControls(); } else dismissTaskPlan();
     });
     edit.disabled = remove.disabled = field.disabled = plan.sending;
     ui(heading, 'title', () => selectedId && !chatKnownIdle(selectedId) ? t("Queued at Session finish; edit or delete this checkpoint independently.") : index === 0 ? t("Send includes your complete request and the full plan. Later stages are queued as verification checkpoints.") : t("Included in the first message, then queued as a checkpoint at Session finish or after a completed answer when enabled."));
@@ -7862,7 +7875,7 @@ export function initChat(next: Deps): void {
   }
   $('createPlan').addEventListener('click', () => {
     // The toolbar toggle only arms planning; Send/Enter generates from the draft.
-    if (taskPlans.has(draftKey())) cancelTaskPlan();
+    if (taskPlans.has(draftKey())) dismissTaskPlan();
     else { taskPlans.set(draftKey(), { text: '', requestId: null, stages: null, sending: false, progress: null, error: null }); paintTaskPlan(); $('chatInput').focus(); }
   });
   $('composer').addEventListener('submit', (event) => {
