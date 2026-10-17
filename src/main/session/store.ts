@@ -41,7 +41,7 @@ import type {
   ToolEditReview
 } from '../../shared/session.js';
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
-import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence } from '../../shared/session.js';
+import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
@@ -2391,7 +2391,7 @@ export async function rewriteUnattributedToolCalls(
   assertSessionId(sessionId);
   const entry = await ensureOpen(sessionId);
   const rewrite = entry.queue.then(async () => {
-    if (entry.summary.conversationId !== null || entry.summary.title !== 'Unattributed activity') {
+    if (entry.summary.conversationId !== null || entry.summary.title !== UNATTRIBUTED_SESSION_TITLE) {
       throw new Error(`Session ${sessionId} is not an Unattributed activity bucket`);
     }
 

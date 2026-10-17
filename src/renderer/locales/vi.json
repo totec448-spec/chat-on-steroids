@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "Thao tác này xóa toàn bộ thư mục checkout, bao gồm tệp làm việc được theo dõi, tệp bị bỏ qua và thay đổi chưa commit.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Nhánh Git và các commit của nó được giữ lại. Không thể khôi phục tệp chưa commit từ Git.",
   "Keep checkout": "Giữ bản checkout",
-  "Remove checkout; preserve Git branch": "Xóa bản checkout, giữ nhánh Git"
+  "Remove checkout; preserve Git branch": "Xóa bản checkout, giữ nhánh Git",
+  "Unattributed activity": "Hoạt động chưa gán"
 }

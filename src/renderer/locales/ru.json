@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "Будет удалена вся папка рабочей копии, включая отслеживаемые рабочие файлы, игнорируемые файлы и незакоммиченные изменения.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Ветка Git и её коммиты сохранятся. Незакоммиченные файлы нельзя восстановить из Git.",
   "Keep checkout": "Оставить рабочую копию",
-  "Remove checkout; preserve Git branch": "Удалить рабочую копию, сохранить ветку Git"
+  "Remove checkout; preserve Git branch": "Удалить рабочую копию, сохранить ветку Git",
+  "Unattributed activity": "Активность без привязки"
 }

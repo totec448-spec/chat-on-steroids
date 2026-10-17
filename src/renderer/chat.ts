@@ -18,6 +18,7 @@ import { messageReaction, withoutMessageReaction } from '../shared/message-react
 import { goalErrorMessage } from '../shared/goal-errors.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
+import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
@@ -841,7 +842,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.dataset.sortHandle = '';
   if (renaming?.id === summary.id) top.append(renameField(summary));
   else {
-    const title = el('b', '', () => summary.title || t("Untitled session")); title.dir = 'auto';
+    const title = el('b', '', () => shownSessionTitle(summary)); title.dir = 'auto';
     // Double-click names the chat, like the pencil does (#1107).
     if (summary.conversationId) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
     top.append(title);
@@ -853,7 +854,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const mark = icon('i-pinned', 'ico sess-pin-mark');
     top.append(mark);
   }
-  ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
+  ui(row, 'title', () => [shownSessionTitle(summary), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
     if (sessionTooltipDismissed === summary.id) return;
     // The same chat's tooltip, from before a repaint, stays as it is: recreating it would blink.
@@ -994,7 +995,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(more, 'title', () => t('More options'));
   ui(more, 'aria-label', () => t('More options'));
   const menu = (at?: { x: number; y: number }) => ({
-    owner, at, label: () => summary.title || t("Untitled session"), anchor: () => rowMenuButton(owner), items: () => items
+    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
   row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
@@ -4436,7 +4437,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const project = selectedLocalProject();
   $('chatProjectContext').hidden = !project;
   $('chatProjectName').textContent = project?.name ?? '';
-  ui($('chatTitle'), 'textContent', () => summary ? summary.title || t("Untitled session") : t("New chat"));
+  ui($('chatTitle'), 'textContent', () => summary ? shownSessionTitle(summary) : t("New chat"));
 
   paintDeliveryControls();
   paintAgentFilter();
