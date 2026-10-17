@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT contient déjà un brouillon non envoyé. Envoyez ou effacez ce brouillon dans Chrome avant de réessayer."
   },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT n’est pas connecté dans ce navigateur. Connectez-vous à ChatGPT dans ce navigateur, puis renvoyez le message."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "Le modèle ou le raisonnement demandé n'a pas pu être confirmé"
   },

@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT に未送信の下書きがあります。再試行する前に Chrome でその下書きを送信するか削除してください。"
   },
+  "content_delivery_signed_out": {
+    "message": "このブラウザーでは ChatGPT にサインインしていません。そこで ChatGPT にサインインしてから、もう一度送信してください。"
+  },
   "content_delivery_model_unconfirmed": {
     "message": "指定したモデルまたは推論強度を確認できませんでした"
   },
