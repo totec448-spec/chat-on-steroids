@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT đã có một bản nháp chưa gửi. Hãy gửi hoặc xóa bản nháp đó trong Chrome trước khi thử lại."
   },
+  "content_delivery_signed_out": {
+    "message": "Trình duyệt này chưa đăng nhập ChatGPT. Hãy đăng nhập ChatGPT ở đó rồi gửi lại."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "Không thể xác nhận mô hình hoặc mức suy luận được yêu cầu"
   },

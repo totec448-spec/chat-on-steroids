@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT’de zaten gönderilmemiş bir taslak var. Yeniden denemeden önce bu taslağı Chrome’da gönderin veya temizleyin."
   },
+  "content_delivery_signed_out": {
+    "message": "Bu tarayıcıda ChatGPT oturumu açık değil. Orada ChatGPT’ye giriş yapın, sonra yeniden gönderin."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "İstenen model veya akıl yürütme düzeyi doğrulanamadı"
   },

@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "O ChatGPT já contém um rascunho não enviado. Envie ou limpe esse rascunho no Chrome antes de tentar novamente."
   },
+  "content_delivery_signed_out": {
+    "message": "O ChatGPT não está conectado neste navegador. Entre no ChatGPT nele e envie de novo."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "Não foi possível confirmar o modelo ou o nível de raciocínio solicitado"
   },
