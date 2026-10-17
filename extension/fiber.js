@@ -2961,11 +2961,41 @@
     return { ...result, refreshAvailable: !!control };
   }
 
+  /**
+   * Branch in new chat (#482): marks ChatGPT's own "new chat" entry in the open Branch submenu.
+   *
+   * The submenu's entries differ only by label and handler: Work mode's handler names its
+   * upsell/work surface, the new chat's does not. Labels are translated, so the handler decides,
+   * and exactly one entry must qualify. Reads handler source only; calls nothing.
+   */
+  function markBranchNewChat(nonce) {
+    const triggers = [...document.querySelectorAll('[role="menuitem"][aria-haspopup="menu"][aria-expanded="true"]')]
+      .filter(item => item.querySelector('svg use[href*="#branch"]'));
+    if (triggers.length !== 1) return 0;
+    const menu = document.getElementById(triggers[0].getAttribute('aria-controls') || '');
+    if (!menu) return 0;
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    const handler = item => {
+      let fiber = null;
+      for (const key in item) if (key.indexOf('__reactFiber$') === 0) { fiber = item[key]; break; }
+      for (let depth = 0; fiber && depth < 24; depth++, fiber = fiber.return) {
+        const onSelect = fiber.memoizedProps && fiber.memoizedProps.onSelect;
+        if (typeof onSelect === 'function') return Function.prototype.toString.call(onSelect);
+      }
+      return null;
+    };
+    for (const item of items) item.removeAttribute('data-clf-branch-new-chat');
+    const plain = items.filter(item => { const source = handler(item); return typeof source === 'string' && !/work/i.test(source); });
+    if (plain.length !== 1) return plain.length;
+    plain[0].setAttribute('data-clf-branch-new-chat', nonce);
+    return 1;
+  }
+
   const listener = (event) => {
     // Only this window, only our own request shape. Anything else is not ours to answer.
     if (event.source !== window) return;
     const data = event.data;
-    if (!data || typeof data !== 'object' || ![ASK, 'clf-picker-ask', 'clf-plugin-ask'].includes(data.source)) return;
+    if (!data || typeof data !== 'object' || ![ASK, 'clf-picker-ask', 'clf-plugin-ask', 'clf-branch-ask'].includes(data.source)) return;
     const nonce = typeof data.nonce === 'string' ? data.nonce.slice(0, 64) : '';
     if (!nonce) return;
     adoptAppNames(data.apps);
@@ -2973,6 +3003,12 @@
     const previousPaths = currentPaths;
     currentPaths = new WeakMap();
     try {
+    if (data.source === 'clf-branch-ask') {
+      let marked = 0;
+      try { marked = markBranchNewChat(nonce); } catch { /* An unknown menu shape marks nothing. */ }
+      post({ source: 'clf-branch-reply', nonce, v: 1, marked }, location.origin);
+      return;
+    }
     if (data.source === 'clf-plugin-ask') {
       let plugin = null;
       try { plugin = pluginSnapshot(); } catch { /* Unrecognized installed settings. */ }
