@@ -18,7 +18,7 @@ import { chatLines, crashLines, errorSummaryLines, installKind, installLines, sy
 import type { CompanionEnvironment, UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
-import { mainText } from './main-texts.js';
+import { dialogLabel, mainText } from './main-texts.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
 
 /** Enough log for a long run, small enough to attach anywhere. */
@@ -268,9 +268,9 @@ export async function saveDiagnosticsReport(text: string, owner: BrowserWindow |
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   const options = {
     // In the interface language, like the tray (2.1.39: English title in a German app).
-    title: mainText('Diagnostics report'),
+    ...dialogLabel('Diagnostics report'),
     defaultPath: path.join(app.getPath('downloads'), `chat-on-steroids-diagnostics-${stamp}.txt`),
-    filters: [{ name: 'Text', extensions: ['txt'] }]
+    filters: [{ name: mainText('Text files'), extensions: ['txt'] }]
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { saved: false };

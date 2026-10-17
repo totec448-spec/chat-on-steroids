@@ -321,7 +321,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const result = target
         ? await api.skillsLinkGithub(target.id, githubInput.value.trim())
         : await api.skillsImportGithub(githubInput.value.trim());
-      if (!result.ok) { githubError.textContent = result.error; githubError.hidden = false; return; }
+      if (!result.ok) { githubError.textContent = t(result.error); githubError.hidden = false; return; }
       if (own === epoch) {
         setSkills(result.data);
         for (const skill of skills) {

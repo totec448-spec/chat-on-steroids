@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.40': {
+    lead: () => t('Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.'),
+    highlights: [
+      { icon: 'i-terminal', title: () => t('Projects on a server'), text: () => t('Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.') },
+      { icon: 'i-skill', title: () => t('/ and @ anywhere'), text: () => t('Pick a Skill with / or a project file with @ at any point in a message.') },
+      { icon: 'i-lock', title: () => t('Mac permissions repaired'), text: () => t('If an update left Desktop access broken on a Mac, one click repairs it.') },
+      { icon: 'i-plug', title: () => t('Prefer Plugins'), text: () => t('If you like, messages the app sends use your Plugins app instead of Core.') }
+    ]
+  },
   '2.1.39': {
     lead: () => t('Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.'),
     highlights: [

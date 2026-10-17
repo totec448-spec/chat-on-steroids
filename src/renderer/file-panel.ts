@@ -5,7 +5,7 @@ import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, Projec
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
-import { currentLanguage, t, ui } from './i18n.js';
+import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { createSearchPopup } from './search-popup.js';
@@ -104,6 +104,8 @@ function actionButton(label: () => string, glyph: string, action: () => void | P
   button.type = 'button';
   button.append(icon(glyph), el('span', '', label));
   ui(button, 'title', label);
+  // The label can be hidden when the toolbar is narrow; the name stays (fitToolbarActions).
+  ui(button, 'aria-label', label);
   button.addEventListener('click', () => void action());
   return button;
 }
@@ -229,6 +231,14 @@ export function createFilePanel(options: FilePanelOptions) {
     toolbarActions.append(newFile, newFolder, rename, remove, reveal, changes);
     toolbar.append(toolbarActions, refresh);
   }
+  // Labels that do not fit hid the last actions behind an invisible scrollbar (German: Delete,
+  // Reveal and Changes). Show icons only then; each button keeps its title and accessible name.
+  const fitToolbarActions = (): void => {
+    toolbarActions.classList.remove('is-compact');
+    toolbarActions.classList.toggle('is-compact', toolbarActions.scrollWidth > toolbarActions.clientWidth + 1);
+  };
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fitToolbarActions).observe(toolbar);
+  onLanguageChange(() => { updateChangesButton(); fitToolbarActions(); });
 
   const body = el('div', 'file-panel-body');
   const tree = el('div', 'file-tree'); tree.setAttribute('role', 'tree');
@@ -621,6 +631,7 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function gitStatusLabel(status: ProjectGitStatus): string {
+    if (status === 'C') return t('Conflict');
     if (status === 'U') return t('Untracked');
     if (status === 'A') return t('Added');
     if (status === 'D') return t('Deleted');
@@ -661,6 +672,8 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function folderGitStatus(statuses: ReadonlySet<ProjectGitStatus>): ProjectGitStatus {
+    // A folder holding a conflict says so, whatever else changed in it.
+    if (statuses.has('C')) return 'C';
     return statuses.size === 1 ? [...statuses][0]! : 'M';
   }
 
@@ -997,9 +1010,9 @@ export function createFilePanel(options: FilePanelOptions) {
       surfaceClass = 'has-pdf-viewer';
       content = pdfHost;
     } else if (value.binary) {
-      content = el('p', 'file-preview-empty', value.note ?? (() => t('Binary file · preview unavailable')));
+      content = el('p', 'file-preview-empty', () => value.note ? t(value.note) : t('Binary file · preview unavailable'));
     } else if (value.text === null) {
-      content = el('p', 'file-preview-empty', value.note ?? t('Preview unavailable'));
+      content = el('p', 'file-preview-empty', () => value.note ? t(value.note) : t('Preview unavailable'));
     } else if (/\.(?:md|markdown)$/i.test(value.name)) {
       content = markdownPreview(value.text);
     } else {
@@ -1040,6 +1053,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const label = count > 0 ? t('Changes ({0})', [count]) : t('Changes');
     changes.title = label;
     changes.setAttribute('aria-label', label);
+    fitToolbarActions();
   }
 
   function changeStats(change: ProjectGitChange): HTMLElement {
@@ -1090,7 +1104,7 @@ export function createFilePanel(options: FilePanelOptions) {
       return;
     }
     const groups: Array<[ProjectGitStatus, string]> = [
-      ['M', t('Modified')], ['A', t('Added')], ['D', t('Deleted')],
+      ['C', t('Conflicts')], ['M', t('Modified')], ['A', t('Added')], ['D', t('Deleted')],
       ['R', t('Renamed')], ['U', t('Untracked')]
     ];
     for (const [status, label] of groups) {
@@ -1227,7 +1241,7 @@ export function createFilePanel(options: FilePanelOptions) {
     meta.append(el('span', '', status), language);
     if (('binary' in value && (value.binary || value.tooLarge)) || value.baseText === null || value.currentText === null) {
       language.remove();
-      replacePreview(head, meta, el('p', 'file-preview-empty', 'note' in value ? value.note ?? (() => t('Diff preview unavailable')) : () => t('Diff preview unavailable')));
+      replacePreview(head, meta, el('p', 'file-preview-empty', () => 'note' in value && value.note ? t(value.note) : t('Diff preview unavailable')));
       preview.hidden = false;
       return;
     }
@@ -1395,6 +1409,12 @@ export function createFilePanel(options: FilePanelOptions) {
     updateActions();
     syncWatches();
   }
+
+  // Group titles, counts and row labels are plain text; repaint them when the language changes.
+  onLanguageChange(() => {
+    renderTree();
+    if (mode === 'changes' && gitDiffPath === null) renderChangesList();
+  });
 
   function watchedDirectories(): string[] {
     if (!project) return [];

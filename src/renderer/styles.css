@@ -4186,6 +4186,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-panel-toolbar-actions { display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .file-panel-toolbar-actions::-webkit-scrollbar { display: none; }
 .file-panel-toolbar-actions > button { flex: 0 0 auto; }
+.file-panel-toolbar-actions.is-compact .file-panel-action > span:not(.file-panel-changes-badge) { display: none; }
 .file-panel-toolbar > .file-panel-refresh { flex: 0 0 28px; }
 .file-panel-action { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 6px 7px; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); white-space: nowrap; }
 .file-panel-action:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
@@ -4212,6 +4213,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-tree-git-status.is-d { color: var(--red); }
 .file-tree-git-status.is-r { color: var(--accent); }
 .file-tree-git-status.is-u { color: var(--soft); }
+.file-tree-git-status.is-c { color: var(--red); font-weight: 700; }
 .file-tree-size { flex: 0 0 auto; color: var(--faint); font-size: calc(9.5px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
 .file-tree-status { padding: 7px 12px 7px 26px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); line-height: 1.4; }
 .file-changes-view { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -4258,6 +4260,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-change-status.is-d { color: var(--red); }
 .file-change-status.is-r { color: var(--accent); }
 .file-change-status.is-u { color: var(--soft); }
+.file-change-status.is-c { color: var(--red); font-weight: 700; }
 .file-change-names { min-width: 0; display: flex; align-items: baseline; gap: 5px; overflow: hidden; font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.4; }
 .file-change-path, .file-change-previous { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-change-previous { color: var(--faint); text-decoration: line-through; }

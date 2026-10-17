@@ -323,6 +323,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again."
   },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "Requested model or reasoning could not be confirmed"
   },

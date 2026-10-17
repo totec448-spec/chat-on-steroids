@@ -79,6 +79,17 @@ it('lists exactly one project level at a time and previews bounded text', async 
   expect(large.note).toMatch(/too large/i);
 });
 
+it('previews a file with one very long line as a note, not the model\'s read error', async () => {
+  // A minified bundle or a JSON export is often one line over 2 MB. The preview showed the model's
+  // instruction "Narrow or transform the file before reading it" instead (2.1.41 pass).
+  const projectPath = path.join(approved, 'project');
+  await fs.writeFile(path.join(projectPath, 'bundle.min.js'), 'x'.repeat(2_200_000));
+  const project = await addProject(projectPath);
+  const preview = await previewProjectFile(project.id, 'bundle.min.js');
+  expect(preview).toMatchObject({ binary: false, text: null, truncated: true,
+    note: 'This file contains a line that is too large for the bounded preview.' });
+});
+
 it('reports binary files without decoding them into the renderer', async () => {
   const projectPath = path.join(approved, 'project');
   await fs.writeFile(path.join(projectPath, 'blob.bin'), Buffer.from([0, 1, 2, 3, 4]));

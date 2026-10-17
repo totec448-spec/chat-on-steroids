@@ -52,7 +52,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
-import { isReasoningEffort, type Handoff, type ReasoningEffort } from '../../shared/session.js';
+import { continuationMarkerOf, isReasoningEffort, type Handoff, type ReasoningEffort } from '../../shared/session.js';
 import { logInfo, logWarn } from '../logger.js';
 import {
   PRIME_ID,
@@ -549,6 +549,15 @@ export function continuationForSession(sessionId: string): ContinuationView | nu
   return null;
 }
 
+/** The still-open transfer intent for a source chat, including a ticket before its brief Send. */
+export function continuationForSourceConversation(conversationId: string): ContinuationView | null {
+  sweep();
+  for (const entry of byToken.values()) {
+    if (entry.from === conversationId && isOpen(entry)) return view(entry);
+  }
+  return null;
+}
+
 export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
@@ -1015,7 +1024,7 @@ export async function dispatchContinuationDestinationSendNow(token: string): Pro
       ...current,
       destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null }
     }));
-    noteResumeDispatch(entry.token);
+    noteResumeDispatch(entry.token, entry.sessionId);
     return true;
   });
 }
@@ -1303,7 +1312,7 @@ export async function claimContinuationNow(token: string, claimant: string): Pro
     // does not exist.
     if (entry.state === 'claimed') {
       if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
-        noteResumeDispatch(entry.token);
+        noteResumeDispatch(entry.token, entry.sessionId);
       } else {
         noteResumeClaim(entry.token);
       }
@@ -1584,6 +1593,43 @@ export async function commitContinuationResult(
   } finally {
     if (commitLocks.get(token)?.promise === work) commitLocks.delete(token);
   }
+}
+
+/**
+ * Recover a lost /compact destination checkpoint from the extension's independent
+ * durable /events journal. The journal can outlive the content script, its HTTP response,
+ * or a browser reload. A token alone is not proof: require the *entire* recorded prompt
+ * to match the stored handoff, a claimed and dispatched send, and a stable message id.
+ *
+ * This is another witness for the SAME continuation transaction, not an alternative
+ * session-reassignment API. The regular commit still checks the source attachment and
+ * refuses a destination owned by another session; an ambiguous journal row does nothing.
+ */
+export async function recoverContinuationFromRecordedBootstrap(
+  toConversationId: string,
+  messageId: string,
+  recorded: string
+): Promise<ContinuationCommitResult | null> {
+  if (!toConversationId || !messageId || messageId.length > 200 || !recorded) return null;
+  const marker = continuationMarkerOf(recorded);
+  if (marker?.kind !== 'RESUME') return null;
+  sweep();
+  const entry = byToken.get(marker.token);
+  if (!entry || !entry.handoffId || !entry.claimedBy || toConversationId === entry.from ||
+      !resumeBootstrapMatches(recorded, entry.summary)) return null;
+  if (entry.state !== 'claimed' && entry.state !== 'committing' && entry.state !== 'committed') return null;
+  if (entry.destinationSend.state !== 'dispatched-unresolved' && entry.destinationSend.state !== 'sent') return null;
+  // Never stamp a different destination onto a commit that is already in flight or
+  // complete. The authoritative commit may have selected B before this journal for C
+  // arrived, and writing C's message receipt first would poison later recovery.
+  if ((entry.state === 'committing' || entry.state === 'committed') &&
+      entry.to !== toConversationId) {
+    return { status: 'rejected', reason: 'another replacement chat already owns the continuation' };
+  }
+  if (!await bindContinuationDestinationMessageNow(marker.token, toConversationId, messageId)) {
+    return { status: 'rejected', reason: 'the recorded resume message conflicts with the destination checkpoint' };
+  }
+  return commitContinuationResult(marker.token, toConversationId);
 }
 
 export async function commitContinuation(token: string, toConversationId: string): Promise<boolean> {
@@ -1869,7 +1915,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
     // matters is how long from *here* that chat still has to appear.
     if (entry.state === 'claimed') {
       if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
-        noteResumeDispatch(entry.token);
+        noteResumeDispatch(entry.token, entry.sessionId);
       } else {
         noteResumeClaim(entry.token);
       }

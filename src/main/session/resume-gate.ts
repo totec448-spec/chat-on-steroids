@@ -1,3 +1,5 @@
+import { continuationMarkerOf } from '../../shared/session.js';
+
 /**
  * Whether a compaction is opening its replacement chat right at this moment.
  *
@@ -34,6 +36,8 @@ export const RESUME_CLAIM_WINDOW_MS = 60_000;
 interface ResumeClaim {
   at: number;
   dispatched: boolean;
+  /** The originating durable session, set only by continuation's dispatched checkpoint. */
+  sessionId?: string;
 }
 
 const claims = new Map<string, ResumeClaim>();
@@ -41,7 +45,7 @@ const claims = new Map<string, ResumeClaim>();
 /** Records that a replacement chat is expected to appear imminently. */
 function noteExpectedResume(token: string): void {
   const current = claims.get(token);
-  claims.set(token, { at: Date.now(), dispatched: current?.dispatched === true });
+  claims.set(token, { at: Date.now(), dispatched: current?.dispatched === true, sessionId: current?.sessionId });
 }
 
 /**
@@ -70,8 +74,8 @@ export function noteResumeClaim(token: string): void {
  * Recorder admission is still bounded independently by `settleResumeCommit()`; this does not
  * make an unrelated new conversation wait forever.
  */
-export function noteResumeDispatch(token: string): void {
-  claims.set(token, { at: Date.now(), dispatched: true });
+export function noteResumeDispatch(token: string, sessionId: string): void {
+  claims.set(token, { at: Date.now(), dispatched: true, sessionId });
 }
 
 /** Records that the move landed, or was given up on, so nothing waits on it any longer. */
@@ -95,6 +99,23 @@ export function resumeOpeningChat(now: number = Date.now()): boolean {
     claims.delete(token);
   }
   return false;
+}
+
+/**
+ * A recorded user message may belong to the dispatched replacement. This is only a
+ * deferral hint, never authority to commit or rebind: continuation.ts independently
+ * checks the entire bootstrap, the message ID and the durable send checkpoint.
+ * Without the marker an unrelated chat may proceed after the original bounded wait.
+ */
+export function dispatchedResumeMarkerIn(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const marker = continuationMarkerOf(text);
+  return marker?.kind === 'RESUME' && claims.get(marker.token)?.dispatched === true;
+}
+
+/** An app-authored Resume command already acknowledged this exact destination and source. */
+export function dispatchedResumeFromSession(sessionId: string): boolean {
+  return !!sessionId && [...claims.values()].some((claim) => claim.dispatched && claim.sessionId === sessionId);
 }
 
 /** Test seam. */
