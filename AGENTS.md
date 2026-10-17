@@ -1110,6 +1110,30 @@ turn (copied branch history, an adopted chat's history, replies to messages type
 the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way.
 
+Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
+the same parent, and continues from the new one. The page reports each question's place in that tree
+(`user_message.parentId`: the legacy `metadata.parent_id`, or on the shell the previous turn's last
+`turn.messageIds` entry from the thread's ordered `entries`, `root` for the first) and `parentExact`
+(always for a real parent id; on the shell only with ChatGPT's versions control, whose handler asks the
+versions endpoint). The recorder marks a question with `parentExact` as `replaces` the newest version
+recorded before it under that parent in the current chat (`session/edits.ts`); an edit the app delivered
+is marked at the page's acknowledgement (`noteEditReplacement`), before any versions control. The
+timeline folds the replaced question and everything after it up to the edit (and their late re-scans)
+into one "Earlier version(s) · N messages" row under the newest version, which says "Edited version";
+chains fold into one row. The app's Edit action (newest version of a native question in the chat's
+current conversation, never worker/helper chats or Compact & Resume prompts) puts the authored text in
+the composer with a dock notice counting the later messages it replaces; Cancel and switching chats give
+back the earlier draft. It sends `edit { messageId }`: main admits it only into that existing chat as one
+plain message sent now, with no turn running, for a recorded question that is still the newest version
+(`assertEditSource`); an edit of the chat's first question (`editFramed`) carries the chat's setup again
+through the opening prompt. The browser is offered `edit`; the page asks MAIN to mark the question's Edit
+control by handler (`clf-edit-ask`: `action:"edit"` on surface `user_message`, never a label), opens
+ChatGPT's own editor in that turn, writes the text with the composer's insertion core, and after the
+ordinary claim and authorization submits the editor's form. The receipt is a new question with that text
+where the edited one was, the edited one gone; anything before Send closes the editor, leaving the
+question as it was. Not handled in this version: switching back to an older version in ChatGPT's
+versions view (the app keeps showing the newest one it saw).
+
 ## 10. Files, terminal, patches and images
 
 **Intent:** provide a predictable coding loop without requiring a Codex installation or launching

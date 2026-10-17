@@ -2475,7 +2475,7 @@ input[readonly] {
 .chat-branch-origin:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 /* The new chat being written starts from a reply: one row of the composer dock, drawn like its
    neighbours (the dock draws the frame, the row adds none of its own). */
-.branch-draft[hidden] { display: none; }
+.branch-draft[hidden], .edit-draft[hidden] { display: none; }
 #chatTitle {
   text-transform: none;
   letter-spacing: 0;
@@ -3784,6 +3784,10 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
    it reads as a side branch: indented on a guide line, like routine activity, and a little quieter. */
 .earlier-version > .tool-group-body { padding: 4px 0 4px 18px; margin-left: 7px; border-left: 1px solid var(--line); }
 .earlier-version > .tool-group-body > .ev { opacity: .82; }
+/* Edit under one of your questions, right-aligned with its bubble and quiet until the row is hovered. */
+.question-actions { display: flex; justify-content: flex-end; gap: 2px; margin: 4px -6px 0 0; opacity: 0; transition: opacity 120ms ease; }
+.ev-user_message:hover .question-actions, .question-actions:focus-within { opacity: 1; }
+@media (hover: none) { .question-actions { opacity: 1; } }
 .said.is-user .message-edited { display: block; margin-top: 6px; color: var(--faint); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.3; }
 .tool-group-body .ev { margin: 0; }
 /* Formulas (math.ts), drawn by KaTeX in the text's own colour. A wide block scrolls on its own
@@ -4421,7 +4425,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock { display: none; }
 .composer-dock-body { display: flow-root; }
 @media (prefers-reduced-motion: reduce) { .composer-dock { transition: none; animation: none !important; } }
-.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
+.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft, .edit-draft { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
 .background-exec-status[hidden] { display: none; }
 .background-exec-status .ico { color: var(--ink); }
 .background-exec-status.is-expandable { cursor: pointer; }
