@@ -311,7 +311,7 @@ async function scan(candidateRoot: string): Promise<SkillRecord[]> {
     const record = await recordAt(candidateRoot, name);
     if (!record) continue;
     records.push(record);
-    if (records.length > MAX_SKILLS) throw new Error('The Skills library supports at most 64 skills');
+    if (records.length > MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
   }
   const rootAfter = await assertManagedRoot(candidateRoot);
   if (!sameIdentity(rootBefore, rootAfter)) throw new Error('The managed Skills folder changed while being read');
@@ -451,7 +451,7 @@ export function importSkillFile(sourcePath: string): Promise<SkillSummary> {
     const source = await readTextSnapshot(sourcePath);
     const candidateRoot = requiredRoot();
     const current = await scan(candidateRoot);
-    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 64 skills');
+    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
 
@@ -614,7 +614,7 @@ export function importSkillPackage(sourcePath: string, origin?: GitHubSkillOrigi
     const id = document.id;
     const candidateRoot = requiredRoot();
     const current = await scan(candidateRoot);
-    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 64 skills');
+    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
     const { publishSkillPackage } = await import('./skill-package.js');
@@ -729,6 +729,26 @@ export function skillCatalogInstructions(): string {
     'Install or maintain requested skills with existing filesystem and command capabilities under current guards. Skills add no tools, hooks or permissions and never change the project working directory.'
   ];
   if (!catalog.length) lines.push('No skills are installed.');
-  else lines.push(...catalog.map(summary => `- ${JSON.stringify(summary)}`));
+  else {
+    const rowsBudget = 7_000;
+    let rowsChars = 0;
+    for (let index = 0; index < catalog.length; index++) {
+      const summary = catalog[index]!;
+      const line = `- ${JSON.stringify({
+        id: summary.id,
+        name: summary.name,
+        description: oneLine(summary.description, 160)
+      })}`;
+      const remaining = catalog.length - index - 1;
+      const omitted = remaining > 0 ? `- ${remaining} more skills are installed; read /skills to list them.` : '';
+      const added = (rowsChars ? 1 : 0) + line.length + (omitted ? 1 + omitted.length : 0);
+      if (rowsChars + added > rowsBudget) {
+        lines.push(`- ${catalog.length - index} more skills are installed; read /skills to list them.`);
+        break;
+      }
+      lines.push(line);
+      rowsChars += (rowsChars ? 1 : 0) + line.length;
+    }
+  }
   return lines.join('\n');
 }

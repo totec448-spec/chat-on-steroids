@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "Yönetilen beceriler klasörü güvenli bir klasör değil",
   "The managed Skills folder was redirected": "Yönetilen beceriler klasörü yönlendirildi",
   "The Skills library has too many entries": "Beceri kitaplığında çok fazla öğe var",
-  "The Skills library supports at most 64 skills": "Beceri kitaplığı en fazla 64 beceri alır",
+  "The Skills library supports at most 128 skills": "Beceri kitaplığı en fazla 128 beceri alır",
   "The managed Skills folder changed while being read": "Yönetilen beceriler klasörü okunurken değişti",
   "Skills storage requires an absolute user-data path": "Beceri depolaması mutlak bir uygulama verisi yolu gerektirir",
   "Auto-selected Skill revision is invalid": "Otomatik seçilen beceri sürümü geçersiz",

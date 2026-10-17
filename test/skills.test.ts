@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   importSkillFile,
+  importSkillPackage,
   initSkillsPath,
   listSkills,
   readSkill,
@@ -74,7 +75,8 @@ describe('managed Skills store', () => {
     expect(await readSkill(summary.id)).toEqual({ summary, text });
     expect(await fs.readFile(path.join(userData, 'skills', summary.id, 'SKILL.md'), 'utf8')).toBe(text);
     const advertised = skillCatalogInstructions();
-    expect(advertised).toContain(JSON.stringify(summary));
+    expect(advertised).toContain(JSON.stringify({ id: summary.id, name: summary.name, description: summary.description }));
+    expect(advertised).not.toContain(JSON.stringify(summary.path));
     expect(advertised).not.toContain('Use the entire file');
     expect(advertised).toContain(JSON.stringify(path.join(userData, 'skills')));
   });
@@ -117,7 +119,7 @@ describe('managed Skills store', () => {
       id: 'code-review', name: 'Code Review',
       description: 'Review source code for correctness and maintainability.'
     });
-    expect(skillCatalogInstructions()).toContain(JSON.stringify(summary));
+    expect(skillCatalogInstructions()).toContain(JSON.stringify({ id: summary.id, name: summary.name, description: summary.description }));
     expect(skillCatalogInstructions()).not.toContain('BODY_ONLY_MUST_NOT_REPLACE_METADATA');
     // Rebuilding the published catalog uses the same parsed metadata. The text decoder
     // already strips a BOM; the stored source bytes still retain it and the original CRLF.
@@ -288,14 +290,59 @@ describe('managed Skills store', () => {
     }
   });
 
-  it('fails closed instead of silently omitting a valid 65th skill', async () => {
+  it('loads a 114-skill managed library without the legacy 64-skill ceiling', async () => {
+    const root = path.join(userData, 'skills');
+    for (let index = 0; index < 114; index++) {
+      const id = `skill-${String(index).padStart(3, '0')}`;
+      await fs.mkdir(path.join(root, id));
+      await fs.writeFile(path.join(root, id, 'SKILL.md'), `# ${id}\n\nInstruction ${index}.`);
+    }
+    await expect(listSkills()).resolves.toHaveLength(114);
+  });
+
+  it('bounds connector Skill catalog instructions with 128 maximum-description skills', async () => {
+    const root = path.join(userData, 'skills');
+    const description = 'x'.repeat(240);
+    for (let index = 0; index < MAX_SKILLS; index++) {
+      const id = `skill-${String(index).padStart(3, '0')}`;
+      await fs.mkdir(path.join(root, id));
+      await fs.writeFile(path.join(root, id, 'SKILL.md'), `---\nname: ${id}\ndescription: ${description}\n---\n`);
+    }
+    await expect(listSkills()).resolves.toHaveLength(MAX_SKILLS);
+    const instructions = skillCatalogInstructions();
+    expect(instructions.length).toBeLessThan(8_000);
+    expect(instructions).toMatch(/more skills are installed; read \/skills to list them\./);
+  });
+
+  it('rejects file and package imports beyond 128 with the translated limit key', async () => {
+    const root = path.join(userData, 'skills');
+    for (let index = 0; index < MAX_SKILLS; index++) {
+      const id = `skill-${String(index).padStart(3, '0')}`;
+      await fs.mkdir(path.join(root, id));
+      await fs.writeFile(path.join(root, id, 'SKILL.md'), `# ${id}\n\nInstruction ${index}.`);
+    }
+    await expect(listSkills()).resolves.toHaveLength(MAX_SKILLS);
+
+    const limitError = 'The Skills library supports at most 128 skills';
+    const file = await sourceFile('overflow-file.md', '# Overflow file\n\nMust not be imported.');
+    await expect(importSkillFile(file)).rejects.toThrow(limitError);
+
+    const packageRoot = path.join(sources, 'overflow-package');
+    await fs.mkdir(packageRoot);
+    await fs.writeFile(path.join(packageRoot, 'SKILL.md'), [
+      '---', 'name: Overflow Package', 'description: Must not be imported.', '---', '', 'Body.'
+    ].join('\n'));
+    await expect(importSkillPackage(packageRoot)).rejects.toThrow(limitError);
+  });
+
+  it('fails closed instead of silently omitting a valid over-cap skill', async () => {
     const root = path.join(userData, 'skills');
     for (let index = 0; index <= MAX_SKILLS; index++) {
       const id = `skill-${String(index).padStart(2, '0')}`;
       await fs.mkdir(path.join(root, id));
       await fs.writeFile(path.join(root, id, 'SKILL.md'), `# ${id}\n\nInstruction ${index}.`);
     }
-    await expect(listSkills()).rejects.toThrow(/64 skills/i);
+    await expect(listSkills()).rejects.toThrow(/128 skills/i);
   });
 
   it('bounds unrelated directory enumeration instead of scanning an arbitrary library', async () => {
