@@ -767,9 +767,9 @@ export class UnifiedExecProcessManager {
    * `rand::rng().random_range(1_000..100_000)`, retried against the reservations. A process id is
    * what later calls name to write to or read a running command, so it is not guessable either.
    */
-  allocateProcessId(): number {
+  allocateProcessId(draw: () => number = () => randomInt(1_000, 100_000)): number {
     for (;;) {
-      const processId = randomInt(1_000, 100_000);
+      const processId = draw();
       if (this.reservedProcessIds.has(processId) || this.completed.has(processId)) continue;
       this.reservedProcessIds.add(processId);
       return processId;

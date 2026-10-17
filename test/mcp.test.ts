@@ -3699,10 +3699,10 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(prove(`wfr_execown_old_recycled_${run}`, `conv-execown-old-${run}`)).toBe('stored');
     expect(prove(`wfr_execown_new_recycled_${run}`, `conv-execown-new-${run}`)).toBe('stored');
 
-    const allocate = unifiedExecManager.allocateProcessId.bind(unifiedExecManager);
+    // The allocator draws from a CSPRNG, so the pick is forced here: reserved the way it reserves.
     const allocation = vi.spyOn(unifiedExecManager, 'allocateProcessId').mockImplementation(() => {
-      const random = vi.spyOn(Math, 'random').mockReturnValue(0);
-      try { return allocate(); } finally { random.mockRestore(); }
+      (unifiedExecManager as unknown as { reservedProcessIds: Set<number> }).reservedProcessIds.add(recycledId);
+      return recycledId;
     });
     // Hold only publication of the real process result, not process creation or ownership.
     // The process is alive and writable, but the MCP handler has not yet installed its new
