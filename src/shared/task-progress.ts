@@ -9,6 +9,19 @@ export interface TaskProgress {
 }
 export type TaskProgressUpdate = Omit<TaskProgress, 'requestId'>;
 
+/** Longest request a plan, a Goal's opening message or a saved objective is made from. */
+export const MAX_TASK_REQUEST_CHARS = 16_000;
+
+/**
+ * Why a request cannot start a plan, decided before anything is sent: nothing to plan, or more than
+ * the planner takes (counted after trimming, as the main process counts it).
+ */
+export function taskRequestProblem(text: string): 'empty' | 'too_long' | null {
+  const request = text.trim();
+  if (!request) return 'empty';
+  return request.length > MAX_TASK_REQUEST_CHARS ? 'too_long' : null;
+}
+
 /** Read a JSON string prefix without guessing unfinished escape sequences. */
 function stringPrefix(source: string, start: number): { text: string; end: number; complete: boolean } | null {
   if (source[start] !== '"') return null;
