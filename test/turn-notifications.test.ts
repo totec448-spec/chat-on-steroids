@@ -57,3 +57,17 @@ it('says the answer is ready when there is no answer text to show', () => {
   // ChatGPT's link cards come as private-use markup; the notice shows their label.
   expect(noticeText('Open \uE200url\uE202the comparison\uE202https://github.com/o/r/compare\uE201 to merge.')).toBe('Open the comparison to merge.');
 });
+
+it('keeps underscores, issue numbers and comparisons that are part of the answer', () => {
+  // Every `_ * # > ~` was removed from the whole answer: "goal_r40.txt" read "goalr40.txt" (2.1.41 pass).
+  expect(noticeText('Created **goal_r40.txt** for #1590; size > 0 and 2*3 = 6.')).toBe('Created goal_r40.txt for #1590; size > 0 and 2*3 = 6.');
+  expect(noticeText('```ts\nconst a = 1;\n```\n\nThe `snake_case` name is kept.')).toBe('The snake_case name is kept.');
+  expect(noticeText('> quoted _emphasis_ here')).toBe('quoted emphasis here');
+});
+
+it('says the answer is ready in the interface language', async () => {
+  const texts = await import('../src/main/main-texts.js');
+  texts.setMainTextTranslations({ 'ChatGPT finished.': 'ChatGPT ist fertig.' });
+  try { expect(noticeText(null)).toBe('ChatGPT ist fertig.'); }
+  finally { texts.setMainTextTranslations({}); }
+});
