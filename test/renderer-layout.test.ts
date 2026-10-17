@@ -269,6 +269,14 @@ describe('a session row', () => {
     expect(bits).toContain('text-overflow: ellipsis');
   });
 
+  it("writes an inbox card's model line in the UI font, as the composer's model picker does, with steady digits", () => {
+    const detail = rule('.sess-detail');
+    expect(detail).not.toContain('font-family');
+    expect(detail).toContain('font-variant-numeric: tabular-nums');
+    expect(detail).toContain('font-size: calc(11px * var(--text-scale, 1))');
+    expect(detail).toContain('color: var(--faint)');
+  });
+
   it('never borrows live worker status from a different run that reused worker-1/worker-2', () => {
     // Worker ids are slot names and repeat every run. The conversation is the durable chat
     // identity, so both have to match before an old recorded session can show the current
