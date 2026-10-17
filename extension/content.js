@@ -3945,6 +3945,10 @@
         rawText,
         // A boolean from MAIN; only `true` exactly means ChatGPT stored this as escaped Markdown.
         ...(entry.role === 'user' && entry.markdown === true ? { markdown: true } : {}),
+        // A question's place in ChatGPT's message tree (Edit & resubmit, #365).
+        ...(entry.role === 'user' && typeof entry.parentId === 'string' &&
+          (entry.parentId === 'root' || /^[A-Za-z0-9:_-]{8,190}$/.test(entry.parentId))
+          ? { parentId: entry.parentId, parentExact: entry.parentExact === true } : {}),
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
         sectionIndex:
@@ -5018,8 +5022,10 @@
           const sentModel = sendModels.get(message.messageId);
           // The model is part of the occurrence, so a send-model report that lands after the
           // first sighting re-emits the same message with it.
+          // The tree place is part of the occurrence too: ChatGPT shows its versions control only
+          // once a second version exists, so an edit re-emits the question it replaced.
           const key = occurrenceKey(message.messageId, message.rawText + (message.attachments?.length ? JSON.stringify(message.attachments) : '') +
-            (sentModel ? `\u0000${sentModel}` : ''));
+            (sentModel ? `\u0000${sentModel}` : '') + (message.parentId ? `\u0000${message.parentId}:${message.parentExact === true}` : ''));
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
             userAuthoredTimesReported.set(key, message.createTime);
@@ -5034,6 +5040,7 @@
             text: shownUserText(message.rawText, message.markdown === true, renderedUserTexts.get(message.messageId)),
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
             ...(sentModel ? { model: sentModel } : {}),
+            ...(message.parentId ? { parentId: message.parentId, parentExact: message.parentExact === true } : {}),
             ...(message.createTime ? { time: message.createTime, authoredTime: true, authoredAt: message.createTime } : {})
           });
           reportedUserMessages.delete(message.messageId);

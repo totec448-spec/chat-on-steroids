@@ -732,6 +732,12 @@
    * it after a reload. The model id is already ChatGPT's durable identity, so there is no
    * reason to make user capture depend on the DOM having caught up.
    */
+  /** A question's parent in ChatGPT's message tree: a message id, or "root" for a chat's first turn. */
+  function parentIdOf(message) {
+    const parent = message.metadata?.parent_id;
+    return typeof parent === 'string' && (parent === 'root' || /^[A-Za-z0-9:_-]{8,190}$/.test(parent)) ? parent : null;
+  }
+
   function authoredUserMessages(messages, budget) {
     const out = [];
     const seen = new Set();
@@ -765,6 +771,10 @@
         // ChatGPT's own mark for text it stored as escaped Markdown (page-inserted text).
         ...(message.metadata?.serialization_metadata?.render_format === 'markdown' ? { markdown: true } : {}),
         ...(attachments.length ? { attachments } : {}),
+        // Its place in ChatGPT's message tree; `parentExact` says two questions sharing it are versions
+        // of one message (always, for a real parent id; for the shell's predecessor, only with ChatGPT's
+        // own versions control on that turn).
+        ...(parentIdOf(message) ? { parentId: parentIdOf(message), parentExact: message.metadata?.clf_parent_exact !== false } : {}),
         order: index,
         createTime: authoredTime(message)
       });
@@ -1129,6 +1139,7 @@
         rawText: userCandidates[c].rawText,
         ...(userCandidates[c].markdown ? { markdown: true } : {}),
         ...(userCandidates[c].attachments ? { attachments: userCandidates[c].attachments } : {}),
+        ...(userCandidates[c].parentId ? { parentId: userCandidates[c].parentId, parentExact: userCandidates[c].parentExact === true } : {}),
         renderedHtml: ''
       });
     }
@@ -2206,12 +2217,42 @@
   }
   /** Translate only publicly identified items in the mounted exchange. Missing item ids
    * stay missing; a stopped turn does not manufacture replies to its tool calls. */
+  /**
+   * Where a shell turn's question sits in ChatGPT's message tree (Edit & resubmit, #365). The shell
+   * model carries no parent ids, but the thread's ordered `entries` (a few levels up) does: the
+   * question follows the previous turn's last message, and the first turn follows the root. Two
+   * questions with the same predecessor are versions of one message. The versions control (its
+   * handler asks ChatGPT's versions endpoint) is the page's own proof that this one has others.
+   */
+  function shellQuestionPlace(fiber, entry, section) {
+    let entries = null, index = -1;
+    for (let at = fiber, up = 0; at && up < 40; up++, at = at.return) {
+      const list = at.memoizedProps?.entries;
+      if (!Array.isArray(list)) continue;
+      // The same entry, or the same turn re-rendered as a new object; one match only.
+      const matches = list.reduce((found, item, at) => item === entry || (item?.id && item.id === entry.id) ? [...found, at] : found, []);
+      if (matches.length === 1) { entries = list; index = matches[0]; break; }
+    }
+    if (!entries || index < 0) return null;
+    const previous = index > 0 ? entries[index - 1]?.turn?.messageIds : null;
+    const parentId = index === 0 ? 'root' : Array.isArray(previous) && previous.length ? str(previous[previous.length - 1]) : null;
+    if (!parentId) return null;
+    let versioned = false;
+    for (const button of section.querySelectorAll('button')) {
+      if (button.closest('[data-turn-key]') !== section) continue;
+      const onClick = fiberOf(button)?.memoizedProps?.onClick;
+      if (typeof onClick === 'function' && /usesVersionsEndpoint/.test(Function.prototype.toString.call(onClick))) { versioned = true; break; }
+    }
+    return { parentId, versioned };
+  }
+
   function shellTurnSource(fiber, section, turnId) {
-    let entry = null;
+    let entry = null, entryFiber = null;
     for (let at = fiber, up = 0; at && up < 16; up++, at = at.return) {
-      if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; break; }
+      if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; entryFiber = at; break; }
     }
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
+    const place = shellQuestionPlace(entryFiber, entry, section);
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
     let lastAnswer = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
@@ -2231,7 +2272,8 @@
         const completed = final && item.completed === true && entry.turn.status === 'complete';
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
-          status: completed ? 'finished_successfully' : 'in_progress', metadata: {} });
+          status: completed ? 'finished_successfully' : 'in_progress',
+          metadata: user && place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
         const key = `${turnId}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
