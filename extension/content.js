@@ -13873,6 +13873,21 @@
         })().catch(() => sendResponse({ safe: false }));
         return true;
       }
+      // The extension closes the tab of a new chat's first message that was cancelled before Send.
+      // Only this exact opening page, still on ChatGPT's start page, with nothing typed, sent,
+      // attached or running, and no send of this page in flight.
+      if (message.type === 'clf-close-cancelled-opening') {
+        const id = typeof message.id === 'string' ? message.id : '';
+        let marked = false;
+        try {
+          const url = new URL(location.href);
+          marked = !!id && (url.searchParams.get('cos-input') === id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === id);
+        } catch { marked = false; }
+        sendResponse({ safe: marked && !CLF_DOM.conversationId() && !desktopInputBusy && !generating && !CLF_DOM.generating() &&
+          pendingTools === 0 && !CLF_DOM.hasComposerAttachments() && !(CLF_DOM.composer()?.textContent || '').trim() &&
+          CLF_DOM.messages().filter(row => row.role === 'user').length === 0 });
+        return false;
+      }
       if (message.type === 'clf-close-temporary-planner') {
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
         const exact = (desktopDecision?.id === message.id && desktopDecision?.owner === message.owner) ||

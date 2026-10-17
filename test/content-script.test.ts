@@ -1868,6 +1868,15 @@ describe('desktop input delivery and helper ownership', () => {
    * native Send dropped its deadline after the click. The page held its input slot until reload,
    * and the claim stayed open in the app, so the next message could not be delivered.
    */
+  it.each([['untouched', true], ['typed-into', false], ['sent', false], ['other input', false]] as const)(
+    'proves a cancelled opening page untouched before the extension closes it (%s)', async (mode, safe) => {
+      live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {});
+      if (mode === 'typed-into') live.document.querySelector('#prompt-textarea')!.textContent = 'my own words';
+      if (mode === 'sent') userTurn(live.document, 'already-sent', 'A question that went out');
+      const id = mode === 'other input' ? 'ffffffff-1111-4222-8333-444444444444' : inputId;
+      expect(await live.runtimeMessage({ type: 'clf-close-cancelled-opening', id })).toEqual({ safe });
+    });
+
   it('reports a clicked Send that ChatGPT did not take, and clears exactly its own draft', async () => {
     const typed = 'Inspect the exact requested task';
     let claims = 0;
