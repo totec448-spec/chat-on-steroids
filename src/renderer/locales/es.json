@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "Esto elimina toda la carpeta del directorio de trabajo, incluidos los archivos de trabajo con seguimiento, los archivos ignorados y los cambios sin confirmar.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "La rama de Git y sus commits se conservan. Los archivos sin confirmar no se pueden recuperar desde Git.",
   "Keep checkout": "Conservar directorio de trabajo",
-  "Remove checkout; preserve Git branch": "Eliminar directorio de trabajo; conservar la rama de Git"
+  "Remove checkout; preserve Git branch": "Eliminar directorio de trabajo; conservar la rama de Git",
+  "Unattributed activity": "Actividad sin atribución"
 }

@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "Cela supprime tout le dossier de l’espace de travail, y compris les fichiers suivis, les fichiers ignorés et les modifications non validées.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "La branche Git et ses commits sont conservés. Les fichiers non validés ne peuvent pas être récupérés depuis Git.",
   "Keep checkout": "Conserver l’espace de travail",
-  "Remove checkout; preserve Git branch": "Supprimer l’espace de travail ; conserver la branche Git"
+  "Remove checkout; preserve Git branch": "Supprimer l’espace de travail ; conserver la branche Git",
+  "Unattributed activity": "Activité non attribuée"
 }

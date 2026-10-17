@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "추적 중인 작업 파일, 무시된 파일, 커밋되지 않은 변경 사항을 포함해 체크아웃 폴더 전체가 제거됩니다.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git 브랜치와 커밋은 유지됩니다. 커밋되지 않은 파일은 Git에서 복구할 수 없습니다.",
   "Keep checkout": "체크아웃 유지",
-  "Remove checkout; preserve Git branch": "체크아웃 제거, Git 브랜치 유지"
+  "Remove checkout; preserve Git branch": "체크아웃 제거, Git 브랜치 유지",
+  "Unattributed activity": "귀속되지 않은 활동"
 }

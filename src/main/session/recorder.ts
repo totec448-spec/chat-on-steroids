@@ -30,7 +30,7 @@ import type {
   ToolOutcome,
   TurnOutcome
 } from '../../shared/session.js';
-import { estimateTokens, originTitle } from '../../shared/session.js';
+import { estimateTokens, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
@@ -600,7 +600,7 @@ async function ensureUnattributedSession(): Promise<string | null> {
   if (unattributedSessionId) return unattributedSessionId;
   if (unattributedInitialization) return unattributedInitialization;
   const initializing = (async () => {
-    const summary = await createSession({ title: 'Unattributed activity' });
+    const summary = await createSession({ title: UNATTRIBUTED_SESSION_TITLE });
     await appendEvent(summary.id, {
       time: Date.now(), source: 'app', kind: 'session_start', conversationId: null, title: summary.title
     });
@@ -888,7 +888,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
   const changed = new Set<string>();
 
   for (const summary of await indexedSessions()) {
-    if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
+    if (summary.conversationId !== null || summary.title !== UNATTRIBUTED_SESSION_TITLE) continue;
     const cached = repairBuckets.get(summary.id);
     if (affected && cached?.toolCalls === summary.toolCalls && cached.updatedAt === summary.updatedAt &&
         ![...affected].some((id) => cached.requestIds.has(id))) continue;

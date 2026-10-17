@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "チェックアウトのフォルダー全体が削除されます。追跡中の作業ファイル、無視されたファイル、未コミットの変更も含まれます。",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git ブランチとそのコミットは残ります。未コミットのファイルは Git から復元できません。",
   "Keep checkout": "チェックアウトを残す",
-  "Remove checkout; preserve Git branch": "チェックアウトを削除し、Git ブランチを残す"
+  "Remove checkout; preserve Git branch": "チェックアウトを削除し、Git ブランチを残す",
+  "Unattributed activity": "帰属未確定のアクティビティ"
 }
