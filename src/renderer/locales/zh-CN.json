@@ -2706,5 +2706,7 @@
   "Conflict": "冲突",
   "Conflicts": "冲突",
   "Goal result needs review": "请检查 Goal 结果",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 辅助工具认为工作已完成，但尚未检查。请查看聊天或发送下一条指示。"
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 辅助工具认为工作已完成，但尚未检查。请查看聊天或发送下一条指示。",
+  "Review Goal completion": "检查 Goal 完成情况",
+  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "默认关闭。Goal 停止时结果仍未验证，回复会保持待处理。Session finish 也会让对话保持打开，并可能发送通知。"
 }

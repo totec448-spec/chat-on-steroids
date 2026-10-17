@@ -2706,5 +2706,7 @@
   "Conflict": "Xung đột",
   "Conflicts": "Xung đột",
   "Goal result needs review": "Cần xem lại kết quả Goal",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Trợ lý Goal cho rằng công việc đã hoàn tất, nhưng điều này chưa được kiểm tra. Hãy xem lại cuộc trò chuyện hoặc gửi chỉ dẫn tiếp theo."
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Trợ lý Goal cho rằng công việc đã hoàn tất, nhưng điều này chưa được kiểm tra. Hãy xem lại cuộc trò chuyện hoặc gửi chỉ dẫn tiếp theo.",
+  "Review Goal completion": "Xem lại kết quả Goal",
+  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "Mặc định là tắt. Khi Goal dừng, kết quả vẫn chưa được xác minh và câu trả lời vẫn chờ xử lý. Session finish cũng giữ cuộc trò chuyện mở và có thể gửi thông báo."
 }

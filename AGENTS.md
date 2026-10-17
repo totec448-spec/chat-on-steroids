@@ -3792,10 +3792,10 @@ local tool call, so lost tool connectivity cannot be established; Loop remains e
 claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
 
-`ui.finishHoldOnStop` is a config-only opt-in; there is no Settings control. When enabled, a Goal
-helper's `stop` is shown as unverified rather than treated as verified completion. For an
-ordinary Goal reply, show the stop as unverified and keep the reply pending without retrying.
-At Session finish, keep the current hold and notify once; record the event as
+The `Review Goal completion` setting is off by default. When enabled, a Goal helper's `stop` is
+shown as unverified rather than treated as verified completion. For an ordinary Goal reply,
+show the stop as unverified and keep the reply pending without retrying. At Session finish,
+keep the current hold and try to show one notice; record the event as
 `helper_stop_unverified`. Missing/false keeps the prior behavior, and Loop's refusal handling
 is unchanged. The optional progress `reason` is a typed `SessionEvent` field, not completion
 evidence.

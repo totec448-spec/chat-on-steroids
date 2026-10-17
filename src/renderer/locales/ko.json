@@ -2706,5 +2706,7 @@
   "Conflict": "충돌",
   "Conflicts": "충돌",
   "Goal result needs review": "Goal 결과를 확인하세요",
-  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 보조 도구는 작업이 끝났다고 판단했지만 아직 확인되지 않았습니다. 채팅을 확인하거나 다음 지시를 보내세요."
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 보조 도구는 작업이 끝났다고 판단했지만 아직 확인되지 않았습니다. 채팅을 확인하거나 다음 지시를 보내세요.",
+  "Review Goal completion": "Goal 완료 확인",
+  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "기본값은 꺼짐입니다. Goal 중단은 확인되지 않은 상태로 표시되고 답변은 대기 상태로 유지됩니다. Session finish에서도 채팅은 열린 상태로 유지되며 알림을 보낼 수 있습니다."
 }
