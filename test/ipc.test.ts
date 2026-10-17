@@ -902,6 +902,18 @@ describe('ChatGPT browser settings', () => {
 });
 
 describe('settings writes from more than one UI', () => {
+  it("keeps the version whose What's New was seen when a setting changes", async () => {
+    // Every settings save rebuilt \`ui\` without it, so What's New came back at the next start after
+    // any changed setting (2.1.41 pass, Windows VM).
+    const base = defaultConfig(); await saveConfig({ ...base, ui: { ...base.ui, lastSeenVersion: '2.1.40' } });
+    const current = getConfig();
+    const { lastSeenVersion: _seen, ...formUi } = current.ui;
+    expect((await save({ ...current, ui: { ...formUi, theme: 'dark' } }, { ...current, ui: formUi })).ok).toBe(true);
+    expect(getConfig().ui.theme).toBe('dark');
+    expect(getConfig().ui.lastSeenVersion).toBe('2.1.40');
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.lastSeenVersion).toBe('2.1.40');
+  });
+
   it('validates and persists the Plugins tunnel id through Settings, including explicit clearing', async () => {
     const base = defaultConfig(); await saveConfig(base);
     const tunnelId = `tunnel_${'a'.repeat(32)}`;
