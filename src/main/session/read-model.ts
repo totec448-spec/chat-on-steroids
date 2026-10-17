@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { primeForOwnedConversation } from '../agents.js';
-import { sessionActivityExpiresAt } from '../bridge.js';
+import { approvalWaitingChats } from '../approval-wait.js';
+import { recoveryStoppedChats, sessionActivityExpiresAt } from '../bridge.js';
 import { getConfig } from '../config.js';
 import { tokenPressure } from '../../shared/session.js';
 import { listInputs } from './input.js';
@@ -38,7 +39,7 @@ export async function readSession(id: string): Promise<SessionSummary | null> {
 
 export async function readSessionList(options: { cursor?: SessionListCursor; limit: number; projectId?: string }) {
   const config = getConfig();
-  await listInputs(); // Restore exact helper origins before the first sidebar page.
+  const inputs = await listInputs(); // Restore exact helper origins before the first sidebar page.
   const page = await listSessionPage({ cursor: options.cursor, limit: options.limit, ...(options.projectId ? { projectId: options.projectId } : {}) });
   // Older recordings omitted worker origins' parent IDs. The broker's exact
   // retained owner can repair that presentation without reviving a worker or
@@ -61,6 +62,12 @@ export async function readSessionList(options: { cursor?: SessionListCursor; lim
     // not belong in any session's meta.json. It rides the list for the same reason
     // `activeId` and `pressure` do — one paint, one round trip.
     blocked: blockedChatIds(),
+    // Two more per-chat states the main process alone holds, keyed the same way. `approval` is
+    // the recovery hold's own freshness rule (approval-wait.ts); `recoveryStopped` is exactly the
+    // chats whose recovery countdown reads `pickup-stopped`, asked only of sessions with a durable
+    // stop mark, so a list with none costs nothing.
+    approval: approvalWaitingChats(),
+    recoveryStopped: await recoveryStoppedChats(inputs),
     // Explicit roots only. Renderer projects committed resume lineage from each returned summary;
     // keeping the roots here avoids copying derived trust into a second authority surface.
     trusted: trustedChatIds(),

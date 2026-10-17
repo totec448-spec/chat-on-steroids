@@ -351,6 +351,22 @@ it('searches a comparison branch without checking out and keeps the chosen diff 
   expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectB.id, undefined);
 });
 
+it('gives focus back to the branch trigger when a branch is chosen with the keyboard', async () => {
+  const branches = [{ ref: 'refs/heads/main', label: 'main' }];
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({ ...cleanGit(), currentBranch: 'feature', branches }));
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  const trigger = host.querySelector<HTMLButtonElement>('.file-branch-trigger')!;
+  trigger.focus(); trigger.click();
+  const search = document.querySelector<HTMLInputElement>('.file-branch-search')!;
+  expect(document.activeElement).toBe(search);
+  search.value = 'main'; search.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  search.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await tick();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, 'refs/heads/main');
+  expect(document.activeElement).toBe(trigger);
+});
+
 it('lets Review leave a comparison whose branch disappeared', async () => {
   const baseRef = 'refs/heads/removed';
   (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok(selected

@@ -8,6 +8,7 @@ import { marked } from 'marked';
 import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
+import { createSearchPopup } from './search-popup.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import type { ProjectCodeEditor, ProjectDiffViewer } from './file-code-editor.js';
 import type { ProjectPdfViewer } from './file-pdf-viewer.js';
@@ -319,7 +320,23 @@ export function createFilePanel(options: FilePanelOptions) {
   let reviewGeneration = 0;
   let gitSnapshot: ProjectGitSnapshot | null = null;
   let selectedBaseRef: string | null = null;
-  let branchMenu: HTMLElement | null = null;
+  const branchPopup = createSearchPopup({
+    trigger: () => branchTrigger, className: 'file-branch',
+    label: () => t('Compare branches'), placeholder: () => t('Search branches…'), empty: () => t('No branches found'),
+    choices: () => [{ ref: '', label: t('Working tree') }, ...(gitSnapshot?.branches ?? [])].map(choice => ({
+      label: choice.label, selected: choice.ref === (selectedBaseRef ?? ''),
+      ...(choice.ref.startsWith('refs/remotes/') ? { title: t('Locally cached remote branch; no automatic fetch') } : {}),
+      pick: () => {
+        if (selectedBaseRef === (choice.ref || null)) return;
+        selectedBaseRef = choice.ref || null;
+        gitDiffGeneration++; gitDiffPath = null; gitDiffValue = null;
+        gitSnapshot = null;
+        destroyDiffViewer(); render();
+        void reconcileGitChanges();
+      }
+    })),
+    notes: () => gitSnapshot?.branchesTruncated ? [t('More branches exist than can be shown.')] : []
+  });
   let gitLoading = false;
   let gitGeneration = 0;
   let gitDiffGeneration = 0;
@@ -1604,84 +1621,11 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   refresh.onclick = () => void (mode === 'changes' ? reconcileGitChanges(true) : refreshAll());
-  function closeBranchMenu(restoreFocus = false): void {
-    if (!branchMenu) return;
-    const leaving = branchMenu; branchMenu = null;
-    // Leave like the other menus: a short fade while it stops taking input, then removal.
-    leaving.inert = true; leaving.classList.add('is-leaving');
-    const motion = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && typeof leaving.animate === 'function';
-    if (motion) void leaving.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-4px)' }], { duration: 120, easing: 'ease-in' })
-      .finished.catch(() => undefined).then(() => leaving.remove());
-    else leaving.remove();
-    document.removeEventListener('pointerdown', dismissBranchMenu, true);
-    document.removeEventListener('keydown', branchMenuKeydown, true);
-    window.removeEventListener('resize', dismissBranchMenuOnResize);
-    branchTrigger.setAttribute('aria-expanded', 'false');
-    if (restoreFocus) branchTrigger.focus();
-  }
-  function dismissBranchMenu(event: PointerEvent): void {
-    if (branchMenu && !branchMenu.contains(event.target as Node) && !branchTrigger.contains(event.target as Node)) closeBranchMenu();
-  }
-  function branchMenuKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeBranchMenu(true); }
-  }
-  function dismissBranchMenuOnResize(): void { closeBranchMenu(); }
+  function closeBranchMenu(restoreFocus = false): void { branchPopup.close(restoreFocus); }
   branchTrigger.addEventListener('click', () => {
-    if (branchMenu) { closeBranchMenu(); return; }
+    if (branchPopup.open) { closeBranchMenu(); return; }
     if (!project || (gitSnapshot?.state !== 'ready' && !selectedBaseRef)) return;
-    const menu = el('div', 'file-branch-menu');
-    menu.setAttribute('role', 'dialog');
-    menu.setAttribute('aria-label', t('Compare branches'));
-    const search = el('input', 'file-branch-search') as HTMLInputElement;
-    search.type = 'search'; search.placeholder = t('Search branches…');
-    search.setAttribute('aria-label', t('Search branches…'));
-    const items = el('div', 'file-branch-items');
-    const renderItems = (): void => {
-      items.replaceChildren();
-      const query = search.value.trim().toLocaleLowerCase();
-      const choices = [{ ref: '', label: t('Working tree') }, ...(gitSnapshot?.branches ?? [])];
-      for (const choice of choices.filter(entry => entry.label.toLocaleLowerCase().includes(query))) {
-        const option = el('button', 'file-branch-option') as HTMLButtonElement;
-        option.type = 'button';
-        if (choice.ref.startsWith('refs/remotes/')) option.title = t('Locally cached remote branch; no automatic fetch');
-        option.append(el('span', '', choice.label));
-        if (choice.ref === (selectedBaseRef ?? '')) option.append(icon('i-check'));
-        option.addEventListener('click', () => {
-          closeBranchMenu();
-          if (selectedBaseRef === (choice.ref || null)) return;
-          selectedBaseRef = choice.ref || null;
-          gitDiffGeneration++; gitDiffPath = null; gitDiffValue = null;
-          gitSnapshot = null;
-          destroyDiffViewer(); render();
-          void reconcileGitChanges();
-        });
-        items.append(option);
-      }
-      if (!items.childElementCount) items.append(el('p', 'file-branch-empty', () => t('No branches found')));
-      if (gitSnapshot?.branchesTruncated) items.append(el('p', 'file-branch-empty', () => t('More branches exist than can be shown.')));
-    };
-    search.addEventListener('input', renderItems);
-    search.addEventListener('keydown', event => {
-      if (event.key === 'ArrowDown') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button')?.focus(); }
-      if (event.key === 'Enter') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button')?.click(); }
-    });
-    items.addEventListener('keydown', event => {
-      const buttons = [...items.querySelectorAll<HTMLButtonElement>('button')];
-      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault(); buttons[Math.max(0, Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
-      }
-    });
-    menu.append(search, items);
-    const rect = branchTrigger.getBoundingClientRect();
-    menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 300))}px`;
-    menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 270))}px`;
-    document.body.append(menu); branchMenu = menu;
-    branchTrigger.setAttribute('aria-expanded', 'true');
-    document.addEventListener('pointerdown', dismissBranchMenu, true);
-    document.addEventListener('keydown', branchMenuKeydown, true);
-    window.addEventListener('resize', dismissBranchMenuOnResize);
-    renderItems(); search.focus();
+    branchPopup.show();
   });
   pane.addEventListener('keydown', event => {
     if (editingPath && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
