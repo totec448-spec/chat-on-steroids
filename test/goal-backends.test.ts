@@ -361,6 +361,37 @@ describe('Goal decision backends', () => {
     expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
     expect(fetch).not.toHaveBeenCalled();
   });
+  describe('the original request in the ChatGPT helper prompt', () => {
+    async function chatWithStarter(conversationId: string, starter: string): Promise<string> {
+      await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'chatgpt', loopBackend: 'chatgpt' } });
+      const session = await createSession({ title: 'starter', conversationId });
+      const rows = [['user', starter], ['assistant', 'a'.repeat(11_000)], ['user', 'b'.repeat(40_000)], ['assistant', 'Latest result']] as const;
+      for (const [index, [role, text]] of rows.entries()) {
+        await appendEvent(session.id, { time: 1000 + index, source: 'extension',
+          ...(role === 'assistant' ? { kind: 'assistant_message' as const, final: true } : { kind: 'user_message' as const }),
+          message: { text, chars: text.length, truncated: false } });
+      }
+      return session.id;
+    }
+    it('trims the transcript to fit but never the protected original request', async () => {
+      const starter = `HEAD ${'s'.repeat(50_000)} TAIL`;
+      const sessionId = await chatWithStarter('browser-starter-fits', starter);
+      browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
+      expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('Next');
+      const prompt = browser.request.mock.calls[0]![0] as string;
+      expect(prompt.length).toBeLessThanOrEqual(96_000);
+      expect(prompt).toContain(`exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`);
+      expect(prompt).not.toContain('b'.repeat(40_000));
+    });
+    it('fails visibly, without retry or a helper call, when the original cannot fit the helper budget', async () => {
+      const { noteGoalHelperUnanswered } = await import('../src/main/goal-helper-size.js');
+      noteGoalHelperUnanswered(30_000);
+      const sessionId = await chatWithStarter('browser-starter-too-big', 'z'.repeat(20_000));
+      await expect(goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal'))
+        .rejects.toMatchObject({ message: expect.stringMatching(/^original_request_too_large/), retryable: false });
+      expect(browser.request).not.toHaveBeenCalled();
+    });
+  });
   it('uses the Loop driver even when offline Goal marked the last answer complete', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates', loopBackend: 'chatgpt' } });
     const sessionId = await recording('finish-offline', 'Done\n[[COS_GOAL:COMPLETE]]');
