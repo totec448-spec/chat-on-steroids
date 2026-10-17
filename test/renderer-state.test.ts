@@ -909,6 +909,33 @@ it('calls an unread reply a New response on its card, the word its row badge alr
   expect(card.textContent).not.toContain('Done');
 });
 
+it('writes a card and a settled line age in the app language', async () => {
+  const now = Date.now();
+  const mounted = await mountInbox({ listSessions: async () => listed([
+    inboxChat('recent', { updatedAt: now - 5 * 60 * 60_000 }),
+    inboxChat('quiet', { startedAt: now - 2 * DAY, updatedAt: now - 2 * DAY })
+  ]) });
+  const doc = mounted.window.document;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['recent']));
+  const cardAge = () => inboxCardState(doc, 'recent').state.querySelector('.sess-age')!.textContent;
+  const settledAge = () => doc.querySelector('.inbox-settled > .sess[data-id="quiet"] .sess-age')!.textContent;
+  // The narrow form the platform has for each language: the exact words differ between ICU versions.
+  const narrow = (language: string, value: number, unit: string) =>
+    new Intl.NumberFormat(language, { style: 'unit', unit, unitDisplay: 'narrow' }).format(value);
+  expect([cardAge(), settledAge()]).toEqual(['5h', '2d']);
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    setLanguage('ru');
+    expect(cardAge()).toBe(narrow('ru', 5, 'hour'));
+    expect(cardAge()).not.toBe('5h');
+    setLanguage('de');
+    expect(settledAge()).toBe(narrow('de', 2, 'day'));
+    expect(settledAge()).not.toBe('2d');
+  } finally {
+    setLanguage('en');
+  }
+});
+
 it('says No project on the card of a chat outside every project', async () => {
   const now = Date.now();
   const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('loose', { updatedAt: now })]) });
