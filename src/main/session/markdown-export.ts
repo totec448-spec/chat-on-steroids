@@ -3,7 +3,7 @@ import path from 'node:path';
 import { app, clipboard, dialog, type BrowserWindow } from 'electron';
 import type { StoredText } from '../../shared/session.js';
 import {
-  answerMarkdown, completedTurnIds, markdownFileName, sessionMarkdown, transcriptEntries, turnAnswerEntries
+  answerMarkdown, completedTurnIds, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries, turnAnswerEntries
 } from '../../shared/markdown-export.js';
 import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
@@ -13,8 +13,10 @@ import { completedDilText } from '../../shared/dil-tables.js';
 export type MarkdownExportRequest = {
   id: string;
   scope: 'answer' | 'session';
-  /** The completed turn whose answer is wanted; required for `answer`. */
+  /** The completed turn whose answer is wanted; `answer` names this or `messageId`. */
   turnId?: string;
+  /** An answer recorded outside any turn (copied branch history, an adopted chat's history). */
+  messageId?: string;
   target: 'clipboard' | 'file';
 };
 
@@ -36,9 +38,10 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
   let markdown: string;
   let name: string;
   if (request.scope === 'answer') {
-    // Only a turn the page reported as completed has an answer to hand out.
-    if (!request.turnId || !completedTurnIds(events).has(request.turnId)) throw new Error('This turn has not completed');
-    const entries = turnAnswerEntries(events, request.turnId);
+    // Only a turn the page reported as completed has an answer to hand out; an answer recorded
+    // outside any turn is final already, and is named by its message instead.
+    if (!request.messageId && (!request.turnId || !completedTurnIds(events).has(request.turnId))) throw new Error('This turn has not completed');
+    const entries = request.messageId ? messageAnswerEntries(events, request.messageId) : turnAnswerEntries(events, request.turnId!);
     if (!entries.length) throw new Error('This turn has no answer to export');
     markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored, entry.html))));
     name = markdownFileName(summary.title, ' - answer');

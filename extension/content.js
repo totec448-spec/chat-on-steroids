@@ -12922,7 +12922,96 @@
       ...(changed ? { changed, ...(changed === 'progress' && turnProgressSource ? { progressBy: turnProgressSource } : {}) } : {}) });
   }
 
+  /**
+   * Branch in new chat (#482): the input this document made ChatGPT's branch for, and the draft
+   * route ChatGPT moved to. Document-local: a reload or another document never inherits it.
+   */
+  let branchDraft = null;
+  const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /**
+   * ChatGPT's move to its branch draft drops this message's `cos-input` marker, which is how the
+   * extension knows the tab is the one opened for this message (claim, discard protection, tab
+   * group). Put it back without a navigation, as a new chat's home page carries it until Send.
+   */
+  function markBranchDraft(inputId) {
+    const url = new URL(location.href);
+    if (url.searchParams.get('cos-input') === inputId && new URLSearchParams(url.hash.slice(1)).get('cos-input') === inputId) return;
+    const marker = `cos-input=${encodeURIComponent(inputId)}`;
+    history.replaceState(history.state, '', `${location.pathname}?${marker}#${marker}`);
+  }
+  /**
+   * Turns the source chat this tab was opened on into ChatGPT's own branch at the exact reply,
+   * before the ordinary new-chat delivery claims, types and sends. Only the tab the app opened for
+   * this input (its marker) acts, only on an idle, readable page, and nothing is typed or claimed
+   * here: a branch ChatGPT never received a message for stays a local draft in this tab.
+   */
+  async function prepareBranchPage(message) {
+    const branch = message.branch;
+    if (!branch || message.conversationId || !NATIVE_ID.test(branch.conversationId || '') || !NATIVE_ID.test(branch.messageId || '')) return false;
+    if (branchDraft) {
+      const ours = branchDraft.inputId === message.id && location.pathname === branchDraft.path;
+      // ChatGPT can rewrite the draft's address once more after moving there, dropping the marker.
+      if (ours) markBranchDraft(message.id);
+      return ours;
+    }
+    if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy || stopRequestedAt) return false;
+    // ChatGPT's draft of this exact reply, after this document forgot it made it (an extension or
+    // page reload). Only the tab elected for this message is offered it; the draft itself proves
+    // it continues from that reply.
+    if (/^\/c\/local-chatgpt(?::|%3A)/i.test(location.pathname) && !CLF_DOM.conversationId()) {
+      const path = location.pathname;
+      const onDraft = () => alive && location.pathname === path && !CLF_DOM.conversationId() && !stopRequestedAt;
+      desktopInputBusy = true;
+      try {
+        if (!await waitPageView(() => !CLF_DOM.generating() && CLF_DOM.turns().length > 0, onDraft, 15000) || !onDraft()) return false;
+        await refreshFiber();
+        const last = CLF_DOM.turns().filter(candidate => candidate.role === 'assistant').at(-1);
+        if (!onDraft() || !last || fiberTurnFor(last)?.endMessageId !== branch.messageId || CLF_DOM.turns().at(-1)?.role !== 'assistant') return false;
+        branchDraft = { inputId: message.id, path };
+        markBranchDraft(message.id);
+        return true;
+      } finally {
+        desktopInputBusy = false;
+      }
+    }
+    const marked = () => {
+      const url = new URL(location.href);
+      return url.searchParams.get('cos-input') === message.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === message.id;
+    };
+    if (CLF_DOM.conversationId() !== branch.conversationId || !marked()) return false;
+    const forEpoch = epoch;
+    const onSource = () => alive && epoch === forEpoch && CLF_DOM.conversationId() === branch.conversationId && marked() && !stopRequestedAt;
+    const report = reason => ask({ type: 'desktop_input', id: message.id, conversationId: branch.conversationId, branchFailed: reason }).catch(() => null);
+    desktopInputBusy = true;
+    try {
+      // The reply's own turn, by its native id: a reply still being written is not a branch point.
+      const ready = await waitPageView(() => !CLF_DOM.generating() && pendingTools === 0 && CLF_DOM.turns().length > 0, onSource, 15000);
+      if (!ready || !onSource()) return false;
+      await refreshFiber();
+      if (!onSource()) return false;
+      const turn = CLF_DOM.turns().find(candidate => candidate.role === 'assistant' && fiberTurnFor(candidate)?.endMessageId === branch.messageId);
+      if (!turn) {
+        // Fiber evidence must be readable before the reply can be called missing.
+        if (fiberPresent && CLF_DOM.turns().some(candidate => candidate.role === 'assistant' && fiberTurnFor(candidate))) await report('branch_message_missing');
+        return false;
+      }
+      const node = turn.node || turn.nodes?.[0];
+      const scope = node?.closest?.('[data-turn-key]') || node;
+      const chosen = await CLF_DOM.branchInNewChat(scope, onSource);
+      if (chosen !== 'clicked') { if (onSource()) await report('branch_unavailable'); return false; }
+      // ChatGPT moves this tab to its local draft of the branch: same history, ending at that reply.
+      const drafted = () => alive && /^\/c\/local-chatgpt(?::|%3A)/i.test(location.pathname) && !CLF_DOM.conversationId();
+      if (!await waitPageView(drafted, () => alive && !stopRequestedAt, 15000)) { await report('branch_unavailable'); return false; }
+      branchDraft = { inputId: message.id, path: location.pathname };
+      markBranchDraft(message.id);
+      return true;
+    } finally {
+      desktopInputBusy = false;
+    }
+  }
+
   async function acceptDesktopInput(message) {
+    if (message.branch && !message.conversationId && !await prepareBranchPage(message)) return false;
     const silencePickup = typeof message.silenceTurnId === 'string';
     let sourceQuiet = silencePickup;
     if (desktopInputBusy || modelCatalogBusy || !alive || (generating && !message.directTurn && !silencePickup) || (pendingTools > 0 && !message.directTurn) || goalBusy || job?.busy) return false;
@@ -13017,8 +13106,11 @@
       const url = new URL(location.href);
       return url.searchParams.get('cos-input') === message.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === message.id;
     };
-    const ownsFreshPage = () => !target && onTarget() && (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
-      (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length;
+    // A branch's fresh page is the draft this document made for it, already holding the history.
+    const ownsBranchDraft = () => !!message.branch && branchDraft?.inputId === message.id && location.pathname === branchDraft.path;
+    const ownsFreshPage = () => !target && onTarget() && (ownsBranchDraft() || (!message.branch &&
+      (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
+      (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
     desktopInputBusy = true;
     let decision = null;

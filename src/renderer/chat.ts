@@ -38,7 +38,7 @@ import { sanitizeHtmlTree } from './sanitize-html.js';
 import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
-import { answerAnchors } from '../shared/markdown-export.js';
+import { answerAnchors, messageAnswerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
@@ -172,6 +172,10 @@ let activeId: string | null = null;
 let selectedId: string | null = null;
 let newChatSelected = true;
 let selectedProjectId: string | null = null;
+/** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
+let newChatBranch: { sessionId: string; conversationId: string; messageId: string; title: string } | null = null;
+/** ChatGPT's own conversation and message ids; a synthetic interim id is never a branch point. */
+const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let projects: LocalProject[] = [];
 /** Window-local disclosure intent. Project groups start closed until the user or selection opens one. */
 const expandedProjects = new Set<string>();
@@ -2044,6 +2048,64 @@ function syncSelectedWorkspace(): void {
   workspaceTerminal?.update(selectedLocalProject());
   rightWorkspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
+  // Branch in new chat: the draft notice and the link back follow the selection in either layout.
+  paintBranchNotices();
+}
+
+/**
+ * Branch in new chat (#482). While a branch is being written, the composer says which chat and
+ * reply it starts from; a branched chat links back to that reply. Nothing else carries over.
+ */
+function paintBranchNotices(): void {
+  const draft = $('branchDraft');
+  // A source chat deleted while its branch is a draft: the draft becomes a plain new chat.
+  if (newChatBranch && !sessions.some(row => row.id === newChatBranch!.sessionId)) newChatBranch = null;
+  const pending = newChatSelected && selectedId === null ? newChatBranch : null;
+  draft.hidden = !pending;
+  if (pending && draft.dataset.branchFor !== `${pending.sessionId}:${pending.messageId}`) {
+    draft.dataset.branchFor = `${pending.sessionId}:${pending.messageId}`;
+    // A row of the composer dock, drawn like its neighbours: icon, label, then the dock's own action.
+    // Cancel undoes the Branch click: back to the reply it was made from. A source chat deleted
+    // meanwhile leaves a plain new chat, with whatever was typed still in it.
+    const cancel = dockAction(() => t('Cancel branch'), 'i-x', () => {
+      const back = newChatBranch;
+      newChatBranch = null;
+      if (back && sessions.some(row => row.id === back.sessionId)) { void openBranchSource(back.sessionId, back.messageId); return; }
+      paintBranchNotices(); $<HTMLTextAreaElement>('chatInput').focus();
+    });
+    cancel.classList.add('branch-draft-cancel');
+    draft.replaceChildren(icon('i-git-branch'), el('span', 'queue-label', () => t('New chat from a reply in “{0}”', [pending.title])), cancel);
+  } else if (!pending) delete draft.dataset.branchFor;
+  const link = $<HTMLButtonElement>('chatBranchOrigin');
+  const selected = !newChatSelected && selectedId ? sessions.find(row => row.id === selectedId) : undefined;
+  const branchOf = selected?.origin?.branchOf;
+  const source = branchOf && selected?.origin?.fromSessionId ? sessions.find(row => row.id === selected.origin!.fromSessionId) : undefined;
+  link.hidden = !branchOf;
+  link.disabled = !source;
+  if (!branchOf) { delete link.dataset.branchSource; return; }
+  const key = `${selected!.id}:${source?.id ?? ''}:${source ? shownSessionTitle(source) : ''}`;
+  if (link.dataset.branchSource === key) return;
+  link.dataset.branchSource = key;
+  link.replaceChildren(icon('i-git-branch'), el('span', '', () => source
+    ? t('Branched from “{0}”', [shownSessionTitle(source)]) : t('Branched from another chat')));
+  link.onclick = source ? () => void openBranchSource(source.id, branchOf.messageId) : null;
+}
+
+/** Opens the chat a branch came from, at the exact reply it was branched from. */
+async function openBranchSource(sessionId: string, messageId: string): Promise<void> {
+  selectSession(sessionId);
+  const selection = selectionGeneration;
+  const location = await run(api.locateMessage(sessionId, messageId));
+  if (!location || selection !== selectionGeneration || selectedId !== sessionId) return;
+  await revealChatLocation(sessionId, location);
+}
+
+/** The reply a new chat may branch from: a native reply in a chat ChatGPT knows, never a worker's. */
+function branchPoint(messageId: string | undefined): typeof newChatBranch {
+  const source = sessions.find(row => row.id === selectedId);
+  if (!source || !messageId || !NATIVE_ID.test(messageId) || !source.conversationId || !NATIVE_ID.test(source.conversationId)) return null;
+  if (source.origin?.kind === 'worker' || source.origin?.kind === 'helper') return null;
+  return { sessionId: source.id, conversationId: source.conversationId, messageId, title: shownSessionTitle(source) };
 }
 
 /** Repaint once at the nearest activity-window boundary; no polling clock is needed. */
@@ -4184,12 +4246,14 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
  * builds the text from the log, reading back answers that were cut there, so a long answer
  * copies and exports whole; the timeline only decides where the actions appear.
  */
-function answerActions(turnId: string): HTMLElement {
+function answerActions(turnId: string | null, messageId?: string): HTMLElement {
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
+  // A turn's answer is named by its turn; one recorded outside any turn by its message.
   const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file') => {
     if (!sessionId || selectedId !== sessionId) return null;
-    return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' ? turnId : undefined, target }));
+    return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' && turnId ? turnId : undefined,
+      messageId: scope === 'answer' && !turnId ? messageId : undefined, target }));
   };
   const copy = el('button', 'answer-action') as HTMLButtonElement;
   copy.type = 'button';
@@ -4228,6 +4292,20 @@ function answerActions(turnId: string): HTMLElement {
   });
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
   bar.append(copy, menu);
+  const branch = branchPoint(messageId);
+  if (branch) {
+    // Branch in new chat (#482): ChatGPT's own branch at this reply, made with the first message.
+    const button = el('button', 'answer-action answer-branch') as HTMLButtonElement;
+    button.type = 'button';
+    button.append(icon('i-git-branch'));
+    ui(button, 'title', () => t('Branch in new chat')); ui(button, 'aria-label', () => t('Branch in new chat'));
+    button.addEventListener('click', () => {
+      const current = branchPoint(messageId);
+      if (!current) return;
+      selectNewChat(projectGroup(sessions.find(row => row.id === current.sessionId)?.projectId) ?? null, current);
+    });
+    bar.append(button);
+  }
   return bar;
 }
 
@@ -5021,6 +5099,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const duplicateErrors = duplicateChatErrors(events);
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
+  const looseAnchors = messageAnswerAnchors(events);
   const workedSeconds = exchangeDurations(events);
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
@@ -5034,8 +5113,11 @@ function paintDetail(followBottom = historyBefore === null): void {
     const key = itemKey(item);
     const answerTurn = item.kind === 'event' && item.event.kind === 'assistant_message' && item.event.turnId &&
       anchors.get(item.event.turnId) === item.event.seq ? item.event.turnId : null;
+    // A final answer recorded outside any turn (copied branch history, an adopted chat) has the same actions.
+    const looseAnswer = !answerTurn && item.kind === 'event' && item.event.kind === 'assistant_message' && !item.event.turnId &&
+      !!item.event.messageId && looseAnchors.get(item.event.messageId) === item.event.seq;
     const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn ? '\u0000answer' : '') +
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '');
     keep.add(key);
@@ -5053,7 +5135,8 @@ function paintDetail(followBottom = historyBefore === null): void {
       continue;
     }
     const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction) : eventRow(item.event);
-    if (answerTurn) row.querySelector('.said')?.append(answerActions(answerTurn));
+    if (answerTurn || looseAnswer) row.querySelector('.said')?.append(answerActions(answerTurn,
+      item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
     row.dataset.timelineKey = key;
     row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
@@ -7107,7 +7190,13 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
       controlledCanInject && images.some(file => 'id' in file) && injectableAttachments(images) ? { attachmentDelivery: 'tool' as const } : {}) };
   const objective = plan ? planObjective : mode === 'finish' ? undefined : $<HTMLTextAreaElement>('sessionObjective').value.trim() || undefined;
   const authoredSource = plan ? 'objective' as const : 'text' as const;
-  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
+  // Branch in new chat (#482): the first message of a branch, or its retry before ChatGPT has it.
+  const reserved = sessionId ? sessions.find(row => row.id === sessionId) : undefined;
+  const branch = sessionId === null && newChatBranch
+    ? { sessionId: newChatBranch.sessionId, conversationId: newChatBranch.conversationId, messageId: newChatBranch.messageId }
+    : reserved?.origin?.branchOf && reserved.origin.fromSessionId && !reserved.conversationId
+      ? { sessionId: reserved.origin.fromSessionId, ...reserved.origin.branchOf } : undefined;
+  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
     dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
   replaceComposerDraft();
   input.value = ''; inputDrafts.delete(key);
@@ -7119,7 +7208,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       // A disk failure after outbox commit still owns this input. Keep its exact
@@ -7203,6 +7292,7 @@ function showView(name: string): void {
 }
 
 function selectSession(id: string): void {
+  newChatBranch = null;
   const ownerChanged = id !== selectedId;
   rememberDraft();
   selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
@@ -7247,7 +7337,8 @@ function selectSession(id: string): void {
   void refreshInputQueue();
 }
 
-function selectNewChat(projectId: string | null = null): void {
+function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
+  newChatBranch = branch;
   rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
@@ -7264,6 +7355,7 @@ function selectNewChat(projectId: string | null = null): void {
     $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
   }
   ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
+  paintBranchNotices();
   $<HTMLTextAreaElement>('chatInput').focus();
 }
 

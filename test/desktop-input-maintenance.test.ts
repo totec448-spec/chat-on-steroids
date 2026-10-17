@@ -250,7 +250,7 @@ it('carries the direct-turn offer only to the elected existing conversation', as
 });
 
 type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number; active?: boolean; pinned?: boolean };
-async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string; project?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}, rendered?: Set<number>) {
+async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string; project?: string; branch?: { conversationId: string; messageId: string } }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}, rendered?: Set<number>) {
   const tabs: Tab[] = [];
   const event = { addListener: () => {} };
   const tabUpdated = { addListener: vi.fn() };
@@ -409,6 +409,59 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.maintain();
     expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/project-create')).toBe(false);
     expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/g/${project}/project?cos-input=${firstId}#cos-input=${firstId}` }));
+  });
+
+  describe('branch in new chat (#482)', () => {
+    const source = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const branch = { conversationId: source, messageId: '2b06482d-0dc6-4847-bf7a-2e1a0f671e89' };
+    const offers = (h: Awaited<ReturnType<typeof worker>>) => h.sendMessage.mock.calls
+      .filter(([, message]) => message.type === 'clf-desktop-input').map(([tab, message]) => ({ ...message, tab }));
+
+    it('opens the source chat for the branch, never by borrowing a home tab', async () => {
+      const h = await worker([{ id: firstId, conversationId: null, branch }]);
+      const home = { id: 7, url: 'https://chatgpt.com/' };
+      h.tabs.push(home);
+      await h.authorizeDocument({ tab: home, documentId: 'idle-home', frameId: 0, url: home.url }, { navigationEpoch: 1 });
+      h.sendMessage.mockImplementation(async (_id, message): Promise<any> =>
+        message.type === 'clf-input-reuse-state' ? { safe: true, navigationEpoch: 1 } : { ok: true });
+      await h.maintain();
+      expect(h.sendMessage.mock.calls.some(([id, message]) => id === 7 && message.type === 'clf-prepare-desktop-input')).toBe(false);
+      expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/c/${source}?cos-input=${firstId}#cos-input=${firstId}` }));
+    });
+
+    it('offers the branch point to its tab, and again once that tab shows ChatGPT\'s local draft', async () => {
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${source}?cos-input=${firstId}#cos-input=${firstId}`, status: 'complete' } as never);
+      await h.maintain();
+      expect(offers(h)).toEqual([expect.objectContaining({ tab: 7, id: firstId, conversationId: null, branch })]);
+      h.sendMessage.mockClear();
+      h.tabs[0] = { id: 7, url: 'https://chatgpt.com/c/local-chatgpt:4754b9e6-4fd8-4c76-87b2-731ee7a8cde0', status: 'complete' } as never;
+      await h.maintain();
+      expect(offers(h)).toEqual([expect.objectContaining({ tab: 7, id: firstId, conversationId: null, branch })]);
+      expect(h.create).not.toHaveBeenCalled();
+    });
+
+    it.each([[7, true], [8, false]] as const)('lets only the elected tab claim from a draft whose marker ChatGPT dropped (tab %s)', async (tabId, allowed) => {
+      // Live 2.1.41 (VM): ChatGPT rewrote the draft's URL after its own navigation, without the marker.
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      const url = 'https://chatgpt.com/c/local-chatgpt%3A18dba412-03e9-4b2d-a284-6ac4d6d4e5ac';
+      h.tabs.push({ id: tabId, url } as never);
+      const sender = { tab: { id: tabId }, documentId: 'draft', frameId: 0, url };
+      const owner = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+      h.fetch.mockClear();
+      const reply = await h.desktopInput({ id: firstId, conversationId: null, requiresAuthorization: true }, sender, owner);
+      const claimed = h.fetch.mock.calls.some(([target]) => new URL(target).pathname === '/input/claim');
+      expect(claimed).toBe(allowed);
+      if (!allowed) expect(reply).toEqual({ ok: false });
+    });
+
+    it("never takes another tab's local draft for this branch", async () => {
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      h.tabs.push({ id: 8, url: 'https://chatgpt.com/c/local-chatgpt:4754b9e6-4fd8-4c76-87b2-731ee7a8cde0', status: 'complete' } as never);
+      await h.maintain();
+      expect(offers(h)).toEqual([]);
+      expect(h.create).not.toHaveBeenCalled();
+    });
   });
 
   it("opens a new chat of a linked project on its native Project's page, never by borrowing a home tab (#1176)", async () => {

@@ -77,3 +77,15 @@ it('copies the rows of a table ChatGPT drew but wrote with only its header (#147
   await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenCalledWith('| **Item** | **Qty** |\n|---|---|\n| Rice | 1 kg |\n| Milk | 2 l |\n');
 });
+
+// An answer recorded outside any turn (copied branch history, an adopted chat) has no turn to name.
+it('copies an answer recorded without a turn by its message id, and only such an answer', async () => {
+  store.readEvents.mockResolvedValue([...events,
+    { seq: 4, time: 4, source: 'extension', kind: 'assistant_message', messageId: 'loose-1', final: true, state: 'final',
+      message: { text: 'An earlier answer', truncated: false, chars: 17 } }] as SessionEvent[]);
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', messageId: 'loose-1', target: 'clipboard' }, null)).resolves.toEqual({ done: 'copied' });
+  expect(electron.clipboard.writeText).toHaveBeenCalledWith('An earlier answer\n');
+  // A turn's own answer is exported by its turn; an unknown or turn-owned id is refused.
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', messageId: 'a1', target: 'clipboard' }, null)).rejects.toThrow('no answer to export');
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
+});

@@ -134,7 +134,7 @@ import {
   withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
-import { findInSession, locateSearchMatch, searchSessions } from './session/search.js';
+import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -1281,6 +1281,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'session']),
       turnId: z.string().min(1).max(200).optional(),
+      messageId: z.string().min(1).max(200).optional(),
       target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
@@ -1675,6 +1676,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:locate-match', async (payload) => {
     const { id, query } = sessionIdArg.extend({ query: z.string().max(200) }).parse(payload);
     return locateSearchMatch(id, query);
+  });
+  // Branch in new chat (#482): where the reply a branch was made from is, to open the source there.
+  handle('sessions:locate-message', async (payload) => {
+    const { id, messageId } = sessionIdArg.extend({ messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) }).parse(payload);
+    return locateMessage(id, messageId);
   });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);
