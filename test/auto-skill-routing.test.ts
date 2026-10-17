@@ -4,6 +4,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { addProject } from '../src/main/projects.js';
+import { autoSelectManagedSkills } from '../src/main/skill-routing.js';
 import { initSkillsPath, importSkillPackage } from '../src/main/skills.js';
 import { editQueuedInput, enqueueInput, listInputs, resetInputForTests, type InputArgs, type InputEntry } from '../src/main/session/input.js';
 import { createSession, initSessionStore, resetSessionStoreForTests } from '../src/main/session/store.js';
@@ -61,6 +63,33 @@ it('freezes an explicit none when a literal name is ambiguous or no exact name i
   await enableAutoRouting();
   expect(routedIds(await enqueueInput(request('Please use Code Review for this source change.')))).toEqual([]);
   expect(routedIds(await enqueueInput(request('Prepare a quarterly budget summary.')))).toEqual([]);
+});
+
+it('freezes the ETD managed router as the project preflight without widening generic semantic routing', async () => {
+  await install('etd-external-skill-router', 'etd-external-skill-router', 'Mandatory ETD technique preflight.');
+  await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
+  await enableAutoRouting();
+  const projectPath = path.join(directory, 'etd-sports-market-engine');
+  const otherProjectPath = path.join(directory, 'another-project');
+  await fs.mkdir(projectPath, { recursive: true });
+  await fs.mkdir(otherProjectPath, { recursive: true });
+  await saveConfig({ ...getConfig(), roots: [{ name: 'workspace', path: directory }] });
+  const project = await addProject(projectPath);
+
+  const row = await enqueueInput({ ...request('Diagnose why this deterministic test only fails in CI.'), projectId: project.id });
+  expect(routedIds(row)).toEqual(['etd-external-skill-router']);
+  expect(await autoSelectManagedSkills('Diagnose why this deterministic test only fails in CI.', { projectPath: otherProjectPath }))
+    .toEqual([]);
+});
+
+it('does not force the ETD preflight when that managed router forbids implicit invocation', async () => {
+  await install('etd-external-skill-router', 'etd-external-skill-router', 'Mandatory ETD technique preflight.', false);
+  await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
+  await enableAutoRouting();
+  const projectPath = path.join(directory, 'etd-sports-market-engine');
+  await fs.mkdir(projectPath, { recursive: true });
+  await saveConfig({ ...getConfig(), roots: [{ name: 'workspace', path: directory }] });
+  expect(await autoSelectManagedSkills('Please use Code Review to diagnose why this deterministic test only fails in CI.', { projectPath })).toEqual([]);
 });
 
 it('ignores metadata that forbids implicit invocation', async () => {
