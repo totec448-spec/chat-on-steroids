@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "La responsabilité du nettoyage a changé pendant la confirmation. Aucun fichier n’a été supprimé.",
   "Local tools are still executing. No worker files were removed.": "Des outils locaux sont encore en cours d’exécution. Aucun fichier de l’agent n’a été supprimé.",
   "The checkout was not removed safely. Inspect the local app logs for details.": "L’espace de travail n’a pas été supprimé en toute sécurité. Consultez le journal local de l’app pour les détails.",
-  "The browser bridge could not start": "Le pont du navigateur n’a pas pu démarrer"
+  "The browser bridge could not start": "Le pont du navigateur n’a pas pu démarrer",
+  "Image is too large for the bounded preview.": "L’image est trop volumineuse pour l’aperçu.",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "Aperçu de l’image indisponible. Le fichier n’est pas valide, n’est pas pris en charge ou dépasse la limite de pixels.",
+  "PDF is too large for the bounded in-app preview.": "Le PDF est trop volumineux pour l’aperçu dans l’app.",
+  "This .pdf file does not contain a PDF header.": "Ce fichier .pdf ne contient pas d’en-tête PDF.",
+  "This file contains a line that is too large for the bounded preview.": "Ce fichier contient une ligne trop longue pour l’aperçu.",
+  "Binary file, so there is no text preview.": "Fichier binaire, donc pas d’aperçu texte.",
+  "Previews of images and PDFs in a server folder are not available yet.": "Les aperçus d’images et de PDF dans un dossier serveur ne sont pas encore disponibles.",
+  "This diff is too large to display.": "Cette modification est trop volumineuse pour être affichée.",
+  "Binary diff · preview unavailable": "Modification binaire · aperçu indisponible"
 }

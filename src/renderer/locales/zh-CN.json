@@ -2690,5 +2690,14 @@
   "Cleanup ownership changed during confirmation. No files were removed.": "确认期间清理负责方发生了变化。未删除任何文件。",
   "Local tools are still executing. No worker files were removed.": "本地工具仍在运行。未删除任何工作代理文件。",
   "The checkout was not removed safely. Inspect the local app logs for details.": "检出目录未被安全删除。详情请查看本地应用日志。",
-  "The browser bridge could not start": "无法启动浏览器桥接"
+  "The browser bridge could not start": "无法启动浏览器桥接",
+  "Image is too large for the bounded preview.": "图片过大，无法预览。",
+  "Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.": "无法预览图片。文件无效、不受支持或超出像素限制。",
+  "PDF is too large for the bounded in-app preview.": "PDF 过大，无法在应用内预览。",
+  "This .pdf file does not contain a PDF header.": "此 .pdf 文件不包含 PDF 文件头。",
+  "This file contains a line that is too large for the bounded preview.": "此文件包含一行过长的内容，无法预览。",
+  "Binary file, so there is no text preview.": "二进制文件，因此没有文本预览。",
+  "Previews of images and PDFs in a server folder are not available yet.": "服务器文件夹中的图片和 PDF 暂不支持预览。",
+  "This diff is too large to display.": "此更改过大，无法显示。",
+  "Binary diff · preview unavailable": "二进制更改 · 无法预览"
 }
