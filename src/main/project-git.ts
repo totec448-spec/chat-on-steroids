@@ -208,7 +208,11 @@ function splitZero(buffer: Buffer): string[] {
   return parts;
 }
 
+/** Git's unmerged pairs: both modified, both added/deleted, and modify/delete in either direction. */
+const UNMERGED = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
+
 function statusFromXY(xy: string): ProjectGitStatus {
+  if (UNMERGED.has(xy)) return 'C';
   if (xy === '??') return 'U';
   if (xy.includes('R') || xy.includes('C')) return 'R';
   if (xy.includes('D')) return 'D';
@@ -444,7 +448,13 @@ export async function readProjectGitDiff(projectId: string, relativePath: string
     ? { text: '', tooLarge: false }
     : snapshot.comparison
       ? await readHeadFile(context, change.path, snapshot.comparison.headOid)
-      : await readWorkingFile(projectId, change.path);
+      // A conflict deleted on both sides has no working file; its diff is the HEAD side removed.
+      : change.status === 'C'
+        ? await readWorkingFile(projectId, change.path).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' || /not found|no longer|does not exist/i.test(String((error as Error)?.message))) return { text: '', tooLarge: false };
+          throw error;
+        })
+        : await readWorkingFile(projectId, change.path);
   const tooLarge = base.tooLarge || current.tooLarge;
   const binary = change.binary || (!tooLarge && (base.text === null || current.text === null));
   return {

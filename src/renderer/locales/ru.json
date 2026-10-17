@@ -2700,5 +2700,8 @@
   "Previews of images and PDFs in a server folder are not available yet.": "Предпросмотр изображений и PDF в папке на сервере пока недоступен.",
   "This diff is too large to display.": "Это изменение слишком велико для показа.",
   "Binary diff · preview unavailable": "Двоичное изменение · предпросмотр недоступен",
-  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Автоматическое Continue 3 минуты не находило безопасного момента для отправки. Чтобы продолжить, отправьте «Continue» сами."
+  "Automatic Continue found no safe moment to send for 3 minutes. Send Continue yourself to go on.": "Автоматическое Continue 3 минуты не находило безопасного момента для отправки. Чтобы продолжить, отправьте «Continue» сами.",
+  "The Skills library supports at most 64 skills": "Библиотека вмещает не больше 64 навыков",
+  "Conflict": "Конфликт",
+  "Conflicts": "Конфликты"
 }
