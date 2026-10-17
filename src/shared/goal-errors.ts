@@ -50,6 +50,7 @@ export function goalErrorKey(error: string): string | null {
   }
   const code = raw.split(':', 1)[0]!;
   if (code === 'goal_browser_send_failed' && raw.includes(':')) return null;
+  if (code === 'original_request_too_large') return 'goal_context_too_large';
   if (Object.hasOwn(explanations, code)) return code;
   if (/^(?:invalid_goal_decision_(?:json|schema)|malformed_(?:completion_response|stream_record)|empty_reply|control_tokens_only|unsafe_control_tokens)$/.test(code)) return null;
   if (/^provider_(?:completion|stream)_error$/.test(code) || /^http_\d{3}$/.test(code)) return null;
@@ -66,6 +67,7 @@ export function goalErrorMessage(error: string): string {
     wrapped = true;
   }
   const code = raw.split(':', 1)[0]!;
+  if (code === 'original_request_too_large') return explanations.goal_context_too_large!;
   if (code === 'goal_browser_send_failed' && raw.includes(':')) {
     return `The helper prompt could not be delivered. ${raw.slice(raw.indexOf(':') + 1).trim().slice(0, 200)}`;
   }
