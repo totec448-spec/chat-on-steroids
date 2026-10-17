@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git 브랜치와 커밋은 유지됩니다. 커밋되지 않은 파일은 Git에서 복구할 수 없습니다.",
   "Keep checkout": "체크아웃 유지",
   "Remove checkout; preserve Git branch": "체크아웃 제거, Git 브랜치 유지",
-  "Unattributed activity": "귀속되지 않은 활동"
+  "Unattributed activity": "귀속되지 않은 활동",
+  "ChatGPT finished.": "ChatGPT가 답변을 마쳤습니다."
 }

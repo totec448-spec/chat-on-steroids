@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Nhánh Git và các commit của nó được giữ lại. Không thể khôi phục tệp chưa commit từ Git.",
   "Keep checkout": "Giữ bản checkout",
   "Remove checkout; preserve Git branch": "Xóa bản checkout, giữ nhánh Git",
-  "Unattributed activity": "Hoạt động chưa gán"
+  "Unattributed activity": "Hoạt động chưa gán",
+  "ChatGPT finished.": "ChatGPT đã trả lời xong."
 }

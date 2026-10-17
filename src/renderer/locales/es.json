@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "La rama de Git y sus commits se conservan. Los archivos sin confirmar no se pueden recuperar desde Git.",
   "Keep checkout": "Conservar directorio de trabajo",
   "Remove checkout; preserve Git branch": "Eliminar directorio de trabajo; conservar la rama de Git",
-  "Unattributed activity": "Actividad sin atribución"
+  "Unattributed activity": "Actividad sin atribución",
+  "ChatGPT finished.": "ChatGPT ha terminado."
 }

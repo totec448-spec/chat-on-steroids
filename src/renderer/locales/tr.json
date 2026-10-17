@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git dalı ve commit’leri korunur. Commit edilmemiş dosyalar Git’ten geri getirilemez.",
   "Keep checkout": "Çalışma kopyasını koru",
   "Remove checkout; preserve Git branch": "Çalışma kopyasını kaldır, Git dalını koru",
-  "Unattributed activity": "İlişkilendirilmemiş etkinlik"
+  "Unattributed activity": "İlişkilendirilmemiş etkinlik",
+  "ChatGPT finished.": "ChatGPT tamamladı."
 }

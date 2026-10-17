@@ -2497,5 +2497,6 @@
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git ブランチとそのコミットは残ります。未コミットのファイルは Git から復元できません。",
   "Keep checkout": "チェックアウトを残す",
   "Remove checkout; preserve Git branch": "チェックアウトを削除し、Git ブランチを残す",
-  "Unattributed activity": "帰属未確定のアクティビティ"
+  "Unattributed activity": "帰属未確定のアクティビティ",
+  "ChatGPT finished.": "ChatGPT の回答が完了しました。"
 }
