@@ -898,6 +898,17 @@
   const sentRequests = [];
   // A Send started in this document's earlier epoch keeps its request when the first route of
   // the chat it opened advances the epoch (submittedSendLifetime holds that send through it).
+  /** ChatGPT's own answer that no account is signed in on this page; null/false when unknown. */
+  async function chatGptSignedOut() {
+    try {
+      if (typeof fetch !== 'function') return false;
+      const response = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store',
+        signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(4000) : undefined });
+      if (!response?.ok) return false;
+      const session = await response.json();
+      return !!session && typeof session === 'object' && !Array.isArray(session) && !session.accessToken && !session.user;
+    } catch { return false; }
+  }
   function sentRequestSince(since, sendEpoch = epoch) {
     const sent = sentRequests.find(entry => entry.epoch === sendEpoch && entry.at >= since);
     return sent && sent.at - since <= SENT_REQUEST_MS ? { id: sent.id } : null;
@@ -12026,6 +12037,13 @@
         ...(boot.reasoningEffort ? { reasoningEffort: boot.reasoningEffort } : {}), time: selectionConfirmedAt });
     };
     if (await failIfRetargeted()) return;
+    // A worker brief, Resume handoff or helper prompt never goes into an anonymous signed-out chat.
+    if (await chatGptSignedOut()) {
+      return void (await fail(t(
+        'content_delivery_signed_out',
+        'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
+      )));
+    }
     let insertionFailure = '';
     step('inserting');
     if (!CLF_DOM.insertPrompt(boot.text, true, reason => { insertionFailure = reason; })) {
@@ -13053,6 +13071,14 @@
        * "the same message" means. Attachments still block regardless: an attachment draft is not
        * something this delivery could have produced.
        */
+      // A signed-out ChatGPT still offers a composer and answers in an anonymous chat that is never
+      // saved, so the app's message would leave the account and never get a receipt (2.1.41 pass:
+      // the built-in browser opened signed out). Only ChatGPT's own "no account" answer stops it;
+      // an unreadable session is not evidence and keeps today's behavior.
+      if (await chatGptSignedOut()) return fail(t(
+        'content_delivery_signed_out',
+        'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
+      ));
       const ownResidue = sendText(composer.textContent) === sendText(input.text);
       if ((!ownsFreshPage() && (composer.textContent || '').trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_existing_draft',
