@@ -1569,13 +1569,29 @@ describe('locale-independent provider composer evidence', () => {
     expect(api.stopGeneration(() => true)).toBe(false);
   });
 
-  it('does not anchor to a microphone glyph in prose or an unrelated composer control', () => {
+  it('anchors to the provider microphone in an empty composer without action-row markers', () => {
+    // ChatGPT 2026-10-17 (German UI): no test ids and no trailing grid area anywhere in the
+    // composer, the microphone glyph is microphone-light-*, and an empty composer shows Voice,
+    // not Send. The app's composer control never appeared on such a page.
+    document.documentElement.lang = 'de-DE';
+    document.querySelector('form')!.innerHTML = '<div id="prompt-textarea" contenteditable="true"></div>' +
+      '<div class="flex justify-end"><div><div><span><button type="button" aria-label="ChatGPT-Modell auswählen">5.6</button></span></div></div>' +
+      '<div id="row"><div id="mic-wrap"><div><span><button type="button" aria-label="Diktieren"><svg><use href="/cdn/sprites.svg#microphone-light-20"></use></svg></button></span></div></div>' +
+      '<div><button type="button" aria-label="Sprachchat starten"><svg><use href="/cdn/sprites.svg#voice-regular-20"></use></svg></button></div></div></div>';
+    expect(api.sendButton()).toBeNull();
+    expect(api.composerActions()).toEqual({ host: document.getElementById('row'), before: document.getElementById('mic-wrap') });
+  });
+
+  it('does not anchor to a microphone glyph in prose or outside the composer', () => {
     button.parentElement!.removeAttribute('data-testid');
     button.removeAttribute('data-testid'); button.removeAttribute('aria-label');
-    button.innerHTML = '<svg><use href="#microphone-regular-24"></use></svg>';
+    button.innerHTML = '<svg><use href="#plus-regular-24"></use></svg>';
     const quote = document.createElement('section'); quote.setAttribute('data-testid', 'conversation-turn-1');
     quote.innerHTML = '<button><svg><use href="#microphone-regular-24"></use></svg></button>';
     document.body.prepend(quote);
+    const outside = document.createElement('div');
+    outside.innerHTML = '<button><svg><use href="#microphone-light-20"></use></svg></button>';
+    document.body.append(outside);
     expect(api.composerActions()).toBeNull();
     expect(api.sendButton()).toBeNull();
     expect(api.generating()).toBe(false);
