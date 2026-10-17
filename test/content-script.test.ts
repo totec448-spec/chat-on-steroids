@@ -757,6 +757,43 @@ describe('desktop input delivery and helper ownership', () => {
     expect(sends()).toBe(1);
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
+  it('clears its own automatic continue when the Send it clicked did not take it', async () => {
+    // 2.1.40 release round, Windows: a rotation fired right after a tool result while the model
+    // was already finishing. Its Send click delivered nothing, the receipt could not be confirmed,
+    // and the continue was left in ChatGPT's composer, so the person's next message failed on "an
+    // unsent draft". An automatic continue is never the person's text: when the composer still
+    // holds exactly it, it is cleared.
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    for (const row of live.document.querySelectorAll('[data-message-author-role="user"]')) row.closest('[data-testid^="conversation-turn"]')?.remove() ?? row.remove();
+    live.hook.observe(); await live.hook.flush();
+    const sends = watchSend(live.document);
+    // The click lands as the turn ends: nothing is sent, the text stays in the composer, and
+    // ChatGPT draws the first turn's question again, so the page cannot prove the click failed.
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      stopGenerating(live!.document);
+      userTurn(live!.document, 'question-redrawn', 'The original question of this chat.');
+    });
+    const held = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) =>
+      held(fn, ms === live!.hook.DESKTOP_RECEIPT_MS ? 0 : ms)) as typeof live.window.setTimeout;
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
+    expect(sends()).toBe(1);
+    expect(result).toEqual({ ok: false });
+    // Still reported as uncertain, never resent, but no longer left in the person's composer.
+    expect(live.sent.filter(message => message.fail).map(message => message.error)).toEqual(['Native Send receipt was not confirmed.']);
+    expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
   it('sends a message into the running turn while one of its calls is still running (#1231)', async () => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
@@ -826,6 +863,67 @@ describe('desktop input delivery and helper ownership', () => {
     const ends = emitted(live.sent, 'turn_end');
     expect(ends).toHaveLength(1);
     expect(ends[0]!.event).toMatchObject({ outcome: 'completed' });
+  });
+
+  it('opens the first turn from a Send the app acknowledged more than 30 seconds after it began', async () => {
+    // 2026-10-16, live in Firefox: a background window throttled the page, and the app-sent first
+    // message took 30 s from its composer receipt to the app's acknowledgement. The receipt was
+    // only accepted within 30 s of its start, so it never was; the next look at the page came
+    // after the answer, the question was already history, and no turn opened (1 in 4 new chats).
+    const submitted = 'Slow-ack test: reply with exactly the word ready.';
+    let holdActivity = false;
+    let releaseActivity!: (value: unknown) => void;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => holdActivity
+        ? new Promise(resolve => { releaseActivity = resolve; })
+        : ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [] } }),
+      desktop_input: message => {
+        if (message.ack) live!.advance(31_000);
+        return { ok: true, data: message.authorize ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: submitted }) } };
+      }
+    });
+    holdActivity = true;
+    live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+    live.hook.observe();
+    let user!: HTMLElement;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      user = userTurn(live!.document, 'slow-ack-user', submitted, { sent: false });
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    user.remove();
+    const answer = assistantTurn(live.document, 'slow-ack-answer', []);
+    prose(live.document, answer, 'slow-ack-message', 'ready');
+    releaseActivity({ ok: true, data: { entries: [], stream: [], nextSince: 1, activeTurnId: null, userAnchors: [] } });
+    await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
+  it('asks again when the reply to its send acknowledgement is lost', async () => {
+    // 2026-10-16, live in Firefox: the background answered the acknowledgement with nothing (its
+    // event page was suspended), the page treated the lost reply as final, and the app's row sat
+    // in "browser" for hours with the chat and its queue blocked. The acknowledgement is
+    // idempotent in the worker, so a lost reply is asked again.
+    const submitted = 'Lost-ack test: reply with exactly the word ready.';
+    let acks = 0;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.ack) { acks += 1; return acks === 1 ? undefined : { ok: true, data: { ok: true } }; }
+        return { ok: true, data: message.authorize ? { ok: true } : { input: claimed({ text: submitted }) } };
+      }
+    });
+    live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+    live.hook.observe();
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'lost-ack-user', submitted, { sent: false });
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(acks).toBe(2);
+    await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
   });
 
   it('closes a fast first answer whose end_turn ChatGPT reported before the turn opened (#1099)', async () => {
@@ -1770,6 +1868,15 @@ describe('desktop input delivery and helper ownership', () => {
    * native Send dropped its deadline after the click. The page held its input slot until reload,
    * and the claim stayed open in the app, so the next message could not be delivered.
    */
+  it.each([['untouched', true], ['typed-into', false], ['sent', false], ['other input', false]] as const)(
+    'proves a cancelled opening page untouched before the extension closes it (%s)', async (mode, safe) => {
+      live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {});
+      if (mode === 'typed-into') live.document.querySelector('#prompt-textarea')!.textContent = 'my own words';
+      if (mode === 'sent') userTurn(live.document, 'already-sent', 'A question that went out');
+      const id = mode === 'other input' ? 'ffffffff-1111-4222-8333-444444444444' : inputId;
+      expect(await live.runtimeMessage({ type: 'clf-close-cancelled-opening', id })).toEqual({ safe });
+    });
+
   it('reports a clicked Send that ChatGPT did not take, and clears exactly its own draft', async () => {
     const typed = 'Inspect the exact requested task';
     let claims = 0;
@@ -2195,6 +2302,84 @@ describe('desktop input delivery and helper ownership', () => {
     });
     await settle();
     expect((live.window as any).CLF_DOM.connectorNames()).toEqual(['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins']);
+  });
+
+  it.each([
+    ['default remains Core', false, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, {}],
+    ['opt-in selects this computer\'s Plugins', true, [
+      { name: 'Chat On Steroids Plugins', path: 'app://asdk_app_other_plugins' },
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: 'Chat On Steroids Plugins (Windows)' }, {}],
+    // Without this computer's own Plugins app the message keeps Core: never another computer's
+    // app, and never no app at all on an account that attaches apps only when mentioned (#861).
+    ['opt-in never substitutes another computer\'s Plugins and keeps Core', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins', path: 'app://asdk_app_other_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, {}],
+    ['opt-in does not use ambiguous Plugins and keeps Core', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: null }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, {}],
+    ['opt-in with the Core mention off sends no app when Plugins is missing', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' }
+    ], null, { mentionCore: false }],
+    ['opt-in with the Core mention off still uses this computer\'s Plugins', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: 'Chat On Steroids Plugins (Windows)' }, { mentionCore: false }],
+    ['Core-only default keeps Goal on Core', false, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { finishOwner: 'goal-run' }],
+    ['opt-in retains Core for Goal completion', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { finishOwner: 'goal-run' }],
+    ['opt-in retains Core for Loop automation', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { automation: 'loop' }],
+    ['opt-in retains Core for Goal automation', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { automation: 'goal' }],
+    // Live 2026-10-16: every ordinary message the app sends carries automation 'off'. Read as "an
+    // automated send", it kept Core on all of them and the option never took effect.
+    ['opt-in selects Plugins for an ordinary message with automation off', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: 'Chat On Steroids Plugins (Windows)' }, { automation: 'off' }],
+    ['opt-in retains Core for a fresh-turn rotation', true, [
+      { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, { purpose: 'rotation' }]
+  ] as const)('selects one managed-message app: %s', async (_case, preferPlugins, candidates, expected, extra) => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0, connectorNames: {
+        core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' } }),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null,
+        userAnchors: [], mentionCore: (extra as { mentionCore?: boolean }).mentionCore ?? true, mentionPlugins: preferPlugins } }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed(Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'mentionCore'))) } })
+    });
+    await live.hook.pullActivity(); await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-core-mention', candidates: [...candidates], pluginList: true }
+    }));
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'plugin-mention-user', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send({ ...options, mention: null }); };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(mentions).toEqual([expected]);
   });
 
   it.each([

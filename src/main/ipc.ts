@@ -5,7 +5,8 @@ import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { setMainTextTranslations } from './main-texts.js';
+import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
+import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -88,8 +89,8 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, expireArmedProjectCreates, getSessionProject, listProjects, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
-import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
+import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
+import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
@@ -223,6 +224,7 @@ const settingsPatch = z.object({
     playfulContinue: z.boolean().optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
+    mentionPlugins: z.boolean().optional(),
     language: z.enum(UI_LANGUAGES).optional(),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     cosBrowserTrayHint: z.boolean().optional(),
@@ -403,6 +405,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
+      mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
       browserPreferences: current.ui.browserPreferences,
@@ -834,7 +837,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, {
-      title: 'Approve a folder for ChatGPT',
+      ...dialogLabel('Approve a folder for ChatGPT'),
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
@@ -864,8 +867,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     setStopNoticeTranslations(z.record(z.string().max(200), z.string().max(400)).refine(value => Object.keys(value).length <= 16).parse(payload));
   });
   handle('ui:mainTexts', async payload => {
-    // The tray menu and Session finish notice in the interface language; bounded and allowlisted.
-    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200)).refine(value => Object.keys(value).length <= 32).parse(payload));
+    // The tray menu, notices and native dialogs in the interface language; bounded and allowlisted.
+    // The bound follows the list: a fixed 32 refused the whole set once it grew past that.
+    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200))
+      .refine(value => Object.keys(value).length <= MAIN_TEXTS.length).parse(payload));
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
@@ -874,7 +879,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return setPetOverlayVisible(visible);
   });
   handle('pets:import', async () => {
-    const options: Electron.OpenDialogOptions = { title: 'Import CoS Pet folder', properties: ['openDirectory'] };
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Import CoS Pet folder'), properties: ['openDirectory'] };
     const owner = getWindow();
     const selected = owner && !owner.isDestroyed()
       ? await dialog.showOpenDialog(owner, options)
@@ -911,8 +916,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:import', async payload => {
     const { kind } = z.object({ kind: z.enum(['folder', 'file']) }).strict().parse(payload);
     const options: Electron.OpenDialogOptions = kind === 'folder'
-      ? { title: 'Import Skill folder', properties: ['openDirectory'] }
-      : { title: 'Import SKILL.md', properties: ['openFile'], filters: [{ name: 'Markdown skills', extensions: ['md'] }] };
+      ? { ...dialogLabel('Import Skill folder'), properties: ['openDirectory'] }
+      : { ...dialogLabel('Import SKILL.md'), properties: ['openFile'], filters: [{ name: mainText('Markdown skills'), extensions: ['md'] }] };
     const owner = getWindow();
     const selected = owner && !owner.isDestroyed()
       ? await dialog.showOpenDialog(owner, options)
@@ -948,7 +953,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)
       : scope.projectId ? projectWorkspace(scope.projectId) : Promise.resolve(null);
     const before = await folder();
-    const library = await listSkillLibrary({ projectPath: before?.real ?? null, refreshCodexPlugins: true });
+    const library = await listSkillLibrary({ projectPath: localProjectPath(before), refreshCodexPlugins: true });
     if ((await folder())?.real !== before?.real) throw new Error('The project changed while Skills were loading');
     return library;
   });
@@ -961,7 +966,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('projects:add', async () => {
     const window = getWindow();
     if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { title: 'Choose a project folder for ChatGPT', properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return null;
     const folder = result.filePaths[0];
     try { await resolvePath(getConfig().roots, folder); }
@@ -973,6 +978,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const project = await addProject(folder);
     push('session:changed');
     // Its native ChatGPT Project is created by the browser; tell it there is work.
+    if (project.chatgpt?.state === 'requested') wakeBrowserWork();
+    return project;
+  });
+  // A folder on a server (#1469): the address and folder as typed; the server is asked once.
+  handle('projects:addRemote', async payload => {
+    const { address, folder } = (payload ?? {}) as { address?: unknown; folder?: unknown };
+    if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
+    const project = await addRemoteProject(address, folder);
+    push('session:changed');
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
     return project;
   });
@@ -1111,6 +1125,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('projectFiles:attach', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
+    // A file in a project on a server (#1469) is copied over SFTP first.
+    const snapshot = await serverFileSnapshot(projectId, path);
+    if (snapshot) {
+      const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+      try { return await stageInputAttachment(snapshot.file, retained); } finally { await snapshot.cleanup(); }
+    }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
@@ -1167,9 +1187,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, {
-      title: 'Select the tunnel executable',
+      ...dialogLabel('Select the tunnel executable'),
       properties: ['openFile'],
-      ...(process.platform === 'win32' ? { filters: [{ name: 'Programs', extensions: ['exe'] }] } : {})
+      ...(process.platform === 'win32' ? { filters: [{ name: mainText('Programs'), extensions: ['exe'] }] } : {})
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
     await updateConfig((config) => ({
@@ -1390,7 +1410,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return stageInputAttachments(sources, retained);
   };
   handle('sessions:files', async () => {
-    const chosen = await dialog.showOpenDialog({ title: 'Attach files', properties: ['openFile', 'multiSelections'] });
+    const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
     return stageFiles(chosen.filePaths);
@@ -1835,26 +1855,31 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // or a model-facing tool. List bounded relative paths instead of native paths.
     const changedFiles = candidate.changes.slice(0, 25).map(name =>
       `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+    // Function replacements: a checkout path may contain `$&` or `$'`.
+    const workspace = candidate.workspace;
+    const discarded = String(candidate.changes.length);
     const details = [
-      `Checkout: ${candidate.workspace}`,
+      mainText('Checkout: {0}').replace('{0}', () => workspace),
       candidate.changes.length
-        ? `${candidate.changes.length} uncommitted/ignored paths would be discarded:`
-        : 'No uncommitted or ignored paths were detected.',
+        ? mainText('{0} uncommitted or ignored paths would be discarded:').replace('{0}', () => discarded)
+        : mainText('No uncommitted or ignored paths were detected.'),
       ...changedFiles,
       candidate.changes.length > changedFiles.length || candidate.changesTruncated
-        ? 'Additional paths are not shown; review the checkout before confirming.' : '',
-      candidate.ignoredFiles ? 'Ignored files are included in the removal.' : '',
-      candidate.uniqueCommits ? 'Commits made only on this branch will remain in Git.' : '',
-      'This action removes the entire checkout directory, including tracked working files, ignored files and uncommitted changes. The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'
+        ? mainText('Additional paths are not shown; review the checkout before confirming.') : '',
+      candidate.ignoredFiles ? mainText('Ignored files are included in the removal.') : '',
+      candidate.uniqueCommits ? mainText('Commits made only on this branch will remain in Git.') : '',
+      // Two sentences, each within the 200 characters a published translation may have.
+      mainText('This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.'),
+      mainText('The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.')
     ].filter(Boolean).join('\n');
     // Approval is acquired in the trusted main process, not supplied as a boolean by renderer
     // or model. Default is cancellation, even for an apparently clean checkout.
     const { response } = await dialog.showMessageBox({
       type: 'warning',
-      title: 'Remove worker Git checkout?',
-      message: 'Review the worker checkout before removing it',
+      title: mainText('Remove worker Git checkout?'),
+      message: mainText('Review the worker checkout before removing it'),
       detail: details,
-      buttons: ['Keep checkout', 'Remove checkout; preserve Git branch'],
+      buttons: [mainText('Keep checkout'), mainText('Remove checkout; preserve Git branch')],
       defaultId: 0,
       cancelId: 0,
       noLink: true

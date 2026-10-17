@@ -1300,3 +1300,10 @@ export interface SessionSearchReply {
   /** More chats match than `results` holds. */
   limited?: true;
 }
+
+/**
+ * Stored title of the chat that collects tool calls no chat could be named for. It doubles as the
+ * marker the app finds that chat by (with no conversation), so it stays English on disk and the
+ * window shows it in the interface language.
+ */
+export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';

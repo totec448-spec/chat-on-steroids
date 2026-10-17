@@ -18,6 +18,7 @@ import { messageReaction, withoutMessageReaction } from '../shared/message-react
 import { goalErrorMessage } from '../shared/goal-errors.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
+import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
@@ -92,6 +93,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
+import { initSshProjectDialog } from './ssh-project-dialog.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -840,7 +842,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.dataset.sortHandle = '';
   if (renaming?.id === summary.id) top.append(renameField(summary));
   else {
-    const title = el('b', '', () => summary.title || t("Untitled session")); title.dir = 'auto';
+    const title = el('b', '', () => shownSessionTitle(summary)); title.dir = 'auto';
     // Double-click names the chat, like the pencil does (#1107).
     if (summary.conversationId) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
     top.append(title);
@@ -852,7 +854,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const mark = icon('i-pinned', 'ico sess-pin-mark');
     top.append(mark);
   }
-  ui(row, 'title', () => [summary.title || t("Untitled session"), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
+  ui(row, 'title', () => [shownSessionTitle(summary), ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · '));
   const showTip = () => {
     if (sessionTooltipDismissed === summary.id) return;
     // The same chat's tooltip, from before a repaint, stays as it is: recreating it would blink.
@@ -993,7 +995,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(more, 'title', () => t('More options'));
   ui(more, 'aria-label', () => t('More options'));
   const menu = (at?: { x: number; y: number }) => ({
-    owner, at, label: () => summary.title || t("Untitled session"), anchor: () => rowMenuButton(owner), items: () => items
+    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
   row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
@@ -1405,7 +1407,14 @@ function paintSessions(): void {
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
-    heading.append(icon('i-folder'), label); section.append(heading);
+    heading.append(icon('i-folder'), label);
+    if (project?.remote) {
+      // A folder on a server (#1469): the address is the hover text, the badge says how it is reached.
+      const badge = el('span', 'project-badge', () => 'SSH');
+      ui(badge, 'title', () => project.remote ? `${project.remote.host}${project.remote.port ? `:${project.remote.port}` : ''}` : '');
+      heading.append(badge);
+    }
+    section.append(heading);
     // Native `toggle` is queued after activation. A concurrent activity repaint can replace
     // this node first and lose the click. Commit the summary's pointer/keyboard click to the
     // one disclosure owner synchronously, then project it onto this details element.
@@ -3067,6 +3076,15 @@ async function revealSearchMatch(id: string, query: string): Promise<void> {
   await revealChatLocation(id, location);
 }
 
+/** The loaded timeline row of one recorded message, by the key the timeline gives that message. */
+function rowForLocation(location: SessionSearchLocation): HTMLElement | null {
+  const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
+    : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
+  if (!event) return null;
+  const key = itemKey({ kind: 'event', event });
+  return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
+}
+
 /** Scrolls the open chat to one recorded message, loading the history page around it when needed. */
 async function revealChatLocation(id: string, location: SessionSearchLocation): Promise<void> {
   const selection = selectionGeneration;
@@ -3077,13 +3095,7 @@ async function revealChatLocation(id: string, location: SessionSearchLocation): 
     if (Date.now() > deadline || !current()) return;
     await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
   }
-  const rowFor = (): HTMLElement | null => {
-    const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
-      : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
-    if (!event) return null;
-    const key = itemKey({ kind: 'event', event });
-    return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
-  };
+  const rowFor = (): HTMLElement | null => rowForLocation(location);
   let row = rowFor();
   if (!row) {
     // Marked as history before the read, so a live update meanwhile cannot land in this page.
@@ -4425,7 +4437,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const project = selectedLocalProject();
   $('chatProjectContext').hidden = !project;
   $('chatProjectName').textContent = project?.name ?? '';
-  ui($('chatTitle'), 'textContent', () => summary ? summary.title || t("Untitled session") : t("New chat"));
+  ui($('chatTitle'), 'textContent', () => summary ? shownSessionTitle(summary) : t("New chat"));
 
   paintDeliveryControls();
   paintAgentFilter();
@@ -6408,6 +6420,8 @@ async function refreshInputQueue(): Promise<void> {
             } else if (saved === false) {
               // A claimed or removed row no longer owns an editor. Refresh projects
               // its actual delivery state; it must never preserve this stale draft.
+              // The text the user typed must not vanish with it: an empty composer takes it.
+              keepUnsavedQueueEdit(value);
               inputQueueGeneration++;
               retireCard();
               void refreshInputQueue();
@@ -6440,6 +6454,23 @@ async function refreshInputQueue(): Promise<void> {
     $('inputQueue').append(row);
   }
 }
+/**
+ * A queued edit whose Save came too late: the message was sent or removed while it was open. The
+ * typed text goes into an empty composer, as Retry does, so it can still be sent; a draft the user
+ * already has there is never replaced.
+ */
+function keepUnsavedQueueEdit(text: string): void {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  if (authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) {
+    toast(t("This task was sent or removed before your edit was saved."));
+    return;
+  }
+  replaceComposerDraft();
+  input.value = text.trim();
+  rememberDraft(); skillPicker?.restore(); paintComposerImages(); paintDeliveryControls();
+  toast(t("This task was sent or removed before your edit was saved, so your edit is in the composer."));
+}
+
 async function retryPlannedInput(entry: InputEntry): Promise<void> {
   if (dismissedInputNotices.has(entry.id) || entry.stagesApplied || !['failed', 'cancelled'].includes(entry.state)) return;
   // The outbox retains the authored workflow after failure. Retry that payload, not
@@ -6985,7 +7016,12 @@ export function initChat(next: Deps): void {
         return;
       }
       runSlashCommand(name);
-    }, commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null });
+    }, commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null,
+    listFiles: async (projectId, directory) => {
+      const result = await api.listProjectFiles(projectId, directory);
+      if (!result.ok) throw new Error(result.error);
+      return result.data;
+    } });
   skillPicker.restore();
   $('generateFinishGoal').addEventListener('click', async () => {
     const button = $<HTMLButtonElement>('generateFinishGoal'), id = selectedId, turnId = controlledTurnId;
@@ -7033,20 +7069,38 @@ export function initChat(next: Deps): void {
   $('newChat').addEventListener('click', () => {
     selectNewChat();
   });
-  $('addProject').addEventListener('click', async event => {
-    event.preventDefault();
+  // A project picked or added elsewhere published a newer durable catalog. A list refresh started
+  // before it may still return an empty catalog and otherwise erase this sidebar group.
+  const showAddedProject = (project: LocalProject, generation: number) => {
+    ++sessionsLoadGeneration;
+    projects = [...projects.filter(row => row.id !== project.id), project];
+    expandedProjects.add(project.id);
+    if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
+  };
+  const addLocalProject = async () => {
     const button = $<HTMLButtonElement>('addProject'); button.disabled = true;
     const generation = selectionGeneration;
     try {
       const project = await run(api.addProject());
-      if (!project) return;
-      // The picker published a newer durable catalog. A list refresh started before it
-      // may still return an empty catalog and otherwise erase this sidebar group.
-      ++sessionsLoadGeneration;
-      projects = [...projects.filter(row => row.id !== project.id), project];
-      expandedProjects.add(project.id);
-      if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
+      if (project) showAddedProject(project, generation);
     } finally { button.disabled = false; }
+  };
+  // The composer's Share a folder means a folder on this computer: straight to the picker.
+  $('composerFolder').addEventListener('click', () => void addLocalProject());
+  let sshDialogGeneration = 0;
+  const sshProjectDialog = initSshProjectDialog(api, project => showAddedProject(project, sshDialogGeneration));
+  // A folder on this computer, or one on a server (#1469).
+  $('addProject').addEventListener('click', event => {
+    event.preventDefault();
+    toggleRowMenu({
+      owner: 'add-project',
+      anchor: () => document.getElementById('addProject'),
+      label: () => t('Add a project folder'),
+      items: () => [
+        { action: 'add-local-project', label: () => t('Folder on this computer…'), icon: 'i-folder', run: () => void addLocalProject() },
+        { action: 'add-ssh-project', label: () => t('Folder on a server (SSH)…'), icon: 'i-terminal', run: () => { sshDialogGeneration = selectionGeneration; sshProjectDialog.open(); } }
+      ]
+    });
   });
   const composerMenus = [...document.querySelectorAll<HTMLDetailsElement>('.composer-menu, .session-controls')];
   document.addEventListener('click', (event) => {
@@ -7205,7 +7259,8 @@ export function initChat(next: Deps): void {
   chatFind = initChatFind({
     selectedId: () => selectedId,
     find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,
-    reveal: revealChatLocation
+    reveal: revealChatLocation,
+    row: rowForLocation
   });
   chatSearch = initChatSearch({
     select: (id, match) => {

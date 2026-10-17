@@ -23,17 +23,8 @@
  * decode and would turn every UTF-16 file this connector reads today into an error.
  */
 
-import nodePath from 'node:path';
-
-import {
-  MAX_WALK_DEPTH,
-  MAX_WALK_DIRECTORIES,
-  MAX_WALK_ENTRIES,
-  getMetadata,
-  readDirectory,
-  readFileStream,
-  walk
-} from './filesystem.js';
+import { MAX_WALK_DEPTH, MAX_WALK_DIRECTORIES, MAX_WALK_ENTRIES } from './filesystem.js';
+import { localFs, type ProjectFs } from '../remote/project-fs.js';
 import {
   DEFAULT_READ_BYTES,
   FsOpError,
@@ -97,13 +88,13 @@ function stripBom(text: string): string {
  * lines does it have. The old implementation opened the file three times to learn that; Codex's
  * chunked read hands over the same bytes once.
  */
-async function scanFile(realPath: string, wantLines: boolean): Promise<{ binary: boolean; lines: number | null }> {
+async function scanFile(realPath: string, wantLines: boolean, fs: ProjectFs): Promise<{ binary: boolean; lines: number | null }> {
   let sniffed = false;
   let lines = 0;
   let sawAny = false;
   let endsWithNewline = true;
 
-  for await (const chunk of readFileStream(realPath)) {
+  for await (const chunk of fs.readFileStream(realPath)) {
     if (chunk.length === 0) continue;
     if (!sniffed) {
       sniffed = true;
@@ -132,9 +123,10 @@ async function scanFile(realPath: string, wantLines: boolean): Promise<{ binary:
 export async function statInfo(
   realPath: string,
   virtualPath: string,
-  options: { scanContent?: boolean } = {}
+  options: { scanContent?: boolean; fs?: ProjectFs } = {}
 ): Promise<FileInfo> {
-  const metadata = await getMetadata(realPath);
+  const fs = options.fs ?? localFs;
+  const metadata = await fs.getMetadata(realPath);
   const type = metadata.isDirectory ? 'directory' : metadata.isFile ? 'file' : 'other';
   const info: FileInfo = {
     virtualPath,
@@ -150,7 +142,7 @@ export async function statInfo(
   if (type !== 'file') return info;
   if (options.scanContent === false) return info;
 
-  const scan = await scanFile(realPath, metadata.size <= MAX_LINE_COUNT_BYTES);
+  const scan = await scanFile(realPath, metadata.size <= MAX_LINE_COUNT_BYTES, fs);
   info.binary = scan.binary;
   info.lines = scan.lines;
   return info;
@@ -161,9 +153,10 @@ export async function listDirectoryLevel(
   realDir: string,
   virtualDir: string,
   maxEntries: number,
-  includeFileSizes = true
+  includeFileSizes = true,
+  fs: ProjectFs = localFs
 ): Promise<{ entries: DirEntry[]; truncated: boolean }> {
-  const raw = await readDirectory(realDir);
+  const raw = await fs.readDirectory(realDir);
   // Directories first, then names, which is the order `read` has always printed.
   raw.sort((left, right) => {
     const leftDir = left.isDirectory ? 0 : 1;
@@ -178,7 +171,7 @@ export async function listDirectoryLevel(
     let bytes: number | null = null;
     if (includeFileSizes && entry.isFile) {
       try {
-        bytes = (await getMetadata(nodePath.join(realDir, entry.fileName))).size;
+        bytes = (await fs.getMetadata(fs.path.join(realDir, entry.fileName))).size;
       } catch {
         bytes = null;
       }
@@ -206,9 +199,10 @@ export class BinaryReadError extends FsOpError {}
 export async function walkFiles(
   realDir: string,
   virtualDir: string,
-  options: { maxEntries: number; exclude: readonly string[] }
+  options: { maxEntries: number; exclude: readonly string[]; fs?: ProjectFs }
 ): Promise<{ files: string[]; truncated: boolean }> {
-  const outcome = await walk(realDir, {
+  const fs = options.fs ?? localFs;
+  const outcome = await fs.walk(realDir, {
     maxDepth: MAX_WALK_DEPTH,
     maxDirectories: MAX_WALK_DIRECTORIES,
     maxEntries: clamp(options.maxEntries, 1, MAX_WALK_ENTRIES),
@@ -216,12 +210,12 @@ export async function walkFiles(
     pruneDirectory: (entry) => isExcludedFolderName(entry.fileName, options.exclude)
   });
 
-  const prefix = realDir.endsWith(nodePath.sep) ? realDir : realDir + nodePath.sep;
+  const prefix = realDir.endsWith(fs.path.sep) ? realDir : realDir + fs.path.sep;
   const files: string[] = [];
   for (const entry of outcome.entries) {
     if (entry.kind !== 'file') continue;
     if (!entry.path.startsWith(prefix)) continue;
-    const relative = entry.path.slice(prefix.length).split(nodePath.sep).join('/');
+    const relative = entry.path.slice(prefix.length).split(fs.path.sep).join('/');
     files.push(`${virtualDir}/${relative}`);
   }
   return { files, truncated: outcome.truncated };
@@ -239,9 +233,10 @@ export async function walkFiles(
  */
 export async function readTextFile(
   realPath: string,
-  opts: { startLine?: number; endLine?: number; maxBytes?: number } = {}
+  opts: { startLine?: number; endLine?: number; maxBytes?: number; fs?: ProjectFs } = {}
 ): Promise<ReadTextResult> {
-  const metadata = await getMetadata(realPath);
+  const fs = opts.fs ?? localFs;
+  const metadata = await fs.getMetadata(realPath);
   if (!metadata.isFile) throw new FsOpError('Not a file');
 
   const maxBytes = clamp(opts.maxBytes ?? DEFAULT_READ_BYTES, 1, MAX_READ_BYTES);
@@ -299,7 +294,7 @@ export async function readTextFile(
     return true;
   };
 
-  for await (const chunk of readFileStream(realPath)) {
+  for await (const chunk of fs.readFileStream(realPath)) {
     bytesScanned += chunk.length;
     // The pre-open metadata is only a hint. A live log can grow after that stat, and without
     // this streamed high-water a 20-line range could keep reading gigabytes solely to compute

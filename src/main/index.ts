@@ -1,3 +1,4 @@
+import { closeRemoteSessions } from './remote/ssh.js';
 import { stopInputStartup } from './session/start-input.js';
 import { browserExtensionRequired } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
@@ -764,6 +765,8 @@ app.on('will-quit', (event) => {
         name: 'process cleanup',
         budgetMs: 15_000,
         run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+          // SFTP sessions of projects on a server (#1469): their ssh would outlive the app on Windows.
+          Promise.resolve().then(() => closeRemoteSessions()),
           Promise.resolve().then(() => loadedCosBrowser()?.stop())]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.

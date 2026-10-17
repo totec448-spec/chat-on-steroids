@@ -34,6 +34,20 @@ $result=Get-WindowsApps @{limit=2}
     expect(complete.truncated).toBe(false);
   });
 
+  it('keeps an AppsFolder item whose shell identifier is not a valid path (#1590)', async () => {
+    // Windows PowerShell 5.1 throws from IsPathRooted on "<" and other invalid path characters,
+    // and one such item used to abort the whole list_apps catalog.
+    const result = JSON.parse(await run(`
+function Fake-Item([string]$path) { $item = [pscustomobject]@{ Path = $path; Name = 'Shell item' }; $item | Add-Member ScriptMethod ExtendedProperty { param($name) $null }; $item }
+@(@(Fake-Item 'zn=shell<id'), @(Fake-Item 'C:\\Tools\\bad<name.exe'), @(Fake-Item 'C:\\Windows\\notepad.exe')) | ForEach-Object { $identity = Get-AppCatalogIdentity $_; @{ id = $identity.id; processPath = $identity.processPath } } | ConvertTo-Json -Compress
+`));
+    expect(result).toEqual([
+      { id: 'zn=shell<id', processPath: '' },
+      { id: 'C:\\Tools\\bad<name.exe', processPath: '' },
+      { id: 'c:\\windows\\notepad.exe', processPath: 'C:\\Windows\\notepad.exe' }
+    ]);
+  });
+
   it('launches only an exact current item and rejects unknown or duplicate IDs before invocation', async () => {
     expect(await run(`
 class AppFixtureItem {

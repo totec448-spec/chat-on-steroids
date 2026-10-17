@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { pluginManager } from './plugins/manager.js';
 import { refreshPluginPublication } from './connection.js';
 import { rearmPluginRefresh } from './plugin-refresh.js';
+import { dialogLabel, mainText } from './main-texts.js';
 import { MAX_PLUGIN_LONGEST_CALL_SECONDS } from '../shared/plugins.js';
 
 const values = z.record(z.string().min(1).max(128), z.string().max(16_384)).refine(value => Object.keys(value).length <= 64, 'At most 64 configuration fields');
@@ -49,7 +50,7 @@ export function registerPluginIpc(
     await pluginManager.setToolEnabled(input.id, input.name, input.enabled); return pluginManager.snapshot();
   });
   handle('plugins:importBundle', async () => {
-    const result = await dialog.showOpenDialog({ title: 'Import MCP bundle', properties: ['openFile'], filters: [{ name: 'MCP bundles', extensions: ['mcpb'] }] });
+    const result = await dialog.showOpenDialog({ ...dialogLabel('Import MCP bundle'), properties: ['openFile'], filters: [{ name: mainText('MCP bundles'), extensions: ['mcpb'] }] });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
   pluginManager.onChanged(() => {

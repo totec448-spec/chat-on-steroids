@@ -796,6 +796,9 @@ function takeFollow(browser: string | null): string | null {
 }
 
 /** An input goes to the browser holding its chat or, when none does, to the first one handed it. */
+/** How long after it was queued a cancelled first message's empty tab is still offered for closing. */
+const CANCELLED_OPENING_CLOSE_MS = 2 * 60 * 60_000;
+
 function inputHeldElsewhere(input: { id: string; conversationId: string | null }, browser: string | null, chosen = false): boolean {
   // The chosen built-in browser takes work over from a browser that is not chosen (#1516).
   if (chosen) { if (browser && !input.conversationId) openingCustody.set(input.id, browser); return false; }
@@ -2652,7 +2655,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             // After Send, ChatGPT moves a helper to /c/<id>?temporary-chat=true without its cos-input
             // marker; its chat is the only way a later close pass can find that tab again.
             .map(row => ({ id: row.id, owner: row.owner, lifetime: row.lifetime, close: true,
-              retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) }))],
+              retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) })),
+          // A new chat's first message ended before Send was ever authorized, so nothing reached
+          // ChatGPT. The tab opened for it showed only the start page and stayed open for good
+          // (2.1.40 release round); the extension closes it once that page proves it untouched.
+          ...(otherBrowser ? [] : inputRows.filter(row => row.opening === true && ['cancelled', 'failed'].includes(row.state) &&
+            row.sendAuthorizedAt === undefined && row.deliveredAt === undefined && !row.conversationId &&
+            Date.now() - row.createdAt < CANCELLED_OPENING_CLOSE_MS)
+            .map(row => ({ id: row.id, conversationId: null, opening: true, close: true })))],
         background: getConfig().ui.backgroundChats === true,
         // #128: where the companion puts background tabs. Unknown or absent means the window.
         backgroundPlacement: getConfig().ui.backgroundPlacement === 'group' ? 'group' : 'window',
@@ -3566,6 +3576,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // "Follow new output" applies to the ChatGPT page too; the page owns the scrolling.
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -4323,6 +4334,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(),
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         goal: {
           enabled: getConfig().goal.enabled,
           // The app-wide setting is nobody's own answer, by definition: it is what a chat that
@@ -8278,8 +8290,16 @@ async function noteRecoveryObservations(
   // The ten-/two-minute budget is silence recovery only. Final response evidence
   // consumes it even if a local call is still draining; runningToolCalls separately
   // guards actual send/compaction. Replayed finals cannot consume newer work.
+  // A rotation is reported as one batch with the rotated turn's end and the fresh turn's start,
+  // which never moves the grant; the fresh turn's later work then renews it under the rotated
+  // turn's id. That turn has ended, so this later completed final spends its grant too. Without
+  // this the chat read as busy, and a message typed after the answer waited for the silence sweep
+  // (163 s in the 2.1.40 release round).
+  const grantTurnEnded = !!completedFinal && !!terminalGrant?.turnId && !!finalTurn && terminalGrant.turnId !== finalTurn &&
+    terminalGrant.sessionId === sessionId && activeUntil.get(conversationId) === terminalGrant &&
+    (await readRecentEvents(sessionId!, 20, { kinds: ['turn_end'] })).some(event => event.turnId === terminalGrant.turnId);
   if (completedFinal && terminalGrant && activeUntil.get(conversationId) === terminalGrant &&
-      terminalGrant.sessionId === sessionId && (terminalGrant.turnId ?? null) === (finalTurn ?? null)) endActivity(conversationId);
+      terminalGrant.sessionId === sessionId && ((terminalGrant.turnId ?? null) === (finalTurn ?? null) || grantTurnEnded)) endActivity(conversationId);
   else if (mcpTerminal && terminalGrant && activeUntil.get(conversationId) === terminalGrant) {
     terminalGrant.mcpBacked = true;
     // A completed tool-only response can still acquire its missing final text.

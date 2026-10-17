@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { locateRipgrep } from './ripgrep.js';
 import { isExcludedFolderName, sniffBinaryBytes, type TextEncoding } from './fsops.js';
+import type { ProjectFs } from './remote/project-fs.js';
 
 /**
  * Skipped by default because they are large and rarely what anyone means. The model
@@ -105,6 +106,34 @@ export interface SearchRequest {
   maxResults: number;
   /** Absolute whole-tool deadline shared by every approved root. */
   deadline?: number;
+  /**
+   * A server folder's file system (#1469). The search then walks and reads over SFTP with the
+   * same limits, and matches a regex itself, since ripgrep only searches this computer.
+   */
+  server?: ProjectFs;
+}
+
+type FolderEntry = { name: string; isDirectory: boolean; isFile: boolean };
+
+/**
+ * Opens one folder, links kept opaque: this computer's is streamed, a server's read in one go.
+ * Opening is what may fail and be skipped; the entries are then read as they always were.
+ */
+async function openFolder(dir: string, server: ProjectFs | undefined): Promise<AsyncGenerator<FolderEntry>> {
+  if (server) {
+    const entries = await server.readDirectory(dir);
+    return (async function* () {
+      for (const entry of entries) yield { name: entry.fileName, isDirectory: entry.isDirectory, isFile: entry.isFile };
+    })();
+  }
+  const directory = await fs.opendir(dir);
+  return (async function* () {
+    try {
+      for await (const dirent of directory) yield { name: dirent.name, isDirectory: dirent.isDirectory(), isFile: dirent.isFile() };
+    } finally {
+      await directory.close().catch(() => undefined);
+    }
+  })();
 }
 
 /** Translates a glob into a regex. Supports *, ?, ** and nothing else, on purpose. */
@@ -323,7 +352,7 @@ async function searchWithRipgrep(
 }
 
 export async function search(req: SearchRequest): Promise<SearchOutcome> {
-  if (req.mode === 'content') {
+  if (req.mode === 'content' && !req.server) {
     const ripgrep = locateRipgrep();
     if (ripgrep) return searchWithRipgrep(ripgrep, req, req.realDir, req.virtualDir);
     if (req.regex) throw new Error('Regex content search requires the bundled ripgrep runtime.');
@@ -364,40 +393,37 @@ export async function search(req: SearchRequest): Promise<SearchOutcome> {
     }
     const current = pendingDirectories[directoryHead++]!;
     directoriesScanned++;
-    let directory;
+    const join = req.server ? req.server.path.join : path.join;
+    let entries;
     try {
-      directory = await fs.opendir(current.dir);
+      entries = await openFolder(current.dir, req.server);
     } catch {
       continue;
     }
-    try {
-      for await (const dirent of directory) {
-        if (outOfBudget()) break;
-        const childRel = current.rel ? `${current.rel}/${dirent.name}` : dirent.name;
-        if (dirent.isDirectory()) {
-          if (!isExcludedFolderName(dirent.name, req.exclude)) {
-            pendingDirectories.push({ dir: path.join(current.dir, dirent.name), rel: childRel });
-          }
-          continue;
+    for await (const dirent of entries) {
+      if (outOfBudget()) break;
+      const childRel = current.rel ? `${current.rel}/${dirent.name}` : dirent.name;
+      if (dirent.isDirectory) {
+        if (!isExcludedFolderName(dirent.name, req.exclude)) {
+          pendingDirectories.push({ dir: join(current.dir, dirent.name), rel: childRel });
         }
-        if (!dirent.isFile()) continue;
-        filesScanned++;
-        if (includeMatcher && !includeMatcher(childRel)) continue;
-        if (req.mode === 'name') {
-          const haystack = req.caseSensitive ? dirent.name : dirent.name.toLowerCase();
-          if (needle === '' || haystack.includes(needle)) {
-            hits.push({ path: `${req.virtualDir}/${childRel}` });
-            if (hits.length >= req.maxResults) {
-              stoppedBecause = 'limit';
-              break;
-            }
-          }
-        } else {
-          candidates.push({ real: path.join(current.dir, dirent.name), rel: childRel });
-        }
+        continue;
       }
-    } finally {
-      await directory.close().catch(() => undefined);
+      if (!dirent.isFile) continue;
+      filesScanned++;
+      if (includeMatcher && !includeMatcher(childRel)) continue;
+      if (req.mode === 'name') {
+        const haystack = req.caseSensitive ? dirent.name : dirent.name.toLowerCase();
+        if (needle === '' || haystack.includes(needle)) {
+          hits.push({ path: `${req.virtualDir}/${childRel}` });
+          if (hits.length >= req.maxResults) {
+            stoppedBecause = 'limit';
+            break;
+          }
+        }
+      } else {
+        candidates.push({ real: join(current.dir, dirent.name), rel: childRel });
+      }
     }
     if (stoppedBecause === 'limit') break;
   }
@@ -462,7 +488,7 @@ async function scanContents(
 export async function searchOneFile(
   realPath: string,
   virtualPath: string,
-  req: Pick<SearchRequest, 'query' | 'mode' | 'include' | 'caseSensitive' | 'regex' | 'maxResults' | 'deadline'>
+  req: Pick<SearchRequest, 'query' | 'mode' | 'include' | 'caseSensitive' | 'regex' | 'maxResults' | 'deadline' | 'server'>
 ): Promise<SearchOutcome> {
   const started = Date.now();
   const rel = path.basename(virtualPath);
@@ -476,8 +502,8 @@ export async function searchOneFile(
     // above this ceiling. For an explicitly named file, returning plain "No matches" is false:
     // the file was never searched. Surface the stop reason before either backend can hide it.
     try {
-      const stat = await fs.stat(realPath);
-      if (stat.size > MAX_CONTENT_FILE_BYTES) {
+      const size = req.server ? (await req.server.getMetadata(realPath)).size : (await fs.stat(realPath)).size;
+      if (size > MAX_CONTENT_FILE_BYTES) {
         return {
           hits: [],
           filesScanned: 0,
@@ -490,7 +516,7 @@ export async function searchOneFile(
       // Preserve the backend's existing missing/unreadable-file behaviour below.
     }
   }
-  if (req.mode === 'content') {
+  if (req.mode === 'content' && !req.server) {
     const ripgrep = locateRipgrep();
     if (ripgrep) {
       return searchWithRipgrep(
@@ -517,7 +543,9 @@ export async function searchOneFile(
     include: req.include,
     exclude: [],
     caseSensitive: req.caseSensitive,
-    maxResults: req.maxResults
+    regex: req.regex,
+    maxResults: req.maxResults,
+    server: req.server
   });
   const limited = found.slice(0, req.maxResults);
   return {
@@ -533,13 +561,13 @@ async function scanOneFile(
   realPath: string,
   req: SearchRequest
 ): Promise<Array<{ line: number; text: string }>> {
-  let stat;
+  let size: number;
   try {
-    stat = await fs.stat(realPath);
+    size = req.server ? (await req.server.getMetadata(realPath)).size : (await fs.stat(realPath)).size;
   } catch {
     return [];
   }
-  if (stat.size === 0 || stat.size > MAX_CONTENT_FILE_BYTES) return [];
+  if (size === 0 || size > MAX_CONTENT_FILE_BYTES) return [];
   const needle = req.caseSensitive ? req.query : req.query.toLowerCase();
   let regex: RegExp | null = null;
   if (req.regex) {
@@ -565,7 +593,7 @@ async function scanOneFile(
     });
   };
 
-  const stream = createReadStream(realPath, { highWaterMark: 64 * 1024 });
+  const stream = req.server ? req.server.readFileStream(realPath) : createReadStream(realPath, { highWaterMark: 64 * 1024 });
   try {
     for await (const chunk of stream) {
       const data = chunk as Buffer;
@@ -588,7 +616,8 @@ async function scanOneFile(
   } catch {
     return results;
   } finally {
-    stream.destroy();
+    if ('destroy' in stream) stream.destroy();
+    else await stream.return(undefined).catch(() => undefined);
   }
   return results;
 }

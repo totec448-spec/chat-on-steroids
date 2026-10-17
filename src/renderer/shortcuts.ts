@@ -15,3 +15,8 @@ export function isMac(): boolean {
 export function primaryShortcut(key: string): string {
   return isMac() ? `⌘${key}` : `${t('Ctrl')}+${key}`;
 }
+
+/** "⌘⇧Enter" on macOS, "Ctrl+Shift+Enter" (or "Strg+Umschalt+Enter") elsewhere. */
+export function primaryShiftShortcut(key: string): string {
+  return isMac() ? `⌘⇧${key}` : `${t('Ctrl')}+${t('Shift')}+${key}`;
+}
