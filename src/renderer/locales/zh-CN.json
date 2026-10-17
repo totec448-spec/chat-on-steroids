@@ -1550,7 +1550,7 @@
   "The continuation request timed out or was cancelled. Check the helper chat or provider status before trying again.": "继续请求超时或已取消。重试前请检查辅助聊天或提供者状态。",
   "The custom continuation endpoint is invalid. Check its URL in Settings; use HTTPS or a local HTTP endpoint.": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。",
   "The helper did not produce an opening message. Make the task more specific and try again.": "辅助工具未生成开场消息。请让任务更具体后再试。",
-  "The helper says the goal is met, but this has not been checked. Nothing was sent. Review the chat and continue if work remains.": "辅助工具称目标已达成，但尚未检查。没有发送任何内容。请检查聊天；如果还有工作未完成，请继续。",
+  "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.": "辅助工具称目标已达成，但尚未检查。没有发送后续回复。请检查聊天；如果还有工作未完成，请继续。",
   "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model.": "辅助工具一直选择停止，而不是编写循环继续内容。请检查循环指令，或选择其他辅助模型。",
   "The helper prompt could not be delivered to ChatGPT. Open the helper chat and check its composer or visible error before trying again.": "无法将辅助提示发送到 ChatGPT。重试前请打开辅助聊天，检查其输入框或可见错误。",
   "The helper prompt could not be delivered. {0}": "无法发送辅助提示。{0}",
@@ -2708,5 +2708,5 @@
   "Goal result needs review": "请检查 Goal 结果",
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 辅助工具认为工作已完成，但尚未检查。请查看聊天或发送下一条指示。",
   "Review Goal completion": "检查 Goal 完成情况",
-  "Off by default. Goal stops stay unverified and the reply stays pending. Session finish also keeps the chat open and can notify you.": "默认关闭。Goal 停止时结果仍未验证，回复会保持待处理。Session finish 也会让对话保持打开，并可能发送通知。"
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "默认关闭。如果 Goal 在没有证据时报告完成，结果仍未验证，回复会保持待处理。Session finish 会保持当前暂停状态，请求模型保持当前轮次开放，并可能发送通知。"
 }

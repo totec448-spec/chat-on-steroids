@@ -1140,7 +1140,7 @@
     "message": "輔助工具未產生開場訊息。請讓任務更具體後再試一次。"
   },
   "content_goal_error_goal_helper_stop_unverified": {
-    "message": "輔助工具表示目標已達成，但尚未檢查。沒有傳送任何內容。請檢查對話；若仍有工作，請繼續。"
+    "message": "輔助工具表示目標已達成，但尚未檢查。沒有傳送後續回覆。請檢查對話；若仍有工作，請繼續。"
   },
   "content_goal_error_loop_stop_refused": {
     "message": "輔助工具持續選擇停止，而不是產生循環續接內容。請檢查循環指示，或選擇其他輔助模型。"
