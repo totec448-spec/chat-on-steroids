@@ -54,6 +54,7 @@ import {
   type Hunk,
   type PatchPathResolver
 } from '../codex/apply-patch/index.js';
+import { approvalCardWaiting } from '../approval-wait.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -1575,6 +1576,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
         const slots = status.freeWorkerSlots;
+        // ChatGPT's own "allow this app?" card stops a worker until the person answers it. Read
+        // as just "active", the prime decided the runtime was stuck instead of telling the person
+        // a click was needed (VM, 2026-10-17).
+        const needsApproval = (info: { role: string; conversationId: string | null }): boolean =>
+          info.role !== 'prime' && !!info.conversationId && approvalCardWaiting(info.conversationId);
+        const awaitingUser = state.agents.filter(needsApproval);
         return {
           content: [
             {
@@ -1584,7 +1591,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 state.agents
                   .map(
                     (info) =>
-                      `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
+                      `${info.id}  ${info.role}  ${shown(info)}${needsApproval(info) ? ', needs the user to answer a tool approval in its chat' : ''}  waiting ${info.pending}  ${info.label}` +
                       (info.model ? `  model ${info.model}` : '') +
                       (info.reasoningEffort ? `  reasoning ${info.reasoningEffort}` : '') +
                       (info.result
@@ -1607,6 +1614,10 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   ? `\n\n${failed.map((info) => info.id).join(', ')} will not report. Do that work yourself or wake ` +
                     'another worker; do not wait for them.'
                   : '') +
+                (awaitingUser.length > 0
+                  ? `\n\n${awaitingUser.map((info) => info.id).join(', ')} ${awaitingUser.length === 1 ? 'waits' : 'wait'} for the user to allow or deny a tool call in ${awaitingUser.length === 1 ? 'its own chat' : 'their own chats'} ` +
+                    'and continue only after the user answers, in the app or in the browser. If you are waiting for them, tell the user.'
+                  : '') +
                 // A status check is a glance, not a stopping point. Without this the table reads
                 // like an answer to hand back to the user, and a prime that has just looked at its
                 // workers stops mid-run to report what it saw.
@@ -1628,6 +1639,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               state: info.state,
               revivable: info.revivable,
               waiting: info.pending,
+              needs_user_approval: needsApproval(info),
               result: info.result ?? null
             }))
           }
