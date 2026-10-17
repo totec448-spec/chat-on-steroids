@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "Der verwaltete Skills-Ordner ist kein sicherer Ordner",
   "The managed Skills folder was redirected": "Der verwaltete Skills-Ordner wurde umgeleitet",
   "The Skills library has too many entries": "Die Skill-Bibliothek hat zu viele Einträge",
-  "The Skills library supports at most 64 skills": "Die Skill-Bibliothek fasst höchstens 64 Skills",
+  "The Skills library supports at most 128 skills": "Die Skill-Bibliothek fasst höchstens 128 Skills",
   "The managed Skills folder changed while being read": "Der verwaltete Skills-Ordner hat sich beim Lesen geändert",
   "Skills storage requires an absolute user-data path": "Der Skill-Speicher braucht einen absoluten Pfad für die App-Daten",
   "Auto-selected Skill revision is invalid": "Die automatisch gewählte Skill-Version ist ungültig",

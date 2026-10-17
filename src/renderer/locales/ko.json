@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "관리되는 스킬 폴더가 안전한 폴더가 아닙니다",
   "The managed Skills folder was redirected": "관리되는 스킬 폴더가 리디렉션되었습니다",
   "The Skills library has too many entries": "스킬 라이브러리의 항목이 너무 많습니다",
-  "The Skills library supports at most 64 skills": "스킬 라이브러리에는 최대 64개의 스킬만 넣을 수 있습니다",
+  "The Skills library supports at most 128 skills": "스킬 라이브러리에는 최대 128개의 스킬만 넣을 수 있습니다",
   "The managed Skills folder changed while being read": "읽는 동안 관리되는 스킬 폴더가 변경되었습니다",
   "Skills storage requires an absolute user-data path": "스킬 저장소에는 앱 데이터의 절대 경로가 필요합니다",
   "Auto-selected Skill revision is invalid": "자동 선택된 스킬 리비전이 잘못되었습니다",

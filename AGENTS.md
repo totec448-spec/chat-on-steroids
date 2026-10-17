@@ -452,7 +452,10 @@ internal length and closing boundary; authored whitespace after the frame remain
 ### Text Skills
 
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
-bounded UTF-8 import/read and metadata catalog. Valid YAML name/description fields use the
+bounded to 128 valid packages with fail-closed overflow, UTF-8 import/read and metadata catalog.
+Its Core connector projection omits the redundant per-skill path, trims descriptions to 160
+characters and caps catalog rows at 7,000 characters, ending with the omitted count and `/skills`
+listing hint instead of expanding connector instructions without bound. Valid YAML name/description fields use the
 shared bounded parser before publication, including folded/literal multiline descriptions;
 catalog fields are normalized to one bounded line without rewriting the source body. Legacy
 plain Markdown or invalid/incomplete headers keep the existing heading/prose fallback.

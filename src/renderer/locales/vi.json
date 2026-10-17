@@ -2559,7 +2559,7 @@
   "The managed Skills folder is not a safe directory": "Thư mục kỹ năng được quản lý không phải là thư mục an toàn",
   "The managed Skills folder was redirected": "Thư mục kỹ năng được quản lý đã bị chuyển hướng",
   "The Skills library has too many entries": "Thư viện kỹ năng có quá nhiều mục",
-  "The Skills library supports at most 64 skills": "Thư viện kỹ năng chứa tối đa 64 kỹ năng",
+  "The Skills library supports at most 128 skills": "Thư viện kỹ năng chứa tối đa 128 kỹ năng",
   "The managed Skills folder changed while being read": "Thư mục kỹ năng được quản lý đã thay đổi trong khi đọc",
   "Skills storage requires an absolute user-data path": "Bộ lưu trữ kỹ năng cần đường dẫn tuyệt đối đến dữ liệu ứng dụng",
   "Auto-selected Skill revision is invalid": "Phiên bản kỹ năng được chọn tự động không hợp lệ",
