@@ -22,7 +22,9 @@ vi.mock('node:child_process', async importOriginal => {
     spawn: ((command: string, args: readonly string[], options: { cwd?: string }) => {
       const child = original.spawn(command, args as string[], options as never);
       const at = args.indexOf('worktree');
-      if (at >= 0 && ['add', 'remove'].includes(args[at + 1]!)) {
+      // `list` reads every worktree's admin folder too, and failed with "Invalid path
+      // .git/worktrees" when a removal emptied that folder underneath it (full suite, 2026-10-17).
+      if (at >= 0 && ['add', 'remove', 'list'].includes(args[at + 1]!)) {
         const key = String(options?.cwd);
         const now = (running.get(key) ?? 0) + 1;
         running.set(key, now);
@@ -38,7 +40,7 @@ let temp = '';
 beforeEach(async () => { resetWorkerWorktreeRegistryForTests(); overlap = 0; running.clear(); temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-wt-serial-')); });
 afterEach(async () => { resetWorkerWorktreeRegistryForTests(); await fs.rm(temp, { recursive: true, force: true }); });
 
-it('never runs two worktree changes of one repository at the same time', async () => {
+it('never runs two worktree changes or a listing beside a change in one repository at the same time', async () => {
   const approved = path.join(temp, 'approved');
   const repo = path.join(approved, 'repo');
   await fs.mkdir(repo, { recursive: true });
