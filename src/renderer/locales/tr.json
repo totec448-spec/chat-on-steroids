@@ -2761,6 +2761,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "ChatGPT bu yanıt için “Yeni sohbette dallandır” seçeneğini sunmadı. Özgün sohbeti açıp yeniden dene.",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "Bu yanıt artık özgün ChatGPT sohbetinde değil, bu yüzden dallandırılamaz.",
   "Unblock this conversation before sending": "Göndermeden önce bu konuşmanın engelini kaldır",
+  "Wait until the chat you branch from finishes its turn, then send again": "Dallandırdığın sohbetin turunu bitirmesini bekle, sonra yeniden gönder",
   "{0} sub-agents": "{0} yardımcı ajan",
   "{0} sub-agents|one": "{0} yardımcı ajan",
   "{0} active": "{0} etkin",

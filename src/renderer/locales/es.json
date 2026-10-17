@@ -2798,6 +2798,7 @@
   "ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.": "ChatGPT no ofreció «Bifurcar en un chat nuevo» para esa respuesta. Abre el chat original y vuelve a intentarlo.",
   "That reply is no longer in the original ChatGPT chat, so it cannot be branched.": "Esa respuesta ya no está en el chat original de ChatGPT, así que no se puede bifurcar.",
   "Unblock this conversation before sending": "Desbloquea esta conversación antes de enviar",
+  "Wait until the chat you branch from finishes its turn, then send again": "Espera a que el chat del que bifurcas termine su turno y vuelve a enviar",
   "{0} sub-agents": "{0} subagentes",
   "{0} sub-agents|one": "{0} subagente",
   "{0} sub-agents|many": "{0} de subagentes",

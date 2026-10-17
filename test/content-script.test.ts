@@ -23949,6 +23949,9 @@ describe('branch in new chat (#482)', () => {
     const delivered = live!.runtimeMessage(offer());
     await click; await settle();
     expect(branchInNewChat).toHaveBeenCalledTimes(1);
+    // The draft carries this message's marker again, so the extension keeps owning that tab.
+    expect(live!.window.location.search).toBe(`?cos-input=${inputId}`);
+    expect(live!.window.location.hash).toBe(`#cos-input=${inputId}`);
     // The claim happened on the draft, after the branch, as an ordinary new chat.
     expect(claims.find(message => message.requiresAuthorization)).toMatchObject({ id: inputId, conversationId: null });
     live!.dom.reconfigure({ url: `https://chatgpt.com/c/${branched}` });
@@ -23971,6 +23974,35 @@ describe('branch in new chat (#482)', () => {
     expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
     expect(claims).toEqual([expect.objectContaining({ id: inputId, conversationId: source, branchFailed: 'branch_unavailable' })]);
     expect(live!.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
+  it('continues on a draft of that exact reply after its page lost the branch it made', async () => {
+    // A reloaded extension or document forgets which draft it made; the draft itself still proves
+    // it continues from that reply. Only the tab elected for this message is offered it.
+    const claims: Array<Record<string, any>> = [];
+    live = await harness(draft, { desktop_input: message => { claims.push(message); return { ok: true, data: message.authorize || message.ack
+      ? { ok: true } : { input: { id: inputId, owner: 'input-owner', text, model: null, reasoningEffort: null, purpose: 'user', images: [] } } }; } });
+    const section = assistantTurn(live.document, 'draft-turn', []);
+    await bindFiberTurns([{ section, turn: { conversationId: null, turnId: 'draft-turn', endMessageId: reply,
+      messages: [{ messageId: reply, rawMessageId: reply, stable: true, rawText: 'Done.', renderedHtml: '<p>Done.</p>' }] } }]);
+    live.hook.observe(); await settle();
+    const branchInNewChat = vi.fn(async () => 'clicked');
+    live.window.CLF_DOM.branchInNewChat = branchInNewChat;
+    void live.runtimeMessage(offer());
+    await vi.waitFor(() => expect(claims.find(message => message.requiresAuthorization)).toMatchObject({ id: inputId, conversationId: null }));
+    expect(branchInNewChat).not.toHaveBeenCalled();
+    expect(live.window.location.search).toBe(`?cos-input=${inputId}`);
+  });
+
+  it('refuses a draft that ends at another reply', async () => {
+    const claims: Array<Record<string, any>> = [];
+    live = await harness(draft, { desktop_input: message => { claims.push(message); return { ok: true, data: {} }; } });
+    const section = assistantTurn(live.document, 'draft-turn', []);
+    await bindFiberTurns([{ section, turn: { conversationId: null, turnId: 'draft-turn', endMessageId: '11111111-2222-4333-8444-555555555555',
+      messages: [] } }]);
+    live.hook.observe(); await settle();
+    expect(await live.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(claims).toEqual([]);
   });
 
   it('never branches a chat the person opened themselves', async () => {

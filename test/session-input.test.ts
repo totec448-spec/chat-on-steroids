@@ -2194,6 +2194,14 @@ describe('branch in new chat (#482)', () => {
     await expect(enqueueInput(input({ sessionId: null, branch: branch() }))).rejects.toThrow(/branch/i);
   });
 
+  it('waits until the source chat finishes its turn before branching it', async () => {
+    // Its page would be opened a second time and then left, beside the turn still working there.
+    binding.activeTurnId = 'running-turn';
+    await expect(enqueueInput(input({ sessionId: null, branch: branch() }))).rejects.toThrow(/finishes/);
+    binding.activeTurnId = null;
+    expect(await enqueueInput(input({ sessionId: null, branch: branch() }))).toMatchObject({ opening: true });
+  });
+
   it('refuses to branch from a blocked chat or a chat without a ChatGPT conversation', async () => {
     binding.blocked = true;
     await expect(enqueueInput(input({ sessionId: null, branch: branch() }))).rejects.toThrow(/Unblock/);

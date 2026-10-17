@@ -1082,18 +1082,24 @@ An opening remembers its Project, so a retry's new Project gets its own tab.
 Branch in new chat (#482): the answer action under a completed reply with native ids (not in worker
 or helper chats) starts a new chat whose first message carries `branch { sessionId, conversationId,
 messageId }`. Main admits it only as an opening (or as a retry in its own still-unbound reserved
-chat, at the same reply), from a chat that still shows that conversation; the reserved session's
+chat, at the same reply), from a chat that still shows that conversation and has no turn running; the reserved session's
 origin is `desktop` with `fromSessionId` and `branchOf { conversationId, messageId }`, and nothing
 else carries over (attribution, workers, inputs, Goal/Loop). `pendingBrowserInputs` hands the
-browser `branch` instead of a linked Project. The worker opens `/c/<source>?cos-input=…#cos-input=…`
+browser `branch` instead of a linked Project, and `/input/claim` does not require a Project page for it. The worker opens `/c/<source>?cos-input=…#cos-input=…`
 (never borrowing a tab) and keeps matching its elected tab once it shows ChatGPT's local draft
 (`/c/local-chatgpt:…`). Before any claim, the page on the marked source chat finds the reply's
 turn by fiber `endMessageId`, opens the reply's ellipsis menu, the Branch entry (branch icon) and
 its submenu, and chooses ChatGPT's own "new chat" entry by handler: `fiber.js` answers
 `clf-branch-ask` by marking the single submenu entry whose `onSelect` source does not mention work
 mode (`data-clf-branch-new-chat=<nonce>`). No label is read. ChatGPT then moves the tab to its local
-draft holding the history up to that reply; the ordinary new-chat delivery claims, types and sends
-there, and the first send gives the branch its real id. A missing reply or an absent/ambiguous entry
+draft holding the history up to that reply; the page puts the message's `cos-input` marker back on
+that URL (`history.replaceState`), so the worker's marker checks (claim, protection, tab group) hold,
+and a page that forgot its draft (reload) resumes on one whose last reply is exactly that reply. The
+ordinary new-chat delivery claims, types and sends there, and the first send gives the branch its
+real id. At that first bind, before the question is recorded, `seedBranchHistory` writes the source
+chat's recorded messages and steps up to the reply into the branch under the same native ids (long
+texts with their overflow), so the page's later report of the copied history revises them in place
+and the question follows them. A missing reply or an absent/ambiguous entry
 is reported as `/input/claim { branchFailed: 'branch_message_missing' | 'branch_unavailable' }`
 for that exact source chat, which fails the unclaimed opening with a translated reason
 (`BRANCH_ERRORS`); nothing was typed. The branch chat records the copied history itself, as ChatGPT
