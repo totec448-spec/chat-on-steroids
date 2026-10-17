@@ -24079,6 +24079,21 @@ describe('edit and resubmit (#365)', () => {
     expect(claims.some(message => message.ack)).toBe(false);
   });
 
+  // Live 2.1.41 (VM): a question ChatGPT edited in place was recorded from the page as written,
+  // without its tree place, because only the model report carries it and that report skipped every
+  // question the page already showed with the same text. The edit then read as a new question.
+  it('records where a question the page already shows sits in ChatGPT\'s message tree', async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    const section = userTurn(live.document, 'tree-user', 'Fix the login bug', { sent: false });
+    live.hook.observe(); await settle(); await live.hook.flush();
+    await bindFiberTurns([{ section, turn: { turnId: 'tree-turn', conversationId: chat,
+      messages: [{ role: 'user', stable: true, messageId: 'm-tree-user', rawMessageId: 'm-tree-user', rawText: 'Fix the login bug', parentId: 'answer-1', parentExact: true }] } }]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const reports = emitted(live.sent, 'user_message').filter(entry => entry.event.messageId === 'm-tree-user');
+    expect(reports.some(entry => entry.event.parentId === 'answer-1' && entry.event.parentExact === true)).toBe(true);
+    expect(reports.every(entry => entry.event.text === 'Fix the login bug')).toBe(true);
+  });
+
   it('claims nothing while a turn is running', async () => {
     const { claims, openQuestionEdit } = await editPage();
     live!.window.CLF_DOM.generating = () => true;

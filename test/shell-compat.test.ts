@@ -1670,12 +1670,12 @@ it('places each question in ChatGPT\'s message tree, with the versions control a
   secondNode.__reactFiber$fixture = f.chain({ entry: second.entry }, thread);
   const questions = async () => (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
     .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
-  expect(await questions()).toEqual([[USER, 'root', false], [second.userId, ANSWER, false]]);
-  // ChatGPT draws its versions control once the question has another version.
-  const versions = f.doc.createElement('button');
-  (versions as any).__reactFiber$fixture = f.chain({ onClick: () => ({ conversationId: THREAD, messageId: second.userId, usesVersionsEndpoint: !0 }) });
-  secondNode.querySelector('[data-content-search-turn-key]').append(versions);
+  // After a real message, the place alone proves versions; at the root only ChatGPT's versions control does.
   expect(await questions()).toEqual([[USER, 'root', false], [second.userId, ANSWER, true]]);
+  const versions = f.doc.createElement('button');
+  (versions as any).__reactFiber$fixture = f.chain({ onClick: () => ({ conversationId: THREAD, messageId: USER, usesVersionsEndpoint: !0 }) });
+  f.doc.querySelector('[data-turn-key]')!.querySelector('[data-content-search-turn-key]')!.append(versions);
+  expect(await questions()).toEqual([[USER, 'root', true], [second.userId, ANSWER, true]]);
   // A turn the thread list does not hold exactly once gives no place at all.
   thread.memoizedProps.entries = [f.entry];
   expect((await questions()).find(([id]: any) => id === second.userId)?.[1]).toBeUndefined();

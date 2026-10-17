@@ -6010,6 +6010,9 @@ describe('edit and resubmit (#365)', () => {
     expect(rows[4]).toContain('Done, here is the fix.');
     expect(rows).toHaveLength(5);
     expect(w.document.querySelector('#timeline > .ev-user_message:nth-of-type(n) .message-edited, #timeline .message-edited')?.textContent).toBe('Edited version');
+    // Directly under the edited question, before the line of the turn that answers it.
+    const editedRow = [...w.document.querySelectorAll('#timeline > .ev-user_message')].find(row => row.textContent!.includes('Fix the login bug'))!;
+    expect(editedRow.nextElementSibling?.classList.contains('earlier-version')).toBe(true);
     const fold = w.document.querySelector<HTMLDetailsElement>('#timeline > .earlier-version')!;
     expect(fold.open).toBe(false);
     fold.open = true; fold.dispatchEvent(new w.Event('toggle')); await settle();
@@ -6049,9 +6052,13 @@ describe('edit and resubmit (#365)', () => {
     const notice = w.document.getElementById('editDraft')!;
     expect(notice.hidden).toBe(false);
     expect(notice.textContent).toContain('Editing your message · replaces 3 later messages');
+    // The question being edited is marked in the chat, so an earlier one is easy to find.
+    const marked = () => [...w.document.querySelectorAll('#timeline .ev-user_message.is-being-edited')].map(row => row.textContent!.includes('First question'));
+    expect(marked()).toEqual([true]);
     await submit(w as any, 'First question, edited');
     expect(live.sent.at(-1)).toMatchObject({ sessionId: summary([]).id, text: 'First question, edited', mode: 'auto', edit: { messageId: Q1 } });
     expect(notice.hidden).toBe(true);
+    expect(marked()).toEqual([]);
     // The draft that was there before the edit comes back.
     expect(input.value).toBe('A draft I was writing');
   });
