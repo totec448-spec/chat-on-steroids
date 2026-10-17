@@ -2463,6 +2463,15 @@
   "/srv/app or ~/app": "/srv/app veya ~/app",
   "Prefer Plugins on app-sent messages": "Uygulamanın gönderdiği iletilerde Plugins kullan",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Etkinleştirildiğinde Chat On Steroids, uygulamanın gönderdiği normal iletilerde Core yerine Plugins kullanır. Hedef, Döngü, işçiler ve kurtarma her zaman Core kullanır. Her iletide yalnızca bir uygulamadan söz edilir. Doğrudan ChatGPT üzerinden gönderilen iletiler değişmez.",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Sunucudaki projeler, giriş alanının her yerinde Skills ve dosyalar, ve Mac izinleri için bir onarım.",
+  "Projects on a server": "Sunucudaki projeler",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "SSH ile bir klasör ekleyin; ChatGPT kendi SSH kurulumunuzla orada okur, düzenler ve komut çalıştırır.",
+  "/ and @ anywhere": "Her yerde / ve @",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "İletinin herhangi bir yerinde / ile bir Skill, @ ile bir proje dosyası seçin.",
+  "Mac permissions repaired": "Mac izinleri onarıldı",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "Bir güncelleme Mac’te masaüstü erişimini bozduysa tek tıkla onarılır.",
+  "Prefer Plugins": "Plugins tercih et",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "İsterseniz uygulamanın gönderdiği iletiler Core yerine Plugins uygulamanızı kullanır.",
   "This task was sent or removed before your edit was saved.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı.",
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı; düzenlemeniz giriş alanında."
 }

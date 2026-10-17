@@ -2463,6 +2463,15 @@
   "/srv/app or ~/app": "/srv/app または ~/app",
   "Prefer Plugins on app-sent messages": "アプリから送るメッセージでPluginsを優先",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "有効にすると、Chat On Steroids が送る通常のメッセージには Core ではなく Plugins を使用します。ゴール、ループ、ワーカー、復旧では常に Core を使います。メッセージで参照するアプリは1つだけです。ChatGPT から直接送るメッセージは変更されません。",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "サーバー上のプロジェクト、入力欄のどこでも使える Skill とファイル、そして Mac の権限の修復。",
+  "Projects on a server": "サーバー上のプロジェクト",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "SSH でフォルダを追加すると、ChatGPT があなた自身の SSH 設定でそこを読み、編集し、コマンドを実行します。",
+  "/ and @ anywhere": "どこでも / と @",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "メッセージのどこでも、/ で Skill を、@ でプロジェクトのファイルを選べます。",
+  "Mac permissions repaired": "Mac の権限を修復",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "アップデートで Mac のデスクトップアクセスが使えなくなったら、ワンクリックで修復できます。",
+  "Prefer Plugins": "Plugins を優先",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "必要なら、アプリが送るメッセージで Core の代わりに Plugins アプリを使います。",
   "This task was sent or removed before your edit was saved.": "編集を保存する前に、このタスクは送信または削除されました。",
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "編集を保存する前に、このタスクは送信または削除されました。編集内容は入力欄にあります。"
 }

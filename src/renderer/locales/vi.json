@@ -2463,6 +2463,15 @@
   "/srv/app or ~/app": "/srv/app hoặc ~/app",
   "Prefer Plugins on app-sent messages": "Ưu tiên Plugins trong tin nhắn do ứng dụng gửi",
   "When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Khi bật, Chat On Steroids dùng Plugins thay cho Core trong các tin nhắn thông thường do ứng dụng gửi. Goal, Loop, tác nhân và khôi phục luôn dùng Core. Mỗi tin nhắn chỉ nhắc đến một ứng dụng. Tin nhắn gửi trực tiếp trong ChatGPT không thay đổi.",
+  "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Dự án trên máy chủ, Skills và tệp ở bất kỳ đâu trong ô soạn tin, và cách sửa quyền trên Mac.",
+  "Projects on a server": "Dự án trên máy chủ",
+  "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Thêm một thư mục qua SSH; ChatGPT đọc, chỉnh sửa và chạy lệnh ở đó bằng thiết lập SSH của bạn.",
+  "/ and @ anywhere": "/ và @ ở mọi nơi",
+  "Pick a Skill with / or a project file with @ at any point in a message.": "Chọn một Skill bằng / hoặc một tệp dự án bằng @ ở bất kỳ vị trí nào trong tin nhắn.",
+  "Mac permissions repaired": "Đã sửa quyền trên Mac",
+  "If an update left Desktop access broken on a Mac, one click repairs it.": "Nếu bản cập nhật làm hỏng quyền truy cập màn hình trên Mac, một cú nhấp sẽ sửa lại.",
+  "Prefer Plugins": "Ưu tiên Plugins",
+  "If you like, messages the app sends use your Plugins app instead of Core.": "Nếu muốn, tin nhắn do ứng dụng gửi sẽ dùng ứng dụng Plugins thay cho Core.",
   "This task was sent or removed before your edit was saved.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu.",
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu, nên bản chỉnh sửa đã được đưa vào ô soạn tin."
 }
