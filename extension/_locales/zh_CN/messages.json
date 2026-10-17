@@ -728,12 +728,6 @@
   "content_workers_still_running": {
     "message": "仍有 $1 个子代理在运行"
   },
-  "content_workers_summary": {
-    "message": "$1 个已完成 · $2 个运行中"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 个已完成 · $2 个运行中 · $3 个失败"
-  },
   "content_working": {
     "message": "正在处理…"
   },
@@ -821,9 +815,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · 端口 $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "保留 $1 个 · 共 $2 个"
-  },
   "popup_detail_chat_id": {
     "message": "聊天 ID"
   },
@@ -848,17 +839,11 @@
   "popup_detail_observed": {
     "message": "已观察"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 个事件 · $2 次调用"
-  },
   "popup_detail_ownership": {
     "message": "归属"
   },
   "popup_detail_page_sends": {
     "message": "页面发送次数"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 次失败"
   },
   "popup_detail_recorder": {
     "message": "记录器"
@@ -1174,5 +1159,26 @@
   },
   "popup_app_not_running_help": {
     "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
+  },
+  "content_workers_finished": {
+    "message": "$1 个已完成"
+  },
+  "content_workers_running": {
+    "message": "$1 个运行中"
+  },
+  "content_workers_failed": {
+    "message": "$1 个失败"
+  },
+  "popup_detail_events": {
+    "message": "$1 个事件"
+  },
+  "popup_detail_calls": {
+    "message": "$1 次调用"
+  },
+  "popup_detail_failed": {
+    "message": "$1 次失败"
+  },
+  "popup_detail_total": {
+    "message": "共 $1 个"
   }
 }

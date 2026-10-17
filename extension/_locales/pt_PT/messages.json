@@ -458,6 +458,12 @@
   "content_goal_retrying": {
     "message": "A tentar o Goal novamente dentro de $1 segundos"
   },
+  "content_goal_retrying__one": {
+    "message": "A tentar o Goal novamente dentro de $1 segundo"
+  },
+  "content_goal_retrying__many": {
+    "message": "A tentar o Goal novamente dentro de $1 de segundos"
+  },
   "content_goal_save": {
     "message": "Guardar como objetivo"
   },
@@ -635,8 +641,20 @@
   "content_tokens_from": {
     "message": "a partir de $1 tokens"
   },
+  "content_tokens_from__one": {
+    "message": "a partir de $1 token"
+  },
+  "content_tokens_from__many": {
+    "message": "a partir de $1 de tokens"
+  },
   "content_tool_calls_count": {
     "message": "$1 chamadas de ferramenta"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 chamada de ferramenta"
+  },
+  "content_tool_calls_count__many": {
+    "message": "$1 de chamadas de ferramenta"
   },
   "content_tool_details_loading": {
     "message": "A carregar detalhes gravados…"
@@ -646,6 +664,12 @@
   },
   "content_tool_more_changed_files": {
     "message": "mais $1 ficheiros alterados"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "mais $1 ficheiro alterado"
+  },
+  "content_tool_more_changed_files__many": {
+    "message": "mais $1 de ficheiros alterados"
   },
   "content_tool_outcome_completed": {
     "message": "concluído"
@@ -664,6 +688,12 @@
   },
   "content_tool_preview_truncated": {
     "message": "Prévia cortada a partir de $1 caracteres."
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Prévia cortada a partir de $1 carácter."
+  },
+  "content_tool_preview_truncated__many": {
+    "message": "Prévia cortada a partir de $1 de caracteres."
   },
   "content_tool_ran": {
     "message": "Executou $1"
@@ -713,6 +743,12 @@
   "content_waiting_local_tools": {
     "message": "A aguardar $1 ferramentas locais terminarem"
   },
+  "content_waiting_local_tools__one": {
+    "message": "A aguardar que $1 ferramenta local termine"
+  },
+  "content_waiting_local_tools__many": {
+    "message": "A aguardar $1 de ferramentas locais terminarem"
+  },
   "content_worker_generic": {
     "message": "um worker"
   },
@@ -728,11 +764,11 @@
   "content_workers_still_running": {
     "message": "$1 workers ainda em execução"
   },
-  "content_workers_summary": {
-    "message": "$1 concluídos · $2 em execução"
+  "content_workers_still_running__one": {
+    "message": "$1 worker ainda em execução"
   },
-  "content_workers_summary_failed": {
-    "message": "$1 concluídos · $2 em execução · $3 com falha"
+  "content_workers_still_running__many": {
+    "message": "$1 de workers ainda em execução"
   },
   "content_working": {
     "message": "a trabalhar…"
@@ -803,7 +839,19 @@
   "popup_count_held": {
     "message": "$1 retidos"
   },
+  "popup_count_held__one": {
+    "message": "$1 retido"
+  },
+  "popup_count_held__many": {
+    "message": "$1 retidos"
+  },
   "popup_count_held_in_page": {
+    "message": "$1 retidos na página"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "$1 retido na página"
+  },
+  "popup_count_held_in_page__many": {
     "message": "$1 retidos na página"
   },
   "popup_count_queued": {
@@ -820,9 +868,6 @@
   },
   "popup_detail_app_value": {
     "message": "v$1 · porta $2"
-  },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 retidos · $2 no total"
   },
   "popup_detail_chat_id": {
     "message": "ID do chat"
@@ -848,17 +893,11 @@
   "popup_detail_observed": {
     "message": "observado"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 eventos · $2 chamadas"
-  },
   "popup_detail_ownership": {
     "message": "proprietário"
   },
   "popup_detail_page_sends": {
     "message": "envios da página"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 com falha"
   },
   "popup_detail_recorder": {
     "message": "gravador"
@@ -896,6 +935,12 @@
   "popup_pipeline_call_fallback_many": {
     "message": "A app não conseguiu associar $1 chamadas pelo ID da solicitação — recorreu a $2."
   },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "A app não conseguiu associar $1 chamada pelo ID da solicitação — recorreu a $2."
+  },
+  "popup_pipeline_call_fallback_many__many": {
+    "message": "A app não conseguiu associar $1 de chamadas pelo ID da solicitação — recorreu a $2."
+  },
   "popup_pipeline_call_fallback_one": {
     "message": "A app não conseguiu associar uma chamada pelo ID da solicitação — recorreu a $1."
   },
@@ -925,6 +970,12 @@
   },
   "popup_pipeline_request_id_matched_many": {
     "message": "$1 IDs de solicitação associados à atividade de ferramentas gravada."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 ID de solicitação associado à atividade de ferramentas gravada."
+  },
+  "popup_pipeline_request_id_matched_many__many": {
+    "message": "$1 de IDs de solicitação associados à atividade de ferramentas gravada."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 ID de solicitação associado à atividade de ferramentas gravada."
@@ -1174,5 +1225,62 @@
   },
   "popup_app_not_running_help": {
     "message": "Confirme que o Chat On Steroids está aberto neste computador. A extensão liga-se sozinha."
+  },
+  "content_workers_finished": {
+    "message": "$1 concluídos"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 concluído"
+  },
+  "content_workers_finished__many": {
+    "message": "$1 concluídos"
+  },
+  "content_workers_running": {
+    "message": "$1 em execução"
+  },
+  "content_workers_running__one": {
+    "message": "$1 em execução"
+  },
+  "content_workers_running__many": {
+    "message": "$1 em execução"
+  },
+  "content_workers_failed": {
+    "message": "$1 com falha"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 com falha"
+  },
+  "content_workers_failed__many": {
+    "message": "$1 com falha"
+  },
+  "popup_detail_events": {
+    "message": "$1 eventos"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 evento"
+  },
+  "popup_detail_events__many": {
+    "message": "$1 de eventos"
+  },
+  "popup_detail_calls": {
+    "message": "$1 chamadas"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 chamada"
+  },
+  "popup_detail_calls__many": {
+    "message": "$1 de chamadas"
+  },
+  "popup_detail_failed": {
+    "message": "$1 com falha"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 com falha"
+  },
+  "popup_detail_failed__many": {
+    "message": "$1 com falha"
+  },
+  "popup_detail_total": {
+    "message": "$1 no total"
   }
 }

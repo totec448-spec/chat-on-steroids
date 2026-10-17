@@ -5,7 +5,7 @@ import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, Projec
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
-import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
+import { currentLanguage, onLanguageChange, t, tn, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { createSearchPopup } from './search-popup.js';
@@ -1061,7 +1061,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (change.status === 'U') {
       stats.title = t('All lines in this untracked file');
       stats.append(el('span', 'is-muted', change.binary ? t('Binary') :
-        change.additions === null ? '—' : change.additions === 1 ? t('1 line') : t('{0} lines', [change.additions])));
+        change.additions === null ? '—' : tn('{0} line', '{0} lines', change.additions)));
       return stats;
     }
     stats.title = gitSnapshot?.comparison ? t('Changes from comparison base') : t('Changes since HEAD');

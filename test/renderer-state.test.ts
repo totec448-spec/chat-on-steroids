@@ -1478,7 +1478,7 @@ it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as
     field.value = 'listed';
     field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
     await vi.waitFor(() => expect(doc.getElementById('searchResults')!.textContent)
-      .toContain('Showing the first 1 matches. Add a word to narrow them down.'));
+      .toContain('Showing the first 1 match. Add a word to narrow it down.'));
   } finally {
     vi.unstubAllGlobals();
   }

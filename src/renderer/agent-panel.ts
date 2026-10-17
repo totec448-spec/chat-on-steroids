@@ -1,5 +1,5 @@
 import type { TurnTrace } from '../shared/turn-trace.js';
-import { ui, t } from './i18n.js';
+import { ui, t, tn } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
@@ -74,7 +74,7 @@ export function createAgentPanel(options: {
       const group = workers.filter(worker => isActive(worker) === active);
       const failed = active ? 0 : group.filter(worker => options.agent?.(worker)?.state === 'failed').length;
       body.append(el('h3', '', () =>
-        `${active ? t("Active") : t("History")} · ${group.length}${failed ? ` · ${t('{0} failed', [failed])}` : ''}`));
+        `${active ? t("Active") : t("History")} · ${group.length}${failed ? ` · ${tn('{0} failed', '{0} failed', failed)}` : ''}`));
       if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
       for (const worker of group) {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');

@@ -2349,7 +2349,7 @@ describe('native worker checkout cleanup confirmation', () => {
       'Remove worker Git checkout?': 'Worker-Git-Checkout entfernen?',
       'Keep checkout': 'Checkout behalten',
       'Checkout: {0}': 'Checkout: {0}',
-      '{0} uncommitted or ignored paths would be discarded:': '{0} nicht committete oder ignorierte Pfade würden verworfen:'
+      'Uncommitted or ignored paths that would be discarded ({0}):': 'Nicht committete oder ignorierte Pfade, die verworfen würden ({0}):'
     });
     try {
       await withPreview(async ({ dispose }) => {
@@ -2358,7 +2358,7 @@ describe('native worker checkout cleanup confirmation', () => {
         expect(options.title).toBe('Worker-Git-Checkout entfernen?');
         expect(options.buttons).toEqual(['Checkout behalten', 'Remove checkout; preserve Git branch']);
         expect(options.detail).toContain(`Checkout: ${preview.workspace}`);
-        expect(options.detail).toContain('1 nicht committete oder ignorierte Pfade würden verworfen:');
+        expect(options.detail).toContain('Nicht committete oder ignorierte Pfade, die verworfen würden (1):');
         expect(dispose).not.toHaveBeenCalled();
       });
     } finally { setMainTextTranslations({}); }

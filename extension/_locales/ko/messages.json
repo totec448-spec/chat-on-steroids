@@ -728,12 +728,6 @@
   "content_workers_still_running": {
     "message": "워커 $1개가 아직 실행 중"
   },
-  "content_workers_summary": {
-    "message": "$1개 완료 · $2개 실행 중"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1개 완료 · $2개 실행 중 · $3개 실패"
-  },
   "content_working": {
     "message": "작업 중…"
   },
@@ -821,9 +815,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · 포트 $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1개 보류 · 전체 $2개"
-  },
   "popup_detail_chat_id": {
     "message": "대화 ID"
   },
@@ -848,17 +839,11 @@
   "popup_detail_observed": {
     "message": "관찰됨"
   },
-  "popup_detail_observed_value": {
-    "message": "이벤트 $1개 · 호출 $2개"
-  },
   "popup_detail_ownership": {
     "message": "소유권"
   },
   "popup_detail_page_sends": {
     "message": "페이지 전송"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2개 실패"
   },
   "popup_detail_recorder": {
     "message": "recorder"
@@ -1174,5 +1159,26 @@
   },
   "popup_app_not_running_help": {
     "message": "이 컴퓨터에서 Chat On Steroids가 열려 있는지 확인하세요. 확장 프로그램은 자동으로 연결됩니다."
+  },
+  "content_workers_finished": {
+    "message": "$1개 완료"
+  },
+  "content_workers_running": {
+    "message": "$1개 실행 중"
+  },
+  "content_workers_failed": {
+    "message": "$1개 실패"
+  },
+  "popup_detail_events": {
+    "message": "이벤트 $1개"
+  },
+  "popup_detail_calls": {
+    "message": "호출 $1개"
+  },
+  "popup_detail_failed": {
+    "message": "$1개 실패"
+  },
+  "popup_detail_total": {
+    "message": "전체 $1개"
   }
 }

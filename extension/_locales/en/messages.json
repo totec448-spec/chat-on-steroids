@@ -458,6 +458,9 @@
   "content_goal_retrying": {
     "message": "Retrying Goal in $1 seconds"
   },
+  "content_goal_retrying__one": {
+    "message": "Retrying Goal in $1 second"
+  },
   "content_goal_save": {
     "message": "Save as goal"
   },
@@ -635,8 +638,14 @@
   "content_tokens_from": {
     "message": "from $1 tokens"
   },
+  "content_tokens_from__one": {
+    "message": "from $1 token"
+  },
   "content_tool_calls_count": {
     "message": "$1 tool calls"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 tool call"
   },
   "content_tool_details_loading": {
     "message": "Loading recorded details…"
@@ -646,6 +655,9 @@
   },
   "content_tool_more_changed_files": {
     "message": "$1 more changed files"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "$1 more changed file"
   },
   "content_tool_outcome_completed": {
     "message": "completed"
@@ -664,6 +676,9 @@
   },
   "content_tool_preview_truncated": {
     "message": "Preview truncated from $1 characters."
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Preview truncated from $1 character."
   },
   "content_tool_ran": {
     "message": "Ran $1"
@@ -713,6 +728,9 @@
   "content_waiting_local_tools": {
     "message": "Waiting for $1 local tools to finish"
   },
+  "content_waiting_local_tools__one": {
+    "message": "Waiting for $1 local tool to finish"
+  },
   "content_worker_generic": {
     "message": "a worker"
   },
@@ -728,11 +746,8 @@
   "content_workers_still_running": {
     "message": "$1 workers still running"
   },
-  "content_workers_summary": {
-    "message": "$1 finished · $2 running"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 finished · $2 running · $3 failed"
+  "content_workers_still_running__one": {
+    "message": "$1 worker still running"
   },
   "content_working": {
     "message": "working…"
@@ -803,7 +818,13 @@
   "popup_count_held": {
     "message": "$1 held"
   },
+  "popup_count_held__one": {
+    "message": "$1 held"
+  },
   "popup_count_held_in_page": {
+    "message": "$1 held in page"
+  },
+  "popup_count_held_in_page__one": {
     "message": "$1 held in page"
   },
   "popup_count_queued": {
@@ -820,9 +841,6 @@
   },
   "popup_detail_app_value": {
     "message": "v$1 · port $2"
-  },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 held · $2 total"
   },
   "popup_detail_chat_id": {
     "message": "chat id"
@@ -848,17 +866,11 @@
   "popup_detail_observed": {
     "message": "observed"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 events · $2 calls"
-  },
   "popup_detail_ownership": {
     "message": "ownership"
   },
   "popup_detail_page_sends": {
     "message": "page sends"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 failed"
   },
   "popup_detail_recorder": {
     "message": "recorder"
@@ -896,6 +908,9 @@
   "popup_pipeline_call_fallback_many": {
     "message": "The app could not place $1 calls by request id — it fell back to $2."
   },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "The app could not place $1 call by request id — it fell back to $2."
+  },
   "popup_pipeline_call_fallback_one": {
     "message": "The app could not place a call by request id — it fell back to $1."
   },
@@ -925,6 +940,9 @@
   },
   "popup_pipeline_request_id_matched_many": {
     "message": "$1 request IDs matched to recorded tool activity."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 request ID matched to recorded tool activity."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 request ID matched to recorded tool activity."
@@ -1174,5 +1192,44 @@
   },
   "popup_app_not_running_help": {
     "message": "Make sure Chat On Steroids is open on this computer. The extension connects on its own."
+  },
+  "content_workers_finished": {
+    "message": "$1 finished"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 finished"
+  },
+  "content_workers_running": {
+    "message": "$1 running"
+  },
+  "content_workers_running__one": {
+    "message": "$1 running"
+  },
+  "content_workers_failed": {
+    "message": "$1 failed"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 failed"
+  },
+  "popup_detail_events": {
+    "message": "$1 events"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 event"
+  },
+  "popup_detail_calls": {
+    "message": "$1 calls"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 call"
+  },
+  "popup_detail_failed": {
+    "message": "$1 failed"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 failed"
+  },
+  "popup_detail_total": {
+    "message": "$1 total"
   }
 }
