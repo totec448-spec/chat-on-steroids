@@ -4090,6 +4090,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-panel-toolbar-actions { display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .file-panel-toolbar-actions::-webkit-scrollbar { display: none; }
 .file-panel-toolbar-actions > button { flex: 0 0 auto; }
+.file-panel-toolbar-actions.is-compact .file-panel-action > span:not(.file-panel-changes-badge) { display: none; }
 .file-panel-toolbar > .file-panel-refresh { flex: 0 0 28px; }
 .file-panel-action { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 6px 7px; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); white-space: nowrap; }
 .file-panel-action:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
