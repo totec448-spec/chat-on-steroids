@@ -18,6 +18,8 @@ export interface ChatFindDeps {
   find(id: string, query: string): Promise<SessionSearchLocation[] | null>;
   /** Scrolls to the message, loading the history page around it when needed. */
   reveal(id: string, location: SessionSearchLocation): Promise<void>;
+  /** The message's row in the timeline when it is loaded, found the way the timeline keys it. */
+  row(location: SessionSearchLocation): HTMLElement | null;
 }
 
 const ALL = 'chat-find';
@@ -27,13 +29,6 @@ type HighlightRegistry = { set(name: string, value: unknown): void; delete(name:
 function registry(): HighlightRegistry | null {
   const css = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS;
   return css?.highlights && typeof (globalThis as { Highlight?: unknown }).Highlight === 'function' ? css.highlights : null;
-}
-
-/** The timeline row of one message, by the key the timeline gives it. */
-function rowOf(location: SessionSearchLocation): HTMLElement | null {
-  const key = location.messageId !== null ? `message:${location.kind} ${location.messageId}` : null;
-  if (!key) return null;
-  return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
 }
 
 /** Elements whose text is a line of its own; their words never run into a neighbour's. */
@@ -100,7 +95,7 @@ export function initChatFind(deps: ChatFindDeps): { selectionChanged(): void } {
     const wanted = phrase();
     if (bar.hidden || !wanted) { highlights.delete(ALL); highlights.delete(CURRENT); return; }
     const Highlight = (globalThis as unknown as { Highlight: new (...ranges: Range[]) => unknown }).Highlight;
-    const current = index >= 0 && matches[index] ? rowOf(matches[index]!) : null;
+    const current = index >= 0 && matches[index] ? deps.row(matches[index]!) : null;
     highlights.set(ALL, new Highlight(...rangesIn($('timeline'), wanted)));
     highlights.set(CURRENT, new Highlight(...(current ? rangesIn(current, wanted) : [])));
   };
