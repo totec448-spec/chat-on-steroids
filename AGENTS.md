@@ -1079,6 +1079,27 @@ deleted Project's page redirects to ChatGPT's home and drops the marker: the wor
 `gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
 An opening remembers its Project, so a retry's new Project gets its own tab.
 
+Branch in new chat (#482): the answer action under a completed reply with native ids (not in worker
+or helper chats) starts a new chat whose first message carries `branch { sessionId, conversationId,
+messageId }`. Main admits it only as an opening (or as a retry in its own still-unbound reserved
+chat, at the same reply), from a chat that still shows that conversation; the reserved session's
+origin is `desktop` with `fromSessionId` and `branchOf { conversationId, messageId }`, and nothing
+else carries over (attribution, workers, inputs, Goal/Loop). `pendingBrowserInputs` hands the
+browser `branch` instead of a linked Project. The worker opens `/c/<source>?cos-input=…#cos-input=…`
+(never borrowing a tab) and keeps matching its elected tab once it shows ChatGPT's local draft
+(`/c/local-chatgpt:…`). Before any claim, the page on the marked source chat finds the reply's
+turn by fiber `endMessageId`, opens the reply's ellipsis menu, the Branch entry (branch icon) and
+its submenu, and chooses ChatGPT's own "new chat" entry by handler: `fiber.js` answers
+`clf-branch-ask` by marking the single submenu entry whose `onSelect` source does not mention work
+mode (`data-clf-branch-new-chat=<nonce>`). No label is read. ChatGPT then moves the tab to its local
+draft holding the history up to that reply; the ordinary new-chat delivery claims, types and sends
+there, and the first send gives the branch its real id. A missing reply or an absent/ambiguous entry
+is reported as `/input/claim { branchFailed: 'branch_message_missing' | 'branch_unavailable' }`
+for that exact source chat, which fails the unclaimed opening with a translated reason
+(`BRANCH_ERRORS`); nothing was typed. The branch chat records the copied history itself, as ChatGPT
+shows it, and links back through `sessions:locate-message { id, messageId }` → the reply's
+`SessionSearchLocation`.
+
 ## 10. Files, terminal, patches and images
 
 **Intent:** provide a predictable coding loop without requiring a Codex installation or launching
