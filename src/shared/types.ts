@@ -624,6 +624,11 @@ export interface BridgeStatus {
    */
   extensionVersion: string | null;
   /**
+   * `gecko` when the browser that reported `extensionVersion` is Firefox, whose signed add-on
+   * Firefox updates itself. With several browsers connected, that version is the oldest of them.
+   */
+  extensionEngine?: 'gecko';
+  /**
    * The extension in the person's own Chrome, Edge or Brave, apart from the CoS browser's copy.
    * Null until one has spoken to this app process; Setup's first step waits for it.
    */

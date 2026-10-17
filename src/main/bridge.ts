@@ -66,7 +66,7 @@ export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
 import { BROWSER_BRIDGE_AUTO_PORTS } from '../shared/browser-bridge.js';
 import { bridgePortSelection } from './bridge-ports.js';
-import type { Config } from '../shared/types.js';
+import { isNewer, type Config } from '../shared/types.js';
 import type { PluginSurface } from '../shared/plugin-refresh.js';
 import { getSecret, secureStorageStatus, setSecret } from './secrets.js';
 import {
@@ -616,7 +616,12 @@ const commandWrites = new Map<string, Promise<boolean>>();
 const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
-let extensionVersion: string | null = null;
+/**
+ * The extension version each browser last reported, by its browser id (the CoS browser and a
+ * peer without an id share one entry each). Two browsers may run different versions - Firefox
+ * updates its add-on on its own schedule - and one shared value followed whichever asked last.
+ */
+const extensionVersions = new Map<string, { version: string; engine?: 'gecko'; seenAt: number }>();
 /**
  * When each (version, build) pair was last announced. Two browsers with the extension installed
  * alternate requests, and a single "current" pair would turn every alternation into a fresh
@@ -1026,10 +1031,15 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     // tab open went "missing" a minute after start although it was connected all along.
     present: browserPresent() || browserWakeConnected(),
     lastSeenAt,
-    extensionVersion,
+    ...versionStatus(),
     externalExtension: externalExtensionStatus(),
     cosExtension: { present: cosExtensionPresent() }
   };
+}
+
+function versionStatus(): Pick<BridgeStatus, 'extensionVersion' | 'extensionEngine'> {
+  const reported = reportedExtension();
+  return { extensionVersion: reported?.version ?? null, ...(reported?.engine ? { extensionEngine: reported.engine } : {}) };
 }
 
 /** Live sightings this run, plus what lasts across restarts for Setup. */
@@ -1136,7 +1146,9 @@ function scheduleBrowserPresence(): void {
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
   browserPresenceTimer = null;
   const now = Date.now();
-  const deadlines = [lastSeenAt, externalExtension?.seenAt ?? null, externalExtension?.loginAt ?? null, cosExtensionSeenAt]
+  // A browser's version entry ages out too, and the reported version may change with it.
+  const deadlines = [lastSeenAt, externalExtension?.seenAt ?? null, externalExtension?.loginAt ?? null, cosExtensionSeenAt,
+    ...[...extensionVersions.values()].map(entry => entry.seenAt)]
     .filter((at): at is number => at !== null && at + BROWSER_PRESENT_MS > now)
     .map(at => at + BROWSER_PRESENT_MS);
   if (!server || deadlines.length === 0) return;
@@ -1282,6 +1294,23 @@ export function noteExtensionUpdateHold(hold: unknown, browser: string | null = 
   if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
 }
 
+/**
+ * The version the app reports: the oldest among browsers heard from recently, so an outdated copy
+ * keeps its notice while a current one polls too. With none recent, the last one heard from: a
+ * mismatched companion can fail the protocol gate before it ever counts as present.
+ */
+function reportedExtension(): { version: string; engine?: 'gecko' } | null {
+  const now = Date.now();
+  let oldest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
+  let latest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
+  for (const entry of extensionVersions.values()) {
+    if (!latest || entry.seenAt >= latest.seenAt) latest = entry;
+    if (now - entry.seenAt < BROWSER_PRESENT_MS && (!oldest || isNewer(oldest.version, entry.version))) oldest = entry;
+  }
+  const chosen = oldest ?? latest;
+  return chosen && { version: chosen.version, ...(chosen.engine ? { engine: chosen.engine } : {}) };
+}
+
 function noteExtensionVersion(req: http.IncomingMessage): void {
   const version = req.headers['x-extension-version'];
   const protocol = extensionProtocol(req);
@@ -1294,7 +1323,15 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
   if (typeof version !== 'string') return warnProtocol(protocol);
   const externalChanged = req.headers['x-extension-host'] === 'browser' && externalExtension?.version !== version.slice(0, 32) && !keepsExternalRecord(req);
   if (externalChanged) externalExtension = { version: version.slice(0, 32), seenAt: null };
-  extensionVersion = version.slice(0, 32);
+  const extensionVersion = version.slice(0, 32);
+  const before = reportedExtension();
+  const source = browserOf(req) ?? (req.headers['x-extension-host'] === 'cos' ? 'cos' : 'unknown');
+  extensionVersions.delete(source);
+  extensionVersions.set(source, { version: extensionVersion, ...(req.headers['x-extension-engine'] === 'gecko' ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
+  if (extensionVersions.size > 16) extensionVersions.delete(extensionVersions.keys().next().value!);
+  const after = reportedExtension();
+  const reportChanged = before?.version !== after?.version || before?.engine !== after?.engine;
+  scheduleBrowserPresence();
   const key = `${extensionVersion}\u0000${stamp ?? ''}`;
   const announcedAt = announcedExtensions.get(key);
   if (announcedAt === undefined || Date.now() - announcedAt >= EXTENSION_ANNOUNCE_MS) {
@@ -1321,7 +1358,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     // Even an incompatible peer reports its version before the protocol fence.
     // Publish that evidence without falsely granting compatible browser presence.
     changed();
-  } else if (externalChanged) changed();
+  } else if (externalChanged || reportChanged) changed();
   warnProtocol(protocol);
 }
 
@@ -11257,7 +11294,7 @@ export function resetBridgeForTests(): void {
   for (const entry of pendingReveals.splice(0)) entry.settle(false);
   pendingFollow = null;
   openingCustody.clear();
-  extensionVersion = null;
+  extensionVersions.clear();
   externalExtension = null;
   cosExtensionSeenAt = null;
   resetBrowserProofForTests();

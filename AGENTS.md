@@ -2204,7 +2204,11 @@ Firefox (`chatBrowser: 'firefox'`) runs the Mozilla-signed add-on that each rele
 `Chat-On-Steroids-Firefox.xpi` (`shared/firefox-addon.ts`); Setup opens this app version's download
 (`browser:setupOpen` with `firefox`/`extensions`) instead of the Developer mode and folder steps.
 Firefox gets the URL alone, without Chromium's switches. Its add-on sends
-`x-extension-engine: gecko`; the bridge projects that as `externalExtension.engine`. Firefox updates
+`x-extension-engine: gecko`; the bridge projects that as `externalExtension.engine`. The bridge keeps
+each browser's reported version (by `x-extension-browser`) and reports `extensionVersion` as the oldest
+among browsers heard from within a minute, with `extensionEngine: 'gecko'` when that one is Firefox, so
+a Firefox copy waiting for its update keeps one steady notice with Firefox's advice while a current
+Chrome polls too; with none recent it keeps the last one heard from. Firefox updates
 the add-on itself through its update manifest, so the extension never asks `/extension/update` or
 reloads there and reports the hold `browser-updates-itself` instead. While Firefox is the ChatGPT
 browser, its add-on is never refused work as an out-of-date companion: Firefox may update it up to a
