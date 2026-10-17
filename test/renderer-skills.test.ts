@@ -347,3 +347,16 @@ it('shows a failed library load and ignores a result for an old scope', async ()
   f.type('/'); f.owner('b:2'); f.type('B draft'); resolve({ ok: true, data: library() }); await settle();
   expect(f.picker.authoredText()).toBe('B draft'); expect(f.host.hidden).toBe(true);
 });
+
+it('finds an app command by the name the menu shows in the interface language', async () => {
+  // The German menu says "Umbenennen" for /rename; typing what it shows found nothing (2.1.41 pass).
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const f = await fixture([skill], true);
+  f.type('/umb'); await settle();
+  expect([...f.host.querySelectorAll<HTMLElement>('.slash-menu-option')].map(row => row.title)).toEqual(['/rename']);
+  f.key('Enter');
+  expect(f.command).toHaveBeenCalledWith('rename');
+  f.type('/rena'); await settle();
+  expect([...f.host.querySelectorAll<HTMLElement>('.slash-menu-option')].map(row => row.title)).toEqual(['/rename']);
+});

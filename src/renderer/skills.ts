@@ -234,7 +234,9 @@ export function initSkills(options: Options) {
       { command: 'plugins', name: 'Plugins', description: 'Open the plugins and their status.', glyph: 'i-plug' },
       { command: 'pet', name: 'Pet', description: 'Open the pets.', glyph: 'i-paw' },
       { command: 'feedback', name: 'Feedback', description: 'Open the diagnostics report to attach to a bug report.', glyph: 'i-warning' }
-    ].filter(row => row.command.includes(query) && (options.commandAvailable?.(row.command) ?? true)) : [];
+      // The command or the name the menu shows: a German menu says "Umbenennen" for /rename.
+    ].filter(row => (row.command.includes(query) || t(row.name).toLocaleLowerCase().includes(query)) &&
+      (options.commandAvailable?.(row.command) ?? true)) : [];
     const matchingSkills = range.kind !== 'file' && !(loading && !library) ? filtered(query).slice(0, 64) : [];
     const matchingFiles = range.kind === 'file' && files !== null && files.projectId === options.scope().projectId && files.directory === (range.directory ?? '')
       ? filteredFiles(query).slice(0, 64).map(file => ({ file })) : [];
