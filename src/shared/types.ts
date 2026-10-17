@@ -166,6 +166,8 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
+  /** Opt-in. Keep the finish hold when the Goal helper says the goal is met; off by default. */
+  finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */

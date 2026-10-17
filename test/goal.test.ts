@@ -949,6 +949,39 @@ describe('the reply', () => {
     expect(goal.goalPendingReplyFor('c-typed-owed')).toMatchObject({ turnId: 'g-typed' });
   });
 
+  describe('finishHoldOnStop (opt-in: a helper saying "done" is not verified completion)', () => {
+    const unverified = async (sessionId: string) => (await readRecentEvents(sessionId, 20))
+      .filter(event => 'reason' in event && event.reason === 'helper_stop_unverified');
+    const stopOnce = async (id: string, setting: boolean | undefined) => {
+      const config = (await import('../src/main/config.js')).getConfig();
+      await saveConfig({ ...config, ui: { ...config.ui, ...(setting === undefined ? {} : { finishHoldOnStop: setting }) } });
+      const sessionId = await seed(id);
+      await goal.acceptGoalReplyNow({ conversationId: id, sessionId, replyId: `assistant-${id}`, turnId: 'g-stop', eventSeq: 3, blocked: false });
+      let requests = 0;
+      globalThis.fetch = (async () => { requests += 1; return decision('stop'); }) as never;
+      goal.startGoalDraft({ sessionId, conversationId: id, turnId: 'g-stop' });
+      const view = await settled(id);
+      return { sessionId, view, requests };
+    };
+
+    it.each([undefined, false])('is unchanged when the setting is %s: the goal is met, nothing owed, no unverified event', async setting => {
+      const { sessionId, view, requests } = await stopOnce(`c-stop-default-${setting}`, setting);
+      expect(view).toMatchObject({ stage: 'no-reply', error: null, reply: '', retryable: false });
+      expect(goal.goalPendingReplyFor(`c-stop-default-${setting}`)).toBeNull();
+      expect(await unverified(sessionId)).toEqual([]);
+      expect(requests).toBe(1);
+    });
+
+    it('when on, shows a non-retryable unverified outcome, keeps the reply owed and records a structured event', async () => {
+      const { sessionId, view, requests } = await stopOnce('c-stop-optin', true);
+      expect(view).toMatchObject({ stage: 'failed', error: 'goal_helper_stop_unverified', reply: '', retryable: false });
+      expect(view.message).toMatch(/unverified/);
+      expect(goal.goalPendingReplyFor('c-stop-optin')).toMatchObject({ turnId: 'g-stop' });
+      expect(await unverified(sessionId)).toHaveLength(1);
+      expect(requests, 'no automatic continuation or retry was started').toBe(1);
+    });
+  });
+
   it('reports no outcome for a typed continuation the page has acted on', async () => {
     const sessionId = await seed('c-typed');
     globalThis.fetch = (async () => decision('continue', 'what about the tests')) as never;

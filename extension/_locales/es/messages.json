@@ -1139,6 +1139,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "El asistente no generó un mensaje inicial. Haz la tarea más específica e inténtalo de nuevo."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "El asistente indica que se ha cumplido el objetivo, pero no está verificado. No se ha enviado nada y la respuesta sigue pendiente. Revisa el chat y continúa tú."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "El asistente siguió eligiendo detenerse en lugar de escribir una continuación de Bucle. Revisa las instrucciones de Bucle o elige otro modelo asistente."
   },

@@ -1139,6 +1139,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "Der Helfer hat keine erste Nachricht erzeugt. Formuliere die Aufgabe genauer und versuche es erneut."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Der Helfer meldet, das Ziel sei erreicht, aber das ist nicht bestätigt. Es wurde nichts gesendet, und die Antwort steht noch aus. Prüfe den Chat und fahre dann selbst fort."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "Der Helfer hat immer wieder angehalten, statt eine Loop-Fortsetzung zu schreiben. Prüfe die Loop-Anweisungen oder wähle ein anderes Helfer-Modell."
   },

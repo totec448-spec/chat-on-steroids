@@ -1139,6 +1139,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "Yardımcı bir açılış mesajı üretmedi. Görevi daha belirgin hale getirip yeniden deneyin."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Yardımcı hedefin tamamlandığını söylüyor, ancak bu doğrulanmış değil. Hiçbir şey gönderilmedi ve yanıt hâlâ bekleniyor. Sohbeti kontrol edin ve ardından kendiniz devam edin."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "Yardımcı, Döngü devamı yazmak yerine durmayı seçmeye devam etti. Döngü talimatlarını gözden geçirin veya başka bir yardımcı model seçin."
   },

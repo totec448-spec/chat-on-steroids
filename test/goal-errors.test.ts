@@ -67,7 +67,7 @@ describe('Goal failure explanations', () => {
       'goal_browser_busy', 'goal_browser_cancelled', 'goal_browser_send_failed', 'goal_browser_send_unconfirmed',
       'goal_owned_elsewhere', 'goal_final_not_confirmed', 'astra_finish_only', 'goal_disabled', 'goal_worker_chat',
       'conversation_superseded', 'chat_blocked', 'session_not_recorded', 'no_conversation', 'no_objective',
-      'nothing_to_open_with', 'loop_stop_refused', 'goal_marker_missing', 'goal_reply_not_durable',
+      'nothing_to_open_with', 'goal_helper_stop_unverified', 'loop_stop_refused', 'goal_marker_missing', 'goal_reply_not_durable',
       'goal_ack_not_durable', 'goal_switch_not_durable', 'goal_objective_not_durable',
       'invalid_goal_decision_json', 'provider_completion_error'
     ];
