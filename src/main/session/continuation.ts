@@ -549,6 +549,15 @@ export function continuationForSession(sessionId: string): ContinuationView | nu
   return null;
 }
 
+/** The still-open transfer intent for a source chat, including a ticket before its brief Send. */
+export function continuationForSourceConversation(conversationId: string): ContinuationView | null {
+  sweep();
+  for (const entry of byToken.values()) {
+    if (entry.from === conversationId && isOpen(entry)) return view(entry);
+  }
+  return null;
+}
+
 export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
