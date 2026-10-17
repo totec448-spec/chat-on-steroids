@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "Isto remove toda a pasta do checkout, incluindo ficheiros de trabalho controlados, ficheiros ignorados e alterações não confirmadas.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "O ramo Git e os respetivos commits são mantidos. Os ficheiros não confirmados não podem ser recuperados a partir do Git.",
   "Keep checkout": "Manter checkout",
-  "Remove checkout; preserve Git branch": "Remover checkout; manter o ramo Git"
+  "Remove checkout; preserve Git branch": "Remover checkout; manter o ramo Git",
+  "Unattributed activity": "Atividade sem atribuição"
 }

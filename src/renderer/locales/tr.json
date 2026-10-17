@@ -2496,5 +2496,6 @@
   "This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.": "Bu işlem, izlenen çalışma dosyaları, yok sayılan dosyalar ve commit edilmemiş değişiklikler dahil tüm çalışma kopyası klasörünü kaldırır.",
   "The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.": "Git dalı ve commit’leri korunur. Commit edilmemiş dosyalar Git’ten geri getirilemez.",
   "Keep checkout": "Çalışma kopyasını koru",
-  "Remove checkout; preserve Git branch": "Çalışma kopyasını kaldır, Git dalını koru"
+  "Remove checkout; preserve Git branch": "Çalışma kopyasını kaldır, Git dalını koru",
+  "Unattributed activity": "İlişkilendirilmemiş etkinlik"
 }
