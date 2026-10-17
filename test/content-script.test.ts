@@ -2791,6 +2791,48 @@ describe('desktop input delivery and helper ownership', () => {
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
   });
 
+  it('acknowledges an exact resume Send request without waiting for the opening question to render', async () => {
+    const commandId = 'cmd-resume-request-only';
+    const token = '6y5Vq7gtb62pNMRAwRTeJg';
+    const questionId = '6ac024bb-486c-83e8-bf8e-4be1147847d4';
+    const prompt = `[[CLF-RESUME:${token}]]\n\n${'Preserve the original session and worker history. '.repeat(900)}`;
+    const destination = chatA;
+    let commits = 0;
+    let clicks = 0;
+    live = await harness(`https://chatgpt.com/?clf=${commandId}`, {
+      redeem: () => ({ ok: true, command: { id: commandId, type: 'resume', text: prompt, agent: null } }),
+      compact: message => {
+        if (message.destinationMessageId) { commits++; return { ok: true, data: { committed: true, conversationId: destination, commandId } }; }
+        return { ok: false, error: 'unexpected_compact_shape' };
+      },
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        clicks++;
+        const window = document.defaultView!;
+        // ChatGPT accepts the exact app-authorized click, but a long markdown bootstrap's
+        // user bubble and Fiber message are both missing while its answer is running.
+        window.dispatchEvent(new window.MessageEvent('message', {
+          source: window, origin: 'https://chatgpt.com',
+          data: { type: 'cos-send-request', messageIds: [questionId], observedAt: Date.now() }
+        }));
+        dom.reconfigure({ url: `https://chatgpt.com/c/${destination}` });
+        document.querySelector('#prompt-textarea')!.textContent = '';
+      });
+    }, false, true);
+    await settle(1500);
+    live.hook.observe();
+    await settle(1000);
+    expect(clicks).toBe(1);
+    // The separately committed native request ID and exact route are already available;
+    // waiting for a giant rendered bubble delayed the live continuation for minutes.
+    expect(live.sent.filter(message => message.type === 'ack' && message.id === commandId)).toContainEqual(
+      expect.objectContaining({ status: 'sent', conversationId: destination })
+    );
+    // The command ACK, not a guessed session merge, commits via the existing bridge owner checks.
+    expect(commits).toBe(0);
+  });
+
   it('reads canonical Markdown for a pending fresh send even when native generation already ended', async () => {
     const prompt = 'Inspect `src/main/bridge.ts` and reply briefly.';
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
@@ -22993,12 +23035,19 @@ describe('resume irreversible boundary audit', () => {
     const commandId = 'cmd-resume-route-after-send';
     const token = '0123456789abcdef0123456789abcdef';
     const unrelated = 'bbbbbbbb-1111-4222-8333-444444444444';
+    const requestId = '6ac024bb-486c-83e8-bf8e-4be1147847d5';
     live = await harness(`https://chatgpt.com/?clf=${commandId}`, {
       redeem: () => ({ ok: true, command: { id: commandId, type: 'resume', text: `[[CLF-RESUME:${token}]] handoff`, agent: null } }),
       ack: () => ({ ok: true })
     }, (document, dom) => {
       document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
         document.querySelector('#prompt-textarea')!.textContent = '';
+        // Even an exact outbound native Send request does not authorize a different chat
+        // which the user navigated to after clicking. No reply in that chat quotes our marker.
+        document.defaultView!.dispatchEvent(new document.defaultView!.MessageEvent('message', {
+          source: document.defaultView!, origin: 'https://chatgpt.com',
+          data: { type: 'cos-send-request', messageIds: [requestId], observedAt: Date.now() }
+        }));
         void Promise.resolve().then(() => dom.window.history.pushState({}, '', `/c/${unrelated}`));
       });
     });
