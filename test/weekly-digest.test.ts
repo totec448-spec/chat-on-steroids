@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { checksState as checks, digest as build, prState as state } from '../scripts/weekly-digest.mjs';
 
 type Row = { number: number; title: string; by?: string; state: string };
-type CheckRun = { id: number; name: string; status: string; conclusion: string | null };
+type CheckRun = { id: number; name: string; status: string; conclusion: string | null; app?: { id: number } };
 const checksState = checks as (runs: CheckRun[]) => string;
 const prState = state as (input: { checks: string; lastPushAt: string; lastMaintainerAt?: string }) => string | null;
 const digest = build as (input: { date: string; prs: Row[]; issues: Row[] }) => string;
@@ -41,6 +41,13 @@ it('counts only the latest run of each check', () => {
     { id: 1, name: 'PR checklist', status: 'completed', conclusion: 'failure' },
     { id: 2, name: 'PR checklist', status: 'completed', conclusion: 'skipped' }
   ])).toBe('success');
+});
+
+it('keeps the latest run per app when two apps report the same check name', () => {
+  expect(checksState([
+    { id: 1, name: 'build', status: 'completed', conclusion: 'failure', app: { id: 1 } },
+    { id: 2, name: 'build', status: 'completed', conclusion: 'success', app: { id: 2 } }
+  ])).toBe('failure');
 });
 
 it('writes every section, saying so when one is empty', () => {
