@@ -2770,7 +2770,7 @@ async function refreshSessionControls(): Promise<void> {
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
-    paintAutomationSwitch(); paintDeliveryControls();
+    paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
     return;
   }
   const controls = await run(api.getSessionControls(id));
@@ -2790,6 +2790,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledRecovery = controls?.recovery ?? [];
   paintDeliveryControls();
   paintStateLine();
+  repaintHeld();
   menu.hidden = !controls;
   $('compactSession').hidden = !controls;
   if (!controls) { $('cancelCompaction').hidden = true; return; }
@@ -3205,6 +3206,8 @@ function citationPill(pill: CitationPill): HTMLElement {
   const first = pill.sources[0]!;
   const total = pill.sources.length + pill.unrecorded;
   const wrap = el('span', 'citation');
+  // Only compared, never read: the sources are not in the markup, so a pill citing others must draw differently.
+  wrap.dataset.sources = JSON.stringify([pill.unrecorded, pill.sources]);
   const link = document.createElement('a');
   link.className = 'citation-pill';
   link.href = first.url;
@@ -3331,6 +3334,8 @@ function writingPanels(box: HTMLElement, slots: readonly WritingSlot[]): void {
     if (!slot) continue;
     marker!.remove();
     const panel = el('div', 'markdown-writing');
+    // Copy gives the source, which the markup does not show; a revision that changed only its Markdown draws a different panel.
+    panel.dataset.source = slot.source;
     const header = el('div', 'tool-output-header');
     header.append(icon('i-file-text', 'ico'), slot.label ? el('strong', '', slot.label) : el('strong', '', () => t('Text')));
     const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
@@ -3423,6 +3428,74 @@ function nativePromptCards(root: ParentNode): Array<{ group: Element; anchor: st
     cards.push({ group, anchor, card, options });
   }
   return cards;
+}
+
+/** A list's first item: indented four spaces or more, it is code. */
+const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/;
+/** A list item, or a line indented into one. */
+const LIST_LINE = /^\s*(?:[-*+]|\d+[.)])\s|^(?: {2,}|\t)/;
+/** A line of an indented code block. */
+const CODE_LINE = /^(?: {4,}|\t)/;
+/**
+ * The finished blocks of an answer ChatGPT is still writing: up to its last blank line outside an
+ * open code fence, writing block or display formula, or the end of a fence or writing block that
+ * closed. The block after it waits until it is finished too, so each one appears whole. A list or
+ * an indented code block appears once a line ends it: a blank line between its items makes the
+ * whole list loose when the next item arrives, and one inside the code would split its block, so
+ * a cut there would redraw it.
+ */
+export function finishedBlocks(text: string): string {
+  const lines = text.split('\n');
+  let fence: RegExp | null = null, writing = false, math: string | null = null;
+  // In a list or indented code, the end of its last blank line: a cut once a line does not continue it.
+  let hold: 'list' | 'code' | null = null, gap: number | null = null;
+  let end = 0, at = 0, afterBlank = true;
+  // The last line has no newline yet: it is still being written.
+  for (const raw of lines.slice(0, -1)) {
+    at += raw.length + 1;
+    const line = raw.replace(/\r$/, '');
+    if (hold && line.trim()) {
+      // A list goes on with its lines (any line, before a blank one); code with indented lines only.
+      if (hold === 'list' ? gap !== null && !LIST_LINE.test(line) : !CODE_LINE.test(line)) {
+        if (gap !== null) end = gap;
+        hold = null;
+      }
+      gap = null;
+    }
+    // A backtick fence's info string has no backtick: "```code``` is odd." is inline code.
+    const opens = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (fence.test(line)) { fence = null; if (!writing && !hold) end = at; }
+    } else if (hold === 'code') {
+      if (!line.trim()) gap = at;
+    } else if (opens) {
+      fence = new RegExp(`^ {0,3}${opens[0]}{${opens.length},}[ \\t]*$`);
+    } else if (writing) {
+      if (/^:::[ \t]*$/.test(line)) { writing = false; end = at; }
+    } else if (math) {
+      // A closed formula is a finished block, as a closed fence is: prose may follow without a blank line.
+      if (line.includes(math)) { math = null; if (!hold) end = at; }
+    } else if (/^:::writing(?:\{[^}\n]*\})?[ \t]*$/.test(line)) {
+      // The opener `writingBlock` reads; ":::writing example" is a paragraph.
+      writing = true;
+    } else if ((hold === 'list' ? /^\s*(?:\\\[|\$\$)/ : /^(?:\\\[|\$\$)/).test(line)) {
+      // The math tokenizer opens a formula at the start of a line; a list item's indent is not part of it.
+      const closer = line.trimStart().startsWith('$$') ? '$$' : '\\]';
+      if (!line.trimStart().slice(2).includes(closer)) math = closer;
+    } else if (!hold && afterBlank && CODE_LINE.test(line)) {
+      hold = 'code';
+    } else if (!hold && LIST_ITEM.test(line)) {
+      hold = 'list';
+    } else if (!line.trim()) {
+      if (hold) gap = at; else end = at;
+    }
+    afterBlank = !line.trim();
+  }
+  // A paragraph's line is complete only once it is done: the line being written ends the block as soon
+  // as it starts with what cannot continue it (a letter, `#`, `|`). A digit, marker or space may still
+  // continue a list, and a space indented code.
+  if (gap !== null && (hold === 'list' ? /^[^\s\d*+-]/ : /^\S/).test(lines.at(-1)!)) end = gap;
+  return text.slice(0, end);
 }
 
 export function renderedMarkdown(source: string, capture?: StoredText, references?: readonly MessageReference[]): HTMLElement {
@@ -5095,6 +5168,56 @@ function enter(node: HTMLElement): void {
   node.addEventListener('animationend', () => node.classList.remove('is-entering'), { once: true });
 }
 
+/**
+ * Each answer block's markup as it was drawn. Blocks are compared by it, not by what is on screen
+ * now: an opened source card, a Copied label or a fade would make a kept block differ forever.
+ */
+const drawnBlocks = new WeakMap<Node, string>();
+function drawBlocks(row: Element): void {
+  for (const node of row.querySelector('.said > .msg.rich')?.childNodes ?? []) {
+    drawnBlocks.set(node, node instanceof Element ? node.outerHTML : node.nodeValue ?? '');
+  }
+}
+
+/** Keeps the leading blocks a revision drew as they were and replaces the rest; those it adds fade in. */
+function reviseChildren(parent: Element, next: Node[]): void {
+  const old = [...parent.childNodes];
+  let same = 0;
+  while (same < old.length && same < next.length && drawnBlocks.has(old[same]!) && drawnBlocks.get(old[same]!) === drawnBlocks.get(next[same]!)) same++;
+  for (const node of old.slice(same)) node.remove();
+  for (let index = same; index < next.length; index++) {
+    const node = next[index]!;
+    parent.append(node);
+    if (index >= old.length && node instanceof HTMLElement) enter(node);
+  }
+}
+
+/**
+ * A revision of the answer on screen, patched into its row: the row and every leading block the
+ * revision left unchanged stay the same nodes, so the row's search hit and a selection or find
+ * highlight in a finished block survive while ChatGPT writes and when the answer completes; the
+ * block still being written is replaced. False when the two rows are not laid out alike (plain
+ * text, an empty row); the caller then swaps the whole row.
+ */
+function reviseAnswerRow(row: HTMLElement, next: HTMLElement): boolean {
+  const box = row.querySelector<HTMLElement>('.said > .msg'), fresh = next.querySelector<HTMLElement>('.said > .msg');
+  if (row.hidden || next.hidden || !box?.classList.contains('rich') || !fresh?.classList.contains('rich')) return false;
+  const place = (node: Element, top: Element): number[] =>
+    node === top ? [] : [...place(node.parentElement!, top), [...node.parentElement!.childNodes].indexOf(node)];
+  if (place(box, row).join() !== place(fresh, next).join()) return false;
+  // Beside the box and its ancestors, a part that changed (the label, the actions) is swapped where it stands.
+  for (let kept: Element = box, part: Element = fresh; kept !== row; kept = kept.parentElement!, part = part.parentElement!) {
+    const parent = kept.parentElement!, olds = [...parent.childNodes], parts = [...part.parentElement!.childNodes];
+    parts.forEach((node, index) => {
+      if (node === part || olds[index]?.isEqualNode(node)) return;
+      if (olds[index]) olds[index].replaceWith(node); else parent.append(node);
+    });
+    for (const node of olds.slice(parts.length)) node.remove();
+  }
+  reviseChildren(box, [...fresh.childNodes]);
+  return true;
+}
+
 /** What the model said between steps, as the outline holds it: its own words, never a "partial" answer. */
 function sayRow(part: Extract<RoundPart, { kind: 'say' }>, cache: Map<string, { text: string; row: HTMLElement }>): HTMLElement {
   const text = part.text ?? '';
@@ -5275,6 +5398,35 @@ function composerSessionSelection(summary: SessionSummary | null | undefined) {
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === summary?.id && ['queued', 'browser'].includes(row.state));
   return opening?.model ? { model: opening.model, reasoningEffort: opening.reasoningEffort ?? undefined, observedAt: opening.createdAt } : null;
 }
+/**
+ * The message ChatGPT is writing in the working turn, by seq, and what of it shows: its finished
+ * blocks. Only the turn's newest event can be one, while not final: interim and stopped messages
+ * stay "streaming" for good, so once anything follows it or the turn ends it shows whole. A
+ * directive's captured page is not this text's blocks and shows whole too. Until this chat's
+ * controls arrive, its recorded open turn counts as working: the rows can paint first, and showing
+ * the tail then would take it back once they say the turn works. Once they arrive they decide, so
+ * a turn left open without an end (a crash, a lost tab) shows its message whole.
+ */
+/** The message the last paint held back, by seq. */
+let heldAtPaint: number | null = null;
+/** Controls that change whether the turn works repaint the message they hold back, or release. */
+function repaintHeld(): void {
+  if (detailFor === selectedId && (messageBeingWritten()?.seq ?? null) !== heldAtPaint) paintDetail();
+}
+
+function messageBeingWritten(): { seq: number; shown: string } | null {
+  const known = !!deps.state()?.config.ui.developerMode || (controlledSessionId === selectedId && controlledSelection === selectionGeneration);
+  const working = known ? stateLine().working : detailFor === selectedId;
+  const turn = working && timelineReachesEnd() ? openTurnId(events) : null;
+  // A message the page has not tied to its turn yet has no turnId, and neither has much that can follow
+  // it (a chat error, an unplaced call, your next message). This app's own status rows are skipped,
+  // with or without a turn: a progress line (a finish notice, a page repair) or a note does not end
+  // ChatGPT's answer. Every other row after the message does.
+  const tail = turn ? events.findLast(event => (!event.turnId || event.turnId === turn) && !(event.kind === 'progress' && event.source === 'app') && event.kind !== 'note') : undefined;
+  if (tail?.kind !== 'assistant_message' || tail.final || tail.state === 'final' || hasProviderDirective(tail.message.text)) return null;
+  return { seq: tail.seq, shown: finishedBlocks(tail.message.text) };
+}
+
 function paintDetail(followBottom = historyBefore === null): void {
   paintStateLine();
   paintBackgroundProcesses();
@@ -5348,6 +5500,8 @@ function paintDetail(followBottom = historyBefore === null): void {
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
+  const writing = messageBeingWritten();
+  heldAtPaint = writing?.seq ?? null;
   const laterMessages = laterMessageCounts(items);
   for (const item of items) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
@@ -5361,7 +5515,14 @@ function paintDetail(followBottom = historyBefore === null): void {
     // A final answer recorded outside any turn (copied branch history, an adopted chat) has the same actions.
     const looseAnswer = !answerTurn && item.kind === 'event' && item.event.kind === 'assistant_message' && !item.event.turnId &&
       !!item.event.messageId && looseAnchors.get(item.event.messageId) === item.event.seq;
-    const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
+    const held = item.kind === 'event' && item.event.kind === 'assistant_message' && writing && item.event.seq === writing.seq
+      ? { ...item.event, message: { ...item.event.message, text: writing.shown, chars: writing.shown.length } } : null;
+    // A held message is drawn again only when a block finishes or its sources change: each chunk
+    // advances its seq and grows the page's capture, and the store can move its time to when the
+    // page authored it; none of these changes what it shows (its clock waits for the next block).
+    // Its final text is not held. The shown text itself is compared: a revision can rewrite it to the same length.
+    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}\u0000${held.message.text}`
+      : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '') +
@@ -5380,15 +5541,23 @@ function paintDetail(followBottom = historyBefore === null): void {
       timelineRows.push(cached.row);
       continue;
     }
-    const row = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction)
-      : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(item.event);
-    if (answerTurn || looseAnswer) row.querySelector('.said')?.append(answerActions(answerTurn,
+    const built = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction)
+      : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(held ?? item.event);
+    if (answerTurn || looseAnswer) built.querySelector('.said')?.append(answerActions(answerTurn,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
-      row.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
-      row.dataset.questionId = item.event.messageId;
-      row.classList.toggle('is-being-edited', editingQuestion?.sessionId === selectedId && editingQuestion?.messageId === item.event.messageId);
+      built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
+      built.dataset.questionId = item.event.messageId;
+      built.classList.toggle('is-being-edited', editingQuestion?.sessionId === selectedId && editingQuestion?.messageId === item.event.messageId);
     }
+    // A later revision of the same answer keeps its row and the blocks it already showed.
+    const answer = item.kind === 'event' && item.event.kind === 'assistant_message';
+    // Only a row that can be revised is compared later: a revision, or a message not yet final. One
+    // drawn final without this compares unequal to any revision, which then replaces it whole.
+    if (item.kind === 'event' && item.event.kind === 'assistant_message' && (cached || !(item.event.final || item.event.state === 'final'))) drawBlocks(built);
+    const row = answer && cached && reviseAnswerRow(cached.row, built) ? cached.row : built;
+    // An answer that showed nothing yet fades its first blocks in as they appear.
+    if (answer && row === built && (!cached || cached.row.hidden)) built.querySelectorAll<HTMLElement>('.said > .msg.rich > *').forEach(block => enter(block));
     row.dataset.timelineKey = key;
     row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
@@ -5837,7 +6006,12 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
     if (event.time < asked || !['assistant_message', 'tool_call', 'page_tool', 'progress'].includes(event.kind)) continue;
     if (!newest || event.time >= newest.time) newest = event;
   }
-  if (newest?.kind === 'assistant_message' && proseMoving(newest)) return null;
+  if (newest?.kind === 'assistant_message' && proseMoving(newest)) {
+    // Prose being written speaks for itself once all of it shows. While a block is held back (a long
+    // code block, a table, a list), nothing on screen moves: Thinking says the turn still works.
+    const writing = messageBeingWritten();
+    if (writing?.seq !== newest.seq || (writing.shown.trim() && !newest.message.text.slice(writing.shown.length).trim())) return null;
+  }
   if (newest?.kind === 'page_tool' && NATIVE_STEP_NOW.test(newest.label)) return { text: newest.label, icon: 'i-globe', working: true, since: newest.time };
   return thinking;
 }
