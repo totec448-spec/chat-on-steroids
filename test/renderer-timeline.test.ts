@@ -3046,6 +3046,24 @@ describe('an answer while ChatGPT writes it', () => {
       expect(shown(w)).toEqual(['Alpha.', 'Be']);
     });
 
+    it('keeps holding the tail when this app files a status row after the message', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      await append([
+        { seq: 3, time: T0 + 1_000, source: 'app', kind: 'progress', progressId: 'finish-notice:x', message: text('Preparing finish notice') },
+        { seq: 4, time: T0 + 1_100, source: 'app', kind: 'note', message: text('Recovered the page') },
+        { seq: 5, time: T0 + 1_200, source: 'app', kind: 'progress', turnId: 'live-turn', progressId: 'browser-repair:y', message: text('Repairing') }
+      ]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(6, 'Alpha.\n\nBeta.\n\nGa')]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+    });
+
+    it('shows the rest when an error for the chat follows the message, with or without its turn', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      await append([{ seq: 3, time: T0 + 1_000, source: 'extension', kind: 'chat_error', message: text('Something went wrong') }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
     it('draws a revision that rewrites a shown block to the same length', async () => {
       const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
       expect(shown(w)).toEqual(['Alpha.']);
