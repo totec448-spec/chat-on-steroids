@@ -692,6 +692,7 @@
   "Retry stage one with the complete plan and queued checkpoints": "Thử lại giai đoạn một với toàn bộ Plan và các checkpoint đã xếp hàng",
   "Restore this message to the composer for review and sending": "Khôi phục tin nhắn này vào composer để xem lại và gửi",
   "Send or clear your current draft before retrying this message.": "Gửi hoặc xóa bản nháp hiện tại trước khi thử lại tin nhắn này.",
+  "That message can no longer be edited, so this is restored as a new message.": "Không thể chỉnh sửa tin nhắn này nữa, nên nó được khôi phục thành tin nhắn mới.",
   "Message queued. Browser startup failed:": "Tin nhắn đã xếp hàng. Khởi động trình duyệt thất bại:",
   "Retry browser": "Thử lại trình duyệt",
   "Helper delivery was not confirmed. Its old chat may still be running.": "Chưa xác nhận việc gửi của helper. Cuộc trò chuyện cũ của nó có thể vẫn đang chạy.",

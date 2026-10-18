@@ -6148,4 +6148,50 @@ describe('edit and resubmit (#365)', () => {
     expect(said(w)).toEqual([expect.stringContaining('Fix the login bug'), expect.stringContaining('Done.')]);
     expect(w.document.querySelector('#timeline .message-edited')?.textContent).toBe('Edited version');
   });
+
+  // The page failed an edit's delivery; the failed row keeps `edit`, and retrying must keep it an edit.
+  const failedInput = (text: string, extra: Partial<InputEntry> = {}): InputEntry => ({ id: 'failed-edit', sessionId: summary([]).id, requestedSessionId: null,
+    projectId: null, text, automation: 'off', model: 'gpt-5.6-sol', reasoningEffort: 'high', mode: 'auto', dueAt: 1, createdAt: T0 + 7000, state: 'failed',
+    owner: 'old-page', conversationId: chat, error: 'ChatGPT did not offer Edit for that message.', ...extra }) as InputEntry;
+  const retryDelivery = async (w: Window & typeof globalThis) => {
+    w.document.querySelector<HTMLButtonElement>('[aria-label="Retry delivery"]')!.click(); await settle();
+  };
+
+  it('retries a failed edit as an edit of the same question', async () => {
+    const { w, live, append } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    live.inputs = [failedInput('First question, edited', { edit: { messageId: Q1 } })]; await append([]);
+    await retryDelivery(w as any);
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    expect(input.value).toBe('First question, edited');
+    const notice = w.document.getElementById('editDraft')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Editing your message · replaces 3 later messages');
+    expect(w.document.querySelector('[aria-label="Retry delivery"]')).toBeNull();
+    await submit(w as any);
+    expect(live.sent.at(-1)).toMatchObject({ text: 'First question, edited', mode: 'auto', edit: { messageId: Q1 } });
+    expect(notice.hidden).toBe(true);
+  });
+
+  it('retries a failed ordinary message as an ordinary message', async () => {
+    const { w, live, append } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    live.inputs = [failedInput('A follow-up', { error: 'Delivery failed' })]; await append([]);
+    await retryDelivery(w as any);
+    expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('A follow-up');
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    await submit(w as any);
+    expect(live.sent.at(-1)).toMatchObject({ text: 'A follow-up' });
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('restores a failed edit whose question can no longer be edited as a new message, and says so', async () => {
+    const replaced = [...exchange(), q(7, '6ad3a59b-0003-83eb-8bc4-8c84e68dd911', 'Fix the login bug', 't3', { replaces: Q2 }), end(8, 't3')];
+    const { w, live, append } = await boot(replaced, true, [], [], { summary: { conversationId: chat } });
+    live.inputs = [failedInput('Fix the login bug please', { edit: { messageId: Q2 } })]; await append([]);
+    await retryDelivery(w as any);
+    expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('Fix the login bug please');
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    expect(w.document.querySelector('.toast')?.textContent).toContain('can no longer be edited');
+    await submit(w as any);
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
 });

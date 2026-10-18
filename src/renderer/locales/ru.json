@@ -756,6 +756,7 @@
   "Retry stage one with the complete plan and queued checkpoints": "Повторить первый этап с полным планом и контрольными точками в очереди",
   "Restore this message to the composer for review and sending": "Вернуть это сообщение в редактор для проверки и отправки",
   "Send or clear your current draft before retrying this message.": "Отправьте или очистите текущий черновик, прежде чем повторять это сообщение.",
+  "That message can no longer be edited, so this is restored as a new message.": "Это сообщение больше нельзя изменить, поэтому оно восстановлено как новое.",
   "Message queued. Browser startup failed:": "Сообщение поставлено в очередь. Не удалось запустить браузер:",
   "Retry browser": "Повторить запуск браузера",
   "Helper delivery was not confirmed. Its old chat may still be running.": "Доставка помощнику не подтверждена. Его прежний чат всё ещё может работать.",
