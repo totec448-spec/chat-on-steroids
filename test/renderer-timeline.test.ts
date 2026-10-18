@@ -3002,13 +3002,19 @@ describe('an answer while ChatGPT writes it', () => {
       await append([written(3, 'Alpha.\n\nBeta is', { renderedHtml: text('<p>Alpha.</p><p>Beta is</p>') })]);
       expect(lex).not.toHaveBeenCalled();
       expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
-      await append([written(4, 'Alpha.\n\nBeta is done.\n\nGa')]);
+      // The store can move a revision's time to when the page authored it; the held row keeps its clock.
+      const clock = row!.querySelector('time')!.textContent;
+      await append([written(4, 'Alpha.\n\nBeta is mo', { time: T0 + 1_500 })]);
+      expect(lex).not.toHaveBeenCalled();
+      await append([written(5, 'Alpha.\n\nBeta is done.\n\nGa')]);
       expect(lex).toHaveBeenCalled();
       expect(shown(w)).toEqual(['Alpha.', 'Beta is done.']);
       lex.mockClear();
-      await append([written(5, 'Alpha.\n\nBeta is done.\n\nGamma.', { state: 'final', final: true })]);
+      await append([written(6, 'Alpha.\n\nBeta is done.\n\nGamma.', { state: 'final', final: true, time: T0 + 120_000 })]);
       expect(lex).toHaveBeenCalled();
       expect(shown(w)).toEqual(['Alpha.', 'Beta is done.', 'Gamma.']);
+      // The final event is not held: it draws its own time.
+      expect(w.document.querySelector('.ev-assistant_message time')!.textContent).not.toBe(clock);
       lex.mockRestore();
     });
 

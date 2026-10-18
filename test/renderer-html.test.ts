@@ -644,6 +644,13 @@ y=mx+b
     expect(finishedBlocks('- a\n\n  $$\n  x\n\n  y')).toBe('');
   });
 
+  it('finishes a display formula on its closing line, as it does a fence', () => {
+    expect(finishedBlocks('Intro.\n\n$$\nx\n$$\nThen prose')).toBe('Intro.\n\n$$\nx\n$$\n');
+    expect(finishedBlocks('Intro.\n\n\\[\nx\n\\]\nThen prose')).toBe('Intro.\n\n\\[\nx\n\\]\n');
+    // Inside a list the list still decides.
+    expect(finishedBlocks('- a\n\n  $$\n  x\n  $$\n  Then')).toBe('');
+  });
+
   it('holds an indented code block back until a line after it is not indented', () => {
     expect(finishedBlocks('Alpha.\n\n    one\n\n    two')).toBe('Alpha.\n\n');
     expect(finishedBlocks('Alpha.\n\n    one\n\n    two\n\n  ')).toBe('Alpha.\n\n');
