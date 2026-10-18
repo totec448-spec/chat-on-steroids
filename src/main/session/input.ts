@@ -2035,6 +2035,10 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     }
     // A generic transport failure supplies no proof that native Send was skipped.
     if (entry.recovery && entry.sendAuthorizedAt !== undefined) return false;
+    // The page's own reason, which no record keeps: the only trace of why an attempt stopped short.
+    if (error === 'After-turn pickup was withdrawn before Send.') {
+      logInfo(`input ${entry.id}: the page withdrew it before Send${entry.sendAuthorizedAt !== undefined ? ' after authorization' : ''}${detail ? ` (${detail.slice(0, 120)})` : ''}`);
+    }
     const pickupCancelled = !!(entry.silenceBoundary || entry.completedTurnId) && entry.requiresAuthorization === true &&
       entry.sendAuthorizedAt === undefined && error === 'After-turn pickup was withdrawn before Send.';
     // Losing a document before Send does not lose a still-valid refresh ticket.
