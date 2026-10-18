@@ -261,6 +261,13 @@ describe('the session card header', () => {
  * the part that must survive a narrow row, and the counts are the part that yields.
  */
 describe('a session row', () => {
+  it('draws a still working mark, not a frozen spinner, when the system asks for reduced motion', () => {
+    // Windows "Animation effects: Off" turns reduced motion on, and the sheet then stops every animation.
+    // A quarter arc that no longer turns reads as a stuck app; a whole accent ring still says "working".
+    const still = /@media \(prefers-reduced-motion: reduce\) \{\s*\.session-status\.is-active, \.session-status\.is-working \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(still).toContain('border-color: var(--accent)');
+  });
+
   it('keeps status visible and lets the title truncate', () => {
     expect(rule('.sess-top')).toContain('display: flex');
     expect(rule('.session-status')).toContain('flex: none');
