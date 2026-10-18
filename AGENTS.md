@@ -1338,12 +1338,13 @@ height across draft changes, hidden panels and width changes; do not persist a m
 remains scrollable at the cap. `scripts/verify-composer-layout.cjs` checks real Electron layout.
 Prompt recall (`recallPrompt` in `chat.ts`): in an open chat, plain ArrowUp/ArrowDown in an empty
 composer step through your messages in that chat's loaded timeline, like a shell's history; past the
-newest one the composer is empty again. Only an unedited recalled message keeps the arrows, and in a
-recalled message of several lines they move the caret until its first or last line. IME composition,
-modifiers, an open slash/file menu, attached files or a plan in the draft and Edit & resubmit (#365)
-keep their keys. Messages without text,
-stored cut short, Compact & Resume prompts, folded earlier versions and queued inputs are not recalled.
-Recall only fills the composer; nothing is stored and nothing is sent.
+newest one the composer is empty again. Only an unedited recalled message keeps the arrows, and only
+at its edge: Up recalls with the caret at the start, Down with it at the end. Elsewhere the arrows
+move the caret natively through wrapped and typed rows, so a change of direction first takes it to
+that edge. IME composition, modifiers, an open slash/file menu, attached files or a plan in the
+draft and Edit & resubmit (#365) keep their keys. Messages without text, stored cut short, Compact &
+Resume prompts, folded earlier versions and queued inputs are not recalled. Recall only fills the
+composer; nothing is stored and nothing is sent.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then

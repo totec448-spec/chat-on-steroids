@@ -6175,11 +6175,11 @@ describe('prompt recall in the composer', () => {
     return event.defaultPrevented;
   };
 
-  it('fills an empty composer with your last message on ArrowUp, caret at the end, without sending it', async () => {
+  it('fills an empty composer with your last message on ArrowUp, caret at the start, without sending it', async () => {
     const { w, live } = await boot(chat());
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
-    expect(composer(w).selectionStart).toBe('Second question'.length);
+    expect([composer(w).selectionStart, composer(w).selectionEnd]).toEqual([0, 0]);
     await settle();
     expect(live.sent).toEqual([]);
   });
@@ -6196,8 +6196,12 @@ describe('prompt recall in the composer', () => {
   it('comes forward with ArrowDown and gives back the empty composer past the newest message', async () => {
     const { w } = await boot(chat());
     press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    // Up left the caret at the start: the first Down is the textarea's own, taking it to the end.
+    expect(press(w, 'ArrowDown')).toBe(false);
+    composer(w).setSelectionRange(14, 14);
     expect(press(w, 'ArrowDown')).toBe(true);
     expect(composer(w).value).toBe('Second question');
+    expect(composer(w).selectionStart).toBe('Second question'.length);
     expect(press(w, 'ArrowDown')).toBe(true);
     expect(composer(w).value).toBe('');
     expect(press(w, 'ArrowDown')).toBe(false);
@@ -6271,9 +6275,22 @@ describe('prompt recall in the composer', () => {
     const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Line one\nLine two'), answer(4, 'Done.')]);
     press(w, 'ArrowUp');
     expect(composer(w).value).toBe('Line one\nLine two');
+    composer(w).setSelectionRange(17, 17);
     expect(press(w, 'ArrowUp')).toBe(false);
-    composer(w).setSelectionRange(2, 2);
+    composer(w).setSelectionRange(0, 0);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('First question');
+  });
+
+  // A long one-line message wraps onto several rows: only its very start or end hands the arrows
+  // back to recall, so a lower or upper wrapped row still moves the caret.
+  it.each([['ArrowUp', 40], ['ArrowDown', 40], ['ArrowUp', 'end'], ['ArrowDown', 0]] as const)('leaves %s to the caret inside a long recalled prompt (caret at %s)', async (key, at) => {
+    const long = 'Summarize the release notes for every package in the workspace and group them by area';
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, long), answer(4, 'Done.')]);
+    press(w, 'ArrowUp');
+    const caret = at === 'end' ? long.length : at;
+    composer(w).setSelectionRange(caret, caret);
+    expect(press(w, key)).toBe(false);
+    expect(composer(w).value).toBe(long);
   });
 });

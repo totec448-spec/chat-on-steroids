@@ -2185,8 +2185,9 @@ function recallPrompt(event: KeyboardEvent): boolean {
   const back = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall.back : 0;
   // Attached files and a plan are part of the draft; a recalled message would be sent with them.
   if (imageDrafts.get(draftKey())?.length || taskPlans.has(draftKey()) || (!back && authoredComposerText())) return false;
-  // In a recalled message of several lines, the arrows move the caret until its first or last line.
-  if (up ? input.value.slice(0, input.selectionStart).includes('\n') : input.value.slice(input.selectionEnd).includes('\n')) return false;
+  // Up recalls with the caret at the start and Down with it at the end. Anywhere else the arrows are
+  // the textarea's own, so they move the caret through every row, wrapped or typed, up to that edge.
+  if (input.selectionStart !== input.selectionEnd || input.selectionStart !== (up ? 0 : input.value.length)) return false;
   const prompts = sentPrompts();
   const next = back + (up ? 1 : -1);
   if (next < 0 || next > prompts.length) return false;
@@ -2196,7 +2197,9 @@ function recallPrompt(event: KeyboardEvent): boolean {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // After the input event, which ends any earlier recall.
   recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, back: next, text } : null;
-  input.setSelectionRange(text.length, text.length);
+  // At the edge the next press in the same direction recalls again.
+  const caret = up ? 0 : text.length;
+  input.setSelectionRange(caret, caret);
   return true;
 }
 
