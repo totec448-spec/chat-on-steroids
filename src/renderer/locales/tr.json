@@ -2302,6 +2302,8 @@
   "Recording storage": "Kayıt depolama alanı",
   "Compact & Resume · waiting for this turn to end": "Sıkıştır ve sürdür · bu turun bitmesi bekleniyor",
   "Compact & Resume · asking ChatGPT for the handoff": "Sıkıştır ve sürdür · ChatGPT'den devir isteniyor",
+  "Compact & Resume · the ChatGPT tab could not ask yet": "Sıkıştır ve sürdür · ChatGPT sekmesi henüz isteyemedi",
+  "The ChatGPT tab shows the reason next to its message box. Chat On Steroids tries again on its own.": "ChatGPT sekmesi nedeni mesaj kutusunun yanında gösterir. Chat On Steroids kendiliğinden yeniden dener.",
   "The handoff request is sent as soon as this turn ends.": "Devir isteği bu tur biter bitmez gönderilir.",
   "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids, yeni bir sohbet için özeti yazma isteğini ChatGPT'ye gönderiyor.",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Daha kararlı uzun çalışmalar, proxy arkasında çalışan bir tünel ve ChatGPT'nin kendi terimleri.",

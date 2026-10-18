@@ -689,9 +689,12 @@ a claim that ChatGPT supplied a retry deadline. The existing pending-repair and 
 pickup-stopped countdowns retain their prior precedence over the generic limit notice.
 While the chat's own automatic Compact & Resume ticket is still before its handoff request, the
 recovery projection is a single read-only `compaction` countdown with `phase` `waiting` (the
-source turn still works) or `asking` (the request is being sent); the dock shows it without a
-clock. From the request on, the chat's Compact & Resume timeline row reports progress and the
-projection is empty. The countdown authorizes nothing.
+source turn still works), `asking` (the request is being sent) or `held` (the source page tried
+and stopped before asking); the dock shows it without a clock. An automatic attempt the page stops
+before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourceError`, its reason:
+the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
+ticket accepts it. From the request on, the chat's Compact & Resume timeline row reports progress
+and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
 0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
 pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429

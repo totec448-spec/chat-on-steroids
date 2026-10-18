@@ -2266,6 +2266,8 @@
   "Recording storage": "記錄儲存空間",
   "Compact & Resume · waiting for this turn to end": "壓縮並繼續 · 正在等待本輪結束",
   "Compact & Resume · asking ChatGPT for the handoff": "壓縮並繼續 · 正在向 ChatGPT 請求交接",
+  "Compact & Resume · the ChatGPT tab could not ask yet": "壓縮並繼續 · ChatGPT 分頁暫時無法發出請求",
+  "The ChatGPT tab shows the reason next to its message box. Chat On Steroids tries again on its own.": "ChatGPT 分頁會在訊息框旁顯示原因。Chat On Steroids 會自動重試。",
   "The handoff request is sent as soon as this turn ends.": "本輪結束後會立即送出交接請求。",
   "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids 正在請求 ChatGPT 為新聊天撰寫摘要。",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "長時間執行更穩定，隧道可在代理伺服器後運作，並使用 ChatGPT 自己的說法。",
