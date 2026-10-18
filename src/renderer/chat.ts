@@ -7016,7 +7016,8 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
       input.value = entry.text;
       if (edit) {
         if (question && editableQuestion(question, events)) {
-          const later = laterMessageCounts(timelineItems(foldAgentCommunication(visibleEvents()))).get(question.seq) ?? 0;
+          // The edit replaces everything after the question, whatever an agent filter shows.
+          const later = laterMessageCounts(timelineItems(foldAgentCommunication(events))).get(question.seq) ?? 0;
           editingQuestion = { sessionId: selectedId!, messageId: edit.messageId, later, previousDraft: '' };
         } else toast(t("That message can no longer be edited, so this is restored as a new message."));
       }
