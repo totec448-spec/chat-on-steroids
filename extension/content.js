@@ -1061,8 +1061,8 @@
   let mentionPlugins = false;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
                              matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null,
-                             whileGenerating = false) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
+                             whileGenerating = false, stillCurrentAfterClick = null) {
+    return CLF_DOM.send({ stillCurrent, stillCurrentAfterClick, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -12085,6 +12085,11 @@
     }
     const submittedLifetime = submittedSendLifetime(target);
     const sendingBootstrap = () => commandAlive() && submittedLifetime();
+    // The deadline forbids a worker's Send, not the report of one already made: on a starved machine
+    // its new chat can appear after the page's copy of the deadline, and the app takes that late
+    // receipt back (#1086). A resume keeps the deadline throughout; its marker commits it instead.
+    const reportingBootstrap = boot.type === 'worker' ? () => !attempt?.cancelled && submittedLifetime()
+      : () => !attempt?.cancelled && sendingBootstrap();
     // Stop/composer-clear may acknowledge acceptance before the authored row mounts.
     // Keep the original draft lease through that receipt, exactly as desktop delivery does;
     // identical text alone must never erase a later trusted edit or a replacement editor.
@@ -12230,7 +12235,8 @@
                                   matchesSubmittedBootstrap, boot.type === 'resume' ? 30_000 : null,
                                   why => { sendRefusal = why; },
                                   currentCoreMention(), boot.type === 'resume'
-                                    ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null))) {
+                                    ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null,
+                                  false, reportingBootstrap))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -12285,9 +12291,9 @@
     // already present. Reuse the receipt observer and the same 40s ceiling instead.
     // The route and exact submitted user row must agree for workers as for resumes;
     // a missing receipt is still ambiguous and cannot report a successful binding.
-    const found = await waitPageView(bootstrapConversation,
-      () => !attempt?.cancelled && sendingBootstrap(), Math.min(40000, commandWaitMs(40000, 2_000)));
-    if (!found || !sendingBootstrap()) return;
+    const found = await waitPageView(bootstrapConversation, reportingBootstrap,
+      boot.type === 'worker' ? 40000 : Math.min(40000, commandWaitMs(40000, 2_000)));
+    if (!found || !reportingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
     const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
     await publishBootstrapSelection(found);
