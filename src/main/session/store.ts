@@ -1946,7 +1946,11 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   // ChatGPT's redraw, when the turn has already ended. A genuinely new question has a new id.
   const ownQuestion = final.turnId ? entry.summary.timelineTurns?.[final.turnId]?.questionId : undefined;
   const nativeFinal = final.kind === 'turn_end' || (final.final === true && !!final.providerMessageId);
-  if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
+  // Nor is the turn's own question recorded after its answer: ChatGPT stamps a fast answer with its
+  // server time, the page stamps the question with the local clock, and a clock running ahead put
+  // "worker ready" before the question it answered (#1086, Windows VM, 2.1.41).
+  if (question && positionOf(question) >= positionOf(final) && !correction(question) &&
+      !(ownQuestion && question.kind === 'user_message' && question.messageId === ownQuestion)) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!final.turnId && (!question || question.time > final.time)) return null;
   if (entry.summary.activeTurnId && !sameTurn(entry.summary.activeTurnId, final.turnId)) return null;
