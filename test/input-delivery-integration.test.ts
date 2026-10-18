@@ -3093,25 +3093,31 @@ it('retires a lost authorized browser receipt so the session accepts and deliver
   } finally { clock.mockRestore(); }
 });
 
-it('retires an opening send whose receipt never arrives after six hours, and not before', async () => {
+// Measured 2026-09-27: first messages of app-started chats stayed in `browser` for days, so they got a
+// six-hour bound. The 2.1.41 release round showed that was still too long: an opening whose page died
+// right after Send sat invisible for hours and held every automatic extension update ("a message is
+// being sent"). A first message now gives up waiting like any other send; a late receipt still binds it.
+it('retires an opening send whose receipt never arrives after fifteen minutes, like any other send', async () => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   try {
-    // Measured 2026-09-27: first messages of app-started chats stayed in `browser` for days.
     const request = message(null, 'off');
     expect((await handlers.get('sessions:send')!(null, request)).ok).toBe(true);
     const owner = `document-${request.id}`;
     expect((await post('/input/claim', { id: request.id, owner, conversationId: null, requiresAuthorization: true })).body.input).toMatchObject({ opening: true });
     expect((await post('/input/claim', { id: request.id, owner, conversationId: null, authorize: true })).body.ok).toBe(true);
-    now += 15 * 60_000 + 1; // past the ordinary bound, which leaves openings in custody
+    now += 15 * 60_000 - 1_000;
     input.resetInputForTests();
     expect((await input.listInputs()).find(row => row.id === request.id)?.state).toBe('browser');
-    now += 6 * 60 * 60_000;
+    expect((await post('/status', { openConversations: [] })).body.inputOpeningIds).toContain(request.id);
+    now += 2_000;
     input.resetInputForTests();
     expect((await input.listInputs()).find(row => row.id === request.id)).toMatchObject({
       state: 'cancelled',
       error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.'
     });
     expect((await input.pendingBrowserInputs()).map(row => row.id)).not.toContain(request.id);
+    // The extension no longer counts it as a message being sent, so its update can go ahead.
+    expect((await post('/status', { openConversations: [] })).body.inputOpeningIds).not.toContain(request.id);
   } finally { clock.mockRestore(); }
 });
 
