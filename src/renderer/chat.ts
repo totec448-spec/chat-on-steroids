@@ -5,7 +5,7 @@ import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
-import { initSkills } from './skills.js';
+import { APP_COMMANDS, initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
@@ -1058,6 +1058,44 @@ let renaming: { id: string; original: string; value: string; start: number; end:
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
 const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact']);
+/** The commands that switch how the next message is sent; their rest is that message. */
+const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
+
+/** What a slash command does, picked from the composer menu or typed at the start of a message. */
+function runComposerCommand(name: string): void {
+  if (name === 'plan') { $('createPlan').click(); return; }
+  if (name === 'compact') { $('compactSession').click(); return; }
+  if (name === 'goal' || name === 'loop') {
+    const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = name;
+    automation.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+  runSlashCommand(name);
+}
+
+/**
+ * A message typed or pasted as `/goal …` and sent without the menu (2.1.41 release round) went out as a
+ * Skill named "goal" and failed. A leading app command now means that command, as if picked from the
+ * menu, unless a Skill has the name. Plan, Goal and Loop then send the rest the way their mode does;
+ * any other command runs and leaves the rest in the composer.
+ */
+async function sendTypedCommand(controlAction: boolean): Promise<void> {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const typed = /^\s*\/([a-z][a-z-]*)(?=\s|$)/i.exec(input.value);
+  const name = typed?.[1]!.toLowerCase();
+  const known = name && APP_COMMANDS.some(row => row.command === name) && (!CHAT_COMMANDS.has(name) || openChatSummary() !== null);
+  const library = known ? await run(api.skillLibrary({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId })) : null;
+  if (!typed || !known || !library || library.skills.some(skill => skill.id === name)) {
+    if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); }
+    else void sendComposer(undefined, undefined, undefined, controlAction);
+    return;
+  }
+  const rest = input.value.slice(typed[0].length).replace(/^\s+/, '');
+  input.value = rest;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  runComposerCommand(name);
+  if (MODE_COMMANDS.has(name) && rest.trim()) $<HTMLFormElement>('composer').requestSubmit();
+}
 function openChatSummary(): SessionSummary | null {
   return selectedId === null ? null : sessions.find(row => row.id === selectedId) ?? null;
 }
@@ -7845,16 +7883,8 @@ export function initChat(next: Deps): void {
     selectedHost: $('composerSelectedSkills'), owner: () => `${draftKey()}:${composerDraftGeneration}`,
     scope: () => ({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId }),
     draft: () => inputDrafts.get(draftKey()), saveDraft: text => inputDrafts.set(draftKey(), text),
-    list: scope => api.skillLibrary(scope), command: name => {
-      if (name === 'plan') { $('createPlan').click(); return; }
-      if (name === 'compact') { $('compactSession').click(); return; }
-      if (name === 'goal' || name === 'loop') {
-        const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = name;
-        automation.dispatchEvent(new Event('change', { bubbles: true }));
-        return;
-      }
-      runSlashCommand(name);
-    }, commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null,
+    list: scope => api.skillLibrary(scope), command: runComposerCommand,
+    commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null,
     listFiles: async (projectId, directory) => {
       const result = await api.listProjectFiles(projectId, directory);
       if (!result.ok) throw new Error(result.error);
@@ -8090,6 +8120,7 @@ export function initChat(next: Deps): void {
     retireDictation();
     const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
     if (currentPreparedPlan()) void sendPreparedPlan();
+    else if (!controlAction && /^\s*\/[a-z]/i.test($<HTMLTextAreaElement>('chatInput').value)) void sendTypedCommand(controlAction);
     else if (taskPlans.has(draftKey())) {
       if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
     } else void sendComposer(undefined, undefined, undefined, controlAction);
