@@ -721,6 +721,8 @@
   "Retry stage one with the complete plan and queued checkpoints": "重试第一阶段，并包含完整计划和排队检查点",
   "Restore this message to the composer for review and sending": "将此消息恢复到输入框，以便检查并发送",
   "Send or clear your current draft before retrying this message.": "重试此消息前，请先发送或清空当前草稿。",
+  "That message can no longer be edited, so this is restored as a new message.": "此消息已无法再编辑，因此已作为新消息恢复。",
+  "Scroll up to the message you edited, then retry.": "请向上滚动到你编辑的消息，然后重试。",
   "Message queued. Browser startup failed:": "消息已排队。浏览器启动失败：",
   "Retry browser": "重试浏览器",
   "Helper delivery was not confirmed. Its old chat may still be running.": "辅助聊天的消息尚未确认送达，原聊天可能仍在运行。",
