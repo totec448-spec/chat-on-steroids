@@ -436,6 +436,7 @@ const startedCompactions = (harness: Harness): any[] =>
       !message.summary &&
       !message.sourceAttempt &&
       !message.sourceLost &&
+      !message.sourceDeferred &&
       !message.sourceDispatch &&
       !message.sourceMessageId &&
       !message.destinationAttempt &&
@@ -14974,6 +14975,8 @@ describe('the Compact & resume control', () => {
     expect(compacts[0]).toMatchObject({ ticket: true, automatic: true });
     expect(compacts.some((message) => message.cancel === true)).toBe(false);
     expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('message box is not ready (composer_missing)');
+    expect(compacts).toContainEqual(expect.objectContaining({ token: 'tok-auto-missing-composer', sourceDeferred: true,
+      sourceError: expect.stringContaining('message box is not ready (composer_missing)') }));
   });
 
   it('uses the current rich-text composer for handoff even while its form marker is absent', async () => {
@@ -18194,6 +18197,10 @@ describe('the context meter and automatic compaction', () => {
     expect(stopped).toHaveBeenCalledTimes(compacts ? 1 : 0);
     expect(sends()).toBe(compacts ? 1 : 0);
     if (!compacts) expect(live.document.querySelector('.clf-pill-text')?.textContent ?? '').toContain('has not confirmed receiving');
+    // #1643: the app is told why this attempt stopped, so it can log and show it; the ticket stays.
+    const deferred = live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true);
+    expect(deferred).toEqual(compacts ? [] : [expect.objectContaining({ token: 'receipt-token', sourceError: expect.stringContaining('has not confirmed receiving') })]);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
   });
 
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {

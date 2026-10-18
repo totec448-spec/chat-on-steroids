@@ -3844,6 +3844,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       changed();
       return json(res, 200, { aborted: true, sessionId: entry.sessionId, job: resumeJobFor(entry.sessionId) }, origin);
     }
+    // An automatic attempt the source page stopped before asking: the ticket stays for a later
+    // pickup, and the page's reason is logged and shown until that pickup lets it try again.
+    if (body['sourceDeferred'] === true) {
+      const entry = continuationByToken(checkpointToken);
+      if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
+      if (!entry.automatic || entry.state !== 'awaiting-summary' || !sendUnattempted(entry.sourceSend)) {
+        return json(res, 409, { error: 'source_send_not_deferrable' }, origin);
+      }
+      const reason = typeof body['sourceError'] === 'string' ? body['sourceError'].trim().slice(0, 500) : '';
+      compactionDeferrals.set(entry.token, reason);
+      logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${id} — the page could not ask for the handoff yet: ${reason || 'no reason given'}`);
+      changed();
+      return json(res, 200, { deferred: true, job: resumeJobFor(entry.sessionId) }, origin);
+    }
     // The last durable write before the click, quoting the claim handed out above. A false
     // answer means this document was reclaimed while it was composing and must submit nothing.
     if (body['sourceDispatch'] === true) {
@@ -7554,7 +7568,8 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
     const compaction = compactionWatch.get(conversationId);
     // Only before the request goes out: from then on the chat's own Compact & Resume row shows
     // the brief being written, saved and the new chat opening, and a second row repeated it.
-    const phase = compaction?.phase !== 'asking' ? null : sessionInputActivity(session).exact ? 'waiting' : 'asking';
+    const phase = compaction?.phase !== 'asking' ? null : sessionInputActivity(session).exact ? 'waiting'
+      : compactionDeferrals.has(compaction.token) ? 'held' : 'asking';
     return compaction && phase && pendingContinuations().some(entry => entry.from === conversationId && entry.token === compaction.token)
       ? [{ kind: 'compaction', phase, deadline: Math.max(compaction.nextAt, Date.now()) }] : [];
   }
@@ -9026,6 +9041,11 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   opening: { every: 15 * 60_000, attempts: 3 }
 };
 const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean }>();
+/**
+ * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
+ * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
+ */
+const compactionDeferrals = new Map<string, string>();
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
 /**
  * How many slowed extra bursts an automatic pre-Send ticket gets before it is abandoned like a
@@ -9230,6 +9250,9 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
 async function inspectOwedCompactions(now: number): Promise<boolean> {
   if (compactionWatchFloor === null) return false;
   const owed = new Map(pendingContinuations().map((entry) => [entry.from, entry]));
+  for (const token of compactionDeferrals.keys()) {
+    if (![...owed.values()].some((entry) => entry.token === token)) compactionDeferrals.delete(token);
+  }
   for (const [conversationId, watch] of compactionWatch) {
     if (owed.get(conversationId)?.token === watch.token) continue;
     compactionWatch.delete(conversationId);
@@ -9332,6 +9355,8 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
         0,
         now
       );
+      // This pickup lets the page try again; its last reason no longer describes the chat.
+      if (acted) compactionDeferrals.delete(entry.token);
     } else if (
       sendUnattempted(entry.destinationSend) &&
       !commands.some((command) => command.spec.type === 'resume' && command.spec.token === entry.token)

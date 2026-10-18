@@ -3678,6 +3678,59 @@ describe('automatic compaction', () => {
     }
   });
 
+  // #1643: five pickups were "resumed" and none reached Send. The page knew why each attempt
+  // stopped (shown only on its own control); the app logged nothing and said "asking ChatGPT".
+  it('logs and shows why the source page could not ask for an automatic handoff', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0d';
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a chat whose page cannot ask yet', messageId: 'm-auto-deferred' }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const token = filed.body.token as string;
+      const sessionId = filed.body.sessionId as string;
+      const why = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
+      const phase = async () => ((await sessionControlsFor(sessionId)).recovery ?? []).map(countdown => countdown.phase);
+      const takeRepair = async (): Promise<{ token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      await sweepStaleSwarm(Date.now());
+      expect(await phase()).toEqual(['asking']);
+
+      const deferred = await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true, sourceError: why } });
+      expect(deferred.status).toBe(200);
+      expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary', sourceSend: { state: 'not-attempted' } });
+      expect(getLog().map(entry => entry.message)).toContainEqual(expect.stringContaining(`could not ask for the handoff yet: ${why}`));
+      expect(await phase()).toEqual(['held']);
+
+      // The next pickup lets the page try again, so the app is asking once more.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      expect(await takeRepair()).toMatchObject({ reason: 'compaction' });
+      expect(await phase()).toEqual(['asking']);
+
+      // Only the open, still unsent automatic ticket of this chat takes a reason.
+      expect((await request('POST', '/compact', { body: { conversationId, token: 'not-a-ticket', sourceDeferred: true, sourceError: why } })).status).toBe(409);
+      expect((await request('POST', '/compact', { body: { conversationId: 'a1a1a1a1-0000-4000-8000-00000000ac0e', token, sourceDeferred: true, sourceError: why } })).status).toBe(409);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes no deferral reason for a manual Compact & Resume', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0f';
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a manual press', messageId: 'm-manual-deferred' }] }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    const deferred = await request('POST', '/compact', { body: { conversationId, token: filed.body.token, sourceDeferred: true, sourceError: 'no' } });
+    expect(deferred.status).toBe(409);
+    expect(deferred.body.error).toBe('source_send_not_deferrable');
+  });
+
   it('abandons an automatic ticket that never reaches Send after its bounded retry bursts', async () => {
     vi.useFakeTimers();
     try {
