@@ -1,8 +1,11 @@
 /** Read-only projection of an existing recovery deadline. Never authorizes an action. */
 export type RecoveryCountdown = {
   kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped' | 'provider-limit' | 'compaction';
-  /** For `compaction`: whether the source turn still works or the handoff request is being sent. */
-  phase?: 'waiting' | 'asking';
+  /**
+   * For `compaction`: whether the source turn still works, the handoff request is being sent, or
+   * the ChatGPT tab tried and could not send it yet (`held`).
+   */
+  phase?: 'waiting' | 'asking' | 'held';
   deadline: number;
   /** Attempts already spent for a pickup that stopped at its durable limit. */
   attempts?: number;

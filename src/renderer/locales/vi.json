@@ -2266,6 +2266,8 @@
   "Recording storage": "Bộ nhớ ghi lại",
   "Compact & Resume · waiting for this turn to end": "Compact & Resume · đang chờ lượt này kết thúc",
   "Compact & Resume · asking ChatGPT for the handoff": "Compact & Resume · đang yêu cầu ChatGPT bàn giao",
+  "Compact & Resume · the ChatGPT tab could not ask yet": "Compact & Resume · thẻ ChatGPT chưa thể yêu cầu",
+  "The ChatGPT tab shows the reason next to its message box. Chat On Steroids tries again on its own.": "Thẻ ChatGPT hiển thị lý do bên cạnh ô nhập tin nhắn. Chat On Steroids sẽ tự thử lại.",
   "The handoff request is sent as soon as this turn ends.": "Yêu cầu bàn giao sẽ được gửi ngay khi lượt này kết thúc.",
   "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids đang gửi cho ChatGPT yêu cầu viết bản tóm tắt cho cuộc trò chuyện mới.",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Các lượt chạy dài ổn định hơn, tunnel hoạt động sau proxy và dùng đúng từ ngữ của ChatGPT.",
