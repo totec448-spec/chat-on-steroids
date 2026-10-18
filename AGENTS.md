@@ -3606,6 +3606,10 @@ final receipt (committed or terminal-failure); any other late ACK is still `no_s
 The page side has to send that ACK: a worker page's deadline forbids its Send click, not the report
 of one already made, so after the click `CLF_DOM.send` (`stillCurrentAfterClick`) and the wait for
 the new chat id hold only the exact send lifetime. A resume keeps the deadline throughout.
+A worker page then waits for its exact receipt in 40 s rounds for up to `WORKER_RECEIPT_WAIT_MS`
+(a hidden tab on a starved machine drew it minutes late), and sends its ACK again with backoff
+while the extension gives no answer (its worker was stopped or restarting and nothing reached the
+outbox). Both stop when the page or its send lifetime ends.
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
