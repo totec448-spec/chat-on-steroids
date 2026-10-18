@@ -6183,6 +6183,30 @@ describe('edit and resubmit (#365)', () => {
     expect(live.sent.at(-1)).not.toHaveProperty('edit');
   });
 
+  // An edit in progress is an unsent draft: retrying must neither replace it nor inherit it.
+  it.each([
+    ['a failed edit', { edit: { messageId: Q1 } }],
+    ['a failed ordinary message', {}]
+  ])('keeps an edit in progress, with the draft it will give back, when %s is retried', async (_name, extra) => {
+    const { w, live, append } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'My draft';
+    editButton(w, 'Fix the logn bug')!.click(); await settle();
+    input.value = ''; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    live.inputs = [failedInput('Retried words', extra)]; await append([]);
+    await retryDelivery(w as any);
+    expect(w.document.querySelector('.toast')?.textContent).toContain('Send or clear your current draft before retrying this message.');
+    expect(input.value).toBe('');
+    expect(w.document.querySelector('[aria-label="Retry delivery"]')).not.toBeNull();
+    const notice = w.document.getElementById('editDraft')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Editing your message · replaces 1 later message');
+    expect([...w.document.querySelectorAll('#timeline .ev-user_message.is-being-edited')].map(row => row.textContent!.includes('Fix the logn bug'))).toEqual([true]);
+    // Cancelling still gives back the draft the edit began with.
+    w.document.querySelector<HTMLButtonElement>('#editDraft .edit-draft-cancel')!.click(); await settle();
+    expect(input.value).toBe('My draft');
+  });
+
   it('restores a failed edit whose question can no longer be edited as a new message, and says so', async () => {
     const replaced = [...exchange(), q(7, '6ad3a59b-0003-83eb-8bc4-8c84e68dd911', 'Fix the login bug', 't3', { replaces: Q2 }), end(8, 't3')];
     const { w, live, append } = await boot(replaced, true, [], [], { summary: { conversationId: chat } });
