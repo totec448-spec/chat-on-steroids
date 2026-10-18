@@ -20,13 +20,14 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { APP_VERSION, BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
-const { resetBridgeForTests, shutdownBridge, startBridge, sessionInputActivity } = await import('../src/main/bridge.js');
+const { resetBridgeForTests, setRotationHoldForTests, shutdownBridge, startBridge, sessionInputActivity } = await import('../src/main/bridge.js');
 const { getSession } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, writeDurableSoon } = await import('../src/main/durable.js');
 const { findSessionByConversation, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
+const { openCallHold, resetCallHoldsForTests } = await import('../src/main/rotation-hold.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -86,12 +87,24 @@ async function events(chat: string, items: unknown[]): Promise<any> {
   return reply.body;
 }
 
-async function attributedCall(chat: string): Promise<void> {
+/**
+ * One attributed call as the MCP kernel answers it: recorded while its answer is still held, then
+ * answered. Returns the answer's release, which waits for any continue the call was held for.
+ */
+async function heldCall(chat: string, hold = true): Promise<() => Promise<void>> {
   const requestId = `rotation_trace_${++requestSerial}`;
   await events(chat, [{ kind: 'tool_evidence', time: Date.now(),
     calls: [{ messageId: `m-${requestSerial}`, tool: 'read', order: 0, answered: false, requestId }] }]);
+  const close = hold ? openCallHold(chat) : async () => undefined;
   await recordToolCall({ tool: 'read', args: { paths: ['/project/a.ts'] }, content: [{ type: 'text', text: 'ok' }],
     outcome: 'ok', durationMs: 1, startedAt: Date.now(), requestId });
+  return close;
+}
+
+async function attributedCall(chat: string): Promise<void> {
+  const answer = (await heldCall(chat))();
+  // The page takes no continue in these tests: the held answer goes out once the wait gives up.
+  await answer;
 }
 
 async function turnFor(chat: string, turnId: string, ageMinutes: number, model = 'GPT-6 Sol'): Promise<string> {
@@ -135,6 +148,8 @@ beforeEach(async () => {
   resetRecorderForTests();
   resetInputForTests();
   resetTurnRotationForTests();
+  resetCallHoldsForTests();
+  setRotationHoldForTests(200);
   resetGoalStateForTests();
   writeDurableSoon('bridge-commands', null);
   await flushDurable();
@@ -197,6 +212,49 @@ describe('turn rotation (#1402)', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     // Before the fix this still read as exact work on the rotated turn g-rot-follow-0-1.
     expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: false, possible: false });
+  });
+
+  // #1662: sent into the gap after a call's result, ChatGPT sometimes queued the continue behind its
+  // answer and never answered it. The continue now goes in only while the call it is due at is still
+  // being answered: the app holds that call's answer until the page has sent the continue.
+  it('holds the due call\'s answer until the page has sent the continue into the turn', async () => {
+    setRotationHoldForTests(5_000);
+    const chat = 'f0f00003-1111-4111-8111-000000000201';
+    const sessionId = await turnFor(chat, 'g-rot-hold-1', 31);
+    let answered = false;
+    const answer = (await heldCall(chat))().then(() => { answered = true; });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+    expect(row).toBeDefined();
+    expect(answered).toBe(false);
+    const page = { id: row.id, owner: 'rotation-page', conversationId: chat };
+    expect((await request('POST', '/input/claim', { body: { ...page, requiresAuthorization: true } })).body.input).toMatchObject({ id: row.id });
+    expect((await request('POST', '/input/claim', { body: { ...page, authorize: true } })).body).toEqual({ ok: true });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(answered).toBe(false);
+    expect((await request('POST', '/input/ack', { body: { ...page, messageId: 'rotation-continue-1' } })).body).toEqual({ ok: true });
+    await answer;
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('sent');
+  });
+
+  it('answers the call and withdraws the continue without a notice when the page does not take it in time', async () => {
+    const chat = 'f0f00003-1111-4111-8111-000000000202';
+    const sessionId = await turnFor(chat, 'g-rot-hold-2', 31);
+    const started = Date.now();
+    await (await heldCall(chat))();
+    expect(Date.now() - started).toBeLessThan(2_000);
+    const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+    expect(row.state).toBe('cancelled');
+    expect(row.error).toBeUndefined();
+    // A page that claims it now is refused: it would send into the gap after the call's result.
+    expect((await request('POST', '/input/claim', { body: { id: row.id, owner: 'late-page', conversationId: chat, requiresAuthorization: true } })).body.input).toBeNull();
+  });
+
+  it('files no continue for a call whose answer has already gone out', async () => {
+    const chat = 'f0f00003-1111-4111-8111-000000000203';
+    const sessionId = await turnFor(chat, 'g-rot-hold-3', 31);
+    await (await heldCall(chat, false))();
+    expect(await rotationsFor(sessionId)).toEqual([]);
   });
 
   it('is off at 0 minutes', async () => {
