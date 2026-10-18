@@ -37,6 +37,8 @@ export interface ApprovalWaitDeps {
   record(sessionId: string, progressId: string, text: string, anchor?: { seq: number; time: number }): Promise<{ seq: number; time: number } | null>;
   notify(sessionId: string): void;
   log(message: string): void;
+  /** A chat started or stopped waiting, so the session list's `approval` changed. */
+  changed?(): void;
 }
 
 interface Wait {
@@ -48,6 +50,8 @@ interface Wait {
   row: Promise<{ seq: number; time: number } | null> | null;
   card: ApprovalCardFacts | null;
   answer: ApprovalAnswer | null;
+  /** Fires when no poll has refreshed the wait for `APPROVAL_FRESH_MS`: nothing else would say so. */
+  stale: NodeJS.Timeout | null;
 }
 
 const waits = new Map<string, Wait>();
@@ -56,6 +60,11 @@ const waits = new Map<string, Wait>();
 export function approvalCardWaiting(conversationId: string, now = Date.now()): boolean {
   const wait = waits.get(conversationId);
   return !!wait && now - wait.seenAt < APPROVAL_FRESH_MS;
+}
+
+/** Every chat `approvalCardWaiting` holds true for; the session list carries it as `approval`. */
+export function approvalWaitingChats(now = Date.now()): string[] {
+  return [...waits.keys()].filter(conversationId => approvalCardWaiting(conversationId, now));
 }
 
 /**
@@ -73,7 +82,9 @@ export async function noteApprovalCard(
   let wait = waits.get(conversationId);
   if (wait && (!waiting || now - wait.seenAt >= APPROVAL_FRESH_MS)) {
     waits.delete(conversationId);
+    if (wait.stale) clearTimeout(wait.stale);
     deps.log(`bridge: ${conversationId} no longer shows ChatGPT's tool approval card`);
+    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
     // Only an answer seen on the page itself rewrites the row; a page that stopped reporting
     // says nothing about the card.
     const anchor = waiting ? null : await wait.row;
@@ -82,11 +93,30 @@ export async function noteApprovalCard(
   }
   if (!waiting) return;
   if (!wait) {
-    wait = { since: now, seenAt: now, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null };
+    wait = { since: now, seenAt: now, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null, stale: null };
     waits.set(conversationId, wait);
     deps.log(`bridge: ${conversationId} waits for the user to answer ChatGPT's tool approval card`);
+    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
   }
   wait.seenAt = now;
+  if (deps.changed) {
+    // A page that stops reporting ends the wait with no poll left to say so.
+    const current = wait;
+    if (current.stale) clearTimeout(current.stale);
+    const arm = (delay: number): void => {
+      current.stale = setTimeout(() => {
+        current.stale = null;
+        if (waits.get(conversationId) !== current) return;
+        // A timer may fire a moment early. Pushed then, the list would still say waiting, and
+        // nothing would push again: wait out what is left of the freshness window first.
+        const left = current.seenAt + APPROVAL_FRESH_MS - Date.now();
+        if (left > 0) { arm(left); return; }
+        try { deps.changed?.(); } catch { /* as above */ }
+      }, delay);
+      current.stale.unref?.();
+    };
+    arm(APPROVAL_FRESH_MS);
+  }
   if (card) {
     // Another card replaces this one: an answer filed for the old card must never reach it.
     if (wait.card && wait.card.id !== card.id) wait.answer = null;
@@ -169,5 +199,6 @@ function expire(wait: Wait, now: number): void {
 }
 
 export function resetApprovalWaits(): void {
+  for (const wait of waits.values()) if (wait.stale) clearTimeout(wait.stale);
   waits.clear();
 }

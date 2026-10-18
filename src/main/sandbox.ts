@@ -82,21 +82,37 @@ export interface Resolved {
  */
 export function suggestApprovedSpelling(roots: readonly Root[], segments: readonly string[]): string | null {
   for (const [index, segment] of segments.entries()) {
-    const slug = normaliseRootName(segment);
-    const root = roots.find((candidate) => candidate.name === slug);
+    const slugs = new Set([normaliseRootName(segment), legacyRootName(segment)]);
+    const root = roots.find((candidate) => slugs.has(candidate.name));
     if (root) return `/${root.name}${segments.slice(index + 1).map((part) => `/${part}`).join('')}`;
   }
   return null;
 }
 
-/** Normalises a user-supplied root name into the slug used in virtual paths. */
-export function normaliseRootName(input: string): string {
-  const slug = input
-    .toLowerCase()
+/** Letters spelled with two ASCII letters by custom, or that Unicode does not decompose. */
+const ASCII_SPELLINGS: Readonly<Record<string, string>> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th' };
+
+function slugOf(lowered: string): string {
+  const slug = lowered
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 32);
   return slug || 'folder';
+}
+
+/**
+ * Normalises a user-supplied root name into the slug used in virtual paths. Letters keep an
+ * ASCII spelling instead of being dropped: "Größe" is `groesse`, "Café" is `cafe` (older
+ * versions made "Kundenprojekt Größe & Ä" `/kundenprojekt-gr-e`).
+ */
+export function normaliseRootName(input: string): string {
+  return slugOf(input.toLowerCase().replace(/[äöüßæœøłđðþ]/g, letter => ASCII_SPELLINGS[letter]!)
+    .normalize('NFKD').replace(/\p{M}+/gu, ''));
+}
+
+/** The slug older versions gave a root, which existing roots keep as their name. */
+function legacyRootName(input: string): string {
+  return slugOf(input.toLowerCase());
 }
 
 /** Picks a root name derived from a folder that does not collide with existing ones. */

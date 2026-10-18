@@ -1,5 +1,5 @@
 import { initBrowserSetup } from './setup-browser.js';
-import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
+import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
@@ -605,8 +605,8 @@ function paintGroups(): void {
         : on.length === 0
           ? t('off')
           : on.length === group.caps.length
-            ? t(on.length === 1 ? '{0} permission' : '{0} permissions', [on.length])
-            : t("{0} of {1} permissions", [on.length, group.caps.length]));
+            ? tn('{0} permission', '{0} permissions', on.length)
+            : tn("{0} of {1} permission", "{0} of {1} permissions", group.caps.length, [on.length, group.caps.length]));
 
     root.classList.toggle('is-on', on.length > 0);
     root.classList.toggle('is-locked', usable.length === 0);
@@ -1251,7 +1251,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   }
   if (stale) {
     // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
-    const firefox = bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale;
+    const firefox = bridge.extensionEngine === 'gecko' || (bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale);
     lines.push(
       t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
         (firefox
@@ -1868,8 +1868,8 @@ function apply(next: AppState): void {
   progress.setAttribute('aria-valuenow', String(finished));
   progress.classList.toggle('is-complete', finished === shown.length);
   ui($('setupProgressText'), 'textContent', () => finished === shown.length
-    ? t('All {0} steps done', [shown.length])
-    : t('{0} of {1} steps done', [finished, shown.length]));
+    ? tn('{0} step done', 'All {0} steps done', shown.length)
+    : tn('{0} of {1} step done', '{0} of {1} steps done', shown.length, [finished, shown.length]));
 
   // One step open at a time: the one the user picked, else the first unfinished. Past the last
   // task comes Ready, which reads every check back, so a finished setup opens on its proof.
@@ -2295,7 +2295,7 @@ function paintProblems(): void {
   for (const id of ['homeProblems', 'logProblems']) {
     const badge = $(id);
     badge.hidden = problems === 0;
-    ui(badge, 'textContent', () => t(problems === 1 ? '{0} problem' : '{0} problems', [problems]));
+    ui(badge, 'textContent', () => tn('{0} problem', '{0} problems', problems));
   }
 }
 

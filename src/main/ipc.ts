@@ -134,7 +134,7 @@ import {
   withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
-import { findInSession, locateSearchMatch, searchSessions } from './session/search.js';
+import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -1283,6 +1283,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'session']),
       turnId: z.string().min(1).max(200).optional(),
+      messageId: z.string().min(1).max(200).optional(),
       target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
@@ -1678,6 +1679,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, query } = sessionIdArg.extend({ query: z.string().max(200) }).parse(payload);
     return locateSearchMatch(id, query);
   });
+  // Branch in new chat (#482): where the reply a branch was made from is, to open the source there.
+  handle('sessions:locate-message', async (payload) => {
+    const { id, messageId } = sessionIdArg.extend({ messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) }).parse(payload);
+    return locateMessage(id, messageId);
+  });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
@@ -1867,7 +1873,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const details = [
       mainText('Checkout: {0}').replace('{0}', () => workspace),
       candidate.changes.length
-        ? mainText('{0} uncommitted or ignored paths would be discarded:').replace('{0}', () => discarded)
+        ? mainText('Uncommitted or ignored paths that would be discarded ({0}):').replace('{0}', () => discarded)
         : mainText('No uncommitted or ignored paths were detected.'),
       ...changedFiles,
       candidate.changes.length > changedFiles.length || candidate.changesTruncated
@@ -2000,7 +2006,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
-      return (entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish'
+      // An edit of a chat's first question (#365) replaces the message that carried its setup.
+      return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
         ? prepareSessionPrompt(text, entry, limits, authored)
         : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
     },

@@ -95,6 +95,27 @@ describe('timeline rounds from the turn outline', () => {
     ]);
   });
 
+  it('draws a sentence once when a later page scan records it again without its turn', () => {
+    // Measured live 2026-10-17: after the turn ended, a page scan recorded its first sentence and a
+    // step once more, with no turn; the outline had already drawn both inside the turn.
+    const late = (row: FlowRow): FlowRow => { const { turnId: _turn, ...event } = row.event as SessionEvent & { turnId?: string }; return { ...row, event: event as SessionEvent }; };
+    const rows = [user(), call('Created a.txt'), answer(), late(say('Vou criar os três arquivos em sequência.', 'm-1')),
+      late(say('Vou criar `a.txt` com uma linha de teste.')), late(step('Adicionado arquivo de teste ao projeto'))];
+    expect(shape(structureTimeline(rows, { [TURN]: gpt6.slice(0, 4) }, false))).toEqual([
+      `row ${rows[0]!.key}`, 'say "Vou criar os três arquivos em sequência."', 'say "Vou criar `a.txt` com uma linha de teste."',
+      `work[${rows[1]!.key}] "Adicionado arquivo de teste ao projeto"`, `row ${rows[2]!.key}`
+    ]);
+  });
+
+  it('keeps a sentence without a turn that no outline says', () => {
+    const rows = [user(), call('Created a.txt'), answer(), say('Something only the page recorded, long enough to compare.')];
+    const { turnId: _turn, ...event } = rows[3]!.event as SessionEvent & { turnId?: string };
+    rows[3] = { ...rows[3]!, event: event as SessionEvent };
+    expect(shape(structureTimeline(rows, { [TURN]: gpt6.slice(2, 4) }, false))).toEqual([
+      `row ${rows[0]!.key}`, `work[${rows[1]!.key}] "Adicionado arquivo de teste ao projeto"`, `row ${rows[2]!.key}`, `say ${rows[3]!.key}`
+    ]);
+  });
+
   it('gives a code-mode exec the calls the rest of the outline cannot account for', () => {
     const trace: TurnTrace = [
       { kind: 'exec', id: 'x-1', done: true }, { kind: 'recap', text: 'Read the project' },

@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT đã thay thế ô soạn thảo khi chèn nội dung khởi tạo"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT không hiển thị ô soạn thảo khả dụng để bắt đầu"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT không hiển thị lại ô soạn thảo khả dụng sau khi chọn mô hình"
   },
@@ -728,12 +731,6 @@
   "content_workers_still_running": {
     "message": "$1 worker vẫn đang chạy"
   },
-  "content_workers_summary": {
-    "message": "$1 đã hoàn tất · $2 đang chạy"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 đã hoàn tất · $2 đang chạy · $3 thất bại"
-  },
   "content_working": {
     "message": "đang làm việc…"
   },
@@ -821,9 +818,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · cổng $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 đang giữ · tổng $2"
-  },
   "popup_detail_chat_id": {
     "message": "ID cuộc trò chuyện"
   },
@@ -848,17 +842,11 @@
   "popup_detail_observed": {
     "message": "đã quan sát"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 sự kiện · $2 lần gọi"
-  },
   "popup_detail_ownership": {
     "message": "quyền sở hữu"
   },
   "popup_detail_page_sends": {
     "message": "lần gửi từ trang"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 thất bại"
   },
   "popup_detail_recorder": {
     "message": "trình ghi"
@@ -1177,5 +1165,32 @@
   },
   "popup_app_not_running_help": {
     "message": "Hãy chắc rằng Chat On Steroids đang mở trên máy tính này. Tiện ích sẽ tự kết nối."
+  },
+  "content_workers_finished": {
+    "message": "$1 đã hoàn tất"
+  },
+  "content_workers_running": {
+    "message": "$1 đang chạy"
+  },
+  "content_workers_failed": {
+    "message": "$1 thất bại"
+  },
+  "popup_detail_events": {
+    "message": "$1 sự kiện"
+  },
+  "popup_detail_calls": {
+    "message": "$1 lần gọi"
+  },
+  "popup_detail_failed": {
+    "message": "$1 thất bại"
+  },
+  "popup_detail_total": {
+    "message": "tổng $1"
+  },
+  "content_edit_message_missing": {
+    "message": "Tin nhắn đó không còn trên trang ChatGPT nên không thể chỉnh sửa."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT không cung cấp Chỉnh sửa cho tin nhắn đó. Hãy mở cuộc trò chuyện trong ChatGPT rồi thử lại."
   }
 }

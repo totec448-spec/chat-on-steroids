@@ -529,8 +529,10 @@ code {
 .sidebar-section-empty { padding: 6px 28px 4px; text-align: left; font-size: calc(11px * var(--text-scale, 1)); line-height: 1.5; }
 .sidebar .new-chat { color: var(--ink); }
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
-/* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
-.sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
+/* Let the scrollbar reach the divider; keep a small gap on the row side of its track. Its room
+   stays reserved, so rows and the Inbox toolbar keep their width when a filter or a collapsed
+   section makes the list short enough to need no scrollbar. */
+.sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; scrollbar-gutter: stable; }
 /* Chat search dialog (#1117): recent chats, then matches with the passage that matched. */
 /* One fixed size while typing: the results scroll inside it, the box never grows or shrinks. */
 .search-dialog { width: min(580px, calc(100vw - 40px)); height: min(460px, calc(100dvh - 140px)); max-height: none; margin: 12vh auto auto; padding: 0; overflow: hidden; color: var(--ink);
@@ -930,11 +932,14 @@ main {
 [data-panel='activity'] {
   padding: 46px 36px 36px;
   grid-template-rows: minmax(0, 1fr);
+  /* The same gutter as every scrolling settings page, so this one does not sit half a bar wider;
+     a window too short for the log's floor scrolls the page. */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .activity-content {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -2465,6 +2470,17 @@ input[readonly] {
 }
 .chat-project-context[hidden] { display: none; }
 #chatProjectName { overflow: hidden; text-overflow: ellipsis; }
+/* Branch in new chat (#482): a branched chat's link back to the reply it came from. */
+.chat-branch-origin { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 32%; flex: 0 1 auto; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--soft); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; cursor: pointer; }
+.chat-branch-origin[hidden] { display: none; }
+.chat-branch-origin span { overflow: hidden; text-overflow: ellipsis; }
+.chat-branch-origin .ico { --ico: 14px; --glyph: 14px; flex: none; }
+.chat-branch-origin:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.chat-branch-origin:disabled { cursor: default; }
+.chat-branch-origin:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* The new chat being written starts from a reply: one row of the composer dock, drawn like its
+   neighbours (the dock draws the frame, the row adds none of its own). */
+.branch-draft[hidden], .edit-draft[hidden] { display: none; }
 #chatTitle {
   text-transform: none;
   letter-spacing: 0;
@@ -2500,6 +2516,9 @@ input[readonly] {
 .session-status { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .session-status.is-active, .session-status.is-working { width: 12px; height: 12px; background: transparent; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: session-spin 900ms linear infinite; }
 @keyframes session-spin { to { transform: rotate(360deg); } }
+/* Reduced motion stops the turn (Windows "Animation effects: Off" asks for it too). A quarter arc
+   standing still reads as a stuck app, so the mark becomes a whole accent ring: still, and working. */
+@media (prefers-reduced-motion: reduce) { .session-status.is-active, .session-status.is-working { border-color: var(--accent); } }
 .session-status.is-unseen { width: 8px; height: 8px; background: var(--accent); }
 .session-status.is-failed { background: var(--red); }
 /* The row's menu button floats over its end, so hovering never reflows the title or the list:
@@ -2525,6 +2544,103 @@ input[readonly] {
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
 .session-diagnostics .sess-top b { font-size: calc(13px * var(--text-scale, 1)); }
+
+/* Chat ages in the inbox layout: quiet, right-aligned, numerals that do not jitter. */
+.sess-age { flex: none; margin-left: auto; padding-left: 8px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.sess.is-unseen .sess-top b { font-weight: 500; }
+
+/* The inbox layout: one list; the project tree and its headings step aside. */
+#sessionList.is-inbox #projectsSection,
+#sessionList.is-inbox #chatsSection > .sidebar-session-heading { display: none; }
+#sessionList.is-inbox #chatsSection { margin: 0; }
+/* The list's own search field and compose button replace the brand row's search and the New chat link. */
+.app:has(#sessionList.is-inbox) :is(#searchChatsButton, #newChat) { display: none; }
+/* Search, new chat and the project filter stay put while the list scrolls under them. */
+.inbox-top { position: sticky; top: 0; z-index: 1; display: grid; gap: 8px; padding: 2px 0 12px; background: var(--sidebar-color, var(--sunk)); }
+.inbox-head, .inbox-filters { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.inbox-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 9px 0 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--ink) 3%, transparent);
+  color: var(--faint); font: inherit; font-size: calc(13px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
+.inbox-search:hover { border-color: color-mix(in srgb, var(--ink) 16%, transparent); color: var(--soft); }
+.inbox-search .ico { --ico: 14px; --glyph: 14px; }
+.inbox-search-label { flex: 1; min-width: 0; }
+.inbox-search kbd { font-family: var(--mono); font-size: calc(11px * var(--text-scale, 1)); color: var(--faint); }
+.inbox-icon-button { flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: var(--soft); }
+.inbox-icon-button:hover { background: var(--hover); color: var(--ink); }
+.inbox-icon-button .ico { --ico: 14px; --glyph: 14px; }
+.inbox-add { width: 28px; height: 28px; border-radius: 7px; }
+/* The project filter: one button with the chosen project, its menu beside it. */
+.inbox-project-trigger { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px 0 9px;
+  border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--soft); font: inherit;
+  font-size: calc(12px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
+.inbox-project-trigger:hover, .inbox-project-trigger[aria-expanded='true'] { border-color: color-mix(in srgb, var(--ink) 16%, transparent); color: var(--ink); }
+.inbox-project-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-project-trigger .project-mark.is-blank { display: none; }
+.inbox-project-trigger .session-status.is-active { width: 10px; height: 10px; border-width: 1.5px; }
+.inbox-project-trigger .disclosure-chevron { --ico: 12px; --glyph: 12px; flex: none; color: var(--faint); transform: rotate(90deg); }
+.inbox-project-trigger:focus-visible, .inbox-search:focus-visible, .inbox-icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.inbox-filters .inbox-project-menu { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 7px; }
+.inbox-project-picker .file-branch-option { justify-content: flex-start; font-size: calc(12px * var(--text-scale, 1)); }
+.inbox-project-picker .file-branch-option > span:not(.file-branch-hint) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-project-picker .file-branch-option[aria-selected='true'] { background: var(--hover); }
+.file-branch-hint { flex: none; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.project-mark { --ico: 13px; --glyph: 13px; flex: none; color: var(--faint); }
+.project-mark[data-project-color='blue'] { color: #4c7fc1; }
+.project-mark[data-project-color='green'] { color: #3f9b68; }
+.project-mark[data-project-color='amber'] { color: #c38b2f; }
+.project-mark[data-project-color='purple'] { color: #8063b2; }
+.project-mark[data-project-color='rose'] { color: #bd5d72; }
+.project-mark[data-project-color='teal'] { color: #388f91; }
+.project-mark.is-blank { visibility: hidden; }
+/* An active chat: project and state, a title that carries the weight, the model in small mono. */
+.inbox-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.sess-card { margin: 0; padding: 10px 12px 11px; border-radius: 10px; background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.sess-card:hover, .sess-card.is-pointed, .sess-card.is-sel { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.sess-card .sess-top { flex-wrap: wrap; row-gap: 4px; }
+.sess-card .sess-top b { flex-basis: 100%; font-weight: 600; line-height: 20px; }
+.sess-meta { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--faint);
+  font-size: calc(12px * var(--text-scale, 1)); line-height: 18px; }
+.sess-project { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.sess-project > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+/* A card's sub-agents, counted after its model: one line however many there are. The model gives way first. */
+.sess-foot { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sess-foot > .sess-detail { flex: 0 1 auto; }
+.sess-workers { flex: 0 1 auto; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); line-height: 16px; font-variant-numeric: tabular-nums; }
+.sess-workers .is-working { color: var(--accent); }
+.sess-workers .is-failed { color: var(--red); }
+/* Centred on the project and state line (18px), keeping the arrow's full 26px target. */
+.sess-card > .worker-toggle { align-self: flex-start; margin-top: -4px; }
+.inbox-cards > .worker-group { margin: 0; }
+.inbox-top ~ .project-show-more { margin-inline-start: 10px; font-size: calc(13px * var(--text-scale, 1)); }
+/* A chosen project whose history could not be read: the line, and its Retry beside it. */
+.inbox-retry { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+/* The button's label lines up with the line above it. */
+.inbox-retry > .btn { margin-inline-start: -10px; }
+.sess-state { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-left: auto; }
+.sess-state .sess-age { margin: 0; padding: 0; }
+.sess-state.is-working { color: var(--accent); }
+.sess-state.is-unseen { color: var(--green); }
+/* What the chat needs from the person, in the tone its row's status dot and "needs attention" use. */
+.sess-state.is-attention { color: var(--red); }
+.sess-state > .ico { --ico: 13px; --glyph: 13px; }
+.sess-state .session-status.is-active { width: 11px; height: 11px; border-width: 1.5px; }
+/* The model's name in the UI font, as the composer's model picker writes it; steady digits instead of monospace. */
+.sess-detail { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: calc(11px * var(--text-scale, 1)); line-height: 16px; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* Settled chats: one dim line each, under a small label. */
+.inbox-settled { margin-top: 16px; }
+.inbox-settled-heading { display: flex; align-items: center; gap: 6px; padding: 2px 10px 6px; list-style: none; cursor: pointer;
+  color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; }
+.inbox-settled-heading::-webkit-details-marker { display: none; }
+.inbox-settled-heading:hover { color: var(--ink); }
+.inbox-count { font-weight: 400; font-variant-numeric: tabular-nums; }
+.sess-settled { min-height: 32px; margin: 0; padding: 5px 10px; }
+.sess-settled .sess-top { gap: 9px; }
+.sess-settled .sess-top b { color: var(--faint); font-size: calc(13px * var(--text-scale, 1)); }
+.sess-settled:is(:hover, .is-pointed, .is-sel) .sess-top b { color: var(--soft); }
+.sess-settled .project-mark { opacity: 0.7; }
 
 /* ---------------------------------------------------------- timeline */
 
@@ -3030,7 +3146,10 @@ input[readonly] {
   color: var(--soft);
 }
 
+/* The header's connection `.state` (margin-left: auto, flex) must not reach this one. */
 .compaction > summary .state {
+  margin-left: 0;
+  display: inline;
   font-weight: 500;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -3672,6 +3791,17 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .routine-activity-body { padding-left: 18px; border-left: 1px solid var(--line); margin-left: 12px; }
 .routine-activity:not([open]) > .routine-activity-body { display: none; }
 .tool-group-body { padding: 4px 0 0 0; }
+/* Edit & resubmit (#365): the conversation an edit replaced, folded under the edited question. Open,
+   it reads as a side branch: indented on a guide line, like routine activity, and a little quieter. */
+.earlier-version > .tool-group-body { padding: 4px 0 4px 18px; margin-left: 7px; border-left: 1px solid var(--line); }
+.earlier-version > .tool-group-body > .ev { opacity: .82; }
+/* Edit under one of your questions, right-aligned with its bubble and quiet until the row is hovered. */
+.question-actions { display: flex; justify-content: flex-end; gap: 2px; margin: 4px -6px 0 0; opacity: 0; transition: opacity 120ms ease; }
+.ev-user_message:hover .question-actions, .question-actions:focus-within { opacity: 1; }
+@media (hover: none) { .question-actions { opacity: 1; } }
+/* The question being edited wears the same ring as a Find in chat hit, on its rounded bubble. */
+.ev-user_message.is-being-edited .said.is-user > .user-message-text { box-shadow: 0 0 0 2px var(--accent-edge); }
+.said.is-user .message-edited { display: block; margin-top: -2px; color: var(--faint); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.3; }
 .tool-group-body .ev { margin: 0; }
 /* Formulas (math.ts), drawn by KaTeX in the text's own colour. A wide block scrolls on its own
    rather than widening the conversation; one KaTeX could not draw shows its source as code would. */
@@ -4308,7 +4438,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock { display: none; }
 .composer-dock-body { display: flow-root; }
 @media (prefers-reduced-motion: reduce) { .composer-dock { transition: none; animation: none !important; } }
-.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
+.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft, .edit-draft { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
 .background-exec-status[hidden] { display: none; }
 .background-exec-status .ico { color: var(--ink); }
 .background-exec-status.is-expandable { cursor: pointer; }

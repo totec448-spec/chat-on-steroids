@@ -53,7 +53,7 @@ export const MAIN_TEXTS = [
   'Remove worker Git checkout?',
   'Review the worker checkout before removing it',
   'Checkout: {0}',
-  '{0} uncommitted or ignored paths would be discarded:',
+  'Uncommitted or ignored paths that would be discarded ({0}):',
   'No uncommitted or ignored paths were detected.',
   'Additional paths are not shown; review the checkout before confirming.',
   'Ignored files are included in the removal.',

@@ -4,7 +4,7 @@ import { LanguageDescription } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import { classHighlighter, highlightTree } from '@lezer/highlight';
 import { el } from './dom.js';
-import { t } from './i18n.js';
+import { t, tn } from './i18n.js';
 
 export interface DiffLine { kind: 'context' | 'added' | 'removed' | 'gap'; old: number | null; next: number | null; text: string }
 /** Bounded line projection of exact recorded snapshots. Counts remain recorder-owned. */
@@ -18,7 +18,7 @@ export function unifiedDiffLines(base: string, current: string, limit = 600): { 
     const count = end - old;
     for (let i = 0; i < count; i++) {
       if (count > 6 && i === 3) {
-        add({ kind: 'gap', old: null, next: null, text: t('{0} unchanged lines', [count - 6]) });
+        add({ kind: 'gap', old: null, next: null, text: tn('{0} unchanged line', '{0} unchanged lines', count - 6) });
         old += count - 6; next += count - 6; i += count - 6;
       }
       add({ kind: 'context', old, next, text: a.line(old).text }); old++; next++;

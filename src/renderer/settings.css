@@ -52,7 +52,11 @@
 .settings-page-head { display: grid; align-items: initial; gap: 0; min-height: 0; margin-bottom: 30px; padding: 0; border: 0; }
 .settings-page-head h1 { margin: 0; font-size: calc(30px * var(--text-scale, 1)); font-weight: 650; letter-spacing: -.8px; line-height: 1.2; }
 .settings-page-head p { max-width: 68ch; margin: 9px 0 0; color: var(--soft); font-size: calc(14px * var(--text-scale, 1)); line-height: 1.6; }
+/* A short window keeps Update status whole, so its actions stay reachable, and the log yields. With
+   room to spare, Update status yields first (its details scroll inside) and the log keeps a readable
+   floor; expanded details left it a 23 px sliver in an 882 px window. */
 .activity-content { grid-template-rows: auto auto minmax(0, 1fr); }
+@media (min-height: 760px) { .activity-content { grid-template-rows: auto minmax(0, max-content) minmax(min(260px, 40vh), 1fr); } }
 [data-panel='activity'] .update-readiness { grid-template-rows: max-content max-content minmax(0, 1fr) max-content; align-content: start; margin-bottom: 20px; padding: 20px; gap: 12px; }
 .update-readiness h2 { min-height: 0; padding: 0; }
 .update-readiness ul { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }

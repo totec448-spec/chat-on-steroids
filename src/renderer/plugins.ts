@@ -1,4 +1,4 @@
-import { ui, t } from './i18n.js';
+import { ui, t, tn } from './i18n.js';
 import type { AppState } from '../shared/types.js';
 import type { SettingsPatch } from '../preload/index.js';
 import type { PluginSnapshot, PluginView, PluginCatalogEntry, PluginSource } from '../shared/plugins.js';
@@ -80,7 +80,7 @@ export function applyPluginsState(next: AppState): void {
   ui(status, 'title', () => t(surface?.detail ?? ''));
   const setupStatus = document.getElementById('pluginSetupStatus');
   if (setupStatus) ui(setupStatus, 'textContent', () => surface?.state === 'live'
-    ? t("{0} tools available · {1}", [surface.tools.length, surface.lastRequestAt ? t("Connected to ChatGPT") : t("Ready to add in ChatGPT")])
+    ? tn("{0} tool available · {1}", "{0} tools available · {1}", surface.tools.length, [surface.tools.length, surface.lastRequestAt ? t("Connected to ChatGPT") : t("Ready to add in ChatGPT")])
     : surface?.state === 'error' ? t(surface.detail) : t("Save your connection below to make enabled plugins available in ChatGPT."));
 }
 function showConnection(): void {
@@ -133,7 +133,7 @@ function showConnection(): void {
 }
 function renderInstalled(): void {
   const list = $('pluginsInstalled');
-  list.replaceChildren(); ui($('pluginsCount'), 'textContent', () => t("{0} installed", [snapshot.plugins.length]));
+  list.replaceChildren(); ui($('pluginsCount'), 'textContent', () => tn("{0} installed", "{0} installed", snapshot.plugins.length));
   const query = $<HTMLInputElement>('pluginsSearch').value.trim().toLowerCase();
   const matches = (name: string, description = '') => `${name} ${description}`.toLowerCase().includes(query);
   if (!snapshot.plugins.length) {
@@ -192,7 +192,7 @@ function renderCatalog(parent: HTMLElement, query = ''): void {
 }
 function renderPluginTools(parent: HTMLElement, plugin: PluginView): void {
     const published = plugin.tools.filter(tool => tool.published).length;
-    const publication = plugin.tools.some(tool => tool.published !== undefined) ? t(" · {0} available in ChatGPT", [published]) : '';
+    const publication = plugin.tools.some(tool => tool.published !== undefined) ? tn(" · {0} available in ChatGPT", " · {0} available in ChatGPT", published) : '';
     parent.replaceChildren();
     if (plugin.status === 'needs-auth' || plugin.status === 'authenticating') {
       const auth = el('div', 'plugin-auth');

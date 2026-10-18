@@ -1777,6 +1777,10 @@ async function authorizeDocument(sender, message) {
   const opening = discardProtectedTabs[key];
   if (opening && opening !== true && !opening.documentId) opening.documentId = documentId;
   await persistLive();
+  // A tab this extension opened for a command (a worker, a handoff) gets its rendering lease now,
+  // not at the next status pass up to 40 s later: until then the hidden page loaded, chose its model
+  // and waited for ChatGPT's composer so slowly that workers missed their start deadline (#1086).
+  if (opening && opening !== true && opening.commandId) void maintain(true).catch(() => undefined);
   return { ok: true, tab: id, documentId, navigationEpoch: requestedEpoch };
 }
 
@@ -1807,6 +1811,10 @@ async function registerDocument(sender, message) {
   const opening = discardProtectedTabs[key];
   if (opening && opening !== true && !opening.documentId) opening.documentId = documentId;
   await persistLive();
+  // A tab this extension opened for a command (a worker, a handoff) gets its rendering lease now,
+  // not at the next status pass up to 40 s later: until then the hidden page loaded, chose its model
+  // and waited for ChatGPT's composer so slowly that workers missed their start deadline (#1086).
+  if (opening && opening !== true && opening.commandId) void maintain(true).catch(() => undefined);
   return { ok: true, tab: id, documentId, navigationEpoch: requestedEpoch };
 }
 
@@ -2248,7 +2256,11 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     if (target) return conversationForTab(tab) === target;
     try {
       const url = new URL(tab.pendingUrl || tab.url || '');
-      return url.searchParams.get('cos-input') === input.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === input.id;
+      if (url.searchParams.get('cos-input') === input.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === input.id) return true;
+      // A branch (#482) leaves its marker behind with the source chat: the tab elected for it now
+      // shows the local draft ChatGPT made, which only that same tab can be.
+      return !!input.branch && elections[input.id]?.tab === tab.id && url.origin === 'https://chatgpt.com' &&
+        /^\/c\/local-chatgpt(?::|%3A)/i.test(url.pathname);
     } catch { return false; }
   };
   for (const input of inputs.slice(0, 50)) {
@@ -2286,6 +2298,9 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       elected = elections[input.id];
     }
     const projectInput = !target && typeof input.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(input.project) ? input.project : null;
+    // Branch in new chat (#482): its first message is sent from ChatGPT's own branch of the source chat.
+    const branchInput = !target && input.branch && /^[0-9a-f-]{36}$/i.test(input.branch.conversationId) &&
+      /^[0-9a-f-]{36}$/i.test(input.branch.messageId) ? input.branch : null;
     // An opening made for another Project (the person retried after the earlier one was gone)
     // is spent on that one; this Project gets its own tab.
     if (projectInput && elected && elected.project !== projectInput) {
@@ -2358,9 +2373,10 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       // borrowing another tab would go through ChatGPT's New chat, which is the root.
       const project = projectInput;
       const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}`
+        : branchInput ? `https://chatgpt.com/c/${encodeURIComponent(branchInput.conversationId)}?${marker}#${marker}`
         : project ? `https://chatgpt.com/g/${project}/project?${marker}#${marker}`
         : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
-      if (!target && !project && input.lifetime !== 'temporary-planner') {
+      if (!target && !project && !branchInput && input.lifetime !== 'temporary-planner') {
         const reusable = new Set(reusableConversations);
         const choices = tabs.filter(candidate => !candidate.pinned && !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
           (recoveredReuse ? candidate.id === recoveredReuse.tab :
@@ -2430,7 +2446,10 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       ...(!target && typeof input.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(input.project) ? { project: input.project } : {}),
       ...(input.recovery ? { recovery: input.recovery } : {}),
       ...(input.silenceTurnId ? { silenceTurnId: input.silenceTurnId } : {}),
-      ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}) });
+      ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}),
+      ...(branchInput ? { branch: { conversationId: branchInput.conversationId, messageId: branchInput.messageId } } : {}),
+      // Edit & resubmit (#365): the question in this chat that ChatGPT's own edit replaces.
+      ...(target && input.edit && /^[0-9a-f-]{36}$/i.test(input.edit.messageId) ? { edit: { messageId: input.edit.messageId } } : {}) });
   }
 }
 
@@ -2878,6 +2897,45 @@ async function applyRequestedBrowserPreferences(request) {
   await call('/browser/preferences', { method: 'POST', body: JSON.stringify(receipt) });
 }
 
+/** A marked start page this old, for a message or command the app no longer lists, is left over. */
+const LEFTOVER_OPENING_MS = 5 * 60_000;
+/**
+ * Closes a start page this extension opened for a new chat's first message, or for a worker or
+ * handoff command, once the app no longer lists that message or command at all. The cancel path
+ * closes a message's page through its own entry, but a claim that outlived a change of ChatGPT
+ * browser and an app restart left one on ChatGPT's start page for 13 hours, and a worker that
+ * failed before its first message left its page behind (2.1.41 bug hunt). Only an old, inactive,
+ * unpinned page closes, and only when the page proves it untouched: its own marker, no chat,
+ * nothing typed, attached or sent.
+ */
+async function closeLeftoverOpenings(tabs, listed, handed, liveCommands = null) {
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab.id) || tab.pinned || tab.active || tab.pendingUrl || conversationFromUrl(tab.url)) continue;
+    if (!Number.isFinite(tab.lastAccessed) || Date.now() - tab.lastAccessed < LEFTOVER_OPENING_MS) continue;
+    let id = null, command = null;
+    try {
+      const url = new URL(tab.url || '');
+      if (url.origin !== 'https://chatgpt.com') continue;
+      const hash = new URLSearchParams(url.hash.slice(1));
+      id = url.searchParams.get('cos-input') || hash.get('cos-input');
+      command = url.searchParams.get('clf') || hash.get('clf');
+    } catch { continue; }
+    const leftoverInput = !!id && /^[a-f0-9-]{36}$/i.test(id) && !listed.has(id) && !handed.has(id);
+    // A command page closes only against the app's own command list, never by its absence.
+    const leftoverCommand = !id && !!command && /^[a-f0-9]{8,64}$/i.test(command) && liveCommands !== null && !liveCommands.has(command);
+    if (!leftoverInput && !leftoverCommand) continue;
+    const source = { tab: tab.id, documentId: tabDocuments[String(tab.id)], navigationEpoch: tabEpochs[String(tab.id)] };
+    if (!ownsDocument(source)) continue;
+    try {
+      const proof = await tabReply(tab.id, leftoverInput ? { type: 'clf-close-cancelled-opening', id } : { type: 'clf-close-cancelled-opening', command },
+        { documentId: source.documentId });
+      const current = await chrome.tabs.get(tab.id);
+      if (proof?.safe === true && ownsDocument(source) && current && !current.pinned && !current.active &&
+          !current.pendingUrl && current.url === tab.url) await chrome.tabs.remove(tab.id);
+    } catch { /* only the exact, still-owned, untouched start page closes */ }
+  }
+}
+
 /** Retire idle app-owned documents and redundant copies, preserving exact unsent drafts. */
 
 async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
@@ -3242,6 +3300,10 @@ async function maintainOnce() {
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
+  // Only the app's own list of open messages may call a marked page left over; an older app sends none.
+  if (Array.isArray(reply.data.inputOpeningIds)) void closeLeftoverOpenings(observedTabs, liveOpenings,
+    new Set((Array.isArray(reply.data.inputs) ? reply.data.inputs : []).map(input => input?.id)),
+    Array.isArray(reply.data.commandIds) ? liveCommands : null).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;
@@ -3971,7 +4033,10 @@ const HANDLERS = {
       if (message.lifetime === 'temporary-planner' && (owner !== `${prefix}${source.navigationEpoch}` ||
           new URL(tab.url).searchParams.get('temporary-chat') !== 'true')) return { ok: false };
     } else {
-      if (!conversationId && !String(tab.url || '').includes(`cos-input=${id}`)) return { ok: false };
+      // A branch's draft (#482) can lose its marker when ChatGPT rewrites the URL after moving
+      // there; the tab elected for this message still owns it.
+      const branchDraft = () => { try { return inputOpenings[id]?.tab === tab.id && /^\/c\/local-chatgpt(?::|%3A)/i.test(new URL(tab.url).pathname); } catch { return false; } };
+      if (!conversationId && !String(tab.url || '').includes(`cos-input=${id}`) && !branchDraft()) return { ok: false };
       if (message.conversationId !== conversationId || !ownsDocument(source)) return { ok: false };
     }
     if (message.ack === true && message.lifetime !== 'temporary-planner') {
@@ -3985,7 +4050,7 @@ const HANDLERS = {
     }
     if (message.recoveryAction && message.owner !== owner) return { ok: false };
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
-      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
+      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, intoTurn: message.intoTurn === true ? true : undefined, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
     });
     if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Acceptance retires this exact helper immediately. Fresh page proof still
