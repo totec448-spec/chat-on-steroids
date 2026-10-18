@@ -1231,5 +1231,11 @@
   },
   "popup_detail_total": {
     "message": "$1 total"
+  },
+  "content_edit_message_missing": {
+    "message": "That message is no longer on the ChatGPT page, so it cannot be edited."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT did not offer Edit for that message. Open the chat in ChatGPT, then try again."
   }
 }
