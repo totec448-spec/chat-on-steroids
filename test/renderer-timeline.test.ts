@@ -6365,6 +6365,10 @@ describe('prompt recall in the composer', () => {
     composer(w).dispatchEvent(event);
     return event.defaultPrevented;
   };
+  /** The outbox row that sent the message `messageId`, delivered and recorded. */
+  const sentInput = (messageId: string, extra: Partial<InputEntry> = {}): InputEntry => ({ id: `input-${messageId}`, sessionId: summary([]).id, projectId: null,
+    text: 'Sent text', automation: 'off', model: null, reasoningEffort: null, mode: 'auto', dueAt: 1, createdAt: T0, state: 'sent', owner: 'page', conversationId: null,
+    messageId, deliveredAt: T0, historyRecorded: true, ...extra }) as InputEntry;
 
   it('fills an empty composer with your last message on ArrowUp, caret at the start, without sending it', async () => {
     const { w, live } = await boot(chat());
@@ -6445,11 +6449,12 @@ describe('prompt recall in the composer', () => {
   });
 
   it('recalls only the messages the agent filter shows', async () => {
-    const { w } = await boot([ask(1, 'Worker question', { agent: 'worker-1' }), answer(2, 'Worker answer'), ask(3, 'Main question'), answer(4, 'Main answer')],
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Unattributed question'), answer(4, 'Unattributed answer')],
       true, [], [], { developerMode: true });
-    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="worker-1"]')!.click(); await settle();
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click(); await settle();
     expect(press(w, 'ArrowUp')).toBe(true);
-    expect(composer(w).value).toBe('Worker question');
+    expect(composer(w).value).toBe('Main question');
+    expect(press(w, 'ArrowUp')).toBe(false);
   });
 
   // A recalled message ending in a slash or @file fragment opens that menu; its arrows stay the menu's.
@@ -6525,5 +6530,64 @@ describe('prompt recall in the composer', () => {
     // A new recall starts from the newest message again.
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Third question');
+  });
+
+  it.each([
+    ['a Goal continue', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } }],
+    ['a Goal check you asked for', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal', userRequested: true } }],
+    ['a Loop continue', { finishOwner: { turnId: 't5', periodic: true, mode: 'loop' } }],
+    ['a fresh-turn continue', { authoredSource: 'none', purpose: 'rotation' }],
+    ['a recovery continue', { recovery: { questionId: 'q-5', pro: false, busyUntil: 0, phase: 'resumed' } }],
+    ['a plan stage', { authoredSource: 'none', mode: 'finish' }]
+  ] as const)('skips %s, which the app wrote', async (_, extra) => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with the next step'), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5'), sentInput('q-7', extra as Partial<InputEntry>)]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('recalls a correction sent together with the next queued checkpoint', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Use the staging database'), answer(8, 'Switched.')]);
+    live.inputs = [sentInput('q-7', { id: 'correction', companionInputId: 'checkpoint' }), sentInput('q-7', { id: 'checkpoint', authoredSource: 'none', mode: 'finish' })];
+    await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Use the staging database');
+  });
+
+  it('skips the tasks of a worker chat but recalls what you typed there', async () => {
+    const { w, live, append } = await boot(chat(), true, [], [], { origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Inspect' } });
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+  });
+
+  it('skips a worker task the agent filter shows', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Inspect the parser', { agent: 'worker-1' }), answer(4, 'Inspected.')],
+      true, [], [], { developerMode: true });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="worker-1"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+  });
+
+  it('announces each recalled message to screen readers, and nothing once it ends', async () => {
+    const { w } = await boot(chat());
+    const region = w.document.getElementById('recallAnnounce')!;
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('First question');
+    composer(w).setSelectionRange(14, 14);
+    press(w, 'ArrowDown'); press(w, 'ArrowDown');
+    expect(composer(w).value).toBe('');
+    expect(region.textContent).toBe('');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    composer(w).value = 'Second question, shorter please';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(region.textContent).toBe('');
   });
 });
