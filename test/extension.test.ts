@@ -4461,6 +4461,37 @@ describe('extension observation journal', () => {
     expect(journalOf(session).map((entry) => entry.event.text)).toEqual(['A', 'B']);
   });
 
+  // #1648: on a slow Windows machine every events message rewrote the whole journal (up to 4 MiB),
+  // one write after another, and pages waited up to ~100 s for their acknowledgement. Messages that
+  // arrive while a write is in flight share the next write: it is taken when it starts, so it holds
+  // every one of them, and each reply still waits until its observations are stored.
+  it('stores observations that arrive during a slow journal write together in one following write', async () => {
+    const local = new FakeStorageArea();
+    const session = new FakeStorageArea();
+    const journalWrites: string[][] = [];
+    const set = session.set.bind(session);
+    session.set = async (values: Record<string, unknown>) => {
+      if (Array.isArray(values.journal)) {
+        journalWrites.push((values.journal as Array<{ event: { text: string } }>).map(entry => entry.event.text));
+        // The first journal write is slow, as on the loaded machine.
+        if (journalWrites.length === 1) await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      return set(values);
+    };
+    const worker = loadWorker({ local, session });
+    // Each message comes from its own ChatGPT tab, as with a main chat and its workers.
+    const send = (text: string, time: number) => worker.send(
+      { type: 'events', entries: [{ conversationId: null, event: { kind: 'user_message', time, text } }] }, time);
+    const first = send('A', 1);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const later = ['B', 'C', 'D', 'E'].map((text, index) => send(text, index + 2));
+    const replies = await Promise.all([first, ...later]);
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: true, durable: true });
+    expect(journalOf(session).map((entry) => entry.event.text)).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(journalWrites).toEqual([['A'], ['A', 'B', 'C', 'D', 'E']]);
+  });
+
   it('serializes live tab snapshots so a slow older write cannot forget a newer tab owner', async () => {
     const local = new FakeStorageArea();
     const session = new FakeStorageArea();

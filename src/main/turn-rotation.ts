@@ -8,8 +8,8 @@
  * the next attributed tool result files one automatic continue into that turn: a native send there
  * ends it as interrupted and carries on in a fresh one, the call in flight keeping its result.
  *
- * Decided per attributed tool call, so it only ever happens right after a tool result, never in the
- * middle of answer text. One rotation per turn; a refused filing is tried again after a minute, a
+ * Decided per attributed tool call while that call's answer is still held (rotation-hold.ts), so the
+ * continue goes in while ChatGPT still sees the call running, never in the middle of answer text. One rotation per turn; a refused filing is tried again after a minute, a
  * filed one the page did not take after five, and a turn is left alone after two filings it did
  * not take (2026-10-15: seven unsent continues in two turns of one chat, each shown as not sent).
  */
