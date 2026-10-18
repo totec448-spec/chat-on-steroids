@@ -270,6 +270,24 @@ describe('the Compact & Resume card', () => {
   });
 });
 
+// 2.1.41 UI audit: with Update status's details open, the activity log below it shrank to a 23 px sliver,
+// and the page sat 5 px right of every other settings page because only it reserved no scrollbar gutter.
+describe('the Activity page', () => {
+  it('keeps room for the activity log under an expanded update status', () => {
+    // Every block for the selector, in cascade order: settings.css owns the page layout.
+    const rows = [...css.matchAll(/(?:^|\n)\.activity-content\s*\{([^}]*)\}/g)].map(match => match[1]!.replace(/\s+/g, ' ').trim()).join(' ');
+    // A short window keeps Update status whole so its actions stay reachable; the log yields.
+    expect(rows.match(/grid-template-rows: [^;]+/g)?.at(-1)).toBe('grid-template-rows: auto auto minmax(0, 1fr)');
+    // With room to spare, Update status yields first and the log keeps a readable floor.
+    expect(css).toContain('@media (min-height: 760px) { .activity-content { grid-template-rows: auto minmax(0, max-content) minmax(min(260px, 40vh), 1fr); } }');
+  });
+  it('lines up with the other settings pages by reserving the same scrollbar gutter', () => {
+    const panel = rule("[data-panel='activity']");
+    expect(panel).toContain('overflow-y: auto');
+    expect(panel).toContain('scrollbar-gutter: stable');
+  });
+});
+
 describe('a session row', () => {
   it('draws a still working mark, not a frozen spinner, when the system asks for reduced motion', () => {
     // Windows "Animation effects: Off" turns reduced motion on, and the sheet then stops every animation.
