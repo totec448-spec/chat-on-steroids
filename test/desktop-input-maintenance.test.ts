@@ -287,7 +287,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     json: async () => new URL(input).pathname === '/hello'
       ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
       : { ok: true, inputs, background: true, modelCatalogRequest,
-        ...(rendered ? { inputOpeningIds: inputs.map(input => input.id), nonDiscardableConversations: inputs.map(input => input.conversationId).filter(Boolean) } : {}) }
+        ...(rendered ? { inputOpeningIds: inputs.map(input => input.id), commandIds: [], nonDiscardableConversations: inputs.map(input => input.conversationId).filter(Boolean) } : {}) }
   }));
   const scripting = { executeScript: vi.fn(async ({ target, func }: any): Promise<any[]> => {
     const documentId = (saved.tabDocuments as Record<string, string> | undefined)?.[target.tabId];
@@ -829,6 +829,40 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     else expect(h.remove).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
   });
+  it.each(['left-over', 'recent', 'active', 'listed', 'typed-into', 'no-list'])('closes a start page the app opened for a message it no longer lists (%s)', async mode => {
+    // 2.1.41 bug hunt: a new chat's opening tab outlived its message (claimed, then the chosen browser
+    // changed and the app restarted) and sat on ChatGPT's start page for 13 hours. The cancel path's
+    // close entry never came. A marked, untouched start page the app no longer lists now closes.
+    const inputs = mode === 'listed' ? [{ id: firstId, conversationId: null }] : [];
+    const h = await worker(inputs, undefined, {}, {}, mode === 'no-list' ? undefined : new Set<number>());
+    const url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+    h.tabs.push({ id: 7, url, active: mode === 'active', lastAccessed: Date.now() - (mode === 'recent' ? 60_000 : 13 * 3_600_000) } as any);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'opening', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' } : { ok: true, ready: true }) as never);
+    await h.maintain();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalledWith(7);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it.each(['left-over', 'live', 'typed-into'])('closes the start page of a worker or handoff the app no longer lists (%s)', async mode => {
+    // 2.1.41 bug hunt: a worker that failed before its first message (memory-starved VM) left its
+    // `?clf=` start page open after the run had parked.
+    const h = await worker([], undefined, {}, {}, new Set<number>());
+    if (mode === 'live') h.fetch.mockImplementation(async (input: string) => ({ ok: true, status: 200, json: async () => new URL(input).pathname === '/hello'
+      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+      : { ok: true, inputs: [], background: true, inputOpeningIds: [], commandIds: ['df36e44ae2a5446f'] } }));
+    const url = 'https://chatgpt.com/?clf=df36e44ae2a5446f#clf=df36e44ae2a5446f';
+    h.tabs.push({ id: 7, url, lastAccessed: Date.now() - 10 * 60_000 } as any);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'worker', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' && message.command === 'df36e44ae2a5446f' } : { ok: true, ready: true }) as never);
+    await h.maintain();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalledWith(7);
+  });
   it('never opens a helper for passive model observation, including repeated maintenance', async () => {
     const h = await worker([]);
     const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: false };
@@ -1010,6 +1044,19 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.maintain();
     expect([...rendered]).toEqual([]);
     expect(h.create).not.toHaveBeenCalled();
+  });
+  // #1086 (2.1.41, Windows VM): a worker tab got its rendering lease only at the next status pass, up
+  // to 40 s after it opened. Until then the hidden, throttled page loaded, chose its model and waited for
+  // ChatGPT's composer so slowly that workers missed their start deadline. Its page asks for the lease
+  // the moment it registers.
+  it('renders a command tab as soon as its page registers, without waiting for the next pass', async () => {
+    const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;
+    const h = await worker([], undefined, {}, { discardProtectedTabs: { 7: { commandId: firstId, at: Date.now(), url: marker, conversationId: null } } }, rendered);
+    const tab = { id: 7, url: marker }; h.tabs.push(tab);
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, app: 'chat-on-steroids',
+      bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, commandIds: [firstId], inputs: [], nonDiscardableConversations: [] }) });
+    await h.authorizeDocument({ tab, documentId: 'first', frameId: 0, url: marker }, { navigationEpoch: 1 });
+    await vi.waitFor(() => expect([...rendered]).toEqual([7]));
   });
   it('releases command rendering after document replacement and hands a bound worker to ordinary live activity', async () => {
     const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;

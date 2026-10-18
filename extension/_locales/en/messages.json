@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT replaced the composer while inserting the bootstrap"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT never exposed a usable composer for bootstrap"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT never re-exposed a usable composer after model selection"
   },

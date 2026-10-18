@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "O ChatGPT substituiu a caixa de mensagem enquanto o bootstrap era inserido"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "O ChatGPT não mostrou uma caixa de mensagem utilizável para o início"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "O ChatGPT não voltou a mostrar uma caixa de mensagem utilizável após a seleção do modelo"
   },

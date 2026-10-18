@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT 在插入啟動引導訊息時替換了輸入框"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT 未顯示可用於啟動的輸入框"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "選擇模型後，ChatGPT 未重新顯示可用的輸入框"
   },

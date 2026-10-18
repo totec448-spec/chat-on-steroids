@@ -4,7 +4,7 @@ import { REASONING_EFFORTS, workSequence } from '../../shared/session.js';
  * Tool delivery repeats under a stable message id until a later request proves receipt.
  */
 import { z } from 'zod';
-import { browserInputModel, manualInput, queuedFollowup, MAX_INPUT_IMAGES, type InputImage } from '../../shared/input.js';
+import { authoredTextOf, browserInputModel, manualInput, queuedFollowup, MAX_INPUT_IMAGES, type InputImage } from '../../shared/input.js';
 import type { SessionSummary } from '../../shared/session.js';
 import { getConfig } from '../config.js';
 import { randomUUID } from 'node:crypto';
@@ -549,9 +549,11 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     // browser row past authorization is not preparable, so no path re-offers or
     // replays it. Left in place it still owns its whole session, so every later
     // message waits behind an outcome nobody will ever publish. Retire it visibly
-    // after a bounded wait. Automatic Continue, an opening's first send and a
-    // combined delivery keep their existing custody.
-    if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && !row.recovery && !row.opening &&
+    // after a bounded wait; a late receipt still records the delivery. Automatic
+    // Continue and a combined delivery keep their existing custody. A new chat's
+    // first send is retired the same way: held for hours it was invisible and kept
+    // every automatic extension update waiting (2.1.41 release round).
+    if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && !row.recovery &&
         !row.companionInputId && manualInput(row) && Date.now() - row.sendAuthorizedAt >= UNCERTAIN_SEND_MS)
       return { ...row, state: 'cancelled', error: UNCONFIRMED_SEND };
     if (row.state === 'browser' && row.sendAuthorizedAt !== undefined && Date.now() - row.sendAuthorizedAt >= ABANDONED_SEND_MS)
@@ -789,7 +791,7 @@ async function materializeOpening(entry: InputEntry): Promise<void> {
     existing.conversationId === entry.conversationId &&
     existing.origin?.kind !== 'worker' && existing.origin?.kind !== 'helper';
   const session = recoveredExactOwner ? existing : await createSession({ reservedId: entry.sessionId,
-    title: userTitle(entry.text, entry.text), titleSource: 'fallback',
+    title: userTitle(entry.text, authoredTextOf(entry)), titleSource: 'fallback',
     origin: entry.branch
       ? { kind: 'desktop', fromSessionId: entry.branch.sessionId, agentId: null, task: '',
         branchOf: { conversationId: entry.branch.conversationId, messageId: entry.branch.messageId } }

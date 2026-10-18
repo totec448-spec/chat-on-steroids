@@ -815,6 +815,8 @@
    * never runs: the whole resumed turn's work fell into Unattributed activity.
    */
   const USER_SEND_RECEIPT_MS = 30_000;
+  /** A worker page reports its Send for this long; the app takes a late start back for fifteen minutes (#1086). */
+  const WORKER_RECEIPT_WAIT_MS = 10 * 60_000;
   /** Waits before asking the worker again for a send acknowledgement whose reply was lost. */
   const ACK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
   let userSendReceipt = null;
@@ -1061,8 +1063,8 @@
   let mentionPlugins = false;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
                              matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null,
-                             whileGenerating = false) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
+                             whileGenerating = false, stillCurrentAfterClick = null) {
+    return CLF_DOM.send({ stillCurrent, stillCurrentAfterClick, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -11995,11 +11997,13 @@
     // resource finished loading, not whether this editing host is usable, and waiting on it
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
     step('composer');
-    const readyComposer = await waitForComposer();
+    // A worker's hidden tab can take longer than 12 s to show the box on a busy machine; it has the
+    // rest of its own budget, less what model, insert and Send need (#1086). A resume or wake keeps 12 s.
+    const readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
     // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
     // may be tried again without counting against the chat (#1086).
     if (!readyComposer) return void (await fail(t(
-      'content_bootstrap_composer_unavailable',
+      'content_bootstrap_composer_never_ready',
       'ChatGPT never exposed a usable composer for bootstrap'
     ), 'transient'));
     if (await failIfRetargeted()) return;
@@ -12085,6 +12089,14 @@
     }
     const submittedLifetime = submittedSendLifetime(target);
     const sendingBootstrap = () => commandAlive() && submittedLifetime();
+    // The deadline forbids a worker's Send, not the report of one already made: on a starved machine
+    // its new chat can appear after the page's copy of the deadline, and the app takes that late
+    // receipt back (#1086). A resume keeps the deadline throughout; its marker commits it instead.
+    const reportingBootstrap = boot.type === 'worker' ? () => !attempt?.cancelled && submittedLifetime()
+      : () => !attempt?.cancelled && sendingBootstrap();
+    // How long a worker keeps trying to report its Send: inside the fifteen minutes the app takes a late
+    // start back, because a hidden tab on a starved machine can draw its new chat minutes late (#1086).
+    const reportBy = Date.now() + WORKER_RECEIPT_WAIT_MS;
     // Stop/composer-clear may acknowledge acceptance before the authored row mounts.
     // Keep the original draft lease through that receipt, exactly as desktop delivery does;
     // identical text alone must never erase a later trusted edit or a replacement editor.
@@ -12230,7 +12242,8 @@
                                   matchesSubmittedBootstrap, boot.type === 'resume' ? 30_000 : null,
                                   why => { sendRefusal = why; },
                                   currentCoreMention(), boot.type === 'resume'
-                                    ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null))) {
+                                    ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null,
+                                  false, reportingBootstrap))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -12285,11 +12298,23 @@
     // already present. Reuse the receipt observer and the same 40s ceiling instead.
     // The route and exact submitted user row must agree for workers as for resumes;
     // a missing receipt is still ambiguous and cannot report a successful binding.
-    const found = await waitPageView(bootstrapConversation,
-      () => !attempt?.cancelled && sendingBootstrap(), Math.min(40000, commandWaitMs(40000, 2_000)));
-    if (!found || !sendingBootstrap()) return;
+    let found = null;
+    do {
+      found = await waitPageView(bootstrapConversation, reportingBootstrap,
+        boot.type === 'worker' ? 40000 : Math.min(40000, commandWaitMs(40000, 2_000)));
+    } while (!found && boot.type === 'worker' && alive && reportingBootstrap() && Date.now() < reportBy);
+    if (!found || !reportingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
-    const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+    const report = { type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID };
+    let acknowledged = await ask(report);
+    // No answer means the extension's worker did not take it (stopped or restarting), not a refusal:
+    // nothing reached its durable outbox, so the report is sent again. A duplicate is harmless; both
+    // the outbox and the app keep one answer per command.
+    for (let wait = 2_000; !acknowledged && boot.type === 'worker' && alive && reportingBootstrap() && Date.now() < reportBy;
+      wait = Math.min(wait * 2, 30_000)) {
+      await new Promise(resolve => setTimeout(resolve, wait));
+      acknowledged = await ask(report);
+    }
     await publishBootstrapSelection(found);
     await clearAcknowledgedBootstrap(acknowledged);
     } finally { bootstrapDraft.dispose(); }
@@ -12600,7 +12625,7 @@
     limit.published = limit.retryAt;
     emit({
       kind: 'chat_error',
-      text: t('content_history_rate_limited', 'ChatGPT temporarily rate-limited loading this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends.'),
+      text: t('content_history_rate_limited', 'ChatGPT temporarily limited access to this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends.'),
       recoverable: false,
       blocking: true,
       retryAt: limit.retryAt
@@ -14131,10 +14156,13 @@
       // attached or running, and no send of this page in flight.
       if (message.type === 'clf-close-cancelled-opening') {
         const id = typeof message.id === 'string' ? message.id : '';
+        // A worker or handoff page carries its command's `clf` marker instead of an input's.
+        const command = typeof message.command === 'string' ? message.command : '';
         let marked = false;
         try {
-          const url = new URL(location.href);
-          marked = !!id && (url.searchParams.get('cos-input') === id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === id);
+          const url = new URL(location.href), hash = new URLSearchParams(url.hash.slice(1));
+          marked = id ? url.searchParams.get('cos-input') === id || hash.get('cos-input') === id
+            : !!command && (url.searchParams.get('clf') === command || hash.get('clf') === command);
         } catch { marked = false; }
         sendResponse({ safe: marked && !CLF_DOM.conversationId() && !desktopInputBusy && !generating && !CLF_DOM.generating() &&
           pendingTools === 0 && !CLF_DOM.hasComposerAttachments() && !(CLF_DOM.composer()?.textContent || '').trim() &&

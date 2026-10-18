@@ -2256,7 +2256,7 @@
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
-    let lastAnswer = null;
+    let lastAnswer = null, previousId = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
@@ -2275,7 +2275,12 @@
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
           status: completed ? 'finished_successfully' : 'in_progress',
-          metadata: user && place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
+          // The turn's place belongs to its first message. A message sent into the running answer
+          // follows the message before it in this turn; given the turn's place it read as a version
+          // of the turn's question, and Edit & resubmit folded that question away (2.1.41 round).
+          metadata: !user ? {} : previousId ? { parent_id: previousId, clf_parent_exact: true }
+            : place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
+        previousId = id;
         const key = `${turnId}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);

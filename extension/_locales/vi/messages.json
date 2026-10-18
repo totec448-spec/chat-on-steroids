@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT đã thay thế ô soạn thảo khi chèn nội dung khởi tạo"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT không hiển thị ô soạn thảo khả dụng để bắt đầu"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT không hiển thị lại ô soạn thảo khả dụng sau khi chọn mô hình"
   },

@@ -66,12 +66,78 @@ it('says draft only when GitHub confirms the conversion, and reports a refused o
 
 // Live: CI turned green while the checklist was still red, and the label came off.
 it('keeps the label while any check on the same commit still fails', async () => {
-  const red = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [{ name: 'CI', conclusion: 'success' }, { name: 'PR checklist', conclusion: 'failure' }] } });
+  const red = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [{ name: 'CI', conclusion: 'success' }, { name: 'PR checklist', conclusion: 'failure' }] } });
   expect(await applyNotReady(red.request, input('clear'))).toBe('kept (PR checklist still failing)');
   expect(red.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
-  const green = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [{ name: 'CI', conclusion: 'success' }, { name: 'PR checklist', conclusion: 'success' }] } });
+  const green = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [{ name: 'CI', conclusion: 'success' }, { name: 'PR checklist', conclusion: 'success' }] } });
   expect(await applyNotReady(green.request, input('clear'))).toBe('clear');
   expect(green.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
+});
+
+// Live #1624: the checklist failed, the author edited the description, and the rerun passed on the
+// same commit. Only each check's latest run (highest id) counts, so the old failure must not keep the label.
+it('clears the label when a check passed again after an older failed run', async () => {
+  const rerun = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 1, name: 'PR checklist', conclusion: 'failure' }, { id: 2, name: 'PR checklist', conclusion: 'success' }] } });
+  expect(await applyNotReady(rerun.request, input('clear'))).toBe('clear');
+  expect(rerun.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
+});
+
+it('keeps the label when the newest run of a check fails after an older success', async () => {
+  const relapse = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 3, name: 'PR checklist', conclusion: 'failure' }, { id: 2, name: 'PR checklist', conclusion: 'success' }] } });
+  expect(await applyNotReady(relapse.request, input('clear'))).toBe('kept (PR checklist still failing)');
+  expect(relapse.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+it('names only the checks whose latest run still fails', async () => {
+  const mixed = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'failure' }, { id: 5, name: 'CI', conclusion: 'success' },
+    { id: 4, name: 'PR checklist', conclusion: 'success' }, { id: 6, name: 'PR checklist', conclusion: 'failure' }] } });
+  expect(await applyNotReady(mixed.request, input('clear'))).toBe('kept (PR checklist still failing)');
+});
+
+// Review of c67512a2: a rerun that is still running, or was cancelled, supersedes the old failure, so
+// the label stays until the latest run of every check has passed.
+it('keeps the label while the latest run of a check is still running', async () => {
+  const rerunning = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 1, name: 'CI', status: 'completed', conclusion: 'failure' }, { id: 2, name: 'CI', status: 'in_progress', conclusion: null },
+    { id: 3, name: 'PR checklist', status: 'completed', conclusion: 'success' }] } });
+  expect(await applyNotReady(rerunning.request, input('clear'))).toBe('kept (CI still running)');
+  expect(rerunning.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+it('keeps the label when the latest run of a check was cancelled', async () => {
+  const cancelled = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'success' }, { id: 2, name: 'CI', conclusion: 'cancelled' }] } });
+  expect(await applyNotReady(cancelled.request, input('clear'))).toBe('kept (CI still failing)');
+  expect(cancelled.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+it('does not block on a latest run that was skipped or neutral', async () => {
+  const quiet = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'failure' }, { id: 2, name: 'CI', conclusion: 'skipped' },
+    { id: 3, name: 'PR checklist', conclusion: 'neutral' }] } });
+  expect(await applyNotReady(quiet.request, input('clear'))).toBe('clear');
+  expect(quiet.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
+});
+
+// Two GitHub Apps can report a check with the same name on one commit; a run supersedes only one from its own app.
+it('does not let another app\'s passing run of the same check hide a failed one', async () => {
+  const twoApps = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'failure', app: { id: 1 } }, { id: 2, name: 'CI', conclusion: 'success', app: { id: 2 } },
+    { id: 3, name: 'PR checklist', conclusion: 'success' }] } });
+  expect(await applyNotReady(twoApps.request, input('clear'))).toBe('kept (CI still failing)');
+  expect(twoApps.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+// Review of ad07c517: the latest run of a check can sit on a later page, so every page is read.
+it('reads every page of check runs before clearing the label', async () => {
+  const passing = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `check ${i}`, conclusion: 'success' }));
+  const paged = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=1': { check_runs: passing },
+    '/repos/o/r/commits/abc/check-runs?per_page=100&filter=all&page=2': { check_runs: [{ id: 101, name: 'CI', conclusion: 'failure' }] } });
+  expect(await applyNotReady(paged.request, input('clear'))).toBe('kept (CI still failing)');
+  expect(paged.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
 });
 
 it('converts with the optional draft token, since the workflow token never may', async () => {

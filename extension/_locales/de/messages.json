@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT hat das Eingabefeld beim Einfügen des Starttexts ersetzt"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT hat für den Start kein nutzbares Eingabefeld angezeigt"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT hat nach der Modellauswahl kein nutzbares Eingabefeld mehr angezeigt"
   },
