@@ -2511,6 +2511,9 @@ input[readonly] {
 .session-status { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .session-status.is-active, .session-status.is-working { width: 12px; height: 12px; background: transparent; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: session-spin 900ms linear infinite; }
 @keyframes session-spin { to { transform: rotate(360deg); } }
+/* Reduced motion stops the turn (Windows "Animation effects: Off" asks for it too). A quarter arc
+   standing still reads as a stuck app, so the mark becomes a whole accent ring: still, and working. */
+@media (prefers-reduced-motion: reduce) { .session-status.is-active, .session-status.is-working { border-color: var(--accent); } }
 .session-status.is-unseen { width: 8px; height: 8px; background: var(--accent); }
 .session-status.is-failed { background: var(--red); }
 /* The row's menu button floats over its end, so hovering never reflows the title or the list:
