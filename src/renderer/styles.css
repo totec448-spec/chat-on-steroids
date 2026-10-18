@@ -529,8 +529,10 @@ code {
 .sidebar-section-empty { padding: 6px 28px 4px; text-align: left; font-size: calc(11px * var(--text-scale, 1)); line-height: 1.5; }
 .sidebar .new-chat { color: var(--ink); }
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
-/* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
-.sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
+/* Let the scrollbar reach the divider; keep a small gap on the row side of its track. Its room
+   stays reserved, so rows and the Inbox toolbar keep their width when a filter or a collapsed
+   section makes the list short enough to need no scrollbar. */
+.sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; scrollbar-gutter: stable; }
 /* Chat search dialog (#1117): recent chats, then matches with the passage that matched. */
 /* One fixed size while typing: the results scroll inside it, the box never grows or shrinks. */
 .search-dialog { width: min(580px, calc(100vw - 40px)); height: min(460px, calc(100dvh - 140px)); max-height: none; margin: 12vh auto auto; padding: 0; overflow: hidden; color: var(--ink);
