@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { APP_VERSION, BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
-const { resetBridgeForTests, shutdownBridge, startBridge, sessionInputActivity } = await import('../src/main/bridge.js');
+const { resetBridgeForTests, setRotationCallWaitForTests, shutdownBridge, startBridge, sessionInputActivity } = await import('../src/main/bridge.js');
 const { getSession } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, writeDurableSoon } = await import('../src/main/durable.js');
 const { findSessionByConversation, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
@@ -203,13 +203,18 @@ describe('turn rotation (#1402)', () => {
   // 2.1.41 release round, Windows: a rotation filed at a quick call's result reached the page while
   // the model was writing its two-word answer. Sent into that answer, ChatGPT kept it until the
   // answer was done, then posted it and never answered it: the chat ended with a stray "Continue"
-  // and an empty turn. A native send ends the turn and continues only while a tool call runs.
+  // and an empty turn. A native send ends the turn and continues while a tool call runs. A rotation
+  // is filed right after a call's result, before the model's next step is known, so the claim
+  // route waits for that step: another call lets it go in, the turn's end retires it.
   it.each([
-    ['refuses to send it into an answer being written, and retires it without a notice', 'answer', false],
-    ['sends it into the turn while one of its tool calls is running', 'call', true],
+    ['retires it without a notice when the turn ends instead of calling another tool', 'ends', false],
+    ['retires it without a notice when no tool call starts in time', 'quiet', false],
+    ['sends it into the turn once the model starts its next tool call', 'starts', true],
+    ['sends it into the turn while one of its tool calls is running', 'running', true],
     ['sends it once the page has stopped the turn first', 'stopped', true]
   ] as const)('%s', async (_name, phase, sent) => {
-    const chat = `f0f00003-1111-4111-8111-00000000010${phase === 'answer' ? 1 : phase === 'call' ? 2 : 3}`;
+    const index = ['ends', 'quiet', 'starts', 'running', 'stopped'].indexOf(phase) + 1;
+    const chat = `f0f00003-1111-4111-8111-00000000010${index}`;
     const turnId = `g-rot-steer-${phase}-1`;
     const sessionId = await turnFor(chat, turnId, 31);
     await attributedCall(chat);
@@ -219,11 +224,27 @@ describe('turn rotation (#1402)', () => {
     expect(claim.body.input).toMatchObject({ id: row.id, directTurn: { id: turnId } });
     const authorize = () => request('POST', '/input/claim', { body: { id: row.id, owner: 'rotation-page', conversationId: chat,
       authorize: true, ...(phase === 'stopped' ? {} : { intoTurn: true }) } });
-    const reply = phase === 'call'
-      ? await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
-        caller: { requestId: 'rotation-running-call', transportKey: null, conversationId: chat } }, authorize)
-      : await authorize();
+    const call = <T,>(work: () => Promise<T>) => trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null,
+      evidence: emptyEvidence(), caller: { requestId: `rotation-call-${phase}`, transportKey: null, conversationId: chat } }, work);
+    setRotationCallWaitForTests(phase === 'quiet' ? 300 : 5_000);
+    const startedAt = Date.now();
+    let reply: { body: any };
+    if (phase === 'running') reply = await call(authorize);
+    else if (phase === 'starts' || phase === 'ends') {
+      const pending = authorize();
+      await new Promise(resolve => setTimeout(resolve, 400));
+      if (phase === 'starts') reply = await call(() => pending);
+      else {
+        await events(chat, [
+          { kind: 'assistant_message', time: Date.now(), turnId, messageId: 'rot-steer-final', text: 'Done.', state: 'final', final: true },
+          { kind: 'turn_end', time: Date.now(), turnId, outcome: 'completed' }
+        ]);
+        reply = await pending;
+      }
+    } else reply = await authorize();
     expect(reply.body).toEqual({ ok: sent });
+    // The turn's end or the next call decides at once; only a quiet model runs out the wait.
+    if (phase === 'ends' || phase === 'starts') expect(Date.now() - startedAt).toBeLessThan(3_000);
     const after = (await listInputs()).find(entry => entry.id === row.id)!;
     if (sent) expect(after).toMatchObject({ state: 'browser', sendAuthorizedAt: expect.any(Number) });
     // Nobody's message: no "not sent" notice is left in the chat.
