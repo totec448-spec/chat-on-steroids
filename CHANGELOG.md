@@ -20,7 +20,7 @@ Change something you asked earlier and continue from there, or take a chat in a 
 ### ✨ New
 
 - **Edit your earlier messages.** Click the pencil (**Edit message**) on any message you sent, change it and send: the chat continues from your edited message, just like editing in ChatGPT. The composer tells you how many later messages your edit replaces. Nothing is thrown away: what came after the old version folds under your edit as **Earlier version**, one click away. Edits you make in ChatGPT itself show up the same way.
-- **Branch in new chat.** Answers have a **Branch in new chat** button (the branch icon next to Copy). It opens a new chat that shows the conversation up to that answer, so you can try another direction while the original chat stays exactly as it was. ChatGPT makes the branch when you send your first message in it, and the new chat links back to where it came from.
+- **Branch in new chat.** Answers have a **Branch in new chat** button (the branch icon next to Copy). It opens a new chat for your next message. Send it, and ChatGPT carries the conversation up to that answer into the new chat, so you can try another direction while the original chat stays exactly as it was. The new chat links back to where it came from.
 - **Inbox sidebar** (optional, **Settings → Appearance → Sidebar layout**). Lists all your chats together across projects, active chats first. **Projects** stays the default.
 - **Merge conflicts in Review.** Files with merge conflicts get their own group at the top of the Review panel, marked as conflicts instead of looking like ordinary changes.
 
@@ -41,6 +41,7 @@ Change something you asked earlier and continue from there, or take a chat in a 
 - **Signed out of ChatGPT?** The app no longer sends messages into a signed-out ChatGPT page. It asks you to sign in instead.
 - **No more empty tabs.** Cancelling a new chat's first message, or a sub-agent that couldn't start, no longer leaves an empty ChatGPT page open.
 - **A finished chat** no longer repeats the model's first sentence under its answer.
+- **Fresh turns for long work.** The automatic continue no longer arrives right after a finished answer and sits there unanswered.
 - **Automatic Continue.** When it can't find a safe moment to send, the chat says so in your language and tells you to send Continue yourself, instead of a cryptic note.
 - **Two browsers.** The update notice no longer comes and goes, and it names the browser whose extension is behind.
 - **Browser control** can use a tab Chrome unloaded in the background: it loads it again first instead of timing out.
@@ -49,6 +50,9 @@ Change something you asked earlier and continue from there, or take a chat in a 
 - **Folder names keep their letters.** "Größe" becomes "groesse" instead of "gr-e".
 - **Extension updates.** If a new chat's first message got lost on its way to ChatGPT, the browser extension no longer waits hours before updating itself. That message shows in its chat as "may already have been sent", with Retry and Dismiss.
 - **What's New** no longer pops up again after you change a setting.
+- **Typed commands.** `/goal`, `/plan`, `/loop` and the other app commands work when you type them at the start of a message, just like picking them from the menu. They used to fail as an unknown Skill.
+- **New response** no longer shows on a chat you have already read when ChatGPT redraws its answer, for example after you branch from it.
+- **The chat list stays put.** Collapsing project sections no longer shifts the chats sideways.
 - **Reduced motion.** With animations turned off in your system, a working chat shows a still ring instead of a spinner that looks stuck.
 - **Windows.** The app list no longer fails because of one unusual Start menu entry.
 - **Sub-agent checkouts.** Several sub-agents finishing in the same Git project at once no longer leave one of their checkouts behind.
