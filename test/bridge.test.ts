@@ -82,6 +82,7 @@ const {
   REVIVAL_ACTIVITY_MS,
   REVIVAL_DEADLINE_MS,
   WORKER_BOOTSTRAP_LIMIT_MS,
+  WORKER_SENDING_GRACE_MS,
   WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
@@ -7942,6 +7943,35 @@ describe('a command that runs out of time says how far its page got', () => {
       expect(message).toContain('did not report back in time');
       expect(message).toContain('last step: choosing the model and reasoning');
       expect(message).not.toContain('write the audit');
+    } finally { vi.useRealTimers(); }
+  });
+
+  // #1086 (2.1.41, Windows VM under load): pages reported "sending the task" and the app gave the workers
+  // up at the ordinary deadline anyway, while their chats received the task: workers ran that the app had
+  // written off. A page that says it is sending gets a bounded window for its receipt, and is told so.
+  it.each([true, false])('keeps a worker whose page reported Send for its receipt (receipt arrives %s)', async arrives => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS - 10_000);
+      const sending = (await step(bootstrap.id, 'sending')).body;
+      expect(sending).toMatchObject({ ok: true });
+      expect(sending.expiresAt).toBeGreaterThanOrEqual(Date.now() + WORKER_SENDING_GRACE_MS - 1_000);
+      const prior = new Set(getLog());
+      await vi.advanceTimersByTimeAsync(30_000); // past the ordinary deadline
+      expect(giveUp(prior, 'worker:')).toBe('');
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('invited');
+      if (arrives) {
+        const conversationId = 'dededede-7654-3210-fedc-ba9876543211';
+        expect((await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } })).status).toBe(200);
+        expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('active');
+      } else {
+        // The window is bounded: without a receipt the worker still ends, and says it got as far as Send.
+        await vi.advanceTimersByTimeAsync(WORKER_SENDING_GRACE_MS);
+        expect(giveUp(prior, 'worker:')).toContain('last step: sending the task');
+      }
     } finally { vi.useRealTimers(); }
   });
 
