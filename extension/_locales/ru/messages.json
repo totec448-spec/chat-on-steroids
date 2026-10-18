@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT заменил редактор сообщения во время вставки запуска"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT так и не показал доступный редактор сообщения для запуска"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "после выбора модели ChatGPT так и не показал доступный редактор сообщения"
   },

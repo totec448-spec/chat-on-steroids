@@ -1777,6 +1777,10 @@ async function authorizeDocument(sender, message) {
   const opening = discardProtectedTabs[key];
   if (opening && opening !== true && !opening.documentId) opening.documentId = documentId;
   await persistLive();
+  // A tab this extension opened for a command (a worker, a handoff) gets its rendering lease now,
+  // not at the next status pass up to 40 s later: until then the hidden page loaded, chose its model
+  // and waited for ChatGPT's composer so slowly that workers missed their start deadline (#1086).
+  if (opening && opening !== true && opening.commandId) void maintain(true).catch(() => undefined);
   return { ok: true, tab: id, documentId, navigationEpoch: requestedEpoch };
 }
 
@@ -1807,6 +1811,10 @@ async function registerDocument(sender, message) {
   const opening = discardProtectedTabs[key];
   if (opening && opening !== true && !opening.documentId) opening.documentId = documentId;
   await persistLive();
+  // A tab this extension opened for a command (a worker, a handoff) gets its rendering lease now,
+  // not at the next status pass up to 40 s later: until then the hidden page loaded, chose its model
+  // and waited for ChatGPT's composer so slowly that workers missed their start deadline (#1086).
+  if (opening && opening !== true && opening.commandId) void maintain(true).catch(() => undefined);
   return { ok: true, tab: id, documentId, navigationEpoch: requestedEpoch };
 }
 
