@@ -3785,15 +3785,21 @@ let timelineScrollTop: number | null = null;
 
 function paintJumpLatest(): void {
   const jump = document.getElementById('jumpLatest');
-  if (jump) jump.classList.toggle('is-shown', !!selectedId && timelineShown() && distanceFromTail() > JUMP_DISTANCE);
+  // A page of history ends before the chat does: even at its bottom, the end is not on screen.
+  if (jump) jump.classList.toggle('is-shown', !!selectedId && timelineShown() && (distanceFromTail() > JUMP_DISTANCE || onHistoryPage()));
+}
+
+/** Whether the chat shows a page of history whose newer rows, and so its live end, are not loaded. */
+function onHistoryPage(): boolean {
+  const newest = events.reduce((latest, event) => Math.max(latest, event.seq), 0);
+  return historyBefore !== null && selectedId !== null && detailCursor !== null && newest + 1 < detailCursor;
 }
 
 function jumpToLatest(): void {
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   // On a page of history (a search result opened there, or reading went far up), the end is not
   // loaded yet: open the chat at its end again instead of paging down to it one page at a time.
-  const newest = events.reduce((latest, event) => Math.max(latest, event.seq), 0);
-  if (historyBefore !== null && selectedId !== null && detailCursor !== null && newest + 1 < detailCursor) {
+  if (onHistoryPage()) {
     historyBefore = null;
     detailFor = null;
     void loadDetail();
@@ -7476,7 +7482,10 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   skillPicker?.restore();
   imageDrafts.delete(key); paintComposerImages();
   if (sessionId === null) pendingNewInput = { id, generation };
-  if (mode !== 'finish' && followOutput()) { sendAnchor = null; readingAfterSend = false; readerAtEnd = true; }
+  // A page of history takes no live rows: a message sent while one is shown (a search result, or the
+  // reply a cancelled branch went back to) reached ChatGPT unseen. The chat returns to its end first.
+  if (mode !== 'finish' && sessionId !== null && sessionId === selectedId && onHistoryPage()) jumpToLatest();
+  else if (mode !== 'finish' && followOutput()) { sendAnchor = null; readingAfterSend = false; readerAtEnd = true; }
   else if (mode !== 'finish') { sendAnchor = { key: `input:${id}`, inputId: id, before: userMessageKeys(), session: selectedId, seen: false, smoothUntil: 0 }; readingAfterSend = false; }
   void refreshInputQueue();
   paintDeliveryControls();

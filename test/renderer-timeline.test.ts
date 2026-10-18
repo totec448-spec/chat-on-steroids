@@ -6012,6 +6012,37 @@ describe('branch in new chat (#482)', () => {
     expect(live.sent.at(-1)).not.toHaveProperty('branch');
   });
 
+  // 2.1.41 release round, macOS: Cancel branch opened the chat at the reply, on a page of older
+  // history. A message sent from there reached ChatGPT and was answered, but neither showed: a
+  // page of history takes no live rows. Sending returns the chat to its end first.
+  it('shows a message sent after cancelling a branch, even when the reply sat on an older page', async () => {
+    const filler: SessionEvent[] = [];
+    for (let n = 0; n < 40; n += 1) {
+      const seq = 4 + n * 3, turnId = `later-turn-${n}`;
+      filler.push({ kind: 'user_message', seq, origin: seq, time: T0 + seq * 1_000, source: 'extension', turnId, messageId: `later-ask-${n}`, message: text(`Later question ${n}`) },
+        { kind: 'assistant_message', seq: seq + 1, time: T0 + (seq + 1) * 1_000, source: 'extension', turnId,
+          messageId: `0000000${String(n).padStart(1, '0')}-0dc6-4847-bf7a-2e1a0f671e89`.slice(-36), message: text(`Later answer ${n}`), final: true, state: 'final' },
+        { seq: seq + 2, time: T0 + (seq + 2) * 1_000, source: 'extension', kind: 'turn_end', turnId, outcome: 'completed' });
+    }
+    const { w, live } = await boot([ask, reply(), end, ...filler], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    // The branch came from the first reply, far above the page the chat opens on.
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    const timeline = () => w.document.getElementById('timeline')!.textContent!;
+    expect(timeline()).toContain('Later answer 39');
+    [...w.document.querySelectorAll<HTMLButtonElement>('.answer-actions .answer-branch')].at(-1)!.click(); await settle();
+    w.document.querySelector<HTMLButtonElement>('#branchDraft .branch-draft-cancel')!.click(); await settle(); await settle();
+    expect(timeline()).toContain('Tag first, then build.');
+    expect(timeline()).not.toContain('Later answer 39');
+    // At the bottom of that page the newer rows are still not loaded: the way back to the end shows.
+    expect(w.document.getElementById('jumpLatest')!.classList.contains('is-shown')).toBe(true);
+    await submit(w as any, 'Continue from here.');
+    await settle(); await settle();
+    expect(live.sent.at(-1)).toMatchObject({ text: 'Continue from here.' });
+    // Back at the end: the latest exchange and the message just sent are in view.
+    expect(timeline()).toContain('Later answer 39');
+  });
+
   it('drops the branch and stays a plain new chat when the chat it came from is deleted', async () => {
     const { w, live, notifySession } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
     branchButton(w)!.click(); await settle();
