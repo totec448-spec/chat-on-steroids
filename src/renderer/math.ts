@@ -17,7 +17,7 @@ import type { TokenizerAndRendererExtension } from 'marked';
 
 /** Longest formula drawn; anything longer stays as its source. */
 const MAX_TEX = 8_000;
-const OPEN = '', CLOSE = '';
+const OPEN = '', CLOSE = ''; // U+E010, U+E011; chat.ts lists the pair each placeholder has
 const PLACEHOLDER = /(\d{1,5})/g;
 
 export interface MathSlots { formulas: Array<{ tex: string; display: boolean }> }
