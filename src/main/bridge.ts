@@ -20,7 +20,7 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
-import { publishBrowserDecision, authorizeBrowserInput, declineRotationSteer, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, type InputActivity } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, claimedRotation, declineRotationSteer, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, type InputActivity } from './session/input.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { tunnelRouteSettling } from './tunnel/route-settle.js';
@@ -2887,14 +2887,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 200, { ok: deferred }, origin);
     }
     if (body.authorize === true) {
-      // #1402: a fresh-turn continue goes into the running turn only while one of its tool calls
-      // runs; then ChatGPT ends the turn and carries on. While the model writes its answer it would
-      // land after the answer, unanswered. Retired here and tried again at a later tool result.
+      // #1402: a fresh-turn continue goes into the running turn while one of its tool calls runs;
+      // then ChatGPT ends the turn and carries on. Sent while the model writes its answer it lands
+      // after the answer, unanswered. A rotation is filed right after a call's result, so wait for
+      // the model's next step: another call lets it go in, the turn's end or silence retires it,
+      // and the turn is tried again at a later tool result.
       if (body.intoTurn === true && target && runningToolCalls(target) === 0) {
-        const turnId = await declineRotationSteer(body.id, body.owner, target);
+        const rotation = await claimedRotation(body.id, body.owner, target);
+        const next = rotation ? await nextRotationStep(target, rotation.sessionId, rotation.turnId) : 'call';
+        const turnId = next === 'call' ? null : await declineRotationSteer(body.id, body.owner, target);
         if (turnId) {
           declineTurnRotation(target, turnId, Date.now());
-          logInfo(`turn rotation: ${target} — the model was answering, not running a tool; turn ${turnId} continues as it is for now`);
+          logInfo(`turn rotation: ${target} — ${next === 'ended' ? 'the turn ended' : `no tool call started within ${Math.round(rotationCallWaitMs / 1000)} s`} after the last tool result; turn ${turnId} was not continued`);
           changed();
           return json(res, 200, { ok: false }, origin);
         }
@@ -9525,6 +9529,25 @@ function retireSpentRepairs(): void {
  * out is kept until exactly this line runs, so that a reload which did not help is not repeated
  * — see `retireSpentRepairs`. This call is the proof that it did help.
  */
+/**
+ * How long the claim route holds a fresh-turn continue for the model's next tool call (#1402).
+ * The extension's bridge request gives up after 10 s.
+ */
+let rotationCallWaitMs = 7_000;
+/** Test seam. */
+export function setRotationCallWaitForTests(ms: number): void { rotationCallWaitMs = ms; }
+
+/** What the model does after the tool result a fresh-turn continue was filed at: a call, its turn's end, or nothing yet. */
+async function nextRotationStep(conversationId: string, sessionId: string, turnId: string): Promise<'call' | 'ended' | 'quiet'> {
+  const until = Date.now() + rotationCallWaitMs;
+  for (;;) {
+    if (runningToolCalls(conversationId) > 0) return 'call';
+    if ((await getSession(sessionId))?.activeTurnId !== turnId) return 'ended';
+    if (Date.now() >= until) return 'quiet';
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+}
+
 /** When each running turn started, read once per turn from its own `turn_start`. */
 const turnStarts = new Map<string, number>();
 const turnRotationDeps: RotationDeps = {
