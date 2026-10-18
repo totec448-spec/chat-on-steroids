@@ -143,6 +143,34 @@ describe('completed request ownership', () => {
   });
 
   /**
+   * #1086 (2.1.41, Windows VM): a worker answered "worker ready" within a second. ChatGPT stamped
+   * the answer with its own server time and the page stamped the question with the local clock,
+   * which ran ahead, so the turn's own question sat after its answer. The answer was then not
+   * this turn's final; the worker was only put to sleep by the idle sweep, minutes later, and its
+   * report to the prime became a generic note instead of "worker ready".
+   */
+  it.each([false, true])('keeps a fast final complete when its own question is stamped after it (restart %s)', async restart => {
+    const began = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(began);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'assistant_message', time: began - 1_300, turnId: turn, messageId: 'answer',
+        providerMessageId: '11111111-2222-4333-8444-555555555555', text: 'worker ready', state: 'final', final: true },
+      { kind: 'user_message', time: began, messageId: 'question', text: 'Reply with exactly "worker ready".' },
+      { kind: 'turn_start', time: began + 1_500, turnId: turn },
+      { kind: 'turn_end', time: began + 1_550, turnId: turn, outcome: 'completed' }
+    ]);
+    const id = opened.sessionId!;
+    if (restart) { await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests(); }
+    expect(await readCompletedFinal(id, chat)).toMatchObject({ messageId: 'answer', turnId: turn, text: 'worker ready' });
+    expect(await readCompletedFinal(id, chat, turn)).toMatchObject({ messageId: 'answer' });
+    // A genuinely new question after that answer is still new work.
+    clock.mockReturnValue(began + 3_000);
+    await recordChatObservations(chat, [{ kind: 'user_message', time: Date.now(), messageId: 'next-question', text: 'And again?' }]);
+    expect(await readCompletedFinal(id, chat)).toBeNull();
+    clock.mockRestore();
+  });
+
+  /**
    * #1099, part 2: the page's ten-minute check closed a turn as `stalled` because it never saw
    * the end, although ChatGPT had already delivered that turn's final answer. The stall only
    * says the page could not see the end; ChatGPT's own final says it ended. Goal then waited
