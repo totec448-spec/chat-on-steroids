@@ -31,9 +31,9 @@ export const NOT_READY_COMMENT_UNDRAFTED = `A check failed, so this PR is not in
 /**
  * Carries out one decision through \`request(path, init)\`. GraphQL reports a refused mutation with
  * HTTP 200 and an \`errors\` list, so the conversion counts only when GitHub returns the draft. A
- * label comes off only when no check on that commit still fails (only each check's latest run
- * counts): CI and the checklist finish separately, and one green run said nothing about the other
- * (live 2026-10-15).
+ * label comes off only when each check's latest run has passed (success, neutral or skipped): CI
+ * and the checklist finish separately, and one green run said nothing about the other (live
+ * 2026-10-15).
  */
 export async function applyNotReady(request, { repository, sha, pr, decision }, draftRequest = request) {
   const path = `/repos/${repository}/issues/${pr.number}`;
@@ -50,10 +50,13 @@ export async function applyNotReady(request, { repository, sha, pr, decision }, 
   }
   if (decision === 'clear') {
     const runs = (await request(`/repos/${repository}/commits/${sha}/check-runs?per_page=100`))?.check_runs ?? [];
-    // Only each check's latest run (highest id) counts, so a rerun that passed replaces its old failure.
+    // Each check's latest run (highest id) decides: a rerun that passed replaces its old failure, while
+    // one still running or cancelled blocks the label until it passes.
     const latest = runs.filter(run => !runs.some(other => other.name === run.name && other.id > run.id));
-    const failing = latest.filter(run => run.conclusion === 'failure').map(run => run.name);
-    if (failing.length) return `kept (${failing.join(', ')} still failing)`;
+    const running = latest.filter(run => !run.conclusion).map(run => run.name);
+    const failing = latest.filter(run => run.conclusion && !['success', 'neutral', 'skipped'].includes(run.conclusion)).map(run => run.name);
+    const blocked = [failing.length && `${failing.join(', ')} still failing`, running.length && `${running.join(', ')} still running`].filter(Boolean);
+    if (blocked.length) return `kept (${blocked.join('; ')})`;
     await request(`${path}/labels/${NOT_READY_LABEL}`, { method: 'DELETE' });
     return 'clear';
   }
