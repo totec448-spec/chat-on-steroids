@@ -3141,7 +3141,10 @@ input[readonly] {
   color: var(--soft);
 }
 
+/* The header's connection `.state` (margin-left: auto, flex) must not reach this one. */
 .compaction > summary .state {
+  margin-left: 0;
+  display: inline;
   font-weight: 500;
   min-width: 0;
   overflow-wrap: anywhere;
