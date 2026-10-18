@@ -2235,12 +2235,13 @@ function recallPrompt(event: KeyboardEvent): boolean {
   const text = next ? prompts[prompts.length - next]! : '';
   event.preventDefault();
   input.value = text;
+  // At the edge the next press in the same direction recalls again. The caret goes first: the
+  // slash/file menu reads it on the input event.
+  const caret = up ? 0 : text.length;
+  input.setSelectionRange(caret, caret);
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // After the input event, which ends any earlier recall.
   recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, back: next, text } : null;
-  // At the edge the next press in the same direction recalls again.
-  const caret = up ? 0 : text.length;
-  input.setSelectionRange(caret, caret);
   return true;
 }
 
