@@ -2192,10 +2192,12 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
 }
 
 /**
- * Prompt recall: how many of your messages back the composer's recalled one is, and its text. Any
- * other change to the composer ends it: an `input` event, or a draft replaced by send or selection.
+ * Prompt recall: your messages as they were at its first press, how many back the composer's
+ * recalled one is, and its text. A message recorded while you page through them doesn't shift the
+ * list. Any other change to the composer ends it: an `input` event, or a draft replaced by send or
+ * selection.
  */
-let recall: { generation: number; draft: number; back: number; text: string } | null = null;
+let recall: { generation: number; draft: number; prompts: readonly string[]; back: number; text: string } | null = null;
 
 /** Your messages in this chat as its timeline shows them (agent filter included), oldest first; no Compact & Resume prompts or folded versions. */
 function sentPrompts(): string[] {
@@ -2223,13 +2225,14 @@ function recallPrompt(event: KeyboardEvent): boolean {
   // An open slash or @file menu keeps its arrows, also while it loads or has no choices.
   if (skillPicker?.open()) return false;
   const input = $<HTMLTextAreaElement>('chatInput');
-  const back = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall.back : 0;
+  const current = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall : null;
+  const back = current?.back ?? 0;
   // Attached files and a plan are part of the draft; a recalled message would be sent with them.
   if (imageDrafts.get(draftKey())?.length || taskPlans.has(draftKey()) || (!back && authoredComposerText())) return false;
   // Up recalls with the caret at the start and Down with it at the end. Anywhere else the arrows are
   // the textarea's own, so they move the caret through every row, wrapped or typed, up to that edge.
   if (input.selectionStart !== input.selectionEnd || input.selectionStart !== (up ? 0 : input.value.length)) return false;
-  const prompts = sentPrompts();
+  const prompts = current?.prompts ?? sentPrompts();
   const next = back + (up ? 1 : -1);
   if (next < 0 || next > prompts.length) return false;
   const text = next ? prompts[prompts.length - next]! : '';
@@ -2241,7 +2244,7 @@ function recallPrompt(event: KeyboardEvent): boolean {
   input.setSelectionRange(caret, caret);
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // After the input event, which ends any earlier recall.
-  recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, back: next, text } : null;
+  recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, prompts, back: next, text } : null;
   return true;
 }
 
