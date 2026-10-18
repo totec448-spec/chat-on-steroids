@@ -2152,8 +2152,11 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
   return !history.some(other => other.kind === 'user_message' && other.replaces === event.messageId);
 }
 
-/** Prompt recall: how many of your messages back the composer's recalled one is, and its text. */
-let recall: { generation: number; back: number; text: string } | null = null;
+/**
+ * Prompt recall: how many of your messages back the composer's recalled one is, and its text. Any
+ * other change to the composer ends it: an `input` event, or a draft replaced by send or selection.
+ */
+let recall: { generation: number; draft: number; back: number; text: string } | null = null;
 
 /** Your messages in this chat as its timeline shows them, oldest first; no Compact & Resume prompts or folded versions. */
 function sentPrompts(): string[] {
@@ -2179,7 +2182,7 @@ function recallPrompt(event: KeyboardEvent): boolean {
   if ((!up && event.key !== 'ArrowDown') || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
   if (selectedId === null || detailFor !== selectedId || editingQuestion?.sessionId === selectedId) return false;
   const input = $<HTMLTextAreaElement>('chatInput');
-  const back = recall?.generation === selectionGeneration && input.value === recall.text ? recall.back : 0;
+  const back = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall.back : 0;
   // Attached files and a plan are part of the draft; a recalled message would be sent with them.
   if (imageDrafts.get(draftKey())?.length || taskPlans.has(draftKey()) || (!back && authoredComposerText())) return false;
   // In a recalled message of several lines, the arrows move the caret until its first or last line.
@@ -2188,10 +2191,11 @@ function recallPrompt(event: KeyboardEvent): boolean {
   const next = back + (up ? 1 : -1);
   if (next < 0 || next > prompts.length) return false;
   const text = next ? prompts[prompts.length - next]! : '';
-  recall = next ? { generation: selectionGeneration, back: next, text } : null;
   event.preventDefault();
   input.value = text;
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  // After the input event, which ends any earlier recall.
+  recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, back: next, text } : null;
   input.setSelectionRange(text.length, text.length);
   return true;
 }
@@ -7989,6 +7993,7 @@ export function initChat(next: Deps): void {
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
   $('chatInput').addEventListener('input', () => {
+    recall = null;
     const hasText = !!authoredComposerText().trim();
     const plan = taskPlans.get(draftKey());
     if (plan && !plan.stages && plan.requestId) {
