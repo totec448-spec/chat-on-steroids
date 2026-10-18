@@ -20,7 +20,8 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
-import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, type InputActivity } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
+import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { tunnelRouteSettling } from './tunnel/route-settle.js';
@@ -9511,6 +9512,37 @@ function retireSpentRepairs(): void {
  * out is kept until exactly this line runs, so that a reload which did not help is not repeated
  * — see `retireSpentRepairs`. This call is the proof that it did help.
  */
+/** How long a held call waits for its continue to be sent; once Send is authorized, as long again. */
+let rotationHoldMs = 15_000;
+/** Test seam. */
+export function setRotationHoldForTests(ms: number): void { rotationHoldMs = ms; }
+
+/**
+ * Waits, bounded, until the page has sent a fresh-turn continue into the call held for it (#1662).
+ * Not taken in time, it is withdrawn so it cannot land after the call's answer.
+ */
+async function awaitRotationDelivery(conversationId: string, id: string): Promise<void> {
+  const started = Date.now();
+  changed();
+  for (;;) {
+    const state = await rotationDelivery(id);
+    if (state === 'settled') return;
+    const waited = Date.now() - started;
+    if (state === 'pending' && waited >= rotationHoldMs) {
+      if (await withdrawUnsentRotation(id)) {
+        logInfo(`turn rotation: ${conversationId} — the page did not send the continue within ${Math.round(rotationHoldMs / 1000)} s; the call answers and a later one tries again`);
+        changed();
+      }
+      return;
+    }
+    if (waited >= rotationHoldMs * 2) {
+      logWarn(`turn rotation: ${conversationId} — the continue's Send was not confirmed within ${Math.round(rotationHoldMs * 2 / 1000)} s; the call answers now`);
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
 /** When each running turn started, read once per turn from its own `turn_start`. */
 const turnStarts = new Map<string, number>();
 const turnRotationDeps: RotationDeps = {
@@ -9610,11 +9642,20 @@ function noteCallAttribution(
       { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
     // #1402: a long turn continues in a fresh one, right after this tool result. Pro thinks long on
     // purpose; a worker's or helper's turn end is its report, and Goal/Loop decide on turn ends.
+    // #1662: only while this call's answer is still held (callHoldOpen), so the continue goes in
+    // while the call runs; the answer waits until it is sent or withdrawn.
     if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
         filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
-        !isWorkerConversation(conversationId) && !goalArmedFor(conversationId)) {
-      void considerTurnRotation(conversationId, sessionId, sourceTurnId, turnRotationDeps)
-        .catch(error => logWarn(`turn rotation: ${String(error)}`));
+        !isWorkerConversation(conversationId) && !goalArmedFor(conversationId) && callHoldOpen(conversationId)) {
+      let filedId: string | null = null;
+      const deps: RotationDeps = { ...turnRotationDeps, file: async (session, turn) => {
+        const row = await fileRotationInput(session, turn);
+        filedId = row?.id ?? null;
+        return row;
+      } };
+      holdCalls(conversationId, considerTurnRotation(conversationId, sessionId, sourceTurnId, deps)
+        .then(filed => filed && filedId ? awaitRotationDelivery(conversationId, filedId) : undefined)
+        .catch(error => logWarn(`turn rotation: ${String(error)}`)));
     }
     // Exact calls are visible work even without a page. They cannot turn that
     // display into a worker wake, browser repair or continuation after departure.
