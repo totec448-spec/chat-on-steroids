@@ -726,13 +726,16 @@ describe('surface boundaries', () => {
     }
   });
 
+  // #1417 again (2.1.41, VM): ChatGPT's approval classifier flagged the earlier imperative wording
+  // ("Use status once … before finalizing", "Never poll repeatedly") as "behaviour and completion
+  // rules for the classifier". The same guidance is now stated as facts about the tool.
   it('preserves the existing agents guidance while adding only the cross-prime address parameter', async () => {
     everything();
     const agentsTool = toolList(await core('tools/list')).find((tool) => tool.name === 'agents')!;
     expect(agentsTool.description).toBe(
-      'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. ' +
-      'message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. ' +
-      'status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.'
+      'Runs ChatGPT workers. Without model/reasoning_effort, saved app defaults apply; overrides are for explicit user requests, so users need not choose. A suitable sleeping worker is reused with message, not respawned. ' +
+      'message: prime↔worker. Reports arrive with tool results, not by restarting an idle prime. ' +
+      'status: your active, sleeping/revivable and terminal workers, incl. parked families, and pending reports; one call before a final answer collects them, else the answer says review is pending. Repeated polling adds nothing. finish: records the report, then normally sleeps.'
     );
     expect(agentsTool.inputSchema.properties.run_id.description).toBe(
       'Select your returned worker family when status lists several; never grants another caller’s workers.'
@@ -1360,9 +1363,11 @@ describe('capability gating', () => {
     const agentsDescription = (tools.body.result.tools as Array<{ name: string; description?: string }>).find(
       (tool) => tool.name === 'agents'
     )?.description;
-    expect(agentsDescription).toContain('Reuse a suitable sleeping worker with message before spawn');
-    expect(agentsDescription).toContain('status once to collect pending reports before finalizing');
-    expect(agentsDescription).toContain('state that review is pending');
+    expect(agentsDescription).toContain('A suitable sleeping worker is reused with message, not respawned');
+    expect(agentsDescription).toContain('one call before a final answer collects them');
+    expect(agentsDescription).toContain('the answer says review is pending');
+    // Facts about the tool, not orders to whoever reads the description.
+    expect(agentsDescription).not.toMatch(/\b(Never|Do not|Omit|Use status once)\b/);
   });
 
   it('rejects action-specific agent fields instead of silently ignoring them', async () => {
