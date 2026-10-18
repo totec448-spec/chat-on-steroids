@@ -3382,7 +3382,10 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const math: MathSlots = { formulas: [] };
   const writing: WritingSlot[] = [];
   // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
-  const parser = new Marked({ gfm: true, extensions: [writingBlock(writing), ...mathExtensions(math), {
+  // ChatGPT draws answer paragraphs with white-space: pre-line: a single line break stays a line
+  // (a poem, an address). `breaks` draws it the same way; the probes above keep plain soft breaks,
+  // since they compare text with the page's own, which has them as newlines.
+  const parser = new Marked({ gfm: true, breaks: true, extensions: [writingBlock(writing), ...mathExtensions(math), {
     name: 'inlineReference', level: 'inline',
     start: value => { const at = value.search(/:{1,2}chatgpt-content-reference\{/); return at < 0 ? undefined : at; },
     tokenizer(value) { const match = value.match(INLINE_REFERENCE); return match ? { type: 'inlineReference', raw: match[0], probe: directives++ } : undefined; },
