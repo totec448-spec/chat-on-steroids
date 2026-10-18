@@ -335,7 +335,11 @@ function composerDraftOwner(): ComposerDraftOwner { return { key: draftKey(), ge
 function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
   return owner.key === draftKey() && owner.generation === composerDraftGeneration;
 }
-function replaceComposerDraft(): void { retireDictation(); composerDraftGeneration++; skillPicker?.close(); }
+function replaceComposerDraft(): void {
+  retireDictation(); composerDraftGeneration++; skillPicker?.close();
+  // A recall ends here too; the same message recalled next must change the live region to be read.
+  $('recallAnnounce').textContent = '';
+}
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
@@ -2191,6 +2195,87 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
   return !history.some(other => other.kind === 'user_message' && other.replaces === event.messageId);
 }
 
+/**
+ * Prompt recall: your messages as they were at its first press, how many back the composer's
+ * recalled one is, and its text. A message recorded while you page through them doesn't shift the
+ * list. Any other change to the composer ends it: an `input` event, or a draft replaced by send or
+ * selection.
+ */
+let recall: { generation: number; draft: number; prompts: readonly string[]; back: number; text: string } | null = null;
+
+/**
+ * Whether you typed this message. The outbox row that sent it says when the app wrote it: a Goal or
+ * Loop continue, a fresh-turn or recovery continue, or a plan stage. The outbox keeps only its newest
+ * finished rows, and the recorded message keeps the same fields whoever wrote it, so a recorded input
+ * id whose row is gone is left out. With no row and no input id it was sent in ChatGPT itself, so it
+ * is yours, unless it is a worker's: its tasks come from the app.
+ */
+function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): boolean {
+  // The recorded row id is exact; the message id also finds a row this window read before its receipt.
+  const rows = pendingComposerInputs.filter(row => row.id === event.inputId ||
+    (!!event.messageId && (row.messageId ? row.messageId === event.messageId : event.messageId === `input:${row.id}`)));
+  // A correction sent together with the next queued checkpoint is recorded as the correction.
+  const row = rows.find(entry => !rows.some(other => other.companionInputId === entry.id));
+  if (!row) {
+    if (event.inputId) return false;
+    const origin = sessions.find(entry => entry.id === selectedId)?.origin?.kind;
+    return origin !== 'worker' && origin !== 'helper' && (!event.agent || event.agent === 'prime');
+  }
+  return (row.authoredSource ?? 'text') !== 'none' && !row.finishOwner && !row.recovery && row.purpose !== 'rotation' && row.purpose !== 'decision';
+}
+
+/** The messages you typed in this chat as its timeline shows them (agent filter included), oldest first; no Compact & Resume prompts or folded versions. */
+function sentPrompts(): string[] {
+  const prompts: string[] = [];
+  for (const item of timelineItems(visibleEvents())) {
+    if (item.kind !== 'event' || item.event.kind !== 'user_message') continue;
+    const event = item.event;
+    // A stored message cut short would come back incomplete.
+    if (event.authoredText === undefined && event.message.truncated) continue;
+    if (!typedPrompt(event)) continue;
+    const text = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
+    if (text.trim() && text !== prompts.at(-1)) prompts.push(text);
+  }
+  return prompts;
+}
+
+/**
+ * ArrowUp and ArrowDown in an empty composer, or one still holding an unedited recalled message,
+ * step through your earlier messages in this chat like a shell's history. Past the newest one the
+ * composer is empty again. Recall only fills the composer; it never sends.
+ */
+function recallPrompt(event: KeyboardEvent): boolean {
+  const up = event.key === 'ArrowUp';
+  if ((!up && event.key !== 'ArrowDown') || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+  if (selectedId === null || detailFor !== selectedId || editingQuestion?.sessionId === selectedId) return false;
+  // Before the outbox is read, every message would count as typed; the arrows stay the caret's.
+  if (!composerInputsLoaded) return false;
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const current = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall : null;
+  const back = current?.back ?? 0;
+  // Attached files and a plan are part of the draft; a recalled message would be sent with them.
+  if (imageDrafts.get(draftKey())?.length || taskPlans.has(draftKey()) || (!back && authoredComposerText())) return false;
+  // Up recalls with the caret at the start and Down with it at the end. Anywhere else the arrows are
+  // the textarea's own, so they move the caret through every row, wrapped or typed, up to that edge.
+  if (input.selectionStart !== input.selectionEnd || input.selectionStart !== (up ? 0 : input.value.length)) return false;
+  const prompts = current?.prompts ?? sentPrompts();
+  const next = back + (up ? 1 : -1);
+  if (next < 0 || next > prompts.length) return false;
+  const text = next ? prompts[prompts.length - next]! : '';
+  event.preventDefault();
+  input.value = text;
+  // At the edge the next press in the same direction recalls again. The caret goes first: the
+  // slash/file menu reads it on the input event.
+  const caret = up ? 0 : text.length;
+  input.setSelectionRange(caret, caret);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  // After the input event, which ends any earlier recall.
+  recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, prompts, back: next, text } : null;
+  // A screen reader doesn't read a value set by script, so the recalled message is announced.
+  $('recallAnnounce').textContent = text;
+  return true;
+}
+
 /** How many messages each question (by seq) is followed by in the chat as shown: what editing it replaces. */
 function laterMessageCounts(items: readonly TimelineItem[]): Map<number, number> {
   const later = new Map<number, number>();
@@ -2304,6 +2389,8 @@ let controlledCanInject = false;
 let controlledCanSendDirectly = false;
 let controlledRecovery: RecoveryCountdown[] = [];
 let pendingComposerInputs: InputEntry[] = [];
+/** Whether this window has read the outbox yet; prompt recall needs it to tell the app's sends from yours. */
+let composerInputsLoaded = false;
 let inputQueueGeneration = 0;
 let goalIntentGeneration = 0;
 let goalProgress: (Omit<TaskProgress, 'phase'> & { phase: string; selection: number; inputId?: string }) | null = null;
@@ -7327,7 +7414,7 @@ async function refreshInputQueue(): Promise<void> {
   const selection = selectionGeneration;
   const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
   if (!all || selection !== selectionGeneration || request !== inputQueueGeneration) return;
-  pendingComposerInputs = all;
+  pendingComposerInputs = all; composerInputsLoaded = true;
   for (const id of dismissedInputNotices) if (!all.some(entry => entry.id === id)) dismissedInputNotices.delete(id);
   paintDeliveryControls();
   const accepted = pendingNewInput && all.find(entry => entry.id === pendingNewInput!.id);
@@ -8183,6 +8270,9 @@ export function initChat(next: Deps): void {
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
   $('chatInput').addEventListener('input', () => {
+    recall = null;
+    // The same message recalled again later must change the live region to be read again.
+    const recalled = $('recallAnnounce'); if (recalled.textContent) recalled.textContent = '';
     const hasText = !!authoredComposerText().trim();
     const plan = taskPlans.get(draftKey());
     if (plan && !plan.stages && plan.requestId) {
@@ -8192,7 +8282,10 @@ export function initChat(next: Deps): void {
     paintDeliveryControls(); paintTaskActions();
   });
   $('chatInput').addEventListener('keydown', (event) => {
-    if (skillPicker?.keydown(event)) return;
+    // A slash or @file menu on screen keeps its arrows, also while it loads, has no choices, or is
+    // closed by this very key because the caret left its fragment.
+    const menuShown = !!skillPicker?.open();
+    if (skillPicker?.keydown(event) || (!menuShown && recallPrompt(event))) return;
     // Codex's "Enter key behavior": Enter sends, or only Cmd/Ctrl+Enter does and Enter adds a line.
     const enterSends = deps.state()?.config.ui.enterSends !== false || event.metaKey || event.ctrlKey;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && enterSends) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
@@ -8447,6 +8540,8 @@ export function initChat(next: Deps): void {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-agent]');
     if (!button) return;
     agentFilter = button.dataset.agent === '' ? null : (button.dataset.agent ?? null);
+    // A recall pages through the messages the old filter showed.
+    recall = null;
     paintDetail();
   });
 
