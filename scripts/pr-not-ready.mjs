@@ -49,9 +49,10 @@ export async function applyNotReady(request, { repository, sha, pr, decision }, 
     return drafted ? 'draft' : refused;
   }
   if (decision === 'clear') {
-    const runs = (await request(`/repos/${repository}/commits/${sha}/check-runs?per_page=100`))?.check_runs ?? [];
+    const runs = (await request(`/repos/${repository}/commits/${sha}/check-runs?per_page=100&filter=all`))?.check_runs ?? [];
     // Each check's latest run per app (highest id) decides: a rerun that passed replaces its old failure,
-    // while one still running or cancelled blocks the label until it passes.
+    // while one still running or cancelled blocks the label until it passes. `filter=all` lists every run:
+    // the default keeps runs by completion time and can drop a newer one.
     const latest = runs.filter(run => !runs.some(other => other.name === run.name && other.app?.id === run.app?.id && other.id > run.id));
     const running = latest.filter(run => !run.conclusion).map(run => run.name);
     const failing = latest.filter(run => run.conclusion && !['success', 'neutral', 'skipped'].includes(run.conclusion)).map(run => run.name);
