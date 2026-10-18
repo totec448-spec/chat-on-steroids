@@ -3447,6 +3447,20 @@ it('tells a Firefox user how Firefox updates its add-on instead of pointing at t
   expect(text).not.toContain('folder');
 });
 
+// The outdated copy may be Firefox's while Chrome, current, was the last browser to report in.
+it('gives Firefox advice when the outdated extension is Firefox’s, whichever browser reported last', async () => {
+  const mounted = await mountChat({
+    bridge: {
+      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1', extensionEngine: 'gecko',
+      externalExtension: { present: true, version: '2.0.2', lastSeenAt: Date.now() }
+    }
+  });
+  const text = mounted.window.document.getElementById('updateText')!.textContent!;
+  expect(text).toContain('2.0.1');
+  expect(text).toContain('about:addons');
+  expect(text).not.toContain('folder');
+});
+
 it('shows a missing-extension reminder while connected and clears it after the companion reports in', async () => {
   const mounted = await mountChat();
   const connected = structuredClone(mounted.state) as any;

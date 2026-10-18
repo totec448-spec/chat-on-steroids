@@ -1250,7 +1250,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   }
   if (stale) {
     // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
-    const firefox = bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale;
+    const firefox = bridge.extensionEngine === 'gecko' || (bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale);
     lines.push(
       t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
         (firefox
