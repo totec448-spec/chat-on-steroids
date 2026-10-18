@@ -165,7 +165,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary> } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -214,6 +214,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     update: { current: '2.0.3', latest: null, stage: 'idle', error: null, checkedAt: null }
   };
   const ok = (data: any) => Promise.resolve({ ok: true, data });
+  const bootOptions = options;
   const live = { events: [...events], inputs: [] as InputEntry[], sent: [] as InputArgs[], automation: 'off', controlCalls: [] as Array<{ id: string; action: string }>, compacting: false, finishHeld: true };
   let sessionListener: (change?: unknown) => void = () => undefined;
   let writeSessionListener: (id: string) => void = () => undefined;
@@ -248,7 +249,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
         return () => undefined;
       },
       listSessions: () => {
-        const sessions = options.sessions ?? [{ ...summary(live.events), ...(options.origin ? { origin: options.origin } : {}), ...(projects[0] ? { projectId: projects[0].id } : {}) }];
+        const sessions = options.sessions ?? [{ ...summary(live.events), ...options.summary, ...(options.origin ? { origin: options.origin } : {}), ...(projects[0] ? { projectId: projects[0].id } : {}) }];
         const known = new Set(sessions.map(row => row.id));
         const openings = live.inputs.filter(row => row.opening && row.sessionId && !known.has(row.sessionId)).map(row => ({
           ...summary(live.events), id: row.sessionId!, title: row.text, conversationId: null, chatIds: []
@@ -312,7 +313,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
           ? eligible.slice(0, limit) : eligible.slice(-limit);
         const opening = live.inputs.find(row => row.opening && row.sessionId === _id);
         return ok({
-          summary: opening ? { ...summary(live.events), id: _id, title: opening.text, conversationId: null, chatIds: [] } : summary(live.events),
+          summary: opening ? { ...summary(live.events), id: _id, title: opening.text, conversationId: null, chatIds: [] }
+            : { ...summary(live.events), ...bootOptions.summary, ...(bootOptions.sessions?.find(row => row.id === _id) ?? {}) },
           events: page,
           total: live.events.length,
           nextFrom: page.reduce((max, e) => Math.max(max, e.seq + 1), from)
@@ -965,6 +967,26 @@ it.each(['cancelled', 'browser'])('retires the editor when Save learns the queue
   expect(live.inputs[0]?.text).toBe('Original');
   if (state === 'cancelled') expect(w.document.querySelector('#finishQueue [data-input-id="retired-edit"]')).toBeNull();
   else expect(w.document.querySelector('#finishQueue [data-input-id="retired-edit"]')).not.toBeNull();
+  // The edit the user typed is not lost: an empty composer takes it, and a notice says why.
+  expect(w.document.querySelector<HTMLTextAreaElement>('#chatInput')!.value).toBe('Late edit');
+  expect(w.document.querySelector('.toast')?.textContent).toContain('your edit is in the composer');
+});
+
+it('keeps the composer\'s own draft when a late queued edit cannot be saved', async () => {
+  const { w, live, append } = await boot([]);
+  live.inputs.push({ id: 'late-edit', sessionId: summary([]).id, text: 'Original', mode: 'after-turn', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b' });
+  await append([]);
+  const composer = w.document.querySelector<HTMLTextAreaElement>('#chatInput')!;
+  composer.value = 'My next message'; composer.dispatchEvent(new w.Event('input', { bubbles: true }));
+  (w.document.querySelector('[aria-label="Edit queued task"]') as HTMLButtonElement).click();
+  const field = w.document.querySelector<HTMLTextAreaElement>('#finishQueue textarea')!;
+  field.value = 'Late edit';
+  (w as any).api.editQueuedInput = async () => { live.inputs[0]!.state = 'browser'; return { ok: true, data: false }; };
+  (field.nextElementSibling as HTMLButtonElement).click(); await settle();
+  expect(composer.value).toBe('My next message');
+  expect(w.document.querySelector('.toast')?.textContent).toContain('before your edit was saved');
+  expect(w.document.querySelector('.toast')?.textContent).not.toContain('in the composer');
 });
 
 it('retires a queued editor synchronously on New Chat and ignores its delayed save after returning', async () => {
@@ -1966,6 +1988,38 @@ it('Share a folder creates a sidebar project and keeps it when an older list ref
   (w.document.getElementById('chatSend') as HTMLButtonElement).click();
   await settle();
   expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: project.id, text: 'Work in this folder' });
+});
+
+// #1469: the sidebar's + offers a folder on this computer or one on a server.
+it('offers a local folder and a server folder from the sidebar +, and marks a server project', async () => {
+  const { w } = await boot([], false);
+  const api = (w as any).api;
+  const doc = w.document;
+  const local = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1', name: 'Local', path: '/local', createdAt: 1 };
+  const remote = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee2', name: 'app', path: 'me@devbox:/srv/app', createdAt: 2, remote: { host: 'me@devbox', path: '/srv/app' } };
+  api.addProject = vi.fn(async () => ({ ok: true, data: local }));
+  api.addRemoteProject = vi.fn(async () => ({ ok: true, data: remote }));
+  const item = (action: string) => doc.querySelector<HTMLButtonElement>(`[data-row-action="${action}"]`);
+  (doc.getElementById('addProject') as HTMLButtonElement).click();
+  await settle();
+  expect(item('add-local-project')?.textContent).toContain('Folder on this computer');
+  item('add-local-project')!.click();
+  await settle();
+  expect(api.addProject).toHaveBeenCalledTimes(1);
+  expect(doc.querySelector(`[data-project-id="${local.id}"] .project-badge`)).toBeNull();
+  (doc.getElementById('addProject') as HTMLButtonElement).click();
+  await settle();
+  item('add-ssh-project')!.click();
+  await settle();
+  expect((doc.getElementById('sshProjectDialog') as HTMLDialogElement).open).toBe(true);
+  (doc.getElementById('sshProjectAddress') as HTMLInputElement).value = 'me@devbox';
+  (doc.getElementById('sshProjectFolder') as HTMLInputElement).value = '/srv/app';
+  doc.getElementById('sshProjectForm')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await settle();
+  expect(api.addRemoteProject).toHaveBeenCalledWith('me@devbox', '/srv/app');
+  const badge = doc.querySelector(`[data-project-id="${remote.id}"] .project-badge`);
+  expect(badge?.textContent).toBe('SSH');
+  expect(badge?.getAttribute('title')).toBe('me@devbox');
 });
 
 it('sends a new chat at once with Automatic when no model list is readable and none was asked for (#864)', async () => {
@@ -3624,6 +3678,41 @@ it('cancels pending planning without replacing the draft with a late result', as
   expect(live.sent).toHaveLength(0);
 });
 
+// 2.1.41 bug hunt: a ready plan had already taken the request out of the composer, so Cancel plan
+// (whose tooltip promises to keep the draft) or deleting its last stage lost the request outright.
+it('gives the request back to the composer when a ready plan is cancelled or its last stage deleted', async () => {
+  const { w, live } = await boot([], false);
+  const api = (w as any).api;
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Write it', 'Check it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const plan = w.document.getElementById('createPlan') as HTMLButtonElement;
+  const prepare = async (text: string) => {
+    input.value = text; input.dispatchEvent(new w.Event('input'));
+    plan.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
+    expect(input.value).toBe('');
+    expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(2);
+  };
+  await prepare('Write a poem about a lighthouse');
+  plan.click(); await settle();
+  expect(plan.getAttribute('aria-pressed')).toBe('false');
+  expect(input.value).toBe('Write a poem about a lighthouse');
+
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  await prepare('Write a song about the sea');
+  for (let i = 0; i < 2; i++) (w.document.querySelector('#taskPlanPreview .plan-stage [aria-label^="Delete stage"]') as HTMLButtonElement).click();
+  await settle();
+  expect(plan.getAttribute('aria-pressed')).toBe('false');
+  expect(input.value).toBe('Write a song about the sea');
+
+  // Something typed since stays; the request does not overwrite it.
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  await prepare('Write a limerick');
+  input.value = 'A newer thought'; input.dispatchEvent(new w.Event('input'));
+  plan.click(); await settle();
+  expect(input.value).toBe('A newer thought');
+  expect(live.sent).toHaveLength(0);
+});
+
 it('keeps completed stages after clearing or replacing the composer until explicitly deleted', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;
@@ -3738,6 +3827,9 @@ it.each([false, true])('clears the planner prompt and starts a new-chat plan wit
   input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', cancelable: true })); await settle();
   expect(live.sent).toHaveLength(1);
   expect(live.sent[0]).toMatchObject({ objective: 'Original objective', text: 'Build foundation', stages: ['Verify it'], reasoningEffort: pro ? 'pro' : 'high' });
+  // While it is delivered, the message shows what the person wrote, as it will once recorded.
+  await settle();
+  expect([...w.document.querySelectorAll('.pending-message-text')].map(node => node.textContent)).toEqual(['Original objective']);
 });
 
 it('does not erase a new composer draft while completed-plan queue admission is pending', async () => {
@@ -4751,7 +4843,8 @@ it('retains the visible collapsed group beyond the normal resident target and st
   // One deliberate movement keeps filling the edge through collapsed batches.
   // Await the actual read result, including its animation-frame yields.
   pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
-  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 5000 });
+  // 2.7 s here; the macOS x64 release runner stopped at 300–390 of 400 rows after 5 s (2026-10-15).
+  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 20_000 });
   expect(timeline.querySelector('.tool-group')).toBe(group);
   expect(timeline.querySelectorAll('.raw')).toHaveLength(0);
   for (let i = 0; i < 14; i++) {
@@ -4796,6 +4889,25 @@ it('clears a delivered check when later model activity arrives without a timer',
   expect(receipt.hidden).toBe(true);
 });
 
+
+// 2026-10-15, the user's Mac: three fresh-turn continues that failed ("the browser did not pick up
+// this message within 60 seconds") stayed at the end of the chat as its newest messages, even after
+// the work moved on. A failed automatic continue belongs to its time, like a cancelled one.
+it('keeps a failed fresh-turn continue at its creation time, not at the end of the chat', async () => {
+  const app = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'before-rotation', message: text('Original work') },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'user_message', messageId: 'after-rotation', message: text('Later continuation') }
+  ]);
+  const { w, live } = app;
+  live.inputs.push({ id: 'failed-rotation', sessionId: summary([]).id, conversationId: 'chat-b', text: 'Continue the task from where you are.',
+    mode: 'auto', dueAt: T0 + 1000, createdAt: T0 + 1000, state: 'failed', owner: null, model: null, reasoningEffort: null, purpose: 'rotation',
+    error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+  await app.append([]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('[data-input-id="failed-rotation"]')).not.toBeNull();
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Continue the task from where you are.');
+  expect(timeline.textContent!.indexOf('Continue the task from where you are.')).toBeLessThan(timeline.textContent!.indexOf('Later continuation'));
+});
 
 it('keeps a cancelled automatic draft at its creation time as later messages arrive', async () => {
   const app = await boot([
@@ -5794,4 +5906,246 @@ it.each([true, false])('runs the highlighted slash command with Enter whatever E
   expect(app.live.sent).toHaveLength(0);
   expect(app.w.document.getElementById('contextMeterButton')!.getAttribute('aria-expanded')).toBe('true');
   expect(input.value).toBe('');
+});
+
+describe('branch in new chat (#482)', () => {
+  const chat = '6ad337fe-47a4-83ed-a21f-c2e24d5829a4';
+  const replyId = '2b06482d-0dc6-4847-bf7a-2e1a0f671e89';
+  const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Plan the release') };
+  const reply = (messageId = replyId): SessionEvent => ({ kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId, message: text('Tag first, then build.'), final: true, state: 'final' });
+  const end: SessionEvent = { seq: 3, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' };
+  const branchButton = (w: { document: Document }) => w.document.querySelector<HTMLButtonElement>('.answer-actions .answer-branch');
+  const submit = async (w: Window & typeof globalThis, value: string) => {
+    (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = value;
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+  };
+
+  it('starts a new chat from a completed answer and sends its first message at that reply', async () => {
+    const { w, live } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const button = branchButton(w)!;
+    expect(button.getAttribute('aria-label')).toBe('Branch in new chat');
+    button.click(); await settle();
+    expect(w.document.getElementById('chatTitle')!.textContent).toBe('New chat');
+    const notice = w.document.getElementById('branchDraft')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Loop under test');
+    await submit(w as any, 'Try the other approach.');
+    expect(live.sent.at(-1)).toMatchObject({ sessionId: null, text: 'Try the other approach.',
+      branch: { sessionId: summary([]).id, conversationId: chat, messageId: replyId } });
+  });
+
+  it('goes back to the reply it came from when the person cancels the branch', async () => {
+    const { w, live } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    branchButton(w)!.click(); await settle();
+    w.document.querySelector<HTMLButtonElement>('#branchDraft .branch-draft-cancel')!.click(); await settle();
+    expect(w.document.getElementById('branchDraft')!.hidden).toBe(true);
+    expect(w.document.querySelector(`.sess.is-sel[data-id="${summary([]).id}"]`)).not.toBeNull();
+    expect(api.locateMessage).toHaveBeenCalledWith(summary([]).id, replyId);
+    // An ordinary new chat afterwards carries no branch.
+    w.document.getElementById('newChat')!.click(); await settle();
+    await submit(w as any, 'Just a new chat.');
+    expect(live.sent.at(-1)).not.toHaveProperty('branch');
+  });
+
+  it('drops the branch and stays a plain new chat when the chat it came from is deleted', async () => {
+    const { w, live, notifySession } = await boot([ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    branchButton(w)!.click(); await settle();
+    // The source chat is deleted while the branch is still a draft.
+    (w as any).api.listSessions = async () => ({ ok: true, data: { sessions: [], activeId: null, pressure: [] } });
+    notifySession(); await settle(700);
+    // The notice no longer names a chat that is gone, and the first message starts a plain chat.
+    expect(w.document.getElementById('branchDraft')!.hidden).toBe(true);
+    expect(w.document.getElementById('chatTitle')!.textContent).toBe('New chat');
+    await submit(w as any, 'Just a new chat.');
+    expect(live.sent.at(-1)).not.toHaveProperty('branch');
+  });
+
+  it.each([
+    ['a reply without a native id', { reply: 'assistant:interim:1', summary: { conversationId: chat } }],
+    ['a chat without a native ChatGPT id', { reply: replyId, summary: {} }],
+    ['a worker chat', { reply: replyId, summary: { conversationId: chat, origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'x' } } }]
+  ] as const)('offers no branch for %s', async (_name, setup) => {
+    const { w } = await boot([ask, reply(setup.reply), end], true, [], [], { summary: setup.summary as Partial<SessionSummary> });
+    expect(w.document.querySelector('.answer-actions')).not.toBeNull();
+    expect(branchButton(w)).toBeNull();
+  });
+
+  // History ChatGPT copied into a branch, and an adopted chat's earlier answers, are recorded
+  // without a turn: before, they had no actions at all, so nothing could branch from or copy them.
+  it('offers copy, export and branch on an answer recorded without a turn', async () => {
+    const earlierId = '6ad3a59b-0000-83eb-8bc4-8c84e68dd911';
+    const loose: SessionEvent = { kind: 'assistant_message', seq: 4, time: T0 + 3_000, source: 'extension', messageId: earlierId,
+      message: text('An earlier answer.'), final: true, state: 'final' };
+    const { w, live } = await boot([loose, ask, reply(), end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+    const bars = [...w.document.querySelectorAll('.answer-actions')];
+    expect(bars).toHaveLength(2);
+    const bar = bars.find(node => node.closest('.said')!.textContent!.includes('An earlier answer'))!;
+    bar.querySelector<HTMLButtonElement>('.answer-action')!.click(); await settle();
+    expect(api.exportMarkdown).toHaveBeenCalledWith(expect.objectContaining({ scope: 'answer', messageId: earlierId, turnId: undefined }));
+    bar.querySelector<HTMLButtonElement>('.answer-branch')!.click(); await settle();
+    await submit(w as any, 'From the earlier answer.');
+    expect(live.sent.at(-1)).toMatchObject({ branch: { conversationId: chat, messageId: earlierId } });
+  });
+
+  it('links a branched chat back to the reply it came from', async () => {
+    const source = { ...summary([]), id: '2026-10-17-source01', title: 'Release plan', conversationId: chat };
+    const branched = { ...summary([]), id: '2026-10-17-branch01', title: 'Other approach', conversationId: '6ad388c2-faf8-83ed-bb4f-9efff4ad92de',
+      origin: { kind: 'desktop' as const, fromSessionId: source.id, agentId: null, task: '', branchOf: { conversationId: chat, messageId: replyId } } };
+    const { w } = await boot([ask, reply(), end], false, [], [], { sessions: [branched, source] });
+    const api = (w as any).api;
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    (w.document.querySelector(`#sessionList [data-id="${branched.id}"]`) as HTMLElement).click(); await settle();
+    const link = w.document.getElementById('chatBranchOrigin') as HTMLButtonElement;
+    expect(link.hidden).toBe(false);
+    expect(link.textContent).toContain('Release plan');
+    link.click(); await settle();
+    expect(w.document.querySelector(`.sess.is-sel[data-id="${source.id}"]`)).not.toBeNull();
+    expect(api.locateMessage).toHaveBeenCalledWith(source.id, replyId);
+    expect(link.hidden).toBe(true);
+  });
+
+  it('sends a retry from a branch that has not started yet at the same reply', async () => {
+    const source = { ...summary([]), id: '2026-10-17-source01', title: 'Release plan', conversationId: chat };
+    const pending = { ...summary([]), id: '2026-10-17-branch01', title: 'Other approach', conversationId: null, chatIds: [], selectedModel: undefined,
+      origin: { kind: 'desktop' as const, fromSessionId: source.id, agentId: null, task: '', branchOf: { conversationId: chat, messageId: replyId } } };
+    const { w, live } = await boot([], false, [], [], { sessions: [pending, source] });
+    (w.document.querySelector(`#sessionList [data-id="${pending.id}"]`) as HTMLElement).click(); await settle();
+    // Its failed first message left no observed model: the person picks one, as for any resend.
+    for (const [id, value] of [['composerModel', 'gpt-5.6-sol'], ['composerReasoning', 'high']] as const) {
+      const select = w.document.getElementById(id) as HTMLSelectElement;
+      select.value = value; select.dispatchEvent(new w.Event('change', { bubbles: true }));
+    }
+    await settle();
+    await submit(w as any, 'Again, please.');
+    expect(live.sent.at(-1)).toMatchObject({ sessionId: pending.id, branch: { sessionId: source.id, conversationId: chat, messageId: replyId } });
+  });
+});
+
+describe('edit and resubmit (#365)', () => {
+  const q = (seq: number, messageId: string, value: string, turnId: string, extra: object = {}): SessionEvent =>
+    ({ kind: 'user_message', seq, origin: seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId, message: text(value), ...extra }) as SessionEvent;
+  const a = (seq: number, messageId: string, value: string, turnId: string): SessionEvent =>
+    ({ kind: 'assistant_message', seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId, message: text(value), final: true, state: 'final' }) as SessionEvent;
+  const end = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_end', turnId, outcome: 'completed' }) as SessionEvent;
+  const said = (w: { document: Document }) => [...w.document.querySelectorAll('#timeline > .ev-user_message, #timeline > .ev-assistant_message, #timeline > .earlier-version')]
+    .map(node => node.classList.contains('earlier-version') ? `earlier:${node.querySelector('summary')!.textContent!.trim()}` : node.querySelector('.said')!.textContent!.replace(/\s+/g, ' ').trim().slice(0, 40));
+
+  it('folds the version an edit replaced, and what followed it, under the edited question', async () => {
+    const events = [q(1, 'q-1', 'First question', 't1'), a(2, 'a-1', 'First answer', 't1'), end(3, 't1'),
+      q(4, 'q-2', 'Fix the logn bug', 't2'), a(5, 'a-2', 'Which bug?', 't2'), end(6, 't2'),
+      q(7, 'q-2b', 'Fix the login bug', 't3', { replaces: 'q-2' }), a(8, 'a-3', 'Done, here is the fix.', 't3'), end(9, 't3')];
+    const { w } = await boot(events, true);
+    const rows = said(w);
+    expect(rows[0]).toContain('First question');
+    expect(rows[1]).toContain('First answer');
+    expect(rows[2]).toContain('Fix the login bug');
+    expect(rows[3]).toBe('earlier:Earlier version · 2 messages');
+    expect(rows[4]).toContain('Done, here is the fix.');
+    expect(rows).toHaveLength(5);
+    expect(w.document.querySelector('#timeline > .ev-user_message:nth-of-type(n) .message-edited, #timeline .message-edited')?.textContent).toBe('Edited version');
+    // Directly under the edited question, before the line of the turn that answers it.
+    const editedRow = [...w.document.querySelectorAll('#timeline > .ev-user_message')].find(row => row.textContent!.includes('Fix the login bug'))!;
+    expect(editedRow.nextElementSibling?.classList.contains('earlier-version')).toBe(true);
+    const fold = w.document.querySelector<HTMLDetailsElement>('#timeline > .earlier-version')!;
+    expect(fold.open).toBe(false);
+    fold.open = true; fold.dispatchEvent(new w.Event('toggle')); await settle();
+    const shown = [...fold.querySelectorAll('.said')].map(node => node.textContent!.replace(/\s+/g, ' ').trim());
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).toContain('Fix the logn bug');
+    expect(shown[1]).toContain('Which bug?');
+  });
+
+  it('folds every earlier version of a question edited twice into one row', async () => {
+    const events = [q(1, 'q-1', 'Ask', 't1'), a(2, 'a-1', 'Answer one', 't1'), end(3, 't1'),
+      q(4, 'q-1b', 'Ask again', 't2', { replaces: 'q-1' }), a(5, 'a-2', 'Answer two', 't2'), end(6, 't2'),
+      q(7, 'q-1c', 'Ask a third time', 't3', { replaces: 'q-1b' }), a(8, 'a-3', 'Answer three', 't3'), end(9, 't3')];
+    const { w } = await boot(events, true);
+    expect(said(w)).toEqual([expect.stringContaining('Ask a third time'), 'earlier:Earlier versions · 4 messages', expect.stringContaining('Answer three')]);
+  });
+
+  const chat = '6ad337fe-47a4-83ed-a21f-c2e24d5829a4';
+  const Q1 = '6ad3a59b-0001-83eb-8bc4-8c84e68dd911', Q2 = '6ad3a59b-0002-83eb-8bc4-8c84e68dd911';
+  const A1 = '6ad3a59b-00a1-83eb-8bc4-8c84e68dd911', A2 = '6ad3a59b-00a2-83eb-8bc4-8c84e68dd911';
+  const exchange = () => [q(1, Q1, 'First question', 't1'), a(2, A1, 'First answer', 't1'), end(3, 't1'),
+    q(4, Q2, 'Fix the logn bug', 't2'), a(5, A2, 'Which bug?', 't2'), end(6, 't2')];
+  const submit = async (w: Window & typeof globalThis, value?: string) => {
+    if (value !== undefined) (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = value;
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+  };
+  const editButton = (w: { document: Document }, text: string) => [...w.document.querySelectorAll('#timeline > .ev-user_message')]
+    .find(row => row.textContent!.includes(text))?.querySelector<HTMLButtonElement>('.question-edit') ?? null;
+
+  it('edits one of your questions from the composer and sends it as ChatGPT\'s edit of that question', async () => {
+    const { w, live } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'A draft I was writing';
+    editButton(w, 'First question')!.click(); await settle();
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    expect(input.value).toBe('First question');
+    const notice = w.document.getElementById('editDraft')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Editing your message · replaces 3 later messages');
+    // The question being edited is marked in the chat, so an earlier one is easy to find.
+    const marked = () => [...w.document.querySelectorAll('#timeline .ev-user_message.is-being-edited')].map(row => row.textContent!.includes('First question'));
+    expect(marked()).toEqual([true]);
+    await submit(w as any, 'First question, edited');
+    expect(live.sent.at(-1)).toMatchObject({ sessionId: summary([]).id, text: 'First question, edited', mode: 'auto', edit: { messageId: Q1 } });
+    expect(notice.hidden).toBe(true);
+    expect(marked()).toEqual([]);
+    // The draft that was there before the edit comes back.
+    expect(input.value).toBe('A draft I was writing');
+  });
+
+  it('says so when the latest question is edited, and gives the draft back when the edit is cancelled', async () => {
+    const { w, live } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Unfinished';
+    editButton(w, 'Fix the logn bug')!.click(); await settle();
+    expect(w.document.getElementById('editDraft')!.textContent).toContain('Editing your message · replaces 1 later message');
+    w.document.querySelector<HTMLButtonElement>('#editDraft .edit-draft-cancel')!.click(); await settle();
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    expect(input.value).toBe('Unfinished');
+    await submit(w as any, 'Just a follow-up');
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('offers no Edit in a worker chat', async () => {
+    const { w } = await boot(exchange(), true, [], [], { summary: { conversationId: chat, origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'x' } } });
+    expect(editButton(w, 'First question')).toBeNull();
+  });
+
+  it('offers no Edit for a question without a native id', async () => {
+    const { w } = await boot([q(1, 'user:local:1', 'Local question', 't1'), a(2, A1, 'Answer', 't1'), end(3, 't1')], true, [], [], { summary: { conversationId: chat } });
+    expect(editButton(w, 'Local question')).toBeNull();
+  });
+
+  it('offers Edit on the newest version only, never inside the earlier versions it folded', async () => {
+    const { w } = await boot([...exchange(), q(7, '6ad3a59b-0003-83eb-8bc4-8c84e68dd911', 'Fix the login bug', 't3', { replaces: Q2 }), a(8, '6ad3a59b-00a3-83eb-8bc4-8c84e68dd911', 'Fixed.', 't3'), end(9, 't3')],
+      true, [], [], { summary: { conversationId: chat } });
+    expect(editButton(w, 'Fix the login bug')).not.toBeNull();
+    const fold = w.document.querySelector<HTMLDetailsElement>('#timeline > .earlier-version')!;
+    fold.open = true; fold.dispatchEvent(new w.Event('toggle')); await settle();
+    expect(fold.querySelector('.question-edit')).toBeNull();
+  });
+
+  it('leaves edit mode when another chat is opened', async () => {
+    const other = { ...summary([]), id: '2026-10-17-other001', title: 'Other chat', conversationId: '6ad388c2-faf8-83ed-bb4f-9efff4ad92de' };
+    const { w, live } = await boot(exchange(), true, [], [], { summary: { conversationId: chat }, sessions: [{ ...summary([]), conversationId: chat }, other] });
+    editButton(w, 'First question')!.click(); await settle();
+    (w.document.querySelector(`#sessionList [data-id="${other.id}"]`) as HTMLElement).click(); await settle();
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    await submit(w as any, 'Hello there');
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('shows an edit whose replaced version is not in the loaded history as edited, without a fold', async () => {
+    const { w } = await boot([q(7, 'q-2b', 'Fix the login bug', 't3', { replaces: 'q-gone' }), a(8, 'a-3', 'Done.', 't3'), end(9, 't3')], true);
+    expect(said(w)).toEqual([expect.stringContaining('Fix the login bug'), expect.stringContaining('Done.')]);
+    expect(w.document.querySelector('#timeline .message-edited')?.textContent).toBe('Edited version');
+  });
 });

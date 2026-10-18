@@ -1,4 +1,5 @@
 // Real renderer with synthetic controls only. Never connects to the installed app or ChatGPT.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -21,8 +22,7 @@ app.whenReady().then(async () => {
       build.onLoad({ filter: /.*/, namespace: 'vite-url-stub' }, () => ({ contents: 'export default ""', loader: 'js' }));
     } }] })).outputFiles[0].text;
   const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '')
+  const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
   const win = new BrowserWindow({ show: false, width: 1100, height: 760,
     webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });

@@ -11,10 +11,14 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
-import { app, dialog, shell, webContents, type BrowserWindow } from 'electron';
+import { execFile } from 'node:child_process';
+import { constants as fsConstants, promises as fs } from 'node:fs';
+import { app, dialog, screen, shell, webContents, type BrowserWindow } from 'electron';
+import { chatLines, crashLines, errorSummaryLines, installKind, installLines, systemLines, toolCallLines, type ChatFactsSession } from './diagnostics-facts.js';
+import type { CompanionEnvironment, UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
+import { dialogLabel, mainText } from './main-texts.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
 
 /** Enough log for a long run, small enough to attach anywhere. */
@@ -35,6 +39,8 @@ export interface DiagnosticsReportSources {
   log: string;
   /** Every process of the app with what it is for; numbers only. */
   memory?: ProcessMemory[];
+  /** Lines from `diagnostics-facts.ts`: numbers, states and option names; error samples are scrubbed here. */
+  facts?: { install: string[]; system: string[]; crashes: string[]; errors: string[]; tools: string[]; chats: string[] };
   now: number;
 }
 
@@ -106,6 +112,58 @@ export function memoryFacts(window: BrowserWindow | null): ProcessMemory[] {
   } catch { return []; }
 }
 
+/** The app's own folder (the .app bundle on macOS): what a silent update has to write. */
+function appFolder(): string {
+  const exe = process.execPath;
+  const bundle = /^(.*?\.app)\/Contents\/MacOS\//.exec(exe)?.[1];
+  return bundle ? path.dirname(bundle) : path.dirname(exe);
+}
+
+/** Whether macOS still holds the download quarantine on the app; null elsewhere or unknown. */
+function quarantined(): Promise<boolean | null> {
+  const bundle = /^(.*?\.app)\/Contents\/MacOS\//.exec(process.execPath)?.[1];
+  if (process.platform !== 'darwin' || !bundle) return Promise.resolve(null);
+  return new Promise(resolve => execFile('/usr/bin/xattr', ['-p', 'com.apple.quarantine', bundle], { timeout: 3000 },
+    (error, stdout) => resolve(error ? ((error as { code?: unknown }).code === 1 ? false : null) : stdout.trim().length > 0)));
+}
+
+/** Everything `diagnostics-facts.ts` describes, gathered now. */
+export async function collectReportFacts(sources: { update: UpdateStatus; sessions: ChatFactsSession[]; inputs: Array<{ sessionId: string | null; state: string }>; now: number }):
+  Promise<NonNullable<DiagnosticsReportSources['facts']>> {
+  const writable = await fs.access(appFolder(), fsConstants.W_OK).then(() => true, () => false);
+  const disk = await fs.statfs(app.getPath('userData')).then(info => info.bavail * info.bsize, () => null);
+  let scaleFactors: number[] = [];
+  try { scaleFactors = screen.getAllDisplays().map(display => display.scaleFactor); } catch { /* No screen before ready. */ }
+  let crashDir: string | null = null;
+  try { crashDir = app.getPath('crashDumps'); } catch { /* Not available on this platform. */ }
+  return {
+    install: installLines({ kind: installKind(process.platform, process.execPath, process.env), packaged: app.isPackaged,
+      folderWritable: writable, quarantined: await quarantined(), update: sources.update, now: sources.now }),
+    system: systemLines({ totalBytes: os.totalmem(), freeBytes: os.freemem(), cpuModel: os.cpus()[0]?.model ?? '', cpuCount: os.cpus().length,
+      diskFreeBytes: disk, uptimeSeconds: process.uptime(), scaleFactors }),
+    crashes: await crashLines(crashDir, sources.now),
+    errors: errorSummaryLines(),
+    tools: toolCallLines(sources.now),
+    // Finished inputs say nothing about a stuck chat; only waiting and moving ones are counted.
+    chats: chatLines(sources.sessions, sources.inputs.filter(input => !['sent', 'failed', 'cancelled'].includes(input.state)), sources.now)
+  };
+}
+
+/** The companion's browser and ChatGPT page facts as sentences; empty for an older extension. */
+function environmentLines(extension: unknown): string[] {
+  const environment = (extension && typeof extension === 'object' ? (extension as { environment?: CompanionEnvironment | null }).environment : null) ?? null;
+  if (!environment) return [];
+  const { browser, tabs, page } = environment;
+  const found = (value: boolean) => value ? 'found' : 'NOT found';
+  return [
+    `Browser: ${browser.name}${browser.version ? ` ${browser.version}` : ''}`,
+    `ChatGPT tabs: ${tabs.open} open, ${tabs.discarded} discarded, ${tabs.frozen} frozen, ${tabs.loading} loading, ${tabs.grouped} in a tab group, ${tabs.inBackgroundWindow} in the app's background window`,
+    page
+      ? `Page checks (most recently used ChatGPT tab): composer ${found(page.composer)}, send area ${found(page.sendArea)}, model menu ${found(page.modelMenu)}, + menu ${found(page.plusMenu)}, page language ${page.language ?? 'unknown'}`
+      : 'Page checks: no awake ChatGPT tab answered'
+  ];
+}
+
 export function renderDiagnosticsReport(sources: DiagnosticsReportSources): string {
   const context: ScrubContext = {
     home: sources.home,
@@ -139,6 +197,12 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
       `System: ${sources.app.platform} ${sources.app.osRelease} (${sources.app.arch}), locale ${sources.app.locale}`,
       `Electron ${sources.app.electron}, Chrome ${sources.app.chrome}`
     ]),
+    ...(sources.facts ? [
+      section('Install and updates', sources.facts.install.map(scrub)),
+      section('System', sources.facts.system.map(scrub)),
+      section('Crashes and restarts', sources.facts.crashes)
+    ] : []),
+    ...(environmentLines(sources.extension).length ? [section('Browser and ChatGPT page', environmentLines(sources.extension))] : []),
     section('Browser connection', [...json(scrubValue(sources.bridge)), ...json(scrubValue(sources.extension))]),
     section('Connection self-test', sources.selfTest
       ? [sources.selfTest.summary, ...sources.selfTest.checks.map(check => `- ${check.name}: ${check.status} — ${check.detail}`)].map(scrub)
@@ -146,6 +210,11 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
     section('Settings', reportableSettings(getConfig())),
     ...(sources.memory?.length ? [section('Memory', memoryLines(sources.memory))] : []),
     section('Chats', [`${sources.sessions.length} chat(s), ${ended} ended, ${sources.projects.length} project(s)`]),
+    ...(sources.facts ? [
+      section('Active chats', sources.facts.chats.map(scrub)),
+      section('Tool calls (last 24 hours)', sources.facts.tools),
+      section('Most frequent warnings and errors since start', sources.facts.errors.map(scrub))
+    ] : []),
     section('Pending work', [...sources.commands, ...sources.workers].map(row => JSON.stringify(scrubValue(row)))),
     section('Log (most recent last)', [scrub(sources.log)])
   ];
@@ -155,13 +224,18 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
 /** Values from the settings that the log may quote and that identify the user. */
 function configKnownValues(): string[] {
   const config = getConfig() as unknown as Record<string, any>;
-  const roots: Array<{ name?: string; path?: string }> = Array.isArray(config.roots) ? config.roots : [];
+  const roots: Array<{ name?: string; path?: string; remote?: { host?: string; path?: string } }> = Array.isArray(config.roots) ? config.roots : [];
   const tunnel = config.tunnel ?? {};
   const profiles: Array<{ name?: string }> = Array.isArray(tunnel.profiles) ? tunnel.profiles : [];
   return [
     // A computer name can be a person's ("Maxims-MacBook"); log lines may quote connector names.
     typeof config.connectorSuffix === 'string' ? config.connectorSuffix : '',
     ...roots.flatMap(root => [root.path ?? '', root.name ?? '']),
+    // A folder on a server (#1469): ssh's errors quote the address or the bare host name, and
+    // pwd and tool errors the server path, each without the saved `host:path` form.
+    ...roots.flatMap(root => root.remote
+      ? [root.remote.host ?? '', (root.remote.host ?? '').replace(/^.*@/, ''), root.remote.path ?? '']
+      : []),
     tunnel.profileName ?? '', tunnel.tunnelId ?? '', tunnel.desktopTunnelId ?? '', tunnel.pluginsTunnelId ?? '', tunnel.binaryPath ?? '',
     ...profiles.map(profile => profile.name ?? '')
   ].filter((value): value is string => typeof value === 'string');
@@ -193,9 +267,10 @@ export function systemFacts(app: { getVersion(): string; getLocale(): string }):
 export async function saveDiagnosticsReport(text: string, owner: BrowserWindow | null): Promise<{ saved: false } | { saved: true; name: string }> {
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   const options = {
-    title: 'Save diagnostics report',
+    // In the interface language, like the tray (2.1.39: English title in a German app).
+    ...dialogLabel('Diagnostics report'),
     defaultPath: path.join(app.getPath('downloads'), `chat-on-steroids-diagnostics-${stamp}.txt`),
-    filters: [{ name: 'Text', extensions: ['txt'] }]
+    filters: [{ name: mainText('Text files'), extensions: ['txt'] }]
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { saved: false };

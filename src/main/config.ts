@@ -43,7 +43,7 @@ import {
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
-import { logError } from './logger.js';
+import { logError, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 import { capabilitiesForPlatform } from './platform.js';
@@ -216,7 +216,13 @@ const rootSchema = z.object({
     .min(1)
     .max(32)
     .regex(/^[a-z0-9][a-z0-9._-]*$/, 'Root names are lowercase letters, digits, dot, dash, underscore'),
-  path: z.string().min(2).max(4096)
+  path: z.string().min(2).max(4096),
+  // A folder on a server (#1469): the same address rules as parseRemote, and an absolute path.
+  remote: z.object({
+    host: z.string().min(1).max(255).regex(/^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9_][A-Za-z0-9._-]*|[0-9A-Fa-f:.]+)$/),
+    port: z.number().int().min(1).max(65535).optional(),
+    path: z.string().min(1).max(4096).regex(/^\//)
+  }).optional()
 });
 
 /**
@@ -338,9 +344,11 @@ const configSchema = z.object({
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional().default('taskbar'),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
+    playfulContinue: z.boolean().optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),
+    mentionPlugins: z.boolean().optional().default(false),
     language: z.enum(UI_LANGUAGES).optional(),
     // The version this install last started as; What's New shows once per real update (#1172).
     lastSeenVersion: z.string().trim().min(1).max(40).optional().catch(undefined),
@@ -594,7 +602,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, localAppUsage: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, localAppUsage: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },
@@ -691,12 +699,47 @@ async function keepUnreadable(raw: string): Promise<void> {
   }
 }
 
+/**
+ * Drops the preferences this version cannot read and parses again (2.1.39). A newer app may save a
+ * value an older one does not know — 2.1.38's Firefox as the ChatGPT browser made 2.1.37 throw the
+ * whole file away, folders and tunnel included (VM, 2026-10-15). Only keys under `ui` are dropped,
+ * each falling back to its default; anything about folders, permissions or the tunnel still sends
+ * the file to the conservative recovery below.
+ */
+function withoutUnreadablePreferences(value: unknown): { config: Config; dropped: string[] } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const draft = structuredClone(value) as Record<string, unknown>;
+  const dropped: string[] = [];
+  for (let pass = 0; pass < 8; pass++) {
+    const parsed = configSchema.safeParse(draft);
+    if (parsed.success) return dropped.length ? { config: parsed.data, dropped } : null;
+    let progressed = false;
+    for (const issue of parsed.error.issues) {
+      const [section, key] = issue.path;
+      const ui = draft.ui;
+      if (section !== 'ui' || typeof key !== 'string' || !ui || typeof ui !== 'object' || Array.isArray(ui) || !(key in ui)) return null;
+      delete (ui as Record<string, unknown>)[key];
+      dropped.push(`ui.${key}`);
+      progressed = true;
+    }
+    if (!progressed) return null;
+  }
+  return null;
+}
+
 export async function loadConfig(): Promise<Config> {
   let raw: string | null = null;
   try {
     raw = await fs.readFile(configPath, 'utf8');
     // Windows PowerShell 5.1 and older Notepad start UTF-8 files with a byte-order mark; it is not JSON.
-    const parsed = configSchema.safeParse(JSON.parse(raw.replace(/^\uFEFF/, '')));
+    const value: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    let parsed = configSchema.safeParse(value);
+    const salvaged = parsed.success ? null : withoutUnreadablePreferences(value);
+    if (salvaged) {
+      logWarn(`Settings kept; these preferences held values this version does not know and use their defaults: ${salvaged.dropped.join(', ')}`);
+      await keepUnreadable(raw);
+      parsed = { success: true, data: salvaged.config } as typeof parsed;
+    }
     if (!parsed.success) {
       logError('Settings file was invalid and has been reset to defaults');
       await keepUnreadable(raw);

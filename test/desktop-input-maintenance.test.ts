@@ -250,7 +250,7 @@ it('carries the direct-turn offer only to the elected existing conversation', as
 });
 
 type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number; active?: boolean; pinned?: boolean };
-async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string; project?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}, rendered?: Set<number>) {
+async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string; project?: string; branch?: { conversationId: string; messageId: string } }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}, rendered?: Set<number>) {
   const tabs: Tab[] = [];
   const event = { addListener: () => {} };
   const tabUpdated = { addListener: vi.fn() };
@@ -287,7 +287,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     json: async () => new URL(input).pathname === '/hello'
       ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
       : { ok: true, inputs, background: true, modelCatalogRequest,
-        ...(rendered ? { inputOpeningIds: inputs.map(input => input.id), nonDiscardableConversations: inputs.map(input => input.conversationId).filter(Boolean) } : {}) }
+        ...(rendered ? { inputOpeningIds: inputs.map(input => input.id), commandIds: [], nonDiscardableConversations: inputs.map(input => input.conversationId).filter(Boolean) } : {}) }
   }));
   const scripting = { executeScript: vi.fn(async ({ target, func }: any): Promise<any[]> => {
     const documentId = (saved.tabDocuments as Record<string, string> | undefined)?.[target.tabId];
@@ -409,6 +409,59 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.maintain();
     expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/project-create')).toBe(false);
     expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/g/${project}/project?cos-input=${firstId}#cos-input=${firstId}` }));
+  });
+
+  describe('branch in new chat (#482)', () => {
+    const source = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const branch = { conversationId: source, messageId: '2b06482d-0dc6-4847-bf7a-2e1a0f671e89' };
+    const offers = (h: Awaited<ReturnType<typeof worker>>) => h.sendMessage.mock.calls
+      .filter(([, message]) => message.type === 'clf-desktop-input').map(([tab, message]) => ({ ...message, tab }));
+
+    it('opens the source chat for the branch, never by borrowing a home tab', async () => {
+      const h = await worker([{ id: firstId, conversationId: null, branch }]);
+      const home = { id: 7, url: 'https://chatgpt.com/' };
+      h.tabs.push(home);
+      await h.authorizeDocument({ tab: home, documentId: 'idle-home', frameId: 0, url: home.url }, { navigationEpoch: 1 });
+      h.sendMessage.mockImplementation(async (_id, message): Promise<any> =>
+        message.type === 'clf-input-reuse-state' ? { safe: true, navigationEpoch: 1 } : { ok: true });
+      await h.maintain();
+      expect(h.sendMessage.mock.calls.some(([id, message]) => id === 7 && message.type === 'clf-prepare-desktop-input')).toBe(false);
+      expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/c/${source}?cos-input=${firstId}#cos-input=${firstId}` }));
+    });
+
+    it('offers the branch point to its tab, and again once that tab shows ChatGPT\'s local draft', async () => {
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${source}?cos-input=${firstId}#cos-input=${firstId}`, status: 'complete' } as never);
+      await h.maintain();
+      expect(offers(h)).toEqual([expect.objectContaining({ tab: 7, id: firstId, conversationId: null, branch })]);
+      h.sendMessage.mockClear();
+      h.tabs[0] = { id: 7, url: 'https://chatgpt.com/c/local-chatgpt:4754b9e6-4fd8-4c76-87b2-731ee7a8cde0', status: 'complete' } as never;
+      await h.maintain();
+      expect(offers(h)).toEqual([expect.objectContaining({ tab: 7, id: firstId, conversationId: null, branch })]);
+      expect(h.create).not.toHaveBeenCalled();
+    });
+
+    it.each([[7, true], [8, false]] as const)('lets only the elected tab claim from a draft whose marker ChatGPT dropped (tab %s)', async (tabId, allowed) => {
+      // Live 2.1.41 (VM): ChatGPT rewrote the draft's URL after its own navigation, without the marker.
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      const url = 'https://chatgpt.com/c/local-chatgpt%3A18dba412-03e9-4b2d-a284-6ac4d6d4e5ac';
+      h.tabs.push({ id: tabId, url } as never);
+      const sender = { tab: { id: tabId }, documentId: 'draft', frameId: 0, url };
+      const owner = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+      h.fetch.mockClear();
+      const reply = await h.desktopInput({ id: firstId, conversationId: null, requiresAuthorization: true }, sender, owner);
+      const claimed = h.fetch.mock.calls.some(([target]) => new URL(target).pathname === '/input/claim');
+      expect(claimed).toBe(allowed);
+      if (!allowed) expect(reply).toEqual({ ok: false });
+    });
+
+    it("never takes another tab's local draft for this branch", async () => {
+      const h = await worker([{ id: firstId, conversationId: null, branch }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+      h.tabs.push({ id: 8, url: 'https://chatgpt.com/c/local-chatgpt:4754b9e6-4fd8-4c76-87b2-731ee7a8cde0', status: 'complete' } as never);
+      await h.maintain();
+      expect(offers(h)).toEqual([]);
+      expect(h.create).not.toHaveBeenCalled();
+    });
   });
 
   it("opens a new chat of a linked project on its native Project's page, never by borrowing a home tab (#1176)", async () => {
@@ -762,6 +815,54 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     else expect(h.remove).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
   });
+  it.each(['untouched', 'typed-into', 'pinned', 'became-a-chat'])('closes the tab of a first message cancelled before Send (%s)', async mode => {
+    // 2.1.40 release round: cancelling a new chat's first message left the tab the app had opened
+    // for it on ChatGPT's empty start page for good. Only that exact, untouched page closes.
+    const h = await worker([{ id: firstId, conversationId: null, opening: true, close: true } as any]);
+    const url = mode === 'became-a-chat' ? `https://chatgpt.com/c/${secondId}?cos-input=${firstId}` : `https://chatgpt.com/?cos-input=${firstId}`;
+    h.tabs.push({ id: 7, url, pinned: mode === 'pinned' });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'opening', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' } : { ok: true }) as never);
+    await h.maintain();
+    if (mode === 'untouched') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalled();
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it.each(['left-over', 'recent', 'active', 'listed', 'typed-into', 'no-list'])('closes a start page the app opened for a message it no longer lists (%s)', async mode => {
+    // 2.1.41 bug hunt: a new chat's opening tab outlived its message (claimed, then the chosen browser
+    // changed and the app restarted) and sat on ChatGPT's start page for 13 hours. The cancel path's
+    // close entry never came. A marked, untouched start page the app no longer lists now closes.
+    const inputs = mode === 'listed' ? [{ id: firstId, conversationId: null }] : [];
+    const h = await worker(inputs, undefined, {}, {}, mode === 'no-list' ? undefined : new Set<number>());
+    const url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+    h.tabs.push({ id: 7, url, active: mode === 'active', lastAccessed: Date.now() - (mode === 'recent' ? 60_000 : 13 * 3_600_000) } as any);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'opening', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' } : { ok: true, ready: true }) as never);
+    await h.maintain();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalledWith(7);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it.each(['left-over', 'live', 'typed-into'])('closes the start page of a worker or handoff the app no longer lists (%s)', async mode => {
+    // 2.1.41 bug hunt: a worker that failed before its first message (memory-starved VM) left its
+    // `?clf=` start page open after the run had parked.
+    const h = await worker([], undefined, {}, {}, new Set<number>());
+    if (mode === 'live') h.fetch.mockImplementation(async (input: string) => ({ ok: true, status: 200, json: async () => new URL(input).pathname === '/hello'
+      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+      : { ok: true, inputs: [], background: true, inputOpeningIds: [], commandIds: ['df36e44ae2a5446f'] } }));
+    const url = 'https://chatgpt.com/?clf=df36e44ae2a5446f#clf=df36e44ae2a5446f';
+    h.tabs.push({ id: 7, url, lastAccessed: Date.now() - 10 * 60_000 } as any);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'worker', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' && message.command === 'df36e44ae2a5446f' } : { ok: true, ready: true }) as never);
+    await h.maintain();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalledWith(7);
+  });
   it('never opens a helper for passive model observation, including repeated maintenance', async () => {
     const h = await worker([]);
     const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: false };
@@ -943,6 +1044,19 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.maintain();
     expect([...rendered]).toEqual([]);
     expect(h.create).not.toHaveBeenCalled();
+  });
+  // #1086 (2.1.41, Windows VM): a worker tab got its rendering lease only at the next status pass, up
+  // to 40 s after it opened. Until then the hidden, throttled page loaded, chose its model and waited for
+  // ChatGPT's composer so slowly that workers missed their start deadline. Its page asks for the lease
+  // the moment it registers.
+  it('renders a command tab as soon as its page registers, without waiting for the next pass', async () => {
+    const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;
+    const h = await worker([], undefined, {}, { discardProtectedTabs: { 7: { commandId: firstId, at: Date.now(), url: marker, conversationId: null } } }, rendered);
+    const tab = { id: 7, url: marker }; h.tabs.push(tab);
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, app: 'chat-on-steroids',
+      bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, commandIds: [firstId], inputs: [], nonDiscardableConversations: [] }) });
+    await h.authorizeDocument({ tab, documentId: 'first', frameId: 0, url: marker }, { navigationEpoch: 1 });
+    await vi.waitFor(() => expect([...rendered]).toEqual([7]));
   });
   it('releases command rendering after document replacement and hands a bound worker to ordinary live activity', async () => {
     const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;

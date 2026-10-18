@@ -137,14 +137,19 @@ describe('passive usage limits and canonical token totals', () => {
     // Four context tokens, two real exchanges. Children add neither text nor billing calls.
     expect((await usage.usageOverview()).tokens).toBe(4);
   });
-  it('keeps shared windows distinct and does not manufacture model-specific counts', async () => {
-    usage.observeUsage([limit(), limit({ windowSeconds: 604800, remainingPercent: 70 }), limit({ model: 'gpt-example', scope: 'model', remaining: 3, remainingPercent: null })]);
+  it('keeps Codex windows distinct and does not manufacture model-specific counts', async () => {
+    usage.observeUsage([limit({ scope: 'codex' }), limit({ windowSeconds: 604800, remainingPercent: 70, scope: 'codex' }), limit({ model: 'gpt-example', scope: 'model', remaining: 3, remainingPercent: null })]);
     const result = await usage.usageOverview();
     expect(result.limits).toHaveLength(3);
-    expect(result.limits.filter(row => row.scope === 'shared').map(row => row.remaining)).toEqual([null, null]);
+    expect(result.limits.filter(row => row.scope === 'codex').map(row => row.remaining)).toEqual([null, null]);
     expect(result.limits.filter(row => row.scope === 'model')).toEqual([expect.objectContaining({ model: 'gpt-example', remaining: 3, remainingPercent: null })]);
     result.limits[0]!.remainingPercent = 99;
     expect((await usage.usageOverview()).limits[0]?.remainingPercent).toBe(40);
+  });
+  // An extension from before 2.1.40 still sends wham/usage windows as "shared"; they were Codex's.
+  it('reads the old "shared" rows as Codex', () => {
+    usage.observeUsage([limit({ model: 'Shared usage', scope: 'shared' })]);
+    expect(usage.reportedUsageLimits()).toEqual([expect.objectContaining({ model: 'Codex', scope: 'codex', remainingPercent: 40 })]);
   });
   it.each([{ remaining: -1 }, { remaining: Infinity }, { remainingPercent: 101 }, { remainingPercent: NaN }, { resetAt: -1 }, { windowSeconds: 0 }, { scope: 'guessed' }])('rejects malformed batch atomically (%j)', async (bad) => {
     usage.observeUsage([limit()]);

@@ -15,6 +15,10 @@ import { positionOf } from '../../shared/chronology.js';
 import { transcriptEntries } from '../../shared/markdown-export.js';
 import { indexedSessions, readEvents, readOverflowText, sessionSearchIndexPath } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
+import { markdownVisibleText } from '../../shared/markdown-text.js';
+import { foldCase } from '../../shared/fold-case.js';
+
+export { foldCase };
 import { logWarn } from '../logger.js';
 
 /** Plenty for a long chat's words; a runaway transcript is cut, not stored whole. */
@@ -25,21 +29,6 @@ const SNIPPET_CHARS = 140;
 export const MAX_SEARCH_RESULTS = 50;
 const INDEX_VERSION = 1;
 
-
-/**
- * Lowercase without accents ("Prüfung", "café" and "İstanbul" match "prufung", "cafe" and
- * "istanbul") that keeps every character's length, so match offsets in it are offsets in the
- * original. A character whose folded form would change length keeps a same-length form or itself.
- */
-export function foldCase(text: string): string {
-  return text.replace(/[A-Z]+|[^\x00-\x7f]/gu, chunk => {
-    if (chunk.charCodeAt(0) < 0x80) return chunk.toLowerCase();
-    const lower = chunk.toLowerCase();
-    const base = lower.length === chunk.length ? lower : chunk;
-    const bare = base.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
-    return bare.length === chunk.length ? bare : base;
-  });
-}
 
 /** What makes an index current: the chat's last change and its event count. */
 const stampOf = (summary: SessionSummary): string => `${INDEX_VERSION}:${summary.updatedAt}:${summary.events ?? 0}`;
@@ -229,7 +218,8 @@ const MAX_FIND_RESULTS = 500;
 /**
  * Find in chat (Codex's ⌘F): every message of one chat holding the phrase, in the order they were
  * said. Case and runs of white space do not matter. Read from the whole recording, so a match far
- * above the page the window holds is found too.
+ * above the page the window holds is found too. A message matches as written or as drawn: answers
+ * are recorded as Markdown, and "File: /src" is what the person reads in "**File:** `/src`".
  */
 export async function findInSession(id: string, query: string): Promise<SessionSearchLocation[]> {
   const phrase = foldCase(query.replace(/\s+/g, ' ').trim());
@@ -240,7 +230,9 @@ export async function findInSession(id: string, query: string): Promise<SessionS
     const text = entry.stored.truncated && entry.stored.assetId
       ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
       : entry.stored.text;
-    if (!foldCase(text.replace(/\s+/g, ' ')).includes(phrase)) continue;
+    const matches = (written: string): boolean => foldCase(written.replace(/\s+/g, ' ')).includes(phrase);
+    // Only text with Markdown syntax in it can read differently once drawn.
+    if (!matches(text) && !(/[*_`[\]<&|\\~#]/.test(text) && matches(markdownVisibleText(providerEntitiesAsMarkdown(text))))) continue;
     const event = events.find(candidate => candidate.seq === entry.seq);
     if (!event || (event.kind !== 'user_message' && event.kind !== 'assistant_message')) continue;
     const messageId = event.messageId ?? null;
@@ -257,6 +249,16 @@ export async function findInSession(id: string, query: string): Promise<SessionS
  * The first message of a chat holding any of the query's words: where its snippet came from, so the
  * chat can open there instead of at its end. Read only when a result is opened, from the recording.
  */
+/** Where one recorded reply is, by its native message id (#482: a branch links back to it). */
+export async function locateMessage(id: string, messageId: string): Promise<SessionSearchLocation | null> {
+  const events = await readEvents(id, { kinds: ['assistant_message'] });
+  const revisions = events.filter(event => event.kind === 'assistant_message' && event.messageId === messageId);
+  const latest = revisions.at(-1);
+  if (!latest || latest.kind !== 'assistant_message') return null;
+  // A revised message keeps the place where it first appeared.
+  return { seq: latest.seq, kind: 'assistant_message', messageId, position: Math.min(...revisions.map(event => positionOf(event))) };
+}
+
 export async function locateSearchMatch(id: string, query: string): Promise<SessionSearchLocation | null> {
   const terms = queryTerms(query);
   if (!terms.length) return null;

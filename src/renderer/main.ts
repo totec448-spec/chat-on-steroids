@@ -1,5 +1,7 @@
 import { initBrowserSetup } from './setup-browser.js';
-import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
+import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
+import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
+import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
@@ -70,6 +72,10 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+// Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
+ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
+ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
+ui($('enterSendsModifier'), 'textContent', () => primaryShortcut(t('Enter')));
 let pluginRefreshResetBusy = false;
 let pluginRefreshResetFailed = false;
 function paintPluginRefreshRecovery(next: AppState): void {
@@ -340,7 +346,6 @@ $('sidebarPets').addEventListener('click', () => showTab('pets'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
-$('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
 let zoomEdited = false;
 void api.getZoom().then(result => {
@@ -598,10 +603,10 @@ function paintGroups(): void {
     ui(root.querySelector<HTMLElement>('.group-count')!, 'textContent', () => usable.length === 0
         ? t("off in read-only mode")
         : on.length === 0
-          ? 'off'
+          ? t('off')
           : on.length === group.caps.length
-            ? t(on.length === 1 ? '{0} permission' : '{0} permissions', [on.length])
-            : t("{0} of {1} permissions", [on.length, group.caps.length]));
+            ? tn('{0} permission', '{0} permissions', on.length)
+            : tn("{0} of {1} permission", "{0} of {1} permissions", group.caps.length, [on.length, group.caps.length]));
 
     root.classList.toggle('is-on', on.length > 0);
     root.classList.toggle('is-locked', usable.length === 0);
@@ -644,15 +649,26 @@ function paintDesktopAccess(next: AppState): void {
   box.hidden = missing.length === 0;
   if (box.hidden) return;
 
+  const problem = desktopAccessProblem(next);
+  const stale = problem?.stale === true;
+  // Repair resets only this app's own entry and asks again, so it is safe whether or not an
+  // earlier grant is remembered; the first version that remembers grants knows of none.
+  const repairable = problem?.missing === true;
   ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
   ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
-    t("Grant the missing macOS permission, then fully quit and reopen the app."));
+    (stale
+      ? t("macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
+      : repairable
+        ? t("Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.")
+        : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
+  $<HTMLButtonElement>('repairDesktopAccess').hidden = !repairable;
   $<HTMLButtonElement>('openDesktopScreen').hidden =
     !needsScreen || access.screen === 'granted';
   $<HTMLButtonElement>('openDesktopAccessibility').hidden =
     !needsAccessibility || access.accessibility === 'granted';
+  // Repair asks for Accessibility again itself; a second request button would only compete with it.
   $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
-    !needsAccessibility || access.accessibility === 'granted';
+    !needsAccessibility || access.accessibility === 'granted' || repairable;
 }
 
 /**
@@ -740,8 +756,10 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
+      playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
+      mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
@@ -834,6 +852,11 @@ const STATUS_TEXT: Record<AppState['status']['state'], string> = {
   'auth-failed': "Sign-in failed",
   'tunnel-unavailable': "Tunnel unavailable"
 };
+
+/** The connection's one-line name; an outage of OpenAI's tunnel service is not "No internet". */
+function statusText(status: AppState['status']): string {
+  return status.state === 'offline' && status.offlineCause === 'service' ? "OpenAI outage" : STATUS_TEXT[status.state];
+}
 
 const METHOD_HINT: Record<string, string> = {
   openai:
@@ -1216,12 +1239,12 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
         : update.stage === 'downloading'
           ? t("Chat On Steroids {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
           : update.stage === 'failed'
-            ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ?? t("the download stopped")])
+            ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
             : t("Chat On Steroids {0} is out. This installation has to be updated by hand.", [update.latest])
     );
     if (update.stage === 'failed' || update.notInstalled) tone = 'bad';
   } else if (update.stage === 'failed') {
-    lines.push(t("Could not check for a newer version: {0}.", [update.error ?? t("the check stopped")]));
+    lines.push(t("Could not check for a newer version: {0}.", [update.error ? updateErrorText(update.error) : t("the check stopped")]));
     tone = 'bad';
   } else if (update.stage === 'checking') {
     lines.push(t("Checking for a newer version…"));
@@ -1231,9 +1254,13 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     tone = 'ok';
   }
   if (stale) {
+    // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
+    const firefox = bridge.extensionEngine === 'gecko' || (bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale);
     lines.push(
       t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
-        t("Reload the extension from this app’s folder, then refresh ChatGPT.")
+        (firefox
+          ? t("Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.")
+          : t("Reload the extension from this app’s folder, then refresh ChatGPT."))
     );
     tone = 'bad';
   }
@@ -1449,7 +1476,7 @@ function apply(next: AppState): void {
   const label = $('sidebarConnectionLabel');
   const capsuleWords = (): string => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…')
     // A failure says so in one short word; its reason is in the title and the details.
-    : offline ? t(STATUS_TEXT[status.state]) : failed ? t('Failed') : t('Connect');
+    : offline ? t(statusText(status)) : failed ? t('Failed') : t('Connect');
   // Connecting sends several updates with the same words: those change nothing, and a morph under way
   // keeps going. New words morph from what is on screen now, the width mid-way included.
   // Opening from the dot (Disconnecting…) morphs the same way, with no old words to fade.
@@ -1515,12 +1542,12 @@ function apply(next: AppState): void {
     ], { duration: 900, easing: 'ease-out' });
   }
   if (previousConnectionState !== null && previousConnectionState !== status.state) {
-    ui($('connectionAnnounce'), 'textContent', () => t(STATUS_TEXT[status.state]));
+    ui($('connectionAnnounce'), 'textContent', () => t(statusText(status)));
   }
   previousConnectionState = status.state;
   const connectionPopover = $('connectionPopover');
   connectionPopover.className = `connection-popover scroll${capsuleTone ? ` ${capsuleTone}` : ''}`;
-  ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui($('connectionPopoverTitle'), 'textContent', () => t(statusText(status)));
 
   const id = config.tunnel.tunnelId;
   ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
@@ -1604,6 +1631,7 @@ function apply(next: AppState): void {
   readCommandAllowlist();
   paintGroups();
   paintDesktopAccess(next);
+  paintDesktopAccessNotice(next, { repair: () => void repairDesktopAccess(), open: () => showTab('home') });
 
   // ---- folders
   paintRoots(config.roots);
@@ -1636,7 +1664,17 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
-  applyValue($<HTMLSelectElement>('rotateTurnMinutes'), String(config.ui.rotateTurnMinutes ?? 30), previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
+  // A value the list does not offer (set in the config) gets its own option; without one the select
+  // reads empty and the next save of any setting turned fresh turns Off (2.1.39 release round).
+  const rotate = $<HTMLSelectElement>('rotateTurnMinutes');
+  const rotateMinutes = String(config.ui.rotateTurnMinutes ?? 30);
+  if (![...rotate.options].some(option => option.value === rotateMinutes)) {
+    rotate.querySelector('option[data-configured]')?.remove();
+    const option = document.createElement('option');
+    option.value = rotateMinutes; option.textContent = t("{0} min", [rotateMinutes]); option.dataset.configured = '';
+    rotate.add(option);
+  }
+  applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
   applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
@@ -1663,8 +1701,10 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
+  applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
+  applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('codeCheckpoints'), config.projects?.codeCheckpoints === true, previousState?.config.projects?.codeCheckpoints);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
@@ -1747,7 +1787,7 @@ function apply(next: AppState): void {
   wizConnect.dataset.tone = tone;
   const pill = $('wizStatusPill');
   pill.dataset.tone = tone;
-  ui(pill, 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui(pill, 'textContent', () => t(statusText(status)));
   const detail = $('wizStatus');
   detail.hidden = !failed || !status.detail;
   ui(detail, 'textContent', () => failed ? status.detail : '');
@@ -1832,8 +1872,8 @@ function apply(next: AppState): void {
   progress.setAttribute('aria-valuenow', String(finished));
   progress.classList.toggle('is-complete', finished === shown.length);
   ui($('setupProgressText'), 'textContent', () => finished === shown.length
-    ? t('All {0} steps done', [shown.length])
-    : t('{0} of {1} steps done', [finished, shown.length]));
+    ? tn('{0} step done', 'All {0} steps done', shown.length)
+    : tn('{0} of {1} step done', '{0} of {1} steps done', shown.length, [finished, shown.length]));
 
   // One step open at a time: the one the user picked, else the first unfinished. Past the last
   // task comes Ready, which reads every check back, so a finished setup opens on its proof.
@@ -2092,7 +2132,7 @@ function paintClock(): void {
       ? t("Reached")
       : connected
         ? t("waiting")
-        : t(STATUS_TEXT[status.state]));
+        : t(statusText(status)));
   ui($('connectionPopoverBrowser'), 'textContent', () => bridge.present
     ? t("Connected")
     : bridge.paired ? t("Paired · not active") : t("Not connected"));
@@ -2106,8 +2146,8 @@ function paintClock(): void {
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
 
   const triggerText = status.handshakeAt !== null && running
-    ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
-    : t(STATUS_TEXT[status.state]);
+    ? `${t(statusText(status))} · ${t("verified {0}", [ago(status.handshakeAt)])}`
+    : t(statusText(status));
   ui($('sidebarConnection'), 'aria-label', () => triggerText);
   ui($('sidebarConnection'), 'title', () => triggerText);
 }
@@ -2259,7 +2299,7 @@ function paintProblems(): void {
   for (const id of ['homeProblems', 'logProblems']) {
     const badge = $(id);
     badge.hidden = problems === 0;
-    ui(badge, 'textContent', () => t(problems === 1 ? '{0} problem' : '{0} problems', [problems]));
+    ui(badge, 'textContent', () => tn('{0} problem', '{0} problems', problems));
   }
 }
 
@@ -2479,6 +2519,16 @@ async function runChecks(): Promise<void> {
 }
 
 $('runChecks').addEventListener('click', () => void runChecks());
+async function repairDesktopAccess(): Promise<void> {
+  for (const id of ['repairDesktopAccess', 'desktopAccessNoticeRepair']) $<HTMLButtonElement>(id).disabled = true;
+  try {
+    const next = await run(api.repairDesktopAccess());
+    if (next) apply(next);
+  } finally {
+    for (const id of ['repairDesktopAccess', 'desktopAccessNoticeRepair']) $<HTMLButtonElement>(id).disabled = false;
+  }
+}
+$('repairDesktopAccess').addEventListener('click', () => void repairDesktopAccess());
 $('requestDesktopAccessibility').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('requestDesktopAccessibility');
   button.disabled = true;
@@ -2533,6 +2583,43 @@ window.addEventListener('drop', (event) => event.preventDefault());
 $('updateGet').addEventListener('click', () => void run(api.downloadUpdate()));
 initUpdateReadiness();
 $('updateReviewSetup').addEventListener('click', () => showTab('setup'));
+/**
+ * The question before Update all restarts, in the app's own dialog (a system message box looked
+ * foreign, 2026-10-15). Drawn like What's New: the app's tile, the version, one calm question.
+ * Keep working stays first and focused; only the named version is approved.
+ */
+function confirmUpdateRestart(version: string): Promise<boolean> {
+  document.getElementById('updateRestartDialog')?.remove();
+  return new Promise(resolve => {
+    const dialog = document.createElement('dialog');
+    dialog.id = 'updateRestartDialog'; dialog.className = 'whats-new-dialog update-restart-dialog';
+    const head = document.createElement('header'); head.className = 'whats-new-head';
+    const hero = document.createElement('div'); hero.className = 'whats-new-hero'; hero.setAttribute('aria-hidden', 'true');
+    hero.innerHTML = '<span class="whats-new-tile"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>' +
+      '<span class="whats-new-seal"><i class="ico ph ph-arrow-clockwise"></i></span>';
+    const named = document.createElement('span'); named.className = 'whats-new-version';
+    ui(named, 'textContent', () => t('Version {0}', [version]));
+    const title = document.createElement('h2'); title.id = 'updateRestartTitle';
+    ui(title, 'textContent', () => t('Restart to install the update?'));
+    const lead = document.createElement('p'); lead.className = 'whats-new-lead'; lead.id = 'updateRestartLead';
+    ui(lead, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
+    dialog.setAttribute('aria-labelledby', title.id); dialog.setAttribute('aria-describedby', lead.id);
+    head.append(hero, named, title, lead);
+    const actions = document.createElement('footer'); actions.className = 'whats-new-actions';
+    const keep = document.createElement('button'); keep.type = 'button'; keep.className = 'whats-new-link update-restart-keep';
+    ui(keep, 'textContent', () => t('Keep working'));
+    keep.addEventListener('click', () => dialog.close());
+    const restart = document.createElement('button'); restart.type = 'button'; restart.className = 'whats-new-done update-restart-go';
+    ui(restart, 'textContent', () => t('Restart and install'));
+    let approved = false;
+    restart.addEventListener('click', () => { approved = true; dialog.close(); });
+    actions.append(keep, restart); dialog.append(head, actions);
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+    dialog.addEventListener('close', () => { dialog.remove(); resolve(approved); });
+    document.body.append(dialog); dialog.showModal(); keep.focus();
+  });
+}
+
 const updateAllButton = $<HTMLButtonElement>('updateAll');
 updateAllButton.addEventListener('click', async () => {
   if (updateAllButton.disabled) return;
@@ -2542,13 +2629,18 @@ updateAllButton.addEventListener('click', async () => {
   updateAllError = null;
   if (state) paintUpdateReadiness(state, updateAllError);
   try {
-    const reply = await api.updateAll();
+    let reply = await api.updateAll();
+    if (reply.ok && reply.data === 'confirm') {
+      const version = state?.update.latest;
+      if (!version || !await confirmUpdateRestart(version)) { toast(t('Update postponed. You can keep working.')); return; }
+      reply = await api.updateAll(version);
+    }
     if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
     else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
     else if (result === 'checking-connectors') toast(document.getElementById('updateReadinessCard') ? t('Plugin checks requested. Any remaining steps are shown in Update status.') : t('Checking…'));
-    else if (result === 'cancelled') toast(t('Update postponed. You can keep working.'));
+    else if (result === 'confirm') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
     updateAllError = error instanceof Error ? error.message : String(error);
   } finally {
@@ -2680,11 +2772,13 @@ for (const id of [
   'minimizeToTray',
   'developerMode',
   'playfulStatus',
+  'playfulContinue',
   'followOutput',
   'followUp',
   'enterSends',
   'turnNotifications',
   'mentionCore',
+  'mentionPlugins',
   'controlApiEnabled',
   'controlApiAllowActions',
   'codeCheckpoints',

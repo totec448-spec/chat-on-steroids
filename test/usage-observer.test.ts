@@ -468,10 +468,15 @@ describe('MAIN-world usage projection', () => {
     expect(h.posts).toHaveLength(1);
     expect(h.posts[0]?.observedAt).toBe(Date.parse('2026-09-05T12:00:00Z'));
   });
-  it('projects shared percentage windows without copying credentials or inventing a model balance', async () => {
+  // wham/usage is Codex's usage endpoint (the one Codex's /status and ChatGPT's sidebar panel
+  // read): its windows are Codex limits, not ChatGPT chat limits, and are labeled so (2026-10-16).
+  it('projects Codex percentage windows as Codex, without copying credentials or inventing a model balance', async () => {
     const h = harness();
-    await h.feed({ access_token: 'secret', email: 'private@example.test', rate_limit: { primary_window: { used_percent: 25, reset_at: 1900000000, limit_window_seconds: 18000 } } });
-    expect(h.posts).toEqual([{ type: 'cos-usage', observedAt: expect.any(Number), rows: [{ model: 'Shared usage', scope: 'shared', remaining: null, remainingPercent: 75, resetAt: 1900000000000, windowSeconds: 18000 }] }]);
+    await h.feed({ access_token: 'secret', email: 'private@example.test', rate_limit: { primary_window: { used_percent: 25, reset_at: 1900000000, limit_window_seconds: 18000 } },
+      additional_rate_limits: [{ limit_name: 'GPT-5.3-Codex-Spark', rate_limit: { primary_window: { used_percent: 10, limit_window_seconds: 604800 } } }] });
+    expect(h.posts).toEqual([{ type: 'cos-usage', observedAt: expect.any(Number), rows: [
+      { model: 'Codex', scope: 'codex', remaining: null, remainingPercent: 75, resetAt: 1900000000000, windowSeconds: 18000 },
+      { model: 'GPT-5.3-Codex-Spark', scope: 'codex', remaining: null, remainingPercent: 90, resetAt: null, windowSeconds: 604800 }] }]);
     expect(JSON.stringify(h.posts)).not.toMatch(/secret|private|Authorization/);
   });
 
@@ -750,6 +755,37 @@ describe('Core app identity for mentions (#861)', () => {
   const hint = (system_hint: string, name: string) => ({ system_hint, name, description: 'x', is_plugin: true });
   const url = 'https://chatgpt.com/backend-api/system_hints?mode=composer';
   const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+  it('exposes exact Core and Plugins identities, not Desktop or a lookalike, in one provider hint list', async () => {
+    const h = harness();
+    await h.feed({ system_hints: [
+      hint('plugin:asdk_app_core1111', 'Chat On Steroids Core'),
+      hint('plugin:asdk_app_plugins2222', 'Chat On Steroids Plugins (Windows)'),
+      hint('plugin:asdk_app_desktop3333', 'Chat On Steroids Desktop'),
+      hint('plugin:asdk_app_lookalike44', 'Chat On Steroids Plugins Backup')
+    ] }, url);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)?.candidates).toEqual([
+      { name: 'Chat On Steroids Core', path: 'app://asdk_app_core1111' },
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_plugins2222' }
+    ]);
+  });
+  it('never accepts an ambiguous Plugins name and revokes it on a complete plugins list', async () => {
+    const h = harness();
+    const pluginsUrl = 'https://chatgpt.com/backend-api/system_hints?mode=plugins';
+    await h.feed({ system_hints: [
+      hint('plugin:asdk_app_plugins1111', 'Chat On Steroids Plugins'),
+      hint('connector:asdk_app_plugins2222', 'Chat On Steroids Plugins')
+    ] }, pluginsUrl);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)?.candidates).toEqual([
+      { name: 'Chat On Steroids Plugins', path: null }
+    ]);
+    await h.feed({ system_hints: [hint('plugin:asdk_app_core1234', 'Chat On Steroids Core')] }, pluginsUrl);
+    await settle();
+    expect(h.posts.filter(row => row.type === 'cos-core-mention').at(-1)?.candidates).toEqual([
+      { name: 'Chat On Steroids Core', path: 'app://asdk_app_core1234' }
+    ]);
+  });
   it('reports the one Core app from the page\'s own system hints and repeats it on request', async () => {
     const h = harness();
     await h.feed({ system_hints: [hint('plugin:asdk_app_6aa5b6651c3c81919f03cb5dc38bf019', 'Chat On Steroids Core'),

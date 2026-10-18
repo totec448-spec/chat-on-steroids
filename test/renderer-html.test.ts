@@ -133,6 +133,20 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(renderedMarkdown(`Use \`${pointer}\` in docs.`).textContent).toContain('chatgpt-content-reference');
   });
 
+  // 2.1.41 bug hunt: ChatGPT draws an answer's paragraphs with white-space: pre-line, so a poem's single
+  // line breaks stay lines there. Here the three lines ran together as one sentence.
+  it('keeps an answer\'s single line breaks as ChatGPT shows them, inside paragraphs and list items', () => {
+    const rendered = renderedMarkdown('The river weaves its silver dreams,\nAnd carries whispered secrets.\nThe River\'s Song\n\n- first line\n  continued\n- second');
+    const paragraph = rendered.querySelector('p')!;
+    expect(paragraph.querySelectorAll('br')).toHaveLength(2);
+    expect(paragraph.innerHTML.split('<br>').map(line => line.trim())).toEqual(['The river weaves its silver dreams,', 'And carries whispered secrets.', 'The River\'s Song']);
+    expect(rendered.querySelector('li')!.querySelectorAll('br')).toHaveLength(1);
+    // A blank line is still a new paragraph, and code keeps its own lines without breaks added.
+    const code = renderedMarkdown('One\n\nTwo\n\n```\na\nb\n```');
+    expect(code.querySelectorAll('p')).toHaveLength(2);
+    expect(code.querySelector('pre')!.querySelectorAll('br')).toHaveLength(0);
+  });
+
   it('never shows an unknown ChatGPT directive as raw text', () => {
     const leaf = '::chatgpt-entity{type="place" id="42"}';
     expect(renderedMarkdown(leaf, whole('<p>Berlin</p>')).textContent?.trim()).toBe('Berlin');
@@ -565,6 +579,23 @@ c & d
     expect(shown).toContain('ℏ');
     expect(shown).not.toContain(String.raw`\frac`);
     expect(rendered.querySelector('p:last-of-type')!.textContent).toContain('[ok] 2^10 = 1024 a_b');
+  });
+
+  it.each([
+    ['before', 'The area is \\(\\pi r^2\\).\n\n:::writing{variant="standard" title="Note"}\nArea is \\(\\pi r^2\\) for **any** circle.\n:::'],
+    ['after', ':::writing{variant="standard" title="Note"}\nArea is \\(\\pi r^2\\) for **any** circle.\n:::\n\nThe area is \\(\\pi r^2\\).']
+  ])('keeps a writing panel and its formulas apart, with a formula %s the panel', async (_order, text) => {
+    // Both used to mark their place with the same two characters: the panel's marker drew as a formula.
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    Object.assign((dom.window as unknown as { api: object }).api, { writeClipboard });
+    const rendered = renderedMarkdown(text);
+    const panel = rendered.querySelector('.markdown-writing')!;
+    expect(panel.querySelector('.tool-output-header strong')?.textContent).toBe('Note');
+    expect(rendered.querySelectorAll('.math-inline .katex')).toHaveLength(2);
+    expect(panel.querySelectorAll('.math-inline .katex')).toHaveLength(1);
+    expect(rendered.textContent).not.toMatch(/[-]/);
+    panel.querySelector<HTMLButtonElement>('.tool-copy')!.click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('Area is \\(\\pi r^2\\) for **any** circle.'));
   });
 
   it('shows the name of a person or place ChatGPT links, instead of dropping it', () => {

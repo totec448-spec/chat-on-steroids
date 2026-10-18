@@ -39,6 +39,19 @@ export function storedSecretsUnreadable(): boolean {
 }
 /** Invalidates a decrypt that started before an explicit store reset/delete boundary. */
 let loadGeneration = 0;
+/** Counts every change to the stored secrets this process sees, read or written. */
+let revision = 0;
+function setCache(values: Record<string, string> | null): void {
+  cache = values;
+  revision += 1;
+}
+/**
+ * Changes whenever the stored secrets may have: lets a cache scoped to a credential notice a new
+ * one without keeping the credential or anything derived from it.
+ */
+export function secretsRevision(): number {
+  return revision;
+}
 /**
  * Coalesces concurrent cache misses into one disk/keyring read.
  *
@@ -210,14 +223,14 @@ async function loadAll(): Promise<Record<string, string>> {
     // unavailable provider. Once deletion starts, plaintext from the older generation must never
     // republish credentials that have just been removed from disk.
     if (generation !== loadGeneration) return cache ?? {};
-    cache = parsed;
+    setCache(parsed);
     unreadable = false;
     rotationPending = decrypted.shouldReEncrypt;
   } catch (err) {
     if (generation !== loadGeneration) return cache ?? {};
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
-      cache = {};
+      setCache({});
       unreadable = false;
       rotationPending = false;
     } else {
@@ -239,7 +252,7 @@ async function loadAll(): Promise<Record<string, string>> {
       return {};
     }
   }
-  return cache;
+  return cache ?? {};
 }
 
 async function readAll(): Promise<Record<string, string>> {
@@ -268,7 +281,7 @@ async function writeAll(values: Record<string, string>): Promise<void> {
   await fs.rename(tmp, secretsPath);
   // Published only once the rename succeeded. A failed disk write must leave the
   // process believing the old state, not a credential it never actually saved.
-  cache = values;
+  setCache(values);
   rotationPending = false;
 }
 
@@ -359,10 +372,10 @@ export function deleteAllSecrets(): Promise<void> {
     // view instead of resurrecting the deleted credentials into cache.
     loadGeneration += 1;
     rotationPending = false;
-    cache = null;
+    setCache(null);
     try {
       await fs.rm(secretsPath, { force: true });
-      cache = {};
+      setCache({});
       unreadable = false;
     } catch (err) {
       logError(`Could not remove stored credentials: ${(err as Error).message}`);
@@ -387,7 +400,7 @@ export function setAsideUnreadableSecrets(now: Date = new Date()): Promise<strin
     loadGeneration += 1;
     rotationPending = false;
     await fs.rename(secretsPath, path.join(path.dirname(secretsPath), name));
-    cache = {};
+    setCache({});
     unreadable = false;
     logWarn(`Stored credentials could not be read; at the user's request the file was set aside as ${name}`);
     return name;
@@ -398,7 +411,7 @@ export function setAsideUnreadableSecrets(now: Date = new Date()): Promise<strin
 export function resetSecretsCacheForTests(): void {
   loadGeneration += 1;
   unreadable = false;
-  cache = null;
+  setCache(null);
   rotationPending = false;
   loadInFlight = null;
 }

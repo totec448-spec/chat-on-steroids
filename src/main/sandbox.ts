@@ -14,9 +14,17 @@
 
 import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import path from 'node:path';
-import type { Root } from '../shared/types.js';
+import type { RemoteFolder, Root } from '../shared/types.js';
+import { sftpFor } from './remote/ssh.js';
+import { SftpError } from './remote/sftp.js';
 
 const IS_WINDOWS = process.platform === 'win32';
+/** Windows file-name rules for paths on this computer; a server's paths never take them. */
+let windowsNameRules = IS_WINDOWS;
+/** Test seam: apply (true) or drop (false) the Windows name rules on any platform; null restores. */
+export function setWindowsPathRulesForTests(on: boolean | null): void {
+  windowsNameRules = on ?? IS_WINDOWS;
+}
 
 /** WSL's local redirector aliases; the Linux part of their paths is case-sensitive. */
 const WSL_PATH = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)(.*)$/i;
@@ -74,21 +82,37 @@ export interface Resolved {
  */
 export function suggestApprovedSpelling(roots: readonly Root[], segments: readonly string[]): string | null {
   for (const [index, segment] of segments.entries()) {
-    const slug = normaliseRootName(segment);
-    const root = roots.find((candidate) => candidate.name === slug);
+    const slugs = new Set([normaliseRootName(segment), legacyRootName(segment)]);
+    const root = roots.find((candidate) => slugs.has(candidate.name));
     if (root) return `/${root.name}${segments.slice(index + 1).map((part) => `/${part}`).join('')}`;
   }
   return null;
 }
 
-/** Normalises a user-supplied root name into the slug used in virtual paths. */
-export function normaliseRootName(input: string): string {
-  const slug = input
-    .toLowerCase()
+/** Letters spelled with two ASCII letters by custom, or that Unicode does not decompose. */
+const ASCII_SPELLINGS: Readonly<Record<string, string>> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th' };
+
+function slugOf(lowered: string): string {
+  const slug = lowered
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 32);
   return slug || 'folder';
+}
+
+/**
+ * Normalises a user-supplied root name into the slug used in virtual paths. Letters keep an
+ * ASCII spelling instead of being dropped: "Größe" is `groesse`, "Café" is `cafe` (older
+ * versions made "Kundenprojekt Größe & Ä" `/kundenprojekt-gr-e`).
+ */
+export function normaliseRootName(input: string): string {
+  return slugOf(input.toLowerCase().replace(/[äöüßæœøłđðþ]/g, letter => ASCII_SPELLINGS[letter]!)
+    .normalize('NFKD').replace(/\p{M}+/gu, ''));
+}
+
+/** The slug older versions gave a root, which existing roots keep as their name. */
+function legacyRootName(input: string): string {
+  return slugOf(input.toLowerCase());
 }
 
 /** Picks a root name derived from a folder that does not collide with existing ones. */
@@ -107,7 +131,7 @@ export function uniqueRootName(folderPath: string, existing: readonly Root[]): s
  * Validates one path segment. Traversal/control constraints apply everywhere; Windows also
  * rejects drive/ADS syntax, reserved device names and names Win32 silently aliases.
  */
-function checkSegment(segment: string): void {
+function checkSegment(segment: string, windows = windowsNameRules): void {
   if (segment === '' || segment === '.') {
     throw new SandboxError('Path contains an empty segment');
   }
@@ -121,7 +145,7 @@ function checkSegment(segment: string): void {
   if (/[\x00-\x1f]/.test(segment)) {
     throw new SandboxError('Path contains a control character');
   }
-  if (IS_WINDOWS) {
+  if (windows) {
     // ":" would open an alternate data stream or a drive-relative path.
     if (segment.includes(':')) {
       throw new SandboxError('Path contains ":", which is not allowed');
@@ -142,8 +166,12 @@ function checkSegment(segment: string): void {
   }
 }
 
-/** Splits a virtual path into validated segments. Windows accepts both native separators. */
-export function splitVirtualPath(input: string): string[] {
+/**
+ * Splits a virtual path into validated segments. Windows accepts both native separators. A path
+ * in a folder on a server (`posix`) splits on "/" only and keeps the server's own name rules: a
+ * Linux file may be called `it's "quoted".txt` or `a\b`, and Windows has no say over it.
+ */
+export function splitVirtualPath(input: string, { posix = false }: { posix?: boolean } = {}): string[] {
   if (typeof input !== 'string') {
     throw new SandboxError('Path must be a string');
   }
@@ -153,11 +181,12 @@ export function splitVirtualPath(input: string): string[] {
   if (input.length > 4096) {
     throw new SandboxError('Path is too long');
   }
-  const segments = (IS_WINDOWS ? input.split(/[/\\]+/) : input.split(/\/+/)).filter((s) => s.length > 0);
+  const windows = windowsNameRules && !posix;
+  const segments = (windows ? input.split(/[/\\]+/) : input.split(/\/+/)).filter((s) => s.length > 0);
   if (segments.length === 0) {
     throw new SandboxError('Path is empty. Use an approved virtual root such as /<root>/file.txt.');
   }
-  for (const segment of segments) checkSegment(segment);
+  for (const segment of segments) checkSegment(segment, windows);
   return segments;
 }
 
@@ -234,6 +263,12 @@ export interface ResolveOptions {
    * of the root, because there is no point at which a traversal is normalised away first.
    */
   base?: string | null;
+  /**
+   * The caller works on a server folder (#1469) through its `ProjectFs`. Every other caller acts
+   * on this computer's disk, where a server path would name some unrelated local file, so a
+   * server folder is refused to it rather than handed over.
+   */
+  remote?: boolean;
 }
 
 /** True for a path that names its root, rather than starting from somewhere already known. */
@@ -279,7 +314,30 @@ function isNativePosixPath(roots: readonly Root[], input: unknown): input is str
  * equivalent virtual path; resolvePath then runs that through the exact same realpath,
  * symlink/junction and allowMissing checks as an originally-virtual path.
  */
+/**
+ * A path as a server prints it (`pwd`, error output), inside a server root's folder (#1469), as
+ * the virtual path it names. Lexical only, on every platform: the result is validated like any
+ * virtual path, and its folder is checked on the server. Local roots and virtual spellings win.
+ */
+function serverNativePath(roots: readonly Root[], input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
+  const first = trimmed.split('/').find(part => part.length > 0)?.toLowerCase();
+  if (first !== undefined && roots.some(root => root.name.toLowerCase() === first)) return null;
+  if (roots.some(root => !root.remote && path.posix.isAbsolute(root.path) && isContained(root.path, trimmed))) return null;
+  for (const root of roots) {
+    if (!root.remote) continue;
+    const prefix = root.remote.path.replace(/\/+$/, '');
+    if (trimmed === prefix || trimmed === `${prefix}/` || trimmed.startsWith(`${prefix}/`)) {
+      return `/${root.name}${trimmed.slice(prefix.length).replace(/\/+$/, '')}`;
+    }
+  }
+  return null;
+}
+
 async function normaliseNativePath(roots: readonly Root[], input: string): Promise<string | null> {
+  const onServer = typeof input === 'string' ? serverNativePath(roots, input) : null;
+  if (onServer) return onServer;
   const nativeWindows = isNativeWindowsPath(input);
   const nativePosix = isNativePosixPath(roots, input);
   if (!nativeWindows && !nativePosix) return null;
@@ -312,6 +370,8 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
     canonicalNative = native;
   }
   for (const root of roots) {
+    // A server root has no path on this computer to compare with.
+    if (root.remote) continue;
     let rootReal: string;
     try {
       rootReal = await realRoot(root);
@@ -368,7 +428,10 @@ export async function resolvePath(
       `"${requested.slice(0, 120)}" is relative and this chat has no active folder yet. Use a full path: ${names}`
     );
   }
-  const segments = splitVirtualPath(requested);
+  // The root decides which name rules apply, so find it before checking the rest of the path.
+  const firstName = (windowsNameRules ? String(requested).split(/[/\\]+/) : String(requested).split(/\/+/)).find(Boolean)?.toLowerCase();
+  const onServer = roots.some((r) => !!r.remote && r.name.toLowerCase() === firstName);
+  const segments = splitVirtualPath(requested, { posix: onServer });
   const rootName = segments[0]!.toLowerCase();
   const root = roots.find((r) => r.name.toLowerCase() === rootName);
   if (!root) {
@@ -380,8 +443,12 @@ export async function resolvePath(
     );
   }
 
-  const rootReal = await realRoot(root);
   const rest = segments.slice(1);
+  if (root.remote && options.remote !== true) {
+    throw new SandboxError(`/${root.name} is a folder on a server; this works only in folders on this computer.`);
+  }
+  if (root.remote) return resolveRemote(root as Root & { remote: RemoteFolder }, rest, options);
+  const rootReal = await realRoot(root);
   const candidate = rest.length === 0 ? rootReal : path.join(rootReal, ...rest);
 
   // Cheap structural check before touching the disk.
@@ -411,6 +478,49 @@ export async function resolvePath(
     virtual: toVirtualPath(root, rootReal, finalReal),
     root
   };
+}
+
+/** POSIX containment for a path on a server; the server's paths are case-sensitive. */
+function containedOnServer(parent: string, child: string): boolean {
+  return child === parent || child.startsWith(parent.endsWith('/') ? parent : `${parent}/`);
+}
+
+/**
+ * The same rules for a folder on a server (#1469): segments were checked above; containment is
+ * POSIX, and where a link really goes is what the server's own realpath says.
+ */
+async function resolveRemote(root: Root & { remote: RemoteFolder }, rest: string[], options: ResolveOptions): Promise<Resolved> {
+  const rootReal = root.remote.path;
+  const unavailable = () => new SandboxError(`Root "/${root.name}" is not available on the server or changed there. Remove it and add the folder again.`);
+  let client;
+  try { client = await sftpFor(root.remote); }
+  catch (error) { throw new SandboxError(`Root "/${root.name}" could not be reached: ${error instanceof Error ? error.message : String(error)}`); }
+  // OpenSSH's realpath answers for a path whose last part does not exist, so existence is a stat.
+  try { if (!(await client.stat(rootReal)).isDirectory || await client.realpath(rootReal) !== rootReal) throw unavailable(); }
+  catch (error) { throw error instanceof SandboxError ? error : unavailable(); }
+  const candidate = rest.length ? path.posix.join(rootReal, ...rest) : rootReal;
+  if (!containedOnServer(rootReal, candidate)) throw new SandboxError('Path escapes its approved folder');
+  let current = candidate;
+  const missing: string[] = [];
+  let real: string;
+  for (;;) {
+    try { await client.stat(current); real = await client.realpath(current); break; }
+    catch (error) {
+      if (!(error instanceof SftpError) || error.code !== 'ENOENT') throw error;
+      // A link whose target is missing is not a new file: writing through it would create the
+      // target wherever the link points.
+      if (await client.lstat(current).then(() => true, () => false)) throw new SandboxError('Path contains a link that could not be resolved');
+      if (current === rootReal) throw unavailable();
+      missing.unshift(path.posix.basename(current));
+      current = path.posix.dirname(current);
+    }
+  }
+  if (!containedOnServer(rootReal, real)) throw new SandboxError('Path escapes its approved folder via a link');
+  const virtualOf = (target: string) => `/${root.name}${target === rootReal ? '' : target.slice(rootReal.length)}`;
+  if (missing.length > 0 && !options.allowMissing) throw new SandboxError(`Not found: ${virtualOf(candidate)}`);
+  const finalReal = missing.length === 0 ? real : path.posix.join(real, ...missing);
+  if (!containedOnServer(rootReal, finalReal)) throw new SandboxError('Path escapes its approved folder');
+  return { real: finalReal, virtual: virtualOf(finalReal), root };
 }
 
 /** Converts a real path back into the virtual path the model sees. */

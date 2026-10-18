@@ -1,7 +1,7 @@
 import type { AppApi } from '../preload/index.js';
 import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
-import { t, ui } from './i18n.js';
+import { t, tn, ui } from './i18n.js';
 
 /** The managed CoS library only; project and user-discovered skills stay in composer discovery. */
 export function initSkillsLibrary(api: AppApi): () => void {
@@ -59,7 +59,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const available = recommended.filter(entry => !installed.has(entry.id) &&
       `${entry.id} ${entry.name} ${entry.description} ${t(entry.description)}`.toLocaleLowerCase().includes(query));
     section.hidden = available.length === 0;
-    ui($('skillsRecommendedCount'), 'textContent', () => t(available.length === 1 ? '{0} skill' : '{0} skills', [available.length]));
+    ui($('skillsRecommendedCount'), 'textContent', () => tn('{0} skill', '{0} skills', available.length));
     const host = $('skillsRecommended');
     host.replaceChildren();
     for (const entry of available) {
@@ -91,7 +91,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const host = $('skillsInstalled');
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
-    ui($('skillsCount'), 'textContent', () => t(skills.length === 1 ? '{0} skill' : '{0} skills', [skills.length]));
+    ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', skills.length));
     host.replaceChildren();
     if (!visible.length) {
       const empty = skills.length
@@ -321,7 +321,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const result = target
         ? await api.skillsLinkGithub(target.id, githubInput.value.trim())
         : await api.skillsImportGithub(githubInput.value.trim());
-      if (!result.ok) { githubError.textContent = result.error; githubError.hidden = false; return; }
+      if (!result.ok) { githubError.textContent = t(result.error); githubError.hidden = false; return; }
       if (own === epoch) {
         setSkills(result.data);
         for (const skill of skills) {

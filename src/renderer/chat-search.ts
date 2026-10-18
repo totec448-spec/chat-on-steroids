@@ -9,7 +9,7 @@
  */
 import type { SessionSearchReply } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
-import { t, ui } from './i18n.js';
+import { t, tn, ui } from './i18n.js';
 import { closeRowMenu } from './row-menu.js';
 import { isMac, primaryShortcut } from './shortcuts.js';
 
@@ -128,11 +128,11 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
       result.snippet ? marked('span', 'search-snippet', result.snippet.text, result.snippet.matches) : undefined,
       result.snippet ? query() : undefined))));
     if (reply.indexed < reply.total) {
-      results.append(el('p', 'search-status', () => t("Searching message text… {0} of {1} chats", [reply.indexed, reply.total])));
+      results.append(el('p', 'search-status', () => tn("Searching message text… {0} of {1} chat", "Searching message text… {0} of {1} chats", reply.total, [reply.indexed, reply.total])));
     } else if (!reply.results.length) {
       results.append(el('p', 'empty search-status', () => t("No chats match")));
     } else if (reply.limited) {
-      results.append(el('p', 'search-status', () => t("Showing the first {0} matches. Add a word to narrow them down.", [reply.results.length])));
+      results.append(el('p', 'search-status', () => tn("Showing the first {0} match. Add a word to narrow it down.", "Showing the first {0} matches. Add a word to narrow them down.", reply.results.length)));
     }
   };
 

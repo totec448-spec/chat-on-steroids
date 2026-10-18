@@ -1,4 +1,4 @@
-import { currentLanguage, ui, t } from './i18n.js';
+import { currentLanguage, ui, t, tn } from './i18n.js';
 import { $, el, run } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
@@ -75,19 +75,20 @@ export async function refreshUsage(fresh = false): Promise<void> {
       const item = el('div'); item.dataset.usageMetric = label; usageHint(item, () => `${Math.round(number).toLocaleString(currentLanguage())} ${t(label).toLowerCase()}`); item.append(el('strong', '', () => count.format(number)), el('span', '', () => t(label))); summary.append(item);
     }
     const limits = $('usageLimits'); limits.replaceChildren();
-    const modelRows = value.limits.filter((row) => row.scope === 'model');
-    for (const entry of [...modelRows, ...value.limits.filter((row) => row.scope !== 'model')]) {
+    // Chat model limits first, then feature quotas, then Codex's windows.
+    const order = { model: 0, feature: 1, codex: 2 } as const;
+    for (const entry of [...value.limits].sort((a, b) => order[a.scope] - order[b.scope])) {
       const stale = Date.now() - entry.observedAt > 10 * 60000 || (entry.resetAt !== null && entry.resetAt <= Date.now());
       const row = el('div', 'usage-limit');
       const featureLabel = featureLabels[entry.model];
-      // Shared pools are told apart by their window; "Shared usage" twice said nothing.
-      const sharedName = () => entry.windowSeconds === 604800 ? t("Weekly limit") : entry.windowSeconds ? t("{0}-hour limit", [Math.round(entry.windowSeconds / 3600)]) : entry.model;
-      const displayName = () => entry.scope === 'feature' && featureLabel ? t(featureLabel) : entry.scope === 'shared' ? sharedName() : entry.model;
+      // Codex's windows are told apart by their window; the pool's own name comes first.
+      const codexName = () => `${entry.model} · ${entry.windowSeconds === 604800 ? t("Weekly limit") : entry.windowSeconds ? t("{0}-hour limit", [Math.round(entry.windowSeconds / 3600)]) : t("Limit")}`;
+      const displayName = () => entry.scope === 'feature' && featureLabel ? t(featureLabel) : entry.scope === 'codex' ? codexName() : entry.model;
       const name = el('div'); name.append(el('strong', '', displayName));
-      if (entry.scope !== 'model') name.append(el('small', 'muted', () => entry.scope === 'shared' ? t("Shared across all models") : t("Feature quota")));
+      if (entry.scope !== 'model') name.append(el('small', 'muted', () => entry.scope === 'codex' ? t("Codex usage, not your ChatGPT chats") : t("Feature quota")));
       const detail = el('div');
       detail.append(el('b', '', () => stale ? t("Refresh needed") : entry.remaining !== null ? t("{0} remaining", [entry.remaining.toLocaleString(currentLanguage())]) : entry.remainingPercent !== null ? t("{0}% remaining", [Math.round(entry.remainingPercent)]) : t("Not reported")));
-      const window = () => entry.scope === 'shared' ? '' : entry.windowSeconds === 604800 ? t("Weekly · ") : entry.windowSeconds ? t("{0}h window · ", [Math.round(entry.windowSeconds / 3600)]) : '';
+      const window = () => entry.scope === 'codex' ? '' : entry.windowSeconds === 604800 ? t("Weekly · ") : entry.windowSeconds ? t("{0}h window · ", [Math.round(entry.windowSeconds / 3600)]) : '';
       detail.append(el('small', 'muted', () => window() + (entry.resetAt ? t("Resets {0}", [new Date(entry.resetAt).toLocaleString(currentLanguage())]) : t("Reset not reported"))));
       if (entry.remainingPercent !== null && !stale) { const progress = document.createElement('progress'); progress.max = 100; progress.value = entry.remainingPercent; ui(progress, 'aria-label', () => t("{0}: {1}% remaining", [displayName(), entry.remainingPercent])); detail.append(progress); }
       row.append(name, detail); limits.append(row);
@@ -203,7 +204,7 @@ function paintCost(): void {
   // The last 30 days as bars, one glance instead of a long table; the table stays one click away.
   const recent = daily.slice(-30);
   const chart = el('div', 'usage-bars'); chart.setAttribute('role', 'img');
-  ui(chart, 'aria-label', () => t("Estimated cost per day, last {0} days", [recent.length]));
+  ui(chart, 'aria-label', () => tn("Estimated cost per day, last {0} day", "Estimated cost per day, last {0} days", recent.length));
   const top = Math.max(0, ...recent.map(day => day.cost));
   for (const day of recent) {
     const bar = el('span', 'usage-bar');
@@ -247,6 +248,9 @@ function limitRow(name: () => string, note: (() => string) | null, value: () => 
 }
 
 const codexWindowName = (minutes: number) => minutes === 10080 ? t("Weekly limit") : minutes % 60 === 0 ? t("{0}-hour limit", [minutes / 60]) : t("{0}-minute limit", [minutes]);
+/** Codex's reason codes for a reached limit, as a sentence; an unknown code stays readable as it is. */
+const codexReason = (code: string): string =>
+  code === 'workspace_owner_credits_depleted' ? t("The workspace's Codex credits are used up") : code.replace(/_/g, ' ');
 const when = (time: number) => new Date(time).toLocaleString(currentLanguage(), { dateStyle: 'short', timeStyle: 'short' });
 
 /**
@@ -277,7 +281,7 @@ export async function refreshOtherApps(fresh = false): Promise<void> {
           () => window.resetsAt === null ? t("Reset not reported") : reset ? t("Codex reports again with its next answer") : t("Resets {0}", [when(window.resetsAt)]),
           reset ? null : remaining));
       }
-      if (limit.reached && !limit.windows.length) host.append(limitRow(() => `Codex · ${limit.id}`, as, () => t("Limit reached"), () => limit.reached!.replace(/_/g, ' '), null));
+      if (limit.reached && !limit.windows.length) host.append(limitRow(() => `Codex · ${limit.id}`, as, () => t("Limit reached"), () => codexReason(limit.reached!), null));
     }
     const days = value.codex.days;
     const today = days.at(-1);

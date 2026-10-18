@@ -32,7 +32,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -57,7 +57,7 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import type { BridgeStatus, CompanionDiagnostics, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
+import type { BridgeStatus, CompanionDiagnostics, CompanionEnvironment, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
 import { BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, recoveryBusyMs } from '../shared/recovery.js';
 import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffort, normalizedToolOutcome, toolCallSummary, unescapeMarkdown,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
@@ -66,7 +66,7 @@ export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
 import { BROWSER_BRIDGE_AUTO_PORTS } from '../shared/browser-bridge.js';
 import { bridgePortSelection } from './bridge-ports.js';
-import type { Config } from '../shared/types.js';
+import { isNewer, type Config } from '../shared/types.js';
 import type { PluginSurface } from '../shared/plugin-refresh.js';
 import { getSecret, secureStorageStatus, setSecret } from './secrets.js';
 import {
@@ -113,8 +113,10 @@ import {
   recordAgentMessage,
   recordChatObservations,
   recordRequestEvidence,
+  notifyChanged,
   recordNote,
   recordProgress,
+  ResumeDestinationPendingError,
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
@@ -160,7 +162,9 @@ import { ownCoreHint,
   closableWorkerConversations,
   activeRunIds,
   swarmRunning,
+  adoptLateWorker,
   failAgent,
+  LATE_START_WINDOW_MS,
   finishSilentCeilingWorker,
   WORKER_SILENCE_MS,
   failWorkerRevival,
@@ -221,6 +225,7 @@ import {
   openContinuationNow,
   reopenWithHandoffNow,
   releaseContinuationDestinationSendNow,
+  recoverContinuationFromRecordedBootstrap,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   sendUnattempted,
@@ -280,6 +285,12 @@ export const COMMAND_DEADLINE_MS = 90_000;
  * 90th percentile, and two worker tabs loading beside other tabs both missed 20 s (VM, 2026-10-06). */
 export const WORKER_REDEEM_MS = 45_000;
 export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
+/**
+ * How long a worker's page that reported Send has for its receipt (#1086). On a loaded machine
+ * pages said "sending the task" and the app gave the workers up at the ordinary deadline anyway,
+ * while their chats received the task. The page is told this deadline in the step's reply.
+ */
+export const WORKER_SENDING_GRACE_MS = 120_000;
 /** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
 /**
  * How long the browser has to prove it typed a wake into a sleeping worker's chat.
@@ -613,7 +624,12 @@ const commandWrites = new Map<string, Promise<boolean>>();
 const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
-let extensionVersion: string | null = null;
+/**
+ * The extension version each browser last reported, by its browser id (the CoS browser and a
+ * peer without an id share one entry each). Two browsers may run different versions - Firefox
+ * updates its add-on on its own schedule - and one shared value followed whichever asked last.
+ */
+const extensionVersions = new Map<string, { version: string; engine?: 'gecko'; seenAt: number }>();
 /**
  * When each (version, build) pair was last announced. Two browsers with the extension installed
  * alternate requests, and a single "current" pair would turn every alternation into a fresh
@@ -652,6 +668,17 @@ function staleCompanion(req: http.IncomingMessage): boolean {
   if (!stamp || !shipped || stamp === shipped) return false;
   const current = extensionBuildSeenAt.get(shipped);
   return current !== undefined && Date.now() - current < STALE_COMPANION_WINDOW_MS;
+}
+/**
+ * #1516: while the built-in browser is chosen and present, a browser extension elsewhere (Chrome
+ * still open with the extension) takes no new work: every new chat opened a tab there. It keeps
+ * recording and stopping what the person opens in it. Without the built-in browser it works on.
+ */
+function notChosenBrowser(req: http.IncomingMessage): boolean {
+  return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] !== 'cos' && cosExtensionPresent();
+}
+function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
+  return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] === 'cos';
 }
 /**
  * Which browser a companion request comes from. Every browser shares one pairing token, so each
@@ -783,7 +810,12 @@ function takeFollow(browser: string | null): string | null {
 }
 
 /** An input goes to the browser holding its chat or, when none does, to the first one handed it. */
-function inputHeldElsewhere(input: { id: string; conversationId: string | null }, browser: string | null): boolean {
+/** How long after it was queued a cancelled first message's empty tab is still offered for closing. */
+const CANCELLED_OPENING_CLOSE_MS = 2 * 60 * 60_000;
+
+function inputHeldElsewhere(input: { id: string; conversationId: string | null }, browser: string | null, chosen = false): boolean {
+  // The chosen built-in browser takes work over from a browser that is not chosen (#1516).
+  if (chosen) { if (browser && !input.conversationId) openingCustody.set(input.id, browser); return false; }
   if (input.conversationId && chatHolders(input.conversationId).length > 0) return chatHeldElsewhere(input.conversationId, browser);
   return openingHeldElsewhere(input.id, browser);
 }
@@ -922,7 +954,25 @@ function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | nu
       overwrite: preferences.overwrite !== false,
       durations: preferences.durations === true
     },
-    tab: diagnosticTab(root.tab)
+    tab: diagnosticTab(root.tab),
+    environment: diagnosticEnvironment(root.environment)
+  };
+}
+
+function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
+  const root = diagnosticObject(value);
+  const browser = diagnosticObject(root?.browser), tabs = diagnosticObject(root?.tabs), page = diagnosticObject(root?.page);
+  if (!root || !browser || !tabs) return null;
+  const name = diagnosticString(browser.name, 40), version = diagnosticString(browser.version, 32);
+  const count = (key: string) => Math.round(diagnosticNumber(tabs[key], 100_000));
+  return {
+    browser: { name: name && /^[A-Za-z0-9 ._-]{1,40}$/.test(name) ? name : 'unknown', version: version && /^[0-9][0-9.]*$/.test(version) ? version : null },
+    tabs: { open: count('open'), discarded: count('discarded'), frozen: count('frozen'), loading: count('loading'), grouped: count('grouped'),
+      inBackgroundWindow: count('inBackgroundWindow') },
+    page: page ? {
+      composer: page.composer === true, sendArea: page.sendArea === true, modelMenu: page.modelMenu === true, plusMenu: page.plusMenu === true,
+      language: typeof page.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(page.language) ? page.language : null
+    } : null
   };
 }
 
@@ -989,10 +1039,15 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     // tab open went "missing" a minute after start although it was connected all along.
     present: browserPresent() || browserWakeConnected(),
     lastSeenAt,
-    extensionVersion,
+    ...versionStatus(),
     externalExtension: externalExtensionStatus(),
     cosExtension: { present: cosExtensionPresent() }
   };
+}
+
+function versionStatus(): Pick<BridgeStatus, 'extensionVersion' | 'extensionEngine'> {
+  const reported = reportedExtension();
+  return { extensionVersion: reported?.version ?? null, ...(reported?.engine ? { extensionEngine: reported.engine } : {}) };
 }
 
 /** Live sightings this run, plus what lasts across restarts for Setup. */
@@ -1099,7 +1154,9 @@ function scheduleBrowserPresence(): void {
   if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
   browserPresenceTimer = null;
   const now = Date.now();
-  const deadlines = [lastSeenAt, externalExtension?.seenAt ?? null, externalExtension?.loginAt ?? null, cosExtensionSeenAt]
+  // A browser's version entry ages out too, and the reported version may change with it.
+  const deadlines = [lastSeenAt, externalExtension?.seenAt ?? null, externalExtension?.loginAt ?? null, cosExtensionSeenAt,
+    ...[...extensionVersions.values()].map(entry => entry.seenAt)]
     .filter((at): at is number => at !== null && at + BROWSER_PRESENT_MS > now)
     .map(at => at + BROWSER_PRESENT_MS);
   if (!server || deadlines.length === 0) return;
@@ -1229,14 +1286,37 @@ const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
   'folder-not-ready': 'its folder does not hold the new build yet',
   'browser-updates-itself': 'Firefox updates the signed add-on itself (about:addons → Check for Updates)'
 };
-let extensionUpdateHoldLogged: string | null = null;
+/**
+ * The hold last logged per browser. With two browsers reporting in turn, one shared value made the
+ * browser without a hold reset the other's, and the same reason was logged every round (2.1.39).
+ */
+const extensionUpdateHoldLogged = new Map<string, string | null>();
 
-/** Logs once per change why an offered extension update is waiting; silence resets it. */
-export function noteExtensionUpdateHold(hold: unknown): void {
+/** Logs once per change and browser why an offered extension update is waiting; silence resets it. */
+export function noteExtensionUpdateHold(hold: unknown, browser: string | null = null): void {
   const reason = typeof hold === 'string' && Object.hasOwn(EXTENSION_UPDATE_HOLDS, hold) ? hold : null;
-  if (reason === extensionUpdateHoldLogged) return;
-  extensionUpdateHoldLogged = reason;
+  const key = browser ?? '';
+  if (reason === (extensionUpdateHoldLogged.get(key) ?? null)) return;
+  extensionUpdateHoldLogged.set(key, reason);
+  if (extensionUpdateHoldLogged.size > 16) extensionUpdateHoldLogged.delete(extensionUpdateHoldLogged.keys().next().value!);
   if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
+}
+
+/**
+ * The version the app reports: the oldest among browsers heard from recently, so an outdated copy
+ * keeps its notice while a current one polls too. With none recent, the last one heard from: a
+ * mismatched companion can fail the protocol gate before it ever counts as present.
+ */
+function reportedExtension(): { version: string; engine?: 'gecko' } | null {
+  const now = Date.now();
+  let oldest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
+  let latest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
+  for (const entry of extensionVersions.values()) {
+    if (!latest || entry.seenAt >= latest.seenAt) latest = entry;
+    if (now - entry.seenAt < BROWSER_PRESENT_MS && (!oldest || isNewer(oldest.version, entry.version))) oldest = entry;
+  }
+  const chosen = oldest ?? latest;
+  return chosen && { version: chosen.version, ...(chosen.engine ? { engine: chosen.engine } : {}) };
 }
 
 function noteExtensionVersion(req: http.IncomingMessage): void {
@@ -1251,7 +1331,15 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
   if (typeof version !== 'string') return warnProtocol(protocol);
   const externalChanged = req.headers['x-extension-host'] === 'browser' && externalExtension?.version !== version.slice(0, 32) && !keepsExternalRecord(req);
   if (externalChanged) externalExtension = { version: version.slice(0, 32), seenAt: null };
-  extensionVersion = version.slice(0, 32);
+  const extensionVersion = version.slice(0, 32);
+  const before = reportedExtension();
+  const source = browserOf(req) ?? (req.headers['x-extension-host'] === 'cos' ? 'cos' : 'unknown');
+  extensionVersions.delete(source);
+  extensionVersions.set(source, { version: extensionVersion, ...(req.headers['x-extension-engine'] === 'gecko' ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
+  if (extensionVersions.size > 16) extensionVersions.delete(extensionVersions.keys().next().value!);
+  const after = reportedExtension();
+  const reportChanged = before?.version !== after?.version || before?.engine !== after?.engine;
+  scheduleBrowserPresence();
   const key = `${extensionVersion}\u0000${stamp ?? ''}`;
   const announcedAt = announcedExtensions.get(key);
   if (announcedAt === undefined || Date.now() - announcedAt >= EXTENSION_ANNOUNCE_MS) {
@@ -1278,7 +1366,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     // Even an incompatible peer reports its version before the protocol fence.
     // Publish that evidence without falsely granting compatible browser presence.
     changed();
-  } else if (externalChanged) changed();
+  } else if (externalChanged || reportChanged) changed();
   warnProtocol(protocol);
 }
 
@@ -1523,6 +1611,13 @@ function parseObservations(input: unknown): ChatObservation[] {
         const reaction = messageReaction(item['reaction']);
         if (reaction) observation.reaction = reaction;
       }
+    }
+    // Edit & resubmit (#365): a question's place in ChatGPT's message tree, and whether the page proved
+    // that questions sharing it are versions of one message.
+    if (kind === 'user_message' && typeof item['parentId'] === 'string' &&
+        (item['parentId'] === 'root' || /^[A-Za-z0-9:_-]{8,190}$/.test(item['parentId']))) {
+      observation.parentId = item['parentId'];
+      if (item['parentExact'] === true) observation.parentExact = true;
     }
     if (kind === 'user_message' && Array.isArray(item['attachments'])) {
       observation.attachments = item['attachments'].slice(0, 4).filter(file => file && typeof file === 'object' &&
@@ -2532,7 +2627,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
       }
       stalledConversations = (body.stalledConversations ?? []) as string[];
-      noteExtensionUpdateHold(body.updateHold);
+      noteExtensionUpdateHold(body.updateHold, browserOf(req));
       revealRequested = body.canReveal === true;
       imageExportRequested = body.canExportImages === true;
       if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
@@ -2579,8 +2674,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (canReveal) revealBrowsers.set(browser ?? '', Date.now());
     const follow = canReveal ? takeFollow(browser) : null;
     if (req.method === 'POST' && imageExportRequested) imageExportBrowsers.set(browser ?? '', Date.now());
-    const pendingInputs = await pendingBrowserInputs();
-    const pendingIds = new Set(pendingInputs.map(input => input.id));
+    const otherBrowser = notChosenBrowser(req), chosenBuiltIn = chosenBuiltInBrowser(req);
+    // A companion the claim route would refuse as out of date is not offered inputs either: being
+    // offered one first made it the owner of a new chat it could never claim, and the current
+    // browser was never offered it (2.1.39 release round, Windows VM).
+    const refusedAsStale = staleCompanion(req);
+    const pendingInputs = otherBrowser ? [] : await pendingBrowserInputs();
+    const pendingIds = new Set((await pendingBrowserInputs()).map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
     return json(
       res,
@@ -2589,26 +2689,33 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ok: true,
         conversations: live,
         stopTurns: await pendingStopCommands(),
-        modelCatalogRequest: pendingChatModelRequest(),
+        modelCatalogRequest: otherBrowser ? null : pendingChatModelRequest(),
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
         // Apps proven to be this install's connectors, so a renamed connector is still recognized.
         connectorApps: Object.fromEntries(Object.entries(connectorApps()).map(([surface, apps]) =>
           [surface, apps.map(({ appId, linkId, name }) => ({ appId, linkId, name }))])),
-        pluginRefreshRequests: (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
+        pluginRefreshRequests: otherBrowser ? [] : (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
-        projectCreateRequests: await pendingProjectCreates(),
+        projectCreateRequests: otherBrowser ? [] : await pendingProjectCreates(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         // A message for the running turn goes in while a call runs: ChatGPT keeps that call's result (#1231).
         // An existing chat waits out a new tunnel-client's takeover, or its next call waits ~2 min (#1220).
-        inputs: [...pendingInputs.filter(input => (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
+        inputs: [...pendingInputs.filter(input => !refusedAsStale && (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
             (!input.conversationId || !tunnelRouteSettling()) &&
-            !inputHeldElsewhere(input, browser)),
+            !inputHeldElsewhere(input, browser, chosenBuiltIn)),
           ...inputRows.filter(row => row.lifetime === 'temporary-planner' && ['sent', 'cancelled', 'failed'].includes(row.state))
             // After Send, ChatGPT moves a helper to /c/<id>?temporary-chat=true without its cos-input
             // marker; its chat is the only way a later close pass can find that tab again.
             .map(row => ({ id: row.id, owner: row.owner, lifetime: row.lifetime, close: true,
-              retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) }))],
+              retire: true, ...(row.conversationId ? { conversationId: row.conversationId } : {}) })),
+          // A new chat's first message ended before Send was ever authorized, so nothing reached
+          // ChatGPT. The tab opened for it showed only the start page and stayed open for good
+          // (2.1.40 release round); the extension closes it once that page proves it untouched.
+          ...(otherBrowser ? [] : inputRows.filter(row => row.opening === true && ['cancelled', 'failed'].includes(row.state) &&
+            row.sendAuthorizedAt === undefined && row.deliveredAt === undefined && !row.conversationId &&
+            Date.now() - row.createdAt < CANCELLED_OPENING_CLOSE_MS)
+            .map(row => ({ id: row.id, conversationId: null, opening: true, close: true })))],
         background: getConfig().ui.backgroundChats === true,
         // #128: where the companion puts background tabs. Unknown or absent means the window.
         backgroundPlacement: getConfig().ui.backgroundPlacement === 'group' ? 'group' : 'window',
@@ -2618,8 +2725,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         commands: commands.length,
         // Rendering custody follows the actual command ledger, including its retirement.
         commandIds: commands.map(command => command.id),
-        revival,
-        revivals,
+        revival: otherBrowser ? null : revival,
+        revivals: otherBrowser ? [] : revivals,
         placement: pendingBrowserPlacement(null, browser),
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
         ...(follow ? { follow } : {}),
@@ -2767,6 +2874,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (ended) changed();
       return json(res, 200, { ok: ended }, origin);
     }
+    // Branch in new chat (#482): the page showing the source chat could not make the branch.
+    if (typeof body.branchFailed === 'string') {
+      const failed = !!target && (body.branchFailed === 'branch_unavailable' || body.branchFailed === 'branch_message_missing') &&
+        await failBranchInput(body.id, target, body.branchFailed);
+      if (failed) changed();
+      return json(res, 200, { ok: failed }, origin);
+    }
     if (typeof body.silenceBusyTurnId === 'string') {
       const deferred = !!target && await deferSilenceInput(body.id, target, body.silenceBusyTurnId);
       if (deferred) changed();
@@ -2780,13 +2894,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 200, { input: null }, origin);
     // As /status: an existing chat waits until a new tunnel-client has taken over its route (#1220).
     if (target && tunnelRouteSettling()) return json(res, 200, { input: null }, origin);
-    if (staleCompanion(req)) return json(res, 200, { input: null }, origin);
-    if (!target && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
+    if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { input: null }, origin);
+    if (!target && !chosenBuiltInBrowser(req) && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
     // A new chat of a project with a native ChatGPT Project is claimed only from that Project's
     // own page, which the page names; the root or another Project is never its destination.
     if (!target) {
       const entry = (await listInputs()).find(row => row.id === body.id);
-      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime ? (await getProject(entry.projectId))?.chatgpt : undefined;
+      // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
+      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
       if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
     }
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
@@ -2794,7 +2909,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/repairs/claim' && req.method === 'POST') {
-    if (staleCompanion(req)) return json(res, 200, { allowed: false }, origin);
+    if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { allowed: false }, origin);
     let body: unknown;
     try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
     const token = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
@@ -2923,6 +3038,29 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     observationWritesInFlight += 1;
     let committed: { sessionId: string | null; stored: number; wake: boolean } | undefined;
     try {
+      // /compact normally commits B's identity from the marked destination message. If that
+      // checkpoint request was lost, the service worker's independently durable journal
+      // may still carry the exact bootstrap. Prove it against the continuation's saved
+      // handoff and dispatched send BEFORE recorder admission could invent B's owner.
+      for (const observation of observations) {
+        if (observation.kind !== 'user_message' || !observation.messageId || !observation.text) continue;
+        const marker = continuationMarkerOf(observation.text);
+        if (marker?.kind !== 'RESUME') continue;
+        const outcome = await recoverContinuationFromRecordedBootstrap(id, observation.messageId, observation.text);
+        if (!outcome) continue; // An unverified marker must never select a session.
+        if (outcome.status === 'retryable' || outcome.status === 'rejected') {
+          // Do not ACK an observation with a proven continuation whose owner is still
+          // unresolved. The extension retries this entire journal batch after recovery.
+          logWarn(`bridge: journal resume recovery for ${id} is ${outcome.status} — ${outcome.reason}`);
+          return json(res, 503, { error: 'resume_recovery_pending', retryable: true }, origin);
+        }
+        const entry = continuationByToken(marker.token);
+        const resume = commands.find(command => command.spec.type === 'resume' && command.spec.token === marker.token);
+        if (resume) retire(resume, 'the recorded replacement message committed the continuation');
+        if (outcome.status === 'committed' && entry) armResumedChat(entry.sessionId, outcome.conversationId);
+        noticeMarkedReplacement(id, marker.token, 'committed from the durable journal');
+        break;
+      }
       const agent = agentForOwnedConversation(id);
       // The command acknowledgement normally supplies this origin before the worker's first
       // observation. Its pending copy lives in recorder memory until a session exists, though,
@@ -2941,7 +3079,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           });
         }
       }
-      const result = await recordChatObservations(id, observations, agent);
+      let result;
+      try {
+        result = await recordChatObservations(id, observations, agent);
+      } catch (err) {
+        if (err instanceof ResumeDestinationPendingError) {
+          // The browser's journal owns this batch until an exact session can be
+          // proved. Never ACK an observation that was deferred by the recorder.
+          return json(res, 503, { error: 'resume_destination_pending', retryable: true }, origin);
+        }
+        throw err;
+      }
       const superseded = await conversationWasSuperseded(id);
       if (!superseded && !isChatBlocked(id) && result.activity.working && result.activity.at) {
         const woke = result.activity.startedAt !== undefined
@@ -3489,6 +3637,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // "Follow new output" applies to the ChatGPT page too; the page owns the scrolling.
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -4246,6 +4395,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(),
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         goal: {
           enabled: getConfig().goal.enabled,
           // The app-wide setting is nobody's own answer, by definition: it is what a chat that
@@ -4461,6 +4611,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // synced history entry is worth nothing on its own.
   if (route === '/commands/redeem' && req.method === 'POST') {
     if (staleCompanion(req)) return json(res, 409, { error: 'stale_extension_build' }, origin);
+    if (notChosenBrowser(req)) return json(res, 409, { error: 'not_chosen_browser' }, origin);
     let body: Record<string, unknown>;
     try {
       body = (await readBody(req)) as Record<string, unknown>;
@@ -4645,6 +4796,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
+    // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
+    if (command.spec.type === 'worker' && step === 'sending') {
+      armDeadline(command);
+      return json(res, 200, { ok: true, expiresAt: Date.now() + Math.max(1, commandDeadlineDelay(command)) }, origin);
+    }
     return json(res, 200, { ok: true }, origin);
   }
   if (route === '/commands/ack' && req.method === 'POST') {
@@ -4686,6 +4842,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // been cancelled or been superseded, accepting the late ACK as success strands a real
     // tab whose model can never be bound to the worker/session it was opened for. Legacy
     // protocol pages omitted client and keep their old idempotent no-op response.
+    if (!ownedCommand && client && status === 'sent' && conversation) {
+      const late = lateStartFor(id);
+      if (late && late.client === client) {
+        const [code, reply] = await settleLateStart(id, late, conversation);
+        return json(res, code, reply, origin);
+      }
+    }
     if (!ownedCommand && client) {
       return json(res, 404, { error: 'no_such_command' }, origin);
     }
@@ -6820,7 +6983,9 @@ export const GOAL_QUIET_MS = 60_000;
 const approvalWaitDeps: ApprovalWaitDeps = {
   record: (sessionId, progressId, text, anchor) => recordProgress(sessionId, progressId, text, anchor),
   notify: noticeApprovalWaiting,
-  log: logInfo
+  log: logInfo,
+  // The session list's `approval`; a catalog-only push, since no transcript changed.
+  changed: () => notifyChanged()
 };
 /**
  * How long tool calls of no known chat may hold one silent chat's recovery (#1086).
@@ -7326,6 +7491,39 @@ export function unattributedRepairEta(now = Date.now(), requestId?: string | nul
     incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS)) - now) / 1000));
   const count = pendingSuspects(null).length;
   return count ? (count === 1 ? UNATTRIBUTED_SINGLE_WINDOW_MS : UNATTRIBUTED_FIRST_WINDOW_MS) / 1000 : null;
+}
+
+/**
+ * Chats whose recovery stopped after its last pickup reload while the obligation it was collecting
+ * is still owed: exactly the chats whose own countdown below reads `pickup-stopped`, so the
+ * sidebar and the composer can never disagree. ChatGPT conversation ids, like `blocked`.
+ *
+ * Every `pickup-stopped` comes from a durable stop mark (a pending input row's `pickupRecovery`,
+ * or a pending Goal reply's `pickupStoppedAt`), so only sessions holding one are asked, and a list
+ * poll with none reads nothing more. `rows` is the outbox the caller already listed.
+ */
+export async function recoveryStoppedChats(rows?: readonly import('./session/input.js').InputEntry[]): Promise<string[]> {
+  const inputs = rows ?? await listInputs();
+  const pending = new Set(inputs.flatMap(row => row.sessionId && ['queued', 'browser', 'tool'].includes(row.state) ? [row.sessionId] : []));
+  const candidates = new Set<string>();
+  for (const row of inputs) {
+    if (row.sessionId && pending.has(row.sessionId) && (row.pickupRecovery?.stoppedAt ||
+        (row.pickupRecovery?.attempts ?? 0) >= BROWSER_PICKUP_MAX_ATTEMPTS)) candidates.add(row.sessionId);
+  }
+  for (const reply of pendingGoalReplies()) if (reply.pickupStoppedAt) candidates.add(reply.sessionId);
+  const stopped: string[] = [];
+  for (const sessionId of candidates) {
+    // One unreadable recovery journal must not take the whole sidebar list down with it, nor
+    // hide the other stopped chats: that chat is left out, and its composer still says why.
+    try {
+      const conversationId = (await getSession(sessionId))?.conversationId;
+      if (!conversationId || stopped.includes(conversationId)) continue;
+      if ((await sessionRecoveryCountdowns(sessionId, conversationId)).some(row => row.kind === 'pickup-stopped')) stopped.push(conversationId);
+    } catch (error) {
+      logWarn(`bridge: could not read the recovery state of a stopped chat: ${(error as Error).message}`);
+    }
+  }
+  return stopped;
 }
 
 /** Project the actual owners; reading controls cannot file, extend or spend recovery. */
@@ -8200,8 +8398,16 @@ async function noteRecoveryObservations(
   // The ten-/two-minute budget is silence recovery only. Final response evidence
   // consumes it even if a local call is still draining; runningToolCalls separately
   // guards actual send/compaction. Replayed finals cannot consume newer work.
+  // A rotation is reported as one batch with the rotated turn's end and the fresh turn's start,
+  // which never moves the grant; the fresh turn's later work then renews it under the rotated
+  // turn's id. That turn has ended, so this later completed final spends its grant too. Without
+  // this the chat read as busy, and a message typed after the answer waited for the silence sweep
+  // (163 s in the 2.1.40 release round).
+  const grantTurnEnded = !!completedFinal && !!terminalGrant?.turnId && !!finalTurn && terminalGrant.turnId !== finalTurn &&
+    terminalGrant.sessionId === sessionId && activeUntil.get(conversationId) === terminalGrant &&
+    (await readRecentEvents(sessionId!, 20, { kinds: ['turn_end'] })).some(event => event.turnId === terminalGrant.turnId);
   if (completedFinal && terminalGrant && activeUntil.get(conversationId) === terminalGrant &&
-      terminalGrant.sessionId === sessionId && (terminalGrant.turnId ?? null) === (finalTurn ?? null)) endActivity(conversationId);
+      terminalGrant.sessionId === sessionId && ((terminalGrant.turnId ?? null) === (finalTurn ?? null) || grantTurnEnded)) endActivity(conversationId);
   else if (mcpTerminal && terminalGrant && activeUntil.get(conversationId) === terminalGrant) {
     terminalGrant.mcpBacked = true;
     // A completed tool-only response can still acquire its missing final text.
@@ -8989,6 +9195,10 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     watch.dueAt = reserved.nextAt ?? reserved.stoppedAt ?? now;
     watch.stoppedAt = reserved.stoppedAt;
     if (reply.goalReplyId && reply.queued) await syncGoalPickupRecoveryNow(reply.conversationId, reply.goalReplyId, reserved);
+    // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
+    // its last reload can still be queued. A queued input's stop already pushed with its outbox
+    // write; a Goal reply's ledger has no push of its own.
+    if (watch.stoppedAt) notifyChanged();
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
@@ -10222,7 +10432,10 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
       const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
       return Math.min(redeemBy, limit) - now;
     }
-    return Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit) - now;
+    const ordinary = Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit);
+    // A page that said it is sending may already have delivered the task; its receipt gets a window.
+    const { step, stepAt } = command.progress ?? {};
+    return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
   }
   const claimedAt = command.claimedAt ?? now;
   return claimedAt + COMMAND_DEADLINE_MS - now;
@@ -10316,7 +10529,11 @@ function expire(command: Command): void {
     retire(command, 'its worker is no longer waiting to be woken');
     return;
   }
-  drop(command, commandExpiryReason(command));
+  // A page that claimed its worker and reported no failure may still have sent its task: its
+  // reports can be minutes late on a starved machine (#1086). Its late receipt is adopted.
+  drop(command, commandExpiryReason(command), {
+    startTimedOut: spec.type === 'worker' && command.owner !== null && !command.lastError
+  });
   deliver();
 }
 
@@ -10467,7 +10684,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   };
 }
 
-function drop(command: Command, why: string): boolean {
+function drop(command: Command, why: string, options: { startTimedOut?: boolean } = {}): boolean {
   if (!commands.includes(command)) return false;
   const automaticEntry = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
   const automaticResume =
@@ -10519,7 +10736,10 @@ function drop(command: Command, why: string): boolean {
   // limit, it held the one in-flight agent-bearing bootstrap so the next worker never
   // opened, it kept the run looking alive to takeover, and the prime went on waiting for
   // a report from a chat that does not exist.
-  if (command.spec.type === 'worker') failAgent(command.spec.agent, why, undefined, {}, command.spec.runId);
+  if (command.spec.type === 'worker') {
+    const failed = failAgent(command.spec.agent, why, undefined, { startTimedOut: options.startTimedOut }, command.spec.runId);
+    if (failed && options.startTimedOut && command.owner !== null) noteLateStartCandidate(command.id, command.owner, command.spec);
+  }
   // A revival that never happened is not a worker that failed. Nothing was typed into its
   // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
   // prime is told the message it sent is still waiting to be delivered.
@@ -10632,9 +10852,70 @@ function nextDeliverable(): Command | null {
  */
 type AckStatus = 'sent' | 'failed';
 
+/**
+ * Worker commands given up for time whose page had claimed them (#1086), by command id.
+ *
+ * Their chat may still have received the task: on a starved machine a page's reports reached
+ * the app 20–90 s after it sent. The page that claimed the command is the only one whose late
+ * receipt counts. In memory and bounded: after a restart a late receipt is refused as before.
+ */
+type WorkerCommandSpec = Extract<CommandSpec, { type: 'worker' }>;
+interface LateStartCandidate { client: string; spec: WorkerCommandSpec; droppedAt: number; settling: Promise<[number, Record<string, unknown>]> | null }
+const lateStarts = new Map<string, LateStartCandidate>();
+const MAX_LATE_STARTS = 32;
+
+function noteLateStartCandidate(id: string, client: string, spec: WorkerCommandSpec): void {
+  lateStarts.set(id, { client, spec, droppedAt: Date.now(), settling: null });
+  while (lateStarts.size > MAX_LATE_STARTS) lateStarts.delete(lateStarts.keys().next().value!);
+}
+
+function lateStartFor(id: string): LateStartCandidate | null {
+  const late = lateStarts.get(id);
+  if (late && Date.now() - late.droppedAt > LATE_START_WINDOW_MS) lateStarts.delete(id);
+  return lateStarts.get(id) ?? null;
+}
+
+/** One final answer per late receipt, durable before it is given, shared by a concurrent retry. */
+function settleLateStart(id: string, late: LateStartCandidate, conversation: string): Promise<[number, Record<string, unknown>]> {
+  late.settling ??= (async (): Promise<[number, Record<string, unknown>]> => {
+    const result = adoptLateWorker(late.spec.agent, conversation, late.spec.runId);
+    const adopted = result.outcome === 'adopted';
+    if (adopted) {
+      const opened = await specOrigin(late.spec);
+      if (opened) await noteChatOrigin(conversation, opened).catch((err: Error) =>
+        logWarn(`could not record the origin of a late-started worker chat: ${err.message}`));
+    }
+    const receipt: CommandReceipt = {
+      id,
+      client: late.client,
+      conversationId: conversation,
+      outcome: adopted ? 'committed' : 'terminal-failure',
+      committed: adopted,
+      error: adopted ? null : `the worker's chat started after the app had given up on it, and ${result.outcome === 'stray' ? result.why : ''}`,
+      completedAt: Date.now()
+    };
+    try {
+      await writeDurableNow(COMMANDS_STATE, commandSnapshot({ addReceipt: receipt }));
+    } catch (err) {
+      late.settling = null;
+      logWarn(`bridge: could not persist the late receipt for worker:${late.spec.runId}:${late.spec.agent} — ${err instanceof Error ? err.message : String(err)}`);
+      return [503, { error: 'command_receipt_not_durable', retryable: true }];
+    }
+    commandReceipts = [...commandReceipts.filter((entry) => entry.id !== id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    lateStarts.delete(id);
+    logInfo(`bridge: worker:${late.spec.runId}:${late.spec.agent} started late — ${adopted ? 'its chat rejoined the run' : 'its chat was fenced as a stray'}`);
+    changed();
+    return [200, receiptReply(receipt)];
+  })();
+  return late.settling;
+}
+
 /** What a queued command says the chat it opened is for. Null once the command is gone. */
 async function commandOrigin(id: string): Promise<SessionOrigin | null> {
-  const spec = commands.find((entry) => entry.id === id)?.spec;
+  return specOrigin(commands.find((entry) => entry.id === id)?.spec);
+}
+
+async function specOrigin(spec: CommandSpec | undefined): Promise<SessionOrigin | null> {
   if (!spec || spec.type === 'stop') return null;
   if (spec.type === 'worker')
     return {
@@ -11111,7 +11392,7 @@ export function resetBridgeForTests(): void {
   for (const entry of pendingReveals.splice(0)) entry.settle(false);
   pendingFollow = null;
   openingCustody.clear();
-  extensionVersion = null;
+  extensionVersions.clear();
   externalExtension = null;
   cosExtensionSeenAt = null;
   resetBrowserProofForTests();

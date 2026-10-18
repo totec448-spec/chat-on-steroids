@@ -456,6 +456,7 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
         setStatus({
           state: report.state,
           detail: report.detail,
+          offlineCause: report.state === 'offline' ? report.offlineCause ?? null : null,
           lastRequestAt: lastRequestAt(),
           ...(report.publicUrl === undefined ? {} : { publicUrl: report.publicUrl }),
           ...(report.handshakeAt === undefined ? {} : { handshakeAt: report.handshakeAt }),

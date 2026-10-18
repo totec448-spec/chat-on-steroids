@@ -96,6 +96,19 @@ describe('settings migration', () => {
     expect(loaded.readOnly).toBe(true); expect(loaded.capabilities.command).toBe(false);
     expect(loaded.ui.appearance).toBeUndefined();
   });
+  it('loads a sidebar layout saved before the setting existed, or no longer offered, as Projects', async () => {
+    const { defaultAppearance } = await import('../src/shared/appearance.js');
+    const config = defaultConfig();
+    const appearance = { ...defaultAppearance(), sidebarLayout: 'inbox' as const }; appearance.dark.sidebar = '#e53aa0';
+    await saveConfig({ ...config, ui: { ...config.ui, appearance } });
+    expect((await loadConfig()).ui.appearance?.sidebarLayout).toBe('inbox');
+    const { sidebarLayout: _, ...old } = appearance;
+    for (const saved of [old, { ...old, sidebarLayout: 'status' }]) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, ui: { ...config.ui, appearance: saved } }), 'utf8');
+      // The layout alone falls back; the colors around it are kept.
+      expect((await loadConfig()).ui.appearance).toEqual({ ...appearance, sidebarLayout: 'projects' });
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;
@@ -1124,6 +1137,27 @@ describe('a settings file the app cannot read as is', () => {
     const loaded = await loadConfig();
     expect(loaded.roots.map(root => root.name)).toEqual(['project']);
     expect(await backups()).toEqual([]);
+  });
+
+  it('keeps every other setting when a preference holds a value this version does not know', async () => {
+    // VM, 2026-10-15: 2.1.37 read settings 2.1.38 had saved with Firefox as the ChatGPT browser.
+    // The one unknown value made the whole file unusable, and the app started without its folders
+    // and tunnel. A preference this version cannot read now falls back to its default alone.
+    await clearBackups();
+    const config = { ...defaultConfig(), roots: [{ name: 'project', path: dir }],
+      ui: { ...defaultConfig().ui, chatBrowser: 'netscape', theme: 'light', backgroundPlacement: 'shelf' } };
+    const content = JSON.stringify(config);
+    await fs.writeFile(file(), content, 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.roots.map(root => root.name)).toEqual(['project']);
+    expect(loaded.readOnly).toBe(config.readOnly);
+    expect(loaded.ui.theme).toBe('light');
+    expect(loaded.ui.chatBrowser).toBe('chrome');
+    expect(loaded.ui.backgroundPlacement).toBe('window');
+    // The original stays beside it, as for any file the app could not take as is.
+    const saved = await backups();
+    expect(saved).toHaveLength(1);
+    expect(await fs.readFile(path.join(dir, saved[0]!), 'utf8')).toBe(content);
   });
 
   it.each([

@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT 在插入啟動引導訊息時替換了輸入框"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT 未顯示可用於啟動的輸入框"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "選擇模型後，ChatGPT 未重新顯示可用的輸入框"
   },
@@ -323,6 +326,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT 中已有未傳送的草稿。重試前，請先在 Chrome 中傳送或清除該草稿。"
   },
+  "content_delivery_signed_out": {
+    "message": "此瀏覽器中未登入 ChatGPT。請在其中登入 ChatGPT，然後重新傳送。"
+  },
   "content_delivery_model_unconfirmed": {
     "message": "無法確認要求的模型或推理強度"
   },
@@ -334,6 +340,9 @@
   },
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT 未接受該文字$1"
+  },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT 在進行中的回答裡沒有提供傳送，為自動繼續而停止回答也未完成。"
   },
   "content_delivery_turn_changed": {
     "message": "直接傳送前回合已發生變化。"
@@ -722,12 +731,6 @@
   "content_workers_still_running": {
     "message": "仍有 $1 個子代理在執行"
   },
-  "content_workers_summary": {
-    "message": "$1 個已完成 · $2 個執行中"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 個已完成 · $2 個執行中 · $3 個失敗"
-  },
   "content_working": {
     "message": "正在處理…"
   },
@@ -815,9 +818,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · 連線埠 $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "保留 $1 個 · 共 $2 個"
-  },
   "popup_detail_chat_id": {
     "message": "聊天 ID"
   },
@@ -842,17 +842,11 @@
   "popup_detail_observed": {
     "message": "已觀察到"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 個事件 · $2 次呼叫"
-  },
   "popup_detail_ownership": {
     "message": "擁有權"
   },
   "popup_detail_page_sends": {
     "message": "頁面傳送次數"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 次失敗"
   },
   "popup_detail_recorder": {
     "message": "記錄器"
@@ -1168,5 +1162,32 @@
   },
   "popup_app_not_running_help": {
     "message": "請確認 Chat On Steroids 已在這台電腦上開啟。擴充功能會自動連線。"
+  },
+  "content_workers_finished": {
+    "message": "$1 個已完成"
+  },
+  "content_workers_running": {
+    "message": "$1 個執行中"
+  },
+  "content_workers_failed": {
+    "message": "$1 個失敗"
+  },
+  "popup_detail_events": {
+    "message": "$1 個事件"
+  },
+  "popup_detail_calls": {
+    "message": "$1 次呼叫"
+  },
+  "popup_detail_failed": {
+    "message": "$1 次失敗"
+  },
+  "popup_detail_total": {
+    "message": "共 $1 個"
+  },
+  "content_edit_message_missing": {
+    "message": "該訊息已不在 ChatGPT 頁面上，無法編輯。"
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT 沒有為該訊息提供編輯。請在 ChatGPT 中開啟聊天，然後再試一次。"
   }
 }

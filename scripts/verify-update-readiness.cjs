@@ -80,6 +80,10 @@ app.whenReady().then(async () => {
       assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<600,JSON.stringify(geometry));
       assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),n=document.getElementById(b.getAttribute('aria-describedby'));return n.id==='updateAllNotice'&&n.classList.contains('sr-only')&&n.textContent===b.title})()`),true,'Restart explanation remains linked for assistive technology and pointer users');
       if (lang==='ja') assert.equal(geometry.title,'更新状況');
+      // The open card's blocks keep their 12 px rhythm: grid on <details> itself never reaches its
+      // children (Chromium lays them out in ::details-content), so the note sat flush under the list.
+      const tightest = await js(`(()=>{const d=[...document.getElementById('updateReadinessDetails').children].filter(e=>e.tagName!=='SUMMARY'&&e.getClientRects().length).map(e=>e.getBoundingClientRect());return Math.min(...d.slice(1).map((r,i)=>r.top-d[i].bottom))})()`);
+      assert.ok(tightest >= 8, lang+' '+theme+' readiness blocks have room between them: '+tightest);
       await shot('ready-'+lang+'-'+theme+'.png');
     }
     await open('lang=en');
@@ -118,9 +122,10 @@ app.whenReady().then(async () => {
     assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Compact Update all is not covered by the event card');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
     win.setContentSize(700,460);
-    await js(`document.getElementById('updateReviewSetup').scrollIntoView({block:'nearest'})`);
-    const short = await js(`(()=>{const a=document.getElementById('updateReviewSetup').getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight}})()`);
+    await until(`innerWidth===700&&innerHeight===460`);
+    const short = await js(`(()=>{const b=document.getElementById('updateReviewSetup');b.scrollIntoView({block:'nearest'});const a=b.getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight,reachable:b.contains(document.elementFromPoint(a.left+a.width/2,a.top+a.height/2))}})()`);
     assert.ok(short.top>=0 && short.bottom<=short.viewport+1,'Short window action is reachable (subpixel scroll rounding): '+JSON.stringify(short));
+    assert.equal(short.reachable,true,'Short window action receives pointer input');
     assert.equal(await js(`(()=>{const children=[...document.querySelector('.update-readiness').children].map(e=>e.getBoundingClientRect());return children.some((r,i)=>i>0&&r.top<children[i-1].bottom-1)})()`),false,'Short window does not compress text rows into each other');
     await pause(200);
     await shot('short-ja.png');
@@ -135,12 +140,22 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`);
     win.setContentSize(1100,850); await open('lang=en');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.update.latest='99.0.0';next.update.stage='ready';window.fixturePush(next)})()`);
-    await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:true,data:'cancelled'})`);
+    // A ready update is asked about in the app's own dialog, Keep working first (2.1.38).
+    for (const theme of ['light','dark']) {
+      await open('lang=en&theme='+theme);
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.update.latest='99.0.0';next.update.stage='ready';window.fixturePush(next)})()`);
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:true,data:'confirm'})`);
+      await until(`!!document.getElementById('updateRestartDialog')?.open`);
+      assert.equal(await js(`document.activeElement.textContent`),'Keep working','Keep working is the focused default');
+      assert.ok(await js(`document.getElementById('updateRestartDialog').textContent.includes('Version 99.0.0')`),'The dialog names the version');
+      await pause(900); await shot('restart-dialog-'+theme+'.png');
+      if (theme === 'dark') { await js(`document.querySelector('#updateRestartDialog .update-restart-keep').click()`); break; }
+    }
     await until(`!document.getElementById('updateAll').disabled`);
     assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,'Cancelling restart is not an error');
     assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false','A postponed update is still pending');
     assert.ok(await js(`document.querySelector('.toast').textContent.includes('Update postponed. You can keep working.')`));
-    assert.deepEqual(await js('window.mutations'),['update-all'],'Cancel receipt invokes no installer or connection');
+    assert.deepEqual(await js('window.mutations'),['update-all'],'Keep working invokes no installer or connection');
     await open('lang=en');
     await js(`document.getElementById('updateAll').click();document.getElementById('updateAll').click();window.fixtureState.update.stage='checking';window.fixturePush(window.fixtureState)`);
     assert.deepEqual(await js('window.mutations'),['update-all'],'Explicit action only, with duplicate clicks joined');
@@ -271,6 +286,32 @@ app.whenReady().then(async () => {
       await js(`window.fixturePush(window.fixtureState)`);
       assert.equal(await js(`document.getElementById('updateAllError').checkVisibility()`),true);
       assert.deepEqual(await js('window.mutations'),['update-all','diagnostics-report']);
+      // The updater owns network classification; both release-check and download banners
+      // must use the same translated reason as the card and retained operation error.
+      const networkReason = copy('GitHub could not be reached. Check your connection');
+      for (const program of [
+        `(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:null,error:'GitHub could not be reached'};window.fixturePush(next)})()`,
+        `(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:'99.0.0',error:'GitHub could not be reached'};window.fixturePush(next)})()`
+      ]) {
+        await js(program);
+        assert.ok(await js(`document.querySelector('[data-update-part="app"]').textContent.includes(${JSON.stringify(networkReason)})`),lang+' readable network reason in app row');
+        for (const id of ['updateText','updateLine']) {
+          assert.ok(await js(`document.getElementById('${id}').textContent.includes(${JSON.stringify(networkReason)})`),lang+' translated network reason in '+id);
+        }
+      }
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'GitHub could not be reached'})`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      await until(`!document.querySelector('.toast')`);
+      assert.ok(await js(`document.getElementById('updateAllError').textContent.includes(${JSON.stringify(networkReason)})`),lang+' translated operation failure');
+      assert.ok(await js(`document.getElementById('updateAllError').textContent.includes(${JSON.stringify(copy('Choose Update all to retry.'))})`),lang+' explicit network retry');
+      assert.equal(await js(`(()=>{const c=document.querySelector('.update-readiness');return c.scrollWidth<=c.clientWidth+1&&[...c.querySelectorAll('p:not(.sr-only),button')].every(e=>e.scrollWidth<=e.clientWidth+1)})()`),true,lang+' network recovery copy wraps');
+      await js(`document.getElementById('updateReadinessToggle').click()`);
+      assert.equal(await js(`(()=>{const e=document.getElementById('updateAllError'),b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return e.checkVisibility()&&e.getBoundingClientRect().bottom<=innerHeight&&r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' network failure and retry stay reachable with closed details');
+      if(['en','ja','de'].includes(lang)){await pause(200);await shot('network-after-'+lang+'.png');}
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate();window.fixturePush(window.fixtureState)`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,lang+' explicit successful retry clears network error');
+      assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
       console.log('PASS locale: '+lang+'; closed details, translated failure, both actions reachable, no implicit retry');
     }
     assert.deepEqual(errors,[],'No production renderer errors');

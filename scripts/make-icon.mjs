@@ -303,6 +303,52 @@ function encodeIco(images) {
   return Buffer.concat([header, ...entries, ...images.map((i) => i.png)]);
 }
 
+// -------------------------------------------------------- installer images
+
+/** A 24-bit bottom-up BMP: the format NSIS draws in its header and on its welcome/finish pages. */
+function encodeBmp(width, height, rgb) {
+  const stride = Math.ceil((width * 3) / 4) * 4;
+  const header = Buffer.alloc(54);
+  header.write('BM', 0, 'ascii');
+  header.writeUInt32LE(54 + stride * height, 2);
+  header.writeUInt32LE(54, 10);
+  header.writeUInt32LE(40, 14);
+  header.writeInt32LE(width, 18);
+  header.writeInt32LE(height, 22);
+  header.writeUInt16LE(1, 26);
+  header.writeUInt16LE(24, 28);
+  header.writeUInt32LE(stride * height, 34);
+  const body = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const row = (height - 1 - y) * stride;
+    for (let x = 0; x < width; x++) {
+      const at = (y * width + x) * 3;
+      body[row + x * 3] = rgb[at + 2];
+      body[row + x * 3 + 1] = rgb[at + 1];
+      body[row + x * 3 + 2] = rgb[at];
+    }
+  }
+  return Buffer.concat([header, body]);
+}
+
+/** The app icon at `size`, laid over a flat background at (left, top). */
+function iconOn(width, height, background, size, left, top) {
+  const rgb = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < width * height; i++) rgb.set(background, i * 3);
+  const icon = render(size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const tx = left + x, ty = top + y;
+      if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
+      const from = (y * size + x) * 4, to = (ty * width + tx) * 3, alpha = icon[from + 3] / 255;
+      for (let channel = 0; channel < 3; channel++) {
+        rgb[to + channel] = Math.round(icon[from + channel] * alpha + background[channel] * (1 - alpha));
+      }
+    }
+  }
+  return rgb;
+}
+
 // ------------------------------------------------------------------- main
 
 const cache = new Map();
@@ -317,8 +363,11 @@ writeFileSync(path.join(root, 'build', 'icon.ico'), encodeIco(icoImages));
 writeFileSync(path.join(root, 'build', 'icon.png'), pngFor(1024));
 writeFileSync(path.join(root, 'build', 'icon-preview.png'), pngFor(256));
 writeFileSync(path.join(root, 'build', 'runtime-icon.png'), pngFor(256));
+// The installer an update shows (2.1.38): header on the window's white, sidebar in the app's ink.
+writeFileSync(path.join(root, 'build', 'installerHeader.bmp'), encodeBmp(150, 57, iconOn(150, 57, [255, 255, 255], 45, 150 - 45 - 6, 6)));
+writeFileSync(path.join(root, 'build', 'installerSidebar.bmp'), encodeBmp(164, 314, iconOn(164, 314, INK, 96, 34, 56)));
 console.log(
-  `Wrote build/icon.ico (${ICO_SIZES.join(', ')}), build/icon.png, build/icon-preview.png and build/runtime-icon.png`
+  `Wrote build/icon.ico (${ICO_SIZES.join(', ')}), build/icon.png, build/icon-preview.png, build/runtime-icon.png, build/installerHeader.bmp and build/installerSidebar.bmp`
 );
 
 const iconsDir = path.join(root, 'extension', 'icons');

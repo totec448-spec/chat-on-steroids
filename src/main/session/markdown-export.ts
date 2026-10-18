@@ -3,26 +3,31 @@ import path from 'node:path';
 import { app, clipboard, dialog, type BrowserWindow } from 'electron';
 import type { StoredText } from '../../shared/session.js';
 import {
-  answerMarkdown, completedTurnIds, markdownFileName, sessionMarkdown, transcriptEntries, turnAnswerEntries
+  answerMarkdown, completedTurnIds, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries, turnAnswerEntries
 } from '../../shared/markdown-export.js';
 import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
+import { dialogLabel, mainText } from '../main-texts.js';
+import { completedDilText } from '../../shared/dil-tables.js';
 
 export type MarkdownExportRequest = {
   id: string;
   scope: 'answer' | 'session';
-  /** The completed turn whose answer is wanted; required for `answer`. */
+  /** The completed turn whose answer is wanted; `answer` names this or `messageId`. */
   turnId?: string;
+  /** An answer recorded outside any turn (copied branch history, an adopted chat's history). */
+  messageId?: string;
   target: 'clipboard' | 'file';
 };
 
 export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' };
 
 /** The whole text: an answer cut in the log is read back from the overflow copy beside it. */
-async function fullText(sessionId: string, stored: StoredText): Promise<string> {
-  // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links.
-  if (!stored.truncated || !stored.assetId) return providerEntitiesAsMarkdown(stored.text);
-  return providerEntitiesAsMarkdown((await readOverflowText(sessionId, stored.assetId)) ?? stored.text);
+async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
+  // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links. A table
+  // it drew in full but wrote with only its header gets its recorded rows (#1477).
+  const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
+  return providerEntitiesAsMarkdown(completedDilText(text, html));
 }
 
 /** Builds a completed turn's answer or the session transcript and copies or saves it. */
@@ -33,16 +38,17 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
   let markdown: string;
   let name: string;
   if (request.scope === 'answer') {
-    // Only a turn the page reported as completed has an answer to hand out.
-    if (!request.turnId || !completedTurnIds(events).has(request.turnId)) throw new Error('This turn has not completed');
-    const entries = turnAnswerEntries(events, request.turnId);
+    // Only a turn the page reported as completed has an answer to hand out; an answer recorded
+    // outside any turn is final already, and is named by its message instead.
+    if (!request.messageId && (!request.turnId || !completedTurnIds(events).has(request.turnId))) throw new Error('This turn has not completed');
+    const entries = request.messageId ? messageAnswerEntries(events, request.messageId) : turnAnswerEntries(events, request.turnId!);
     if (!entries.length) throw new Error('This turn has no answer to export');
-    markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored))));
+    markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored, entry.html))));
     name = markdownFileName(summary.title, ' - answer');
   } else {
     const entries = transcriptEntries(events);
     markdown = sessionMarkdown(summary.title, await Promise.all(entries.map(async entry =>
-      ({ role: entry.role, text: await fullText(request.id, entry.stored) }))));
+      ({ role: entry.role, text: await fullText(request.id, entry.stored, entry.html) }))));
     name = markdownFileName(summary.title);
   }
   if (request.target === 'clipboard') {
@@ -50,9 +56,9 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     return { done: 'copied' };
   }
   const options = {
-    title: 'Export as Markdown',
+    ...dialogLabel('Export as Markdown'),
     defaultPath: path.join(app.getPath('downloads'), name),
-    filters: [{ name: 'Markdown', extensions: ['md'] }]
+    filters: [{ name: mainText('Markdown files'), extensions: ['md'] }]
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { done: 'cancelled' };

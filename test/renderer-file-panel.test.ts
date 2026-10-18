@@ -145,6 +145,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('keeps every Files action on screen as icons when the labels do not fit', async () => {
+  // German labels pushed Delete, Reveal and Changes past a hidden scrollbar (2.1.41 pass).
+  const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
+  panel.update(projectA); toggle.click(); await tick();
+  const actions = host.querySelector<HTMLElement>('.file-panel-toolbar-actions')!;
+  // jsdom has no layout: the labels need 627 px, the icons alone 180 px, the toolbar has 294 px.
+  Object.defineProperty(actions, 'clientWidth', { configurable: true, get: () => 294 });
+  Object.defineProperty(actions, 'scrollWidth', { configurable: true, get: () => actions.classList.contains('is-compact') ? 180 : 627 });
+  const buttons = [...actions.querySelectorAll<HTMLButtonElement>('.file-panel-action')];
+  expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['New file', 'New folder', 'Rename', 'Delete', 'Reveal', 'Changes']);
+  try {
+    setLanguage('de');
+    expect(actions.classList.contains('is-compact')).toBe(true);
+    // Icons only, and each still names its action for screen readers and on hover.
+    expect(buttons.every(button => button.getAttribute('aria-label') === button.title && button.title)).toBe(true);
+    Object.defineProperty(actions, 'clientWidth', { configurable: true, get: () => 700 });
+    setLanguage('en');
+    expect(actions.classList.contains('is-compact')).toBe(false);
+  } finally { setLanguage('en'); }
+});
+
 it('is unavailable without a local project and lazily expands only the chosen directory', async () => {
   const onShow = vi.fn();
   const panel = createFilePanel({ host, toggle, onShow, onAttach: file => attached.push(file.name) });
@@ -206,6 +227,13 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
   expect(host.textContent).toContain('Deleted (1)');
   expect(host.textContent).toContain('Renamed (1)');
   expect(host.textContent).toContain('Untracked (1)');
+  // The list follows a language change while it is shown (it kept the old language, 2.1.41 pass).
+  try {
+    setLanguage('es');
+    expect(host.textContent).toContain("Sin seguimiento (1)");
+    expect(host.textContent).not.toContain('Untracked (1)');
+  } finally { setLanguage('en'); }
+  expect(host.textContent).toContain('Untracked (1)');
   expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-status')?.textContent).toBe('U');
   expect(host.querySelector('.file-change-row[data-path="src/new.ts"] .file-change-stats')?.textContent).toBe('1 line');
   expect(host.querySelector('.file-change-row[data-path="src/staged.ts"] .file-change-stats')?.textContent).toContain('+1');
@@ -226,6 +254,10 @@ it('shows real Git groups, tree markers, unified diffs, and reconciles metadata 
     expect(host.querySelector('.file-changes-header-title')?.textContent).toBe('Diferencias');
     expect(host.querySelector('.file-changes-back')?.getAttribute('aria-label')).toBe('Volver a cambios');
     expect(host.querySelector('.file-panel-refresh')?.getAttribute('aria-label')).toBe('Actualizar cambios');
+    // The Changes button keeps its count through a language change.
+    const changesButton = host.querySelector('.file-panel-changes-toggle')!;
+    expect(changesButton.getAttribute('title')).toMatch(/^Cambios \(\d+\)$/);
+    expect(changesButton.getAttribute('aria-label')).toBe(changesButton.getAttribute('title'));
   } finally { setLanguage('en'); }
   expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('# old\n---\n# new');
   expect(host.querySelector('.file-preview-title > strong')?.textContent).toBe('README.md');
@@ -345,7 +377,7 @@ it('compares against a code checkpoint and asks main to restore one file or all 
   expect(host.querySelector('.file-checkpoint-bar')).toBeNull();
 
   host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
-  expect(document.querySelector('.file-branch-section')?.textContent).toBe('Checkpoints');
+  expect(document.querySelector('.file-branch-hint')?.textContent).toBe('Checkpoints');
   const option = [...document.querySelectorAll<HTMLButtonElement>('.file-branch-option')].at(-1)!;
   expect(option.textContent).toMatch(/^Before turn · /);
   option.click(); await tick();
@@ -364,6 +396,22 @@ it('compares against a code checkpoint and asks main to restore one file or all 
   host.querySelector<HTMLButtonElement>('.file-checkpoint-bar button')!.click(); await tick(); await tick();
   expect(restore).toHaveBeenLastCalledWith(projectA.id, id, null, 'checkpoint-1');
   expect(host.textContent).toContain('No changes since this checkpoint');
+});
+
+it('gives focus back to the branch trigger when a branch is chosen with the keyboard', async () => {
+  const branches = [{ ref: 'refs/heads/main', label: 'main' }];
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({ ...cleanGit(), currentBranch: 'feature', branches }));
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  const trigger = host.querySelector<HTMLButtonElement>('.file-branch-trigger')!;
+  trigger.focus(); trigger.click();
+  const search = document.querySelector<HTMLInputElement>('.file-branch-search')!;
+  expect(document.activeElement).toBe(search);
+  search.value = 'main'; search.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  search.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await tick();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, 'refs/heads/main');
+  expect(document.activeElement).toBe(trigger);
 });
 
 it('lets Review leave a comparison whose branch disappeared', async () => {
@@ -1212,4 +1260,23 @@ it('does not restart a pending code mount when the directory watcher refreshes',
   expect(codeMount.calls).toBe(1);
   release(); await tick();
   expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe(code.text);
+});
+
+// #1469: a project on a server is browsed and previewed in Files, but v1 changes its files only
+// through ChatGPT's tools. The panel offers no action that could only fail there.
+it('offers no file changes for a project on a server, and still previews it', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update({ ...projectA, path: 'me@devbox:/srv/alpha', remote: { host: 'me@devbox', path: '/srv/alpha' } });
+  toggle.click(); await tick();
+  const action = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.file-panel-toolbar-actions button')]
+    .find(button => button.getAttribute('aria-label') === label || button.title === label);
+  for (const label of ['New file', 'New folder', 'Rename', 'Delete', 'Reveal']) expect(action(label)?.hidden, label).toBe(true);
+  host.querySelector<HTMLButtonElement>('[data-path="README.md"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-preview-markdown h1')?.textContent).toBe('hello');
+  const previewActions = [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].map(button => button.title);
+  expect(previewActions).toContain('Attach');
+  expect(previewActions).not.toContain('Edit');
+
+  panel.update(projectB); await tick();
+  for (const label of ['New file', 'New folder', 'Reveal']) expect(action(label)?.hidden, label).toBe(false);
 });

@@ -30,7 +30,7 @@ import type {
   ToolOutcome,
   TurnOutcome
 } from '../../shared/session.js';
-import { estimateTokens, originTitle } from '../../shared/session.js';
+import { estimateTokens, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
@@ -76,8 +76,9 @@ import {
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
-import { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } from './resume-gate.js';
+import { RESUME_CLAIM_WINDOW_MS, dispatchedResumeFromSession, dispatchedResumeMarkerIn, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
+import { editReplacement, replacedQuestion } from './edits.js';
 
 interface LiveConversation {
   conversationId: string;
@@ -203,9 +204,11 @@ export function recordingEnabled(): boolean {
  */
 export async function sessionForConversation(
   conversationId: string | null,
-  title?: string
+  title?: string,
+  /** An observed authored user message, not a guessed route or page label. */
+  openingUserMessage?: string
 ): Promise<string | null> {
-  if (!conversationId) return initializeSessionForConversation(conversationId, title);
+  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage);
 
   const pending = sessionInitializations.get(conversationId);
   if (pending) {
@@ -220,7 +223,7 @@ export async function sessionForConversation(
     return sessionId;
   }
 
-  const initializing = initializeSessionForConversation(conversationId, title);
+  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage);
   sessionInitializations.set(conversationId, initializing);
   try {
     const sessionId = await initializing;
@@ -277,9 +280,18 @@ async function settleResumeCommit(): Promise<void> {
   }
 }
 
+/** Retry the same observation after the unresolved handoff transfers its session. */
+export class ResumeDestinationPendingError extends Error {
+  constructor() {
+    super('a dispatched replacement chat is still waiting for its original local session');
+    this.name = 'ResumeDestinationPendingError';
+  }
+}
+
 async function initializeSessionForConversation(
   conversationId: string | null,
-  title?: string
+  title?: string,
+  openingUserMessage?: string
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   if (!conversationId) return ensureUnattributedSession();
@@ -307,6 +319,16 @@ async function initializeSessionForConversation(
       return moved.sessionId;
     }
     known = await findSessionByConversation(conversationId);
+    const origin = pendingOrigins.get(conversationId);
+    const exactResumeCommand = origin?.kind === 'resume' && !!origin.fromSessionId &&
+      dispatchedResumeFromSession(origin.fromSessionId);
+    if (!known && resumeOpeningChat() && (dispatchedResumeMarkerIn(openingUserMessage) || exactResumeCommand)) {
+      // Only an observed marker or the ACK of this app's exact Resume command may
+      // defer admission after the ordinary claim window. An unrelated new chat
+      // must not be held hostage by a handoff that can remain open for hours.
+      // Neither hint grants rebind authority; /events validates the full bootstrap.
+      throw new ResumeDestinationPendingError();
+    }
   }
   if (!known && (await conversationWasSuperseded(conversationId))) {
     // Compact & Resume moved this chat's session onto its replacement. Whatever the old page
@@ -600,7 +622,7 @@ async function ensureUnattributedSession(): Promise<string | null> {
   if (unattributedSessionId) return unattributedSessionId;
   if (unattributedInitialization) return unattributedInitialization;
   const initializing = (async () => {
-    const summary = await createSession({ title: 'Unattributed activity' });
+    const summary = await createSession({ title: UNATTRIBUTED_SESSION_TITLE });
     await appendEvent(summary.id, {
       time: Date.now(), source: 'app', kind: 'session_start', conversationId: null, title: summary.title
     });
@@ -888,7 +910,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
   const changed = new Set<string>();
 
   for (const summary of await indexedSessions()) {
-    if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
+    if (summary.conversationId !== null || summary.title !== UNATTRIBUTED_SESSION_TITLE) continue;
     const cached = repairBuckets.get(summary.id);
     if (affected && cached?.toolCalls === summary.toolCalls && cached.updatedAt === summary.updatedAt &&
         ![...affected].some((id) => cached.requestIds.has(id))) continue;
@@ -1759,6 +1781,10 @@ export interface ChatObservation {
   /** Exact native user-message attachment metadata; no remote URL or image bytes. */
   attachments?: import('../../shared/input.js').InputAttachment[];
   reaction?: string | null;
+  /** user_message: its parent in ChatGPT's message tree ("root" for the first question). */
+  parentId?: string;
+  /** user_message: ChatGPT's own proof that questions sharing `parentId` are versions of one message. */
+  parentExact?: boolean;
   /** ChatGPT's already-rendered authored markup for this same logical message. */
   renderedHtml?: string;
   messageId?: string;
@@ -1990,7 +2016,8 @@ export async function recordRequestEvidence(
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
-  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations));
+  const firstUser = observations.find((item) => item.kind === 'user_message' && item.messageId && item.text);
+  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text);
   if (!sessionId) return null;
   // Proof identifies even a retired caller; kernel/recorder attachment checks then refuse it
   // as superseded. Never turn an exact historical owner into anonymous executable authority.
@@ -2159,7 +2186,8 @@ async function recordChatObservationsNow(
   }
   const sessionId = await sessionForConversation(
     conversationId,
-    pageTitle?.text?.trim() || observedUserTitle(firstUser?.text)
+    pageTitle?.text?.trim() || observedUserTitle(firstUser?.text),
+    firstUser?.messageId ? firstUser.text : undefined
   );
   if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
@@ -2201,6 +2229,9 @@ async function recordChatObservationsNow(
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           ...(item.model ? { model: item.model } : {}),
+          ...(item.parentId ? { parentId: item.parentId } : {}),
+          ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId) }
+            : item.parentId && item.parentExact === true ? await replacedQuestion(sessionId, item.messageId, item.parentId) : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;

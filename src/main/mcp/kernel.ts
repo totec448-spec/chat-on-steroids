@@ -29,7 +29,8 @@ import { randomUUID } from 'node:crypto';
 import { beginToolTiming, inboundRequestId, inboundPublication, inboundProviderRequest } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import type { Capabilities, Root } from '../../shared/types.js';
+import type { Capabilities, RemoteFolder, Root } from '../../shared/types.js';
+import { fsForRoot } from '../remote/project-fs.js';
 import { CAPABILITY_LABELS, WRITE_CAPABILITIES } from '../../shared/types.js';
 import { FsOpError, formatBytes, type FileInfo } from '../fsops.js';
 import { logInfo, logWarn } from '../logger.js';
@@ -49,6 +50,7 @@ import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js'
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
 import { getConfig } from '../config.js';
+import { noteToolCall, toolOutcome } from '../diagnostics-facts.js';
 import {
   AgentError,
   IdentityLostError,
@@ -530,6 +532,9 @@ async function withBackgroundExecRecovery(
  * between a completed local operation, its unknown attribution, and an undelivered agent
  * message: none of those facts implies that completed work is about to disappear.
  */
+/** Tools whose answer does not depend on which chat called them. */
+const IDENTITY_FREE_TOOLS: ReadonlySet<string> = new Set(['usage']);
+
 function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
@@ -696,6 +701,7 @@ async function dispatchTracked(
 ): Promise<ToolResult> {
   noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
+  const callStartedAt = Date.now();
   // Recorded here rather than in `guard` because only this layer knows which server
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
@@ -1034,6 +1040,8 @@ async function dispatchTracked(
         : invokeHandler()
   );
   markTiming('handler');
+  // Nested exec children are counted under their own names, like direct calls.
+  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
   if (identityRefusals.has(result)) rememberIdentityRefusal(requestId, name);
   // Identity, once, from this call's own evidence — see callerConversation. `agents` has
   // already established its own inside the call and adopted it, and re-reading here would
@@ -1095,7 +1103,10 @@ async function dispatchTracked(
   // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
   // never visited that owner and therefore needs its own single redaction pass.
   const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
-  let delivered = nested ? baseResult : withUnattributedNotice(
+  // A tool that reads nothing belonging to a chat (usage) answers before the page's evidence
+  // for its request arrives; the attribution notice would only add noise to every such answer.
+  const identityFree = IDENTITY_FREE_TOOLS.has(name);
+  let delivered = nested ? baseResult : identityFree ? (deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish)) : withUnattributedNotice(
     context.caller.conversationId,
     deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
     context.caller.requestId,
@@ -1291,7 +1302,14 @@ async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: st
   if (!learned) return { workspace: null, missing: null };
   // A learned folder can be deleted while its chat sleeps. Keeping it would make every
   // relative path and every command without a workdir fail with "Not found" for that folder.
-  const exists = await fs.stat(learned.real).then((stat) => stat.isDirectory(), () => false);
+  // A folder on a server (#1469) is checked there. Only a folder that is gone is forgotten: a
+  // connection that failed keeps it, and the call that needs it says why it cannot reach it.
+  const name = learned.virtual.split('/').find(part => part.length > 0)?.toLowerCase();
+  const server = getConfig().roots.find(root => root.remote !== undefined && root.name.toLowerCase() === name);
+  const exists = server
+    ? await fsForRoot(server).getMetadata(learned.real).then(meta => meta.isDirectory,
+      (error: { code?: string }) => error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR')
+    : await fs.stat(learned.real).then((stat) => stat.isDirectory(), () => false);
   if (exists) return { workspace: learned, missing: null };
   forgetMissingWorkspace(learned.real);
   return { workspace: null, missing: learned.virtual };
@@ -1300,7 +1318,7 @@ async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: st
 export async function resolveIn(
   roots: Parameters<typeof resolvePath>[0],
   requested: string,
-  options: { allowMissing?: boolean; base?: string | null; access?: 'read' } = {}
+  options: { allowMissing?: boolean; base?: string | null; access?: 'read'; remote?: boolean } = {}
 ): Promise<Resolved> {
   // The user's own Skill folders are served only to read tools, and never become a workspace.
   if (isUserSkillVirtualPath(requested)) {
@@ -1317,6 +1335,7 @@ export async function resolveIn(
   const base = options.base !== undefined ? options.base : (workspace?.virtual ?? null);
   const resolveOptions = {
     ...(options.allowMissing === undefined ? {} : { allowMissing: options.allowMissing }),
+    ...(options.remote === undefined ? {} : { remote: options.remote }),
     base
   };
   const resolved = await resolveLinkedSkillAlias(roots, requested, resolveOptions) ??
@@ -1332,6 +1351,8 @@ export interface ResolvedCwd {
   virtual: string;
   /** True when the caller named no folder, so the workspace or first root was used instead. */
   defaulted: boolean;
+  /** Set when the folder is on a server (#1469): commands then run there over ssh. */
+  remote?: RemoteFolder;
 }
 
 /**
@@ -1359,7 +1380,12 @@ export async function resolveCwd(ctx: ToolContext, virtualPath: string | undefin
   const fallback = firstTaskRoot(ctx.roots);
   const target = provided ? virtualPath : (workspace?.virtual ?? (fallback ? `/${fallback.name}` : ''));
   if (!target) throw new SandboxError('No folder is approved, so there is nowhere to run');
-  const resolved = await resolveIn(ctx.roots, target);
+  const resolved = await resolveIn(ctx.roots, target, { remote: true });
+  const { remote } = resolved.root;
+  if (remote) {
+    if (!(await fsForRoot(resolved.root).getMetadata(resolved.real)).isDirectory) throw new SandboxError('workdir must be a folder');
+    return { real: resolved.real, virtual: resolved.virtual, defaulted: !provided, remote };
+  }
   const stat = await fs.stat(resolved.real);
   if (!stat.isDirectory()) throw new SandboxError('workdir must be a folder');
   return { real: resolved.real, virtual: resolved.virtual, defaulted: !provided };

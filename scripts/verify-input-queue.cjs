@@ -1,4 +1,5 @@
 // Real Chromium and production renderer; isolated API fixture, no provider or live outbox.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -56,8 +57,7 @@ app.whenReady().then(async () => {
   const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
     server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'queue-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request, response) => {
-        const source = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace('</body>', '<script type="module">' + fixture + '</script></body>');
+        const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace('</body>', '<script type="module">' + fixture + '</script></body>');
         response.setHeader('Content-Type', 'text/html'); response.end(await vite.transformIndexHtml('/fixture.html', source));
       });
     } }] });
@@ -163,11 +163,19 @@ app.whenReady().then(async () => {
           controlsVisible:!document.getElementById('activeGoalRow').hidden,label:label.textContent,title:label.title,
           editable:!!card.querySelector('[aria-label="Edit queued task"]'),draggable:label.draggable,
           fits:[timer,cancel].every(node=>{const r=node.getBoundingClientRect();return r.width>0&&r.left>=bounds.left&&r.right<=bounds.right}),
+          // Every row and its divider reach the dock's edges: a reserved scrollbar strip cut them short.
+          rowEdges:[...dock.querySelectorAll('#recoveryStatus, #finishQueue > .queued-input, #activeGoalRow')].filter(node=>node.getBoundingClientRect().width>0)
+            .map(node=>{const r=node.getBoundingClientRect();return Math.round(Math.abs(r.left-bounds.left-1)+Math.abs(bounds.right-1-r.right))}),
+          toast:(()=>{const node=document.querySelector('.toast');if(!node)return null;const t=node.getBoundingClientRect(),c=document.querySelector('form.composer').getBoundingClientRect(),
+            top=Math.min(c.top,bounds.top),main=document.querySelector('.card.is-session').getBoundingClientRect();
+            return {clearOfComposer:t.bottom<=top,inMain:t.left>=main.left&&t.right<=main.right,t:[t.left,t.right,t.bottom],top,main:[main.left,main.right]}})(),
           error:window.fixtureError||null};
       })()`);
       assert.equal(measured.timers, 1); assert.equal(measured.goalHidden, true); assert.equal(measured.controlsVisible, true);
       assert.ok(measured.label.startsWith('Automatic Continue')); assert.ok(measured.title.includes('without a final answer'));
       assert.equal(measured.editable, false); assert.equal(measured.draggable, false); assert.equal(measured.fits, true); assert.equal(measured.error, null);
+      assert.ok(measured.rowEdges.length >= 3 && measured.rowEdges.every(gap => gap === 0), `dock rows reach both edges: ${measured.rowEdges}`);
+      if (measured.toast) assert.ok(measured.toast.clearOfComposer && measured.toast.inMain, `toast stays above the composer, inside the chat: ${JSON.stringify(measured.toast)}`);
       await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
       await new Promise(resolve => setTimeout(resolve, 150));
       fs.writeFileSync(path.join(output, `recovery-dock-${width}.png`), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());

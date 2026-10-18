@@ -2,6 +2,7 @@ import { $ } from './dom.js';
 import { t, ui } from './i18n.js';
 import { isMac } from './shortcuts.js';
 import type { SessionSearchLocation } from '../shared/session.js';
+import { foldCase } from '../shared/fold-case.js';
 
 /**
  * Find in chat, as in Codex: ⌘F (Ctrl+F elsewhere) opens a bar above the open chat. Matches come
@@ -17,6 +18,8 @@ export interface ChatFindDeps {
   find(id: string, query: string): Promise<SessionSearchLocation[] | null>;
   /** Scrolls to the message, loading the history page around it when needed. */
   reveal(id: string, location: SessionSearchLocation): Promise<void>;
+  /** The message's row in the timeline when it is loaded, found the way the timeline keys it. */
+  row(location: SessionSearchLocation): HTMLElement | null;
 }
 
 const ALL = 'chat-find';
@@ -28,26 +31,43 @@ function registry(): HighlightRegistry | null {
   return css?.highlights && typeof (globalThis as { Highlight?: unknown }).Highlight === 'function' ? css.highlights : null;
 }
 
-/** The timeline row of one message, by the key the timeline gives it. */
-function rowOf(location: SessionSearchLocation): HTMLElement | null {
-  const key = location.messageId !== null ? `message:${location.kind} ${location.messageId}` : null;
-  if (!key) return null;
-  return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
-}
+/** Elements whose text is a line of its own; their words never run into a neighbour's. */
+const BLOCK = 'p, li, h1, h2, h3, h4, h5, h6, pre, td, th, blockquote, div, dt, dd';
 
-/** Every occurrence of `phrase` inside the message text of `root`, ignoring case. */
-function rangesIn(root: ParentNode, phrase: string): Range[] {
+/**
+ * Every occurrence of `phrase` (already folded) inside the message text of `root`, as the main
+ * process matched it: ignoring case, accents and runs of white space, and across formatting, so
+ * "File: /src" in "<strong>File:</strong> <code>/src</code>" is marked too.
+ */
+export function rangesIn(root: ParentNode, phrase: string): Range[] {
   const ranges: Range[] = [];
+  if (!phrase) return ranges;
   for (const said of root.querySelectorAll('.said')) {
     const walker = document.createTreeWalker(said, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const text = (node.nodeValue ?? '').toLocaleLowerCase();
-      for (let at = text.indexOf(phrase); at >= 0; at = text.indexOf(phrase, at + phrase.length)) {
-        const range = document.createRange();
-        range.setStart(node, at);
-        range.setEnd(node, at + phrase.length);
-        ranges.push(range);
+    let text = '';
+    const at: Array<[Text, number]> = [];
+    let space = true;
+    let block: Element | null | undefined;
+    for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+      const owner = node.parentElement?.closest(BLOCK);
+      if (block !== undefined && owner !== block && !space) { text += ' '; at.push([node, 0]); space = true; }
+      block = owner;
+      const folded = foldCase(node.data);
+      for (let index = 0; index < folded.length; index++) {
+        const white = /\s/.test(folded[index]!);
+        if (white && space) continue;
+        text += white ? ' ' : folded[index];
+        at.push([node, index]);
+        space = white;
       }
+    }
+    for (let found = text.indexOf(phrase); found >= 0; found = text.indexOf(phrase, found + phrase.length)) {
+      const [startNode, startOffset] = at[found]!;
+      const [endNode, endOffset] = at[found + phrase.length - 1]!;
+      const range = document.createRange();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset + 1);
+      ranges.push(range);
     }
   }
   return ranges;
@@ -64,7 +84,7 @@ export function initChatFind(deps: ChatFindDeps): { selectionChanged(): void } {
   let typing = 0;
   let frame = 0;
 
-  const phrase = (): string => field.value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  const phrase = (): string => foldCase(field.value.replace(/\s+/g, ' ').trim());
   const paintCount = (): void => {
     ui(count, 'textContent', () => !searchedFor ? '' : matches.length ? t('{0} of {1}', [index + 1, matches.length]) : t('No matches'));
     for (const id of ['chatFindPrev', 'chatFindNext']) $<HTMLButtonElement>(id).disabled = matches.length < 2;
@@ -75,7 +95,7 @@ export function initChatFind(deps: ChatFindDeps): { selectionChanged(): void } {
     const wanted = phrase();
     if (bar.hidden || !wanted) { highlights.delete(ALL); highlights.delete(CURRENT); return; }
     const Highlight = (globalThis as unknown as { Highlight: new (...ranges: Range[]) => unknown }).Highlight;
-    const current = index >= 0 && matches[index] ? rowOf(matches[index]!) : null;
+    const current = index >= 0 && matches[index] ? deps.row(matches[index]!) : null;
     highlights.set(ALL, new Highlight(...rangesIn($('timeline'), wanted)));
     highlights.set(CURRENT, new Highlight(...(current ? rangesIn(current, wanted) : [])));
   };

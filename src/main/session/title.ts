@@ -14,9 +14,17 @@ export function legacyContextTitle(summary: SessionSummary): boolean {
   return !summary.titleSource && contextPrefix.test(summary.title) && (!summary.origin || summary.origin.kind === 'desktop');
 }
 
-export function firstTitleMessage(events: Iterable<SessionEvent>): Extract<SessionEvent, { kind: 'user_message' }> | undefined {
+/**
+ * The user message that names a chat. A branch (#482) begins with the history it was branched
+ * from; its own first message comes after that reply and names it instead.
+ */
+export function firstTitleMessage(events: Iterable<SessionEvent>, branchOf?: { messageId: string } | null): Extract<SessionEvent, { kind: 'user_message' }> | undefined {
+  const all = [...events];
+  const reply = branchOf ? all.find((event): event is Extract<SessionEvent, { kind: 'assistant_message' }> =>
+    event.kind === 'assistant_message' && event.messageId === branchOf.messageId) : undefined;
+  const after = reply ? reply.origin ?? reply.seq : -Infinity;
   let first: Extract<SessionEvent, { kind: 'user_message' }> | undefined;
-  for (const event of events) if (event.kind === 'user_message' &&
+  for (const event of all) if (event.kind === 'user_message' && (event.origin ?? event.seq) > after &&
       (!first || (event.origin ?? event.seq) < (first.origin ?? first.seq))) first = event;
   return first;
 }
@@ -60,7 +68,7 @@ export function legacyLabelPending(summary: SessionSummary): boolean {
 
 /** Rebuild only a preview. Provider/manual/origin titles keep their authority. */
 export function refreshUserTitle(summary: SessionSummary, events: Iterable<SessionEvent>): boolean {
-  const first = firstTitleMessage(events);
+  const first = firstTitleMessage(events, summary.origin?.branchOf);
   // A leftover Plan helper is hidden like every other helper chat, never deleted. Its only
   // "user" message is the planner instructions themselves; its title is often the same text.
   const planner = first ? first.message.text.trimStart().startsWith(PLANNER_TITLE) : summary.title.startsWith(PLANNER_TITLE);

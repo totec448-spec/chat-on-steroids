@@ -247,3 +247,29 @@ it('does not let a local package forge CoS GitHub origin metadata', async () => 
   await expect(importSkillPackage(source)).rejects.toThrow('cannot supply CoS origin metadata');
   expect(await listManagedSkills()).toEqual([]);
 });
+
+it('imports from a branch whose name contains a slash, as the default branch or in a pasted link', async () => {
+  // GitHub allows "dev/main"; the default branch was refused as unusable, and a pasted
+  // .../tree/dev/main/pet link was read as branch "dev" with folder "main/pet" (2.1.41 pass).
+  const skill = Buffer.from('---\nname: Slash Pet\ndescription: From a slashed branch.\n---\nUse it.\n');
+  const asked: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input);
+    asked.push(url.pathname);
+    if (url.pathname === '/repos/acme/skills') return json({ default_branch: 'dev/main' });
+    if (url.pathname === '/repos/acme/skills/commits/dev%2Fmain') return json({ sha: 'a'.repeat(40) });
+    if (url.pathname === '/repos/acme/skills/contents') return json([]);
+    if (url.pathname === '/repos/acme/skills/contents/pet') return json([
+      { name: 'SKILL.md', path: 'pet/SKILL.md', type: 'file', sha: blobSha(skill), size: skill.length }
+    ]);
+    if (url.pathname.endsWith(`/${blobSha(skill)}`)) return json({ content: skill.toString('base64'), encoding: 'base64', sha: blobSha(skill), size: skill.length });
+    return new Response('Not found', { status: 404 });
+  }));
+  const linked = await importGitHubSkill('https://github.com/acme/skills/tree/dev/main/pet');
+  expect(linked[0]).toMatchObject({ id: 'pet', origin: { ref: 'dev/main', url: 'https://github.com/acme/skills/tree/dev/main/pet' } });
+  // The link resolves its branch from the shortest prefix up, one request per candidate.
+  expect(asked.filter(pathname => pathname.includes('/commits/'))).toEqual(['/repos/acme/skills/commits/dev', '/repos/acme/skills/commits/dev%2Fmain']);
+  await removeSkill('pet', directory => fs.rename(directory, path.join(userData, 'removed-slash-pet')));
+  await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('needs SKILL.md');
+  expect(asked).toContain('/repos/acme/skills/commits/dev%2Fmain');
+});

@@ -67,6 +67,7 @@
 .ph.ph-file-text::before { content: '\e23a'; }
 .ph.ph-folder::before { content: '\e24a'; }
 .ph.ph-gear-six::before { content: '\e272'; }
+.ph.ph-git-branch::before { content: '\e278'; }
 .ph.ph-git-diff::before { content: '\e27c'; }
 .ph.ph-globe-hemisphere-west::before { content: '\e28c'; }
 .ph.ph-house::before { content: '\e2c2'; }
