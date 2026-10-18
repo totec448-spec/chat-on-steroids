@@ -581,6 +581,23 @@ c & d
     expect(rendered.querySelector('p:last-of-type')!.textContent).toContain('[ok] 2^10 = 1024 a_b');
   });
 
+  it.each([
+    ['before', 'The area is \\(\\pi r^2\\).\n\n:::writing{variant="standard" title="Note"}\nArea is \\(\\pi r^2\\) for **any** circle.\n:::'],
+    ['after', ':::writing{variant="standard" title="Note"}\nArea is \\(\\pi r^2\\) for **any** circle.\n:::\n\nThe area is \\(\\pi r^2\\).']
+  ])('keeps a writing panel and its formulas apart, with a formula %s the panel', async (_order, text) => {
+    // Both used to mark their place with the same two characters: the panel's marker drew as a formula.
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    Object.assign((dom.window as unknown as { api: object }).api, { writeClipboard });
+    const rendered = renderedMarkdown(text);
+    const panel = rendered.querySelector('.markdown-writing')!;
+    expect(panel.querySelector('.tool-output-header strong')?.textContent).toBe('Note');
+    expect(rendered.querySelectorAll('.math-inline .katex')).toHaveLength(2);
+    expect(panel.querySelectorAll('.math-inline .katex')).toHaveLength(1);
+    expect(rendered.textContent).not.toMatch(/[-]/);
+    panel.querySelector<HTMLButtonElement>('.tool-copy')!.click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('Area is \\(\\pi r^2\\) for **any** circle.'));
+  });
+
   it('shows the name of a person or place ChatGPT links, instead of dropping it', () => {
     const rendered = renderedMarkdown('No \uE200entity\uE202["place","Antigo Egito"]\uE201, \uE200entity\uE202["people","René \\"Descartes\\"","filósofo"]\uE201 estudou.');
     expect(JSON.stringify(rendered.textContent!.trim())).toBe(JSON.stringify('No Antigo Egito, René "Descartes" estudou.'));

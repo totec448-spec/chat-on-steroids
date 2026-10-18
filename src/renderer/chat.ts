@@ -3240,7 +3240,11 @@ const PILL_PLACEHOLDER = /^\uE000(\d{1,4})\uE001$/;
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 interface WritingSlot { label: string; source: string }
-const WRITING_MARKER = /^\uE010(\d{1,4})\uE011$/;
+// Each placeholder that holds a place in the HTML until it is sanitised has its own private-use
+// pair: U+E000/E001 a source pill, U+E010/E011 a formula (math.ts), U+E020/E021 a writing panel.
+// ChatGPT's own text marks its references with U+E200 to U+E202.
+const WRITING_OPEN = '\uE020', WRITING_CLOSE = '\uE021';
+const WRITING_MARKER = new RegExp(`^${WRITING_OPEN}(\\d{1,4})${WRITING_CLOSE}$`);
 function writingBlock(slots: WritingSlot[]): TokenizerAndRendererExtension {
   return {
     name: 'writingBlock', level: 'block',
@@ -3255,7 +3259,7 @@ function writingBlock(slots: WritingSlot[]): TokenizerAndRendererExtension {
       return { type: 'writingBlock', raw: match[0], slot, tokens: this.lexer.blockTokens(match[2] ?? '', []) };
     },
     renderer(token) {
-      return `<blockquote><p>\uE010${Number(token['slot'])}\uE011</p>${this.parser.parse(token.tokens ?? [])}</blockquote>`;
+      return `<blockquote><p>${WRITING_OPEN}${Number(token['slot'])}${WRITING_CLOSE}</p>${this.parser.parse(token.tokens ?? [])}</blockquote>`;
     }
   };
 }
