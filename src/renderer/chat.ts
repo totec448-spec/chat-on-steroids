@@ -5271,8 +5271,8 @@ function paintDetail(followBottom = historyBefore === null): void {
     // A held message is drawn again only when a block finishes or its sources change: each chunk
     // advances its seq and grows the page's capture, and the store can move its time to when the
     // page authored it; none of these changes what it shows (its clock waits for the next block).
-    // Its final text is not held.
-    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}`
+    // Its final text is not held. The shown text itself is compared: a revision can rewrite it to the same length.
+    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}\u0000${held.message.text}`
       : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
