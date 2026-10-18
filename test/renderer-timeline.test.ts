@@ -3064,6 +3064,12 @@ describe('an answer while ChatGPT writes it', () => {
       expect(shown(w)).toEqual(['Alpha.', 'Be']);
     });
 
+    it('shows the rest when ChatGPT\'s own commentary follows the message', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      await append([{ seq: 3, time: T0 + 1_000, source: 'extension', kind: 'progress', message: text('Checking the docs') }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
     it('draws a revision that rewrites a shown block to the same length', async () => {
       const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
       expect(shown(w)).toEqual(['Alpha.']);
