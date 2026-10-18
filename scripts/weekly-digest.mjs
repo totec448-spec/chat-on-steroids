@@ -11,6 +11,13 @@ export function prState({ checks, lastPushAt, lastMaintainerAt }) {
   return lastMaintainerAt && Date.parse(lastMaintainerAt) > Date.parse(lastPushAt) ? 'author' : 'review';
 }
 
+/** Only each check's latest run counts; an old failure or pending run is superseded by a rerun. */
+export function checksState(checkRuns) {
+  const runs = checkRuns.filter(run => !checkRuns.some(other => other.name === run.name && other.id > run.id));
+  return runs.some(run => run.status !== 'completed') ? 'pending'
+    : runs.some(run => run.conclusion === 'failure') ? 'failure' : 'success';
+}
+
 /** One short Markdown overview; empty sections say so instead of disappearing. */
 export function digest({ date, prs, issues }) {
   const section = (title, rows) => [`### ${title}`, '', ...(rows.length ? rows.map(row => `- #${row.number} ${row.title}${row.by ? ` (@${row.by})` : ''}`) : ['Nothing right now.']), ''];
@@ -44,8 +51,7 @@ async function main() {
       github(`/repos/${repository}/pulls/${pr.number}/reviews?per_page=100`, token),
       github(`/repos/${repository}/issues/${pr.number}/comments?per_page=100`, token)
     ]);
-    const checks = runs.check_runs.some(run => run.status !== 'completed') ? 'pending'
-      : runs.check_runs.some(run => run.conclusion === 'failure') ? 'failure' : 'success';
+    const checks = checksState(runs.check_runs);
     const lastPushAt = commits.at(-1)?.commit.committer.date ?? pr.created_at;
     const maintainerTimes = [...reviews.map(review => ({ at: review.submitted_at, who: review.author_association })),
       ...comments.filter(comment => comment.user.type !== 'Bot').map(comment => ({ at: comment.created_at, who: comment.author_association }))]
