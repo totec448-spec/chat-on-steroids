@@ -815,6 +815,8 @@
    * never runs: the whole resumed turn's work fell into Unattributed activity.
    */
   const USER_SEND_RECEIPT_MS = 30_000;
+  /** A worker page reports its Send for this long; the app takes a late start back for fifteen minutes (#1086). */
+  const WORKER_RECEIPT_WAIT_MS = 10 * 60_000;
   /** Waits before asking the worker again for a send acknowledgement whose reply was lost. */
   const ACK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
   let userSendReceipt = null;
@@ -12090,6 +12092,9 @@
     // receipt back (#1086). A resume keeps the deadline throughout; its marker commits it instead.
     const reportingBootstrap = boot.type === 'worker' ? () => !attempt?.cancelled && submittedLifetime()
       : () => !attempt?.cancelled && sendingBootstrap();
+    // How long a worker keeps trying to report its Send: inside the fifteen minutes the app takes a late
+    // start back, because a hidden tab on a starved machine can draw its new chat minutes late (#1086).
+    const reportBy = Date.now() + WORKER_RECEIPT_WAIT_MS;
     // Stop/composer-clear may acknowledge acceptance before the authored row mounts.
     // Keep the original draft lease through that receipt, exactly as desktop delivery does;
     // identical text alone must never erase a later trusted edit or a replacement editor.
@@ -12291,11 +12296,23 @@
     // already present. Reuse the receipt observer and the same 40s ceiling instead.
     // The route and exact submitted user row must agree for workers as for resumes;
     // a missing receipt is still ambiguous and cannot report a successful binding.
-    const found = await waitPageView(bootstrapConversation, reportingBootstrap,
-      boot.type === 'worker' ? 40000 : Math.min(40000, commandWaitMs(40000, 2_000)));
+    let found = null;
+    do {
+      found = await waitPageView(bootstrapConversation, reportingBootstrap,
+        boot.type === 'worker' ? 40000 : Math.min(40000, commandWaitMs(40000, 2_000)));
+    } while (!found && boot.type === 'worker' && alive && reportingBootstrap() && Date.now() < reportBy);
     if (!found || !reportingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
-    const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+    const report = { type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID };
+    let acknowledged = await ask(report);
+    // No answer means the extension's worker did not take it (stopped or restarting), not a refusal:
+    // nothing reached its durable outbox, so the report is sent again. A duplicate is harmless; both
+    // the outbox and the app keep one answer per command.
+    for (let wait = 2_000; !acknowledged && boot.type === 'worker' && alive && reportingBootstrap() && Date.now() < reportBy;
+      wait = Math.min(wait * 2, 30_000)) {
+      await new Promise(resolve => setTimeout(resolve, wait));
+      acknowledged = await ask(report);
+    }
     await publishBootstrapSelection(found);
     await clearAcknowledgedBootstrap(acknowledged);
     } finally { bootstrapDraft.dispose(); }

@@ -16741,6 +16741,61 @@ describe('the fresh chat the app opened', () => {
       .toMatchObject({ id: 'cmd-late', status: 'sent', conversationId: workerChat }));
   });
 
+  // #1086 (2.1.41, VM at 370 MB free): ChatGPT accepted three workers' sends, but their hidden tabs
+  // drew the new chat's first message only after the page's 40 s wait, and the pages gave up silently.
+  it('keeps waiting for a worker\'s receipt that draws after the first 40 s, then reports it', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '27272727-3838-4949-8a8a-909090909090';
+    let page!: { document: Document; dom: JSDOM };
+    live = await harness('https://chatgpt.com/?clf=cmd-slow', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      page = { document, dom };
+      // ChatGPT takes the message and clears the box; the new chat draws much later.
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        document.querySelector('#prompt-textarea')!.textContent = '';
+      });
+    }, false, true);
+    const harnessTimeout = (live.window as any).setTimeout;
+    let receiptWaits = 0;
+    (live.window as any).setTimeout = (fn: () => void, ms?: number) => {
+      if (ms === 40_000 && ++receiptWaits === 2) {
+        page.dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(page.document, 'slow-worker-user', 'Slow worker task', { sent: false });
+      }
+      return harnessTimeout(fn, ms);
+    };
+    release({ ok: true, command: { id: 'cmd-slow', type: 'worker', text: 'Slow worker task', agent: 'worker-1',
+      expiresAt: (live.window as any).Date.now() + 90_000 } });
+    await vi.waitFor(() => expect(live!.sent.find(message => message.type === 'ack'))
+      .toMatchObject({ id: 'cmd-slow', status: 'sent', conversationId: workerChat }));
+  });
+
+  // #1086 (2.1.41, VM): the extension's worker was restarting when three pages reported their Send, and
+  // nothing ever reached its durable outbox. An unanswered report of a Send is sent again.
+  it('sends a worker\'s report of its Send again when the extension did not answer it', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '28282828-3939-4a4a-8b8b-909090909090';
+    let acks = 0;
+    live = await harness('https://chatgpt.com/?clf=cmd-retry', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => (++acks === 1 ? null : { ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'retry-worker-user', 'Retry worker task', { sent: false });
+      });
+    });
+    release({ ok: true, command: { id: 'cmd-retry', type: 'worker', text: 'Retry worker task', agent: 'worker-1' } });
+    await vi.waitFor(() => expect(acks).toBe(2));
+    expect(live.sent.filter(message => message.type === 'ack').every(message => message.conversationId === workerChat)).toBe(true);
+  });
+
   it('reacquires a home composer replaced after model selection before placing a worker bootstrap', async () => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
