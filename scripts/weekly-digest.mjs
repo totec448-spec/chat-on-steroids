@@ -11,9 +11,9 @@ export function prState({ checks, lastPushAt, lastMaintainerAt }) {
   return lastMaintainerAt && Date.parse(lastMaintainerAt) > Date.parse(lastPushAt) ? 'author' : 'review';
 }
 
-/** Only each check's latest run counts; anything but success, neutral or skipped is a failure. */
+/** Only each check's latest run per app counts; anything but success, neutral or skipped is a failure. */
 export function checksState(checkRuns) {
-  const runs = checkRuns.filter(run => !checkRuns.some(other => other.name === run.name && other.id > run.id));
+  const runs = checkRuns.filter(run => !checkRuns.some(other => other.name === run.name && other.app?.id === run.app?.id && other.id > run.id));
   return runs.some(run => run.status !== 'completed') ? 'pending'
     : runs.some(run => !['success', 'neutral', 'skipped'].includes(run.conclusion)) ? 'failure' : 'success';
 }
