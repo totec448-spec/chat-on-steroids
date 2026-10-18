@@ -2590,7 +2590,7 @@
   "Inbox sidebar": "Боковая панель «Входящие»",
   "Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.": "По желанию: все чаты вместе, активные сверху. В разделе Оформление → Макет боковой панели.",
   "Sub-agents that start": "Субагенты, которые запускаются",
-  "They start reliably on a busy computer, and one that starts late rejoins its run.": "Они надёжно запускаются даже на загруженном компьютере, а опоздавший возвращается в свой запуск.",
+  "Reliable on a busy computer; one that starts late rejoins its run.": "Надёжно даже на загруженном компьютере; опоздавший возвращается в свой запуск.",
   "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Проекты на сервере, Skills и файлы в любом месте поля ввода и восстановление разрешений на Mac.",
   "Projects on a server": "Проекты на сервере",
   "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Добавьте папку по SSH: ChatGPT читает, редактирует и выполняет там команды с вашими собственными настройками SSH.",
