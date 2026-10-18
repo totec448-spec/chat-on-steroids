@@ -260,6 +260,16 @@ describe('the session card header', () => {
  * belongs to, and whether its tab ever opened, are carried by chips — so the chips are
  * the part that must survive a narrow row, and the counts are the part that yields.
  */
+// 2.1.41 bug hunt: the header's connection `.state` rule (margin-left: auto) also matched the Compact &
+// Resume card's status, so "Compact & Resume:" stood alone and its sentence sat at the far right.
+describe('the Compact & Resume card', () => {
+  it('keeps its status sentence right after its name', () => {
+    const own = rule('.compaction > summary .state');
+    expect(own).toContain('margin-left: 0');
+    expect(own).toContain('display: inline');
+  });
+});
+
 describe('a session row', () => {
   it('draws a still working mark, not a frozen spinner, when the system asks for reduced motion', () => {
     // Windows "Animation effects: Off" turns reduced motion on, and the sheet then stops every animation.
