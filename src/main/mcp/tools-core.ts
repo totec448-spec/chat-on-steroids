@@ -1257,9 +1257,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     toolDeclaration('agents', () => ({
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. ' +
-        'message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. ' +
-        'status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.',
+        'Runs ChatGPT workers. Without model/reasoning_effort, saved app defaults apply; overrides are for explicit user requests, so users need not choose. A suitable sleeping worker is reused with message, not respawned. ' +
+        'message: prime↔worker. Reports arrive with tool results, not by restarting an idle prime. ' +
+        'status: your active, sleeping/revivable and terminal workers, incl. parked families, and pending reports; one call before a final answer collects them, else the answer says review is pending. Repeated polling adds nothing. finish: records the report, then normally sleeps.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
         run_id: z.string().uuid().optional().describe('Select your returned worker family when status lists several; never grants another caller’s workers.'),
