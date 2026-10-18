@@ -2302,6 +2302,8 @@
   "Recording storage": "Aufzeichnungsspeicher",
   "Compact & Resume · waiting for this turn to end": "Komprimieren & Fortsetzen · wartet auf das Ende dieses Durchlaufs",
   "Compact & Resume · asking ChatGPT for the handoff": "Komprimieren & Fortsetzen · Übergabe bei ChatGPT anfordern",
+  "Compact & Resume · the ChatGPT tab could not ask yet": "Komprimieren & Fortsetzen · der ChatGPT-Tab konnte noch nicht anfragen",
+  "The ChatGPT tab shows the reason next to its message box. Chat On Steroids tries again on its own.": "Der ChatGPT-Tab zeigt den Grund neben seinem Eingabefeld. Chat On Steroids versucht es von selbst erneut.",
   "The handoff request is sent as soon as this turn ends.": "Die Übergabeanfrage wird gesendet, sobald dieser Durchlauf endet.",
   "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids sendet ChatGPT die Anfrage, die Zusammenfassung für einen neuen Chat zu schreiben.",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Stabilere lange Läufe, ein Tunnel, der hinter einem Proxy funktioniert, und ChatGPTs eigene Begriffe.",

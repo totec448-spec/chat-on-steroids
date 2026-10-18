@@ -2374,6 +2374,8 @@
   "Recording storage": "Хранилище записей",
   "Compact & Resume · waiting for this turn to end": "Сжать и продолжить · ждём окончания этого хода",
   "Compact & Resume · asking ChatGPT for the handoff": "Сжать и продолжить · запрос передачи у ChatGPT",
+  "Compact & Resume · the ChatGPT tab could not ask yet": "Сжать и продолжить · вкладка ChatGPT пока не смогла отправить запрос",
+  "The ChatGPT tab shows the reason next to its message box. Chat On Steroids tries again on its own.": "Вкладка ChatGPT показывает причину рядом с полем сообщения. Chat On Steroids повторит попытку сам.",
   "The handoff request is sent as soon as this turn ends.": "Запрос на передачу будет отправлен, как только закончится этот ход.",
   "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids отправляет ChatGPT запрос написать сводку для нового чата.",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "Более стабильные длинные запуски, туннель, работающий через прокси, и собственные слова ChatGPT.",

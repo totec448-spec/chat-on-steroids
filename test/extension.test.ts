@@ -2677,7 +2677,7 @@ describe('worker settings authority', () => {
     expect(posted).toEqual([{ autoCompact: false, conversationId: CHAT }]);
   });
 
-  it('forwards compaction ticket, safe source loss, and both irreversible dispatch checkpoints', async () => {
+  it('forwards compaction ticket, safe source loss, a deferred automatic attempt, and both irreversible dispatch checkpoints', async () => {
     const posted: Record<string, unknown>[] = [];
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
@@ -2697,12 +2697,15 @@ describe('worker settings authority', () => {
     await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
     const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
+    const deferredError = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
       expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
+      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);

@@ -2266,6 +2266,8 @@
   "Recording storage": "기록 저장 공간",
   "Compact & Resume · waiting for this turn to end": "압축 후 계속 · 이 턴이 끝나기를 기다리는 중",
   "Compact & Resume · asking ChatGPT for the handoff": "압축 후 계속 · ChatGPT에 인계 요청 중",
+  "Compact & Resume · the ChatGPT tab could not ask yet": "압축 후 계속 · ChatGPT 탭이 아직 요청하지 못했습니다",
+  "The ChatGPT tab shows the reason next to its message box. Chat On Steroids tries again on its own.": "이유는 ChatGPT 탭의 메시지 입력란 옆에 표시됩니다. Chat On Steroids가 자동으로 다시 시도합니다.",
   "The handoff request is sent as soon as this turn ends.": "이 턴이 끝나는 즉시 인계 요청을 보냅니다.",
   "Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.": "Chat On Steroids가 새 채팅용 요약을 작성하도록 ChatGPT에 요청을 보내는 중입니다.",
   "Steadier long runs, a tunnel that works behind a proxy, and ChatGPT's own words.": "더 안정적인 장시간 실행, 프록시 뒤에서도 작동하는 터널, 그리고 ChatGPT와 같은 용어.",
