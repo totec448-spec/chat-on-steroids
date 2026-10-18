@@ -283,6 +283,12 @@ export const COMMAND_DEADLINE_MS = 90_000;
  * 90th percentile, and two worker tabs loading beside other tabs both missed 20 s (VM, 2026-10-06). */
 export const WORKER_REDEEM_MS = 45_000;
 export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
+/**
+ * How long a worker's page that reported Send has for its receipt (#1086). On a loaded machine
+ * pages said "sending the task" and the app gave the workers up at the ordinary deadline anyway,
+ * while their chats received the task. The page is told this deadline in the step's reply.
+ */
+export const WORKER_SENDING_GRACE_MS = 120_000;
 /** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
 /**
  * How long the browser has to prove it typed a wake into a sleeping worker's chat.
@@ -4788,6 +4794,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
+    // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
+    if (command.spec.type === 'worker' && step === 'sending') {
+      armDeadline(command);
+      return json(res, 200, { ok: true, expiresAt: Date.now() + Math.max(1, commandDeadlineDelay(command)) }, origin);
+    }
     return json(res, 200, { ok: true }, origin);
   }
   if (route === '/commands/ack' && req.method === 'POST') {
@@ -10412,7 +10423,10 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
       const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
       return Math.min(redeemBy, limit) - now;
     }
-    return Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit) - now;
+    const ordinary = Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit);
+    // A page that said it is sending may already have delivered the task; its receipt gets a window.
+    const { step, stepAt } = command.progress ?? {};
+    return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
   }
   const claimedAt = command.claimedAt ?? now;
   return claimedAt + COMMAND_DEADLINE_MS - now;
