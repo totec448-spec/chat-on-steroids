@@ -211,6 +211,31 @@ it('records an edited question as replacing the version it was made from', async
   expect(replaces('q-1b')).toBe('q-1');
 });
 
+it('keeps an edit replacing the question it was made from when ChatGPT re-reports the older version', async () => {
+  const id = await sessionForConversation('conv-edit-flip');
+  const at = Date.now();
+  const user = (messageId: string, text: string, time: number) =>
+    ({ kind: 'user_message' as const, time, messageId, text, parentId: 'a-1', parentExact: true });
+  await recordChatObservations('conv-edit-flip', [
+    { kind: 'user_message', time: at, messageId: 'q-1', text: 'First question', parentId: 'root', parentExact: false },
+    { kind: 'assistant_message', time: at + 1, messageId: 'a-1', text: 'First answer', final: true, state: 'final' } as any,
+    user('q-2', 'Second question', at + 2),
+    user('q-2b', 'Second question, edited', at + 4)
+  ]);
+  // The user flips the versions control back to 1/2 (or reloads on it): the older version is reported again.
+  await recordChatObservations('conv-edit-flip', [user('q-2', 'Second question', at + 2)]);
+  await flushRecorder();
+  const latest = async () => new Map((await readEvents(id!, { kinds: ['user_message'] }))
+    .map(event => [event.kind === 'user_message' ? event.messageId : '', event.kind === 'user_message' ? event.replaces : undefined]));
+  expect((await latest()).get('q-2')).toBeUndefined();
+  expect((await latest()).get('q-2b')).toBe('q-2');
+  // A genuinely new edit after the flip still replaces the newest version, not the one re-reported.
+  await recordChatObservations('conv-edit-flip', [user('q-2c', 'Second question, edited twice', at + 6)]);
+  await flushRecorder();
+  expect((await latest()).get('q-2c')).toBe('q-2b');
+  expect((await latest()).get('q-2')).toBeUndefined();
+});
+
 it('never takes a question with the same parent for an edit without ChatGPT\'s versions proof', async () => {
   const id = await sessionForConversation('conv-noedit');
   const at = Date.now();

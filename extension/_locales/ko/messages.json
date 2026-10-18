@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "부트스트랩을 입력하는 동안 ChatGPT가 입력창을 교체했습니다"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT가 시작에 사용할 수 있는 입력창을 보여 주지 않았습니다"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "모델 선택 후 ChatGPT가 사용 가능한 입력창을 다시 보여 주지 않았습니다"
   },
